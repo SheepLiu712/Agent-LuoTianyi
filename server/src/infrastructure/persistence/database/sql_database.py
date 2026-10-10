@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Engine,
@@ -95,11 +96,95 @@ class ConversationContext(Base):
     character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi")
     context_summary = Column(Text, default="")
     context_memory_count = Column(Integer, default=0)
+    maintenance_entry_id = Column(String, nullable=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     user = relationship("User", back_populates="conversation_contexts")
 
     __table_args__ = (UniqueConstraint("user_id", "character_id", name="uq_conversation_context_user_character"),)
+
+
+class CognitiveMaintenanceBatch(Base):
+    __tablename__ = "cognitive_maintenance_batches"
+
+    maintenance_id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
+    character_id = Column(String, nullable=False)
+    previous_progress_key = Column(String, nullable=False)
+    previous_entry_id = Column(String, nullable=True)
+    target_entry_id = Column(String, nullable=False)
+    covered_entry_ids = Column(Text, nullable=False)
+    maintained_entry_ids = Column(Text, nullable=False)
+    candidates = Column(Text, nullable=False)
+    proposed_profile = Column(Text, nullable=True)
+    input_digest = Column(String, nullable=False)
+    compaction_previous_summary = Column(Text, nullable=True)
+    compaction_covered_entry_ids = Column(Text, nullable=False, default="[]")
+    compaction_summary = Column(Text, nullable=True)
+    compaction_expected_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "character_id",
+            "previous_progress_key",
+            name="uq_cognitive_maintenance_batch_predecessor",
+        ),
+    )
+
+
+class CallSession(Base):
+    """Durable privacy-allowlisted lifecycle facts for one realtime call."""
+
+    __tablename__ = "call_sessions"
+
+    call_id = Column(String, primary_key=True)
+    client_request_id = Column(String, nullable=False, unique=True)
+    user_id = Column(String, nullable=False, index=True)
+    character_id = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    outcome = Column(String, nullable=True)
+    end_reason = Column(String, nullable=True)
+    requested_at = Column(DateTime, nullable=False)
+    connected_at = Column(DateTime, nullable=True)
+    disconnected_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    active_duration_ms = Column(Integer, nullable=False, default=0, server_default="0")
+    summary_status = Column(String, nullable=False, default="pending", server_default="pending")
+    maintenance_status = Column(String, nullable=False, default="pending", server_default="pending")
+    conversation_id = Column(String, nullable=True)
+    maintenance_turn_seq = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("active_duration_ms >= 0", name="ck_call_sessions_active_duration_nonnegative"),
+        CheckConstraint("maintenance_turn_seq >= 0", name="ck_call_sessions_maintenance_turn_seq_nonnegative"),
+        CheckConstraint(
+            "state IN ('preparing', 'ringing', 'active', 'reconnecting', 'ending', 'declined', 'ended', 'failed')",
+            name="ck_call_sessions_state",
+        ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('connected', 'cancelled_before_answer', 'declined')",
+            name="ck_call_sessions_outcome",
+        ),
+        CheckConstraint(
+            "end_reason IS NULL OR end_reason IN "
+            "('user_hangup', 'agent_hangup', 'declined', 'setup_timeout', 'time_limit', "
+            "'provider_failed', 'recovery_timeout', 'system_failure')",
+            name="ck_call_sessions_end_reason",
+        ),
+        CheckConstraint(
+            "summary_status IN ('pending', 'succeeded', 'failed')",
+            name="ck_call_sessions_summary_status",
+        ),
+        CheckConstraint(
+            "maintenance_status IN ('pending', 'succeeded', 'failed')",
+            name="ck_call_sessions_maintenance_status",
+        ),
+        Index("ix_call_sessions_stale", "state", "updated_at"),
+    )
 
 
 # ————————————
@@ -193,6 +278,8 @@ class MemoryChunkRecord(Base):
     meta_data = Column(Text, nullable=True)
 
     memory = relationship("AgentMemoryRecord", back_populates="chunks")
+
+    __table_args__ = (UniqueConstraint("embedding_id", name="uq_memory_chunk_embedding_id"),)
 
 
 class MemoryEdgeRecord(Base):
@@ -425,10 +512,34 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
         _migrate_notification_schema(connection)
         _migrate_dynamic_schema(connection)
         _migrate_invite_schema(connection)
+        _migrate_memory_chunk_schema(connection)
 
 
 def _table_columns(connection, table_name: str) -> set[str]:
     return {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _migrate_memory_chunk_schema(connection) -> None:
+    """Add the partial unique embedding index without rewriting historic chunks."""
+    columns = _table_columns(connection, "memory_chunks")
+    if not columns or "embedding_id" not in columns:
+        return
+    duplicates = connection.exec_driver_sql("""
+        SELECT embedding_id, COUNT(*) AS occurrences
+        FROM memory_chunks
+        WHERE embedding_id IS NOT NULL
+        GROUP BY embedding_id
+        HAVING COUNT(*) > 1
+        LIMIT 10
+        """).fetchall()
+    if duplicates:
+        identities = ", ".join(f"{row[0]!r} ({row[1]})" for row in duplicates)
+        raise RuntimeError(f"memory_chunks contains duplicate non-null embedding_id values: {identities}")
+    connection.exec_driver_sql("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_chunk_embedding_id
+        ON memory_chunks(embedding_id)
+        WHERE embedding_id IS NOT NULL
+        """)
 
 
 def _migrate_conversation_schema(connection) -> None:
@@ -439,6 +550,9 @@ def _migrate_conversation_schema(connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_conversations_character_id ON conversations (character_id)"
     )
+    context_columns = _table_columns(connection, "conversation_contexts")
+    if context_columns and "maintenance_entry_id" not in context_columns:
+        connection.exec_driver_sql("ALTER TABLE conversation_contexts ADD COLUMN maintenance_entry_id VARCHAR")
 
 
 def _migrate_event_schema(connection) -> None:

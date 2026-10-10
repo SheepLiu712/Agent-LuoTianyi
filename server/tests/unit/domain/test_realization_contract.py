@@ -6,11 +6,14 @@ from enum import Enum
 from typing import get_type_hints
 
 import pytest
+
 import src.domain.agent as domain
 
-
 ENUMS = {
-    "ActionKind": "start_thinking say sing restore_expression write_diary publish_dynamic reply_dynamic request_song_learning reflection",
+    "ActionKind": (
+        "start_thinking say sing restore_expression write_diary publish_dynamic reply_dynamic request_song_learning "
+        "cognitive_maintenance reflection end_call answer_call"
+    ),
     "OutputDelivery": "conversation ephemeral_reaction",
     "Visibility": "global private",
     "PlanAcceptanceStatus": "accepted already_accepted",
@@ -21,13 +24,22 @@ ENUMS = {
     "ActionExecutionStatus": "completed already_completed cancelled failed not_started",
     "EffectKind": "dynamic_post dynamic_comment song_learning_job",
     "AudioErrorCode": "EMPTY_AUDIO GENERATION_FAILED",
-    "SinkRejectionCode": "IDENTITY_MISMATCH CONTENT_CONFLICT STALE_INTERACTION UNSUPPORTED_OUTPUT SINK_CLOSED BACKPRESSURE_TIMEOUT",
-    "ExecutionErrorCode": "CONTRACT_MISMATCH UNSUPPORTED_ACTION UNSUPPORTED_OUTPUT STALE_INTERACTION SINK_CLOSED BACKPRESSURE_TIMEOUT DEPENDENCY_UNAVAILABLE PROVIDER_TIMEOUT AUDIO_EMPTY AUDIO_GENERATION_FAILED CANCELLED INTERNAL_ERROR",
-    "RealizationContractErrorCode": "CONTRACT_INVALID_ACTION CONTRACT_INVALID_PLAN CONTRACT_INVALID_EXECUTION_CONTEXT CONTRACT_INVALID_OUTPUT CONTRACT_INVALID_RECEIPT CONTRACT_INVALID_EXECUTION_REPORT CONTRACT_INVALID_VALUE",
+    "SinkRejectionCode": (
+        "IDENTITY_MISMATCH CONTENT_CONFLICT STALE_INTERACTION UNSUPPORTED_OUTPUT SINK_CLOSED BACKPRESSURE_TIMEOUT"
+    ),
+    "ExecutionErrorCode": (
+        "CONTRACT_MISMATCH UNSUPPORTED_ACTION UNSUPPORTED_OUTPUT STALE_INTERACTION SINK_CLOSED BACKPRESSURE_TIMEOUT "
+        "DEPENDENCY_UNAVAILABLE PROVIDER_TIMEOUT AUDIO_EMPTY AUDIO_GENERATION_FAILED CANCELLED INTERNAL_ERROR"
+    ),
+    "RealizationContractErrorCode": (
+        "CONTRACT_INVALID_ACTION CONTRACT_INVALID_PLAN CONTRACT_INVALID_EXECUTION_CONTEXT CONTRACT_INVALID_OUTPUT "
+        "CONTRACT_INVALID_RECEIPT CONTRACT_INVALID_EXECUTION_REPORT CONTRACT_INVALID_VALUE"
+    ),
 }
 CASES = (
     "Tone ChangeExpression DynamicReplyTarget DynamicSource StartThinking Say Sing RestoreExpression WriteDiary "
-    "PublishDynamic ReplyDynamic RequestSongLearning Reflection ActionPlan ExecutionContext PlanReceipt "
+    "PublishDynamic ReplyDynamic RequestSongLearning CognitiveMaintenance Reflection ActionPlan ExecutionContext "
+    "PlanReceipt "
     "OutputReceipt TextFinalOutput AudioChunkOutput MessageEndOutput ExpressionOutput EffectRef "
     "ActionResult ExecutionReport"
 ).split()
@@ -43,40 +55,60 @@ def member(name, value):
 
 
 def fields(name):
-    if name == "Tone":
-        return dict(value="normal")
-    if name == "ChangeExpression":
-        return dict(expression_id="微笑脸")
-    if name == "DynamicReplyTarget":
-        return dict(dynamic_id="post", parent_comment_id=None)
-    if name == "DynamicSource":
-        return dict(source_type="citywalk", source_id="walk-1")
-    if name == "EffectRef":
-        return dict(kind=member("EffectKind", "DYNAMIC_POST"), effect_id="post")
-    if name == "ActionResult":
-        return dict(action_id="a", status=member("ActionExecutionStatus", "COMPLETED"),
-                    error_code=None, irreversible_effect_committed=False, effect_ref=None)
-    if name == "ExecutionReport":
-        return dict(execution_id="e", plan_id="p", status=member("ExecutionStatus", "COMPLETED"),
-                    action_results=(make("ActionResult"),), output_started=True,
-                    error_code=None, retryable=False)
-    if name == "ActionPlan":
-        return dict(plan_id="p", origin_request_id="r", plan_ordinal=0, target_character_id="c",
-                    interaction_id="i", basis_interaction_revision=0,
-                    source_stimulus_ids=("m2", "m1"), actions=(make("Say"),))
-    if name == "ExecutionContext":
-        return dict(execution_id="e", interaction_id="i", current_interaction_revision=0,
-                    cancellation=domain.CancellationToken())
-    if name == "PreprocessedInput":
-        return dict(stimulus_id="m2", text="你好", conversation_entry_ids=("e1",))
-    if name == "PlanReceipt":
-        return dict(plan_id="p", status=member("PlanAcceptanceStatus", "ACCEPTED"))
-    if name == "OutputReceipt":
-        return dict(execution_id="e", sequence_no=0,
-                    status=member("OutputAcceptanceStatus", "ACCEPTED"))
+    simple_fields = {
+        "Tone": lambda: dict(value="normal"),
+        "ChangeExpression": lambda: dict(expression_id="微笑脸"),
+        "DynamicReplyTarget": lambda: dict(dynamic_id="post", parent_comment_id=None),
+        "DynamicSource": lambda: dict(source_type="citywalk", source_id="walk-1"),
+        "EffectRef": lambda: dict(kind=member("EffectKind", "DYNAMIC_POST"), effect_id="post"),
+        "ActionResult": lambda: dict(
+            action_id="a",
+            status=member("ActionExecutionStatus", "COMPLETED"),
+            error_code=None,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        ),
+        "ExecutionReport": lambda: dict(
+            execution_id="e",
+            plan_id="p",
+            status=member("ExecutionStatus", "COMPLETED"),
+            action_results=(make("ActionResult"),),
+            output_started=True,
+            error_code=None,
+            retryable=False,
+        ),
+        "ActionPlan": lambda: dict(
+            plan_id="p",
+            origin_request_id="r",
+            plan_ordinal=0,
+            target_character_id="c",
+            interaction_id="i",
+            basis_interaction_revision=0,
+            source_stimulus_ids=("m2", "m1"),
+            actions=(make("Say"),),
+        ),
+        "ExecutionContext": lambda: dict(
+            execution_id="e",
+            interaction_id="i",
+            current_interaction_revision=0,
+            cancellation=domain.CancellationToken(),
+        ),
+        "PreprocessedInput": lambda: dict(stimulus_id="m2", text="你好", conversation_entry_ids=("e1",)),
+        "PlanReceipt": lambda: dict(plan_id="p", status=member("PlanAcceptanceStatus", "ACCEPTED")),
+        "OutputReceipt": lambda: dict(
+            execution_id="e", sequence_no=0, status=member("OutputAcceptanceStatus", "ACCEPTED")
+        ),
+    }
+    if name in simple_fields:
+        return simple_fields[name]()
     if name.endswith("Output"):
-        base = dict(interaction_id="i", execution_id="e", action_id="a", sequence_no=0,
-                    delivery=member("OutputDelivery", "CONVERSATION"))
+        base = dict(
+            interaction_id="i",
+            execution_id="e",
+            action_id="a",
+            sequence_no=0,
+            delivery=member("OutputDelivery", "CONVERSATION"),
+        )
         extra = {
             "TextFinalOutput": lambda: dict(text="你好"),
             "AudioChunkOutput": lambda: dict(data=b"encoded", framing=member("AudioFraming", "COMPLETE_FILE")),
@@ -87,17 +119,30 @@ def fields(name):
     base = dict(action_id="a")
     extra = {
         "StartThinking": lambda: {},
-        "Say": lambda: dict(content="  你好  ", sound_content="你好", prepared_audio_ref=None,
-                            tone=make("Tone"), expression=make("ChangeExpression"),
-                            delivery=member("OutputDelivery", "CONVERSATION")),
+        "Say": lambda: dict(
+            content="  你好  ",
+            sound_content="你好",
+            prepared_audio_ref=None,
+            tone=make("Tone"),
+            expression=make("ChangeExpression"),
+            delivery=member("OutputDelivery", "CONVERSATION"),
+        ),
         "Sing": lambda: dict(song_id="song", segment_id="verse", expression=None),
-        "RestoreExpression": lambda: dict(expression_id="normal",
-                                            delivery=member("OutputDelivery", "EPHEMERAL_REACTION")),
+        "RestoreExpression": lambda: dict(
+            expression_id="normal", delivery=member("OutputDelivery", "EPHEMERAL_REACTION")
+        ),
         "WriteDiary": lambda: dict(owner_user_id="u", local_date=date(2026, 9, 6), body="日记"),
-        "PublishDynamic": lambda: dict(body="动态", media_refs=(), visibility=member("Visibility", "GLOBAL"),
-                                       owner_user_id=None, source=make("DynamicSource"), allow_comment=True),
+        "PublishDynamic": lambda: dict(
+            body="动态",
+            media_refs=(),
+            visibility=member("Visibility", "GLOBAL"),
+            owner_user_id=None,
+            source=make("DynamicSource"),
+            allow_comment=True,
+        ),
         "ReplyDynamic": lambda: dict(target=make("DynamicReplyTarget"), owner_user_id="u", body="评论"),
         "RequestSongLearning": lambda: dict(song_id="song", dedup_key="learn-song"),
+        "CognitiveMaintenance": lambda: dict(reason=domain.MaintenanceReason.COMPACTION_THRESHOLD),
         "Reflection": lambda: dict(prepared_inputs=(make("PreprocessedInput"),)),
     }
     return base | extra[name]()
@@ -108,14 +153,24 @@ def make(name, **changes):
 
 
 def error_code(name):
-    if name in "StartThinking Say Sing RestoreExpression WriteDiary PublishDynamic ReplyDynamic RequestSongLearning Reflection".split():
+    if (
+        name
+        in (
+            "StartThinking Say Sing RestoreExpression WriteDiary PublishDynamic ReplyDynamic RequestSongLearning "
+            "CognitiveMaintenance Reflection"
+        ).split()
+    ):
         return "CONTRACT_INVALID_ACTION"
     if name.endswith("Output"):
         return "CONTRACT_INVALID_OUTPUT"
     if name.endswith("Receipt"):
         return "CONTRACT_INVALID_RECEIPT"
-    return {"ActionPlan": "CONTRACT_INVALID_PLAN", "ExecutionContext": "CONTRACT_INVALID_EXECUTION_CONTEXT",
-            "ActionResult": "CONTRACT_INVALID_EXECUTION_REPORT", "ExecutionReport": "CONTRACT_INVALID_EXECUTION_REPORT"}.get(name, "CONTRACT_INVALID_VALUE")
+    return {
+        "ActionPlan": "CONTRACT_INVALID_PLAN",
+        "ExecutionContext": "CONTRACT_INVALID_EXECUTION_CONTEXT",
+        "ActionResult": "CONTRACT_INVALID_EXECUTION_REPORT",
+        "ExecutionReport": "CONTRACT_INVALID_EXECUTION_REPORT",
+    }.get(name, "CONTRACT_INVALID_VALUE")
 
 
 def invalid(name, **changes):
@@ -172,12 +227,21 @@ def test_abstract_bases_and_fixed_kinds():
         assert inspect.isabstract(public(name))
         with pytest.raises(TypeError):
             public(name)()
-    for name, kind in {"StartThinking": "START_THINKING", "Say": "SAY", "Sing": "SING",
-                       "RestoreExpression": "RESTORE_EXPRESSION",
-                       "WriteDiary": "WRITE_DIARY", "PublishDynamic": "PUBLISH_DYNAMIC",
-                       "ReplyDynamic": "REPLY_DYNAMIC", "RequestSongLearning": "REQUEST_SONG_LEARNING",
-                       "TextFinalOutput": "TEXT_FINAL", "AudioChunkOutput": "AUDIO_CHUNK",
-                       "MessageEndOutput": "MESSAGE_END", "ExpressionOutput": "EXPRESSION"}.items():
+    for name, kind in {
+        "StartThinking": "START_THINKING",
+        "Say": "SAY",
+        "Sing": "SING",
+        "RestoreExpression": "RESTORE_EXPRESSION",
+        "WriteDiary": "WRITE_DIARY",
+        "PublishDynamic": "PUBLISH_DYNAMIC",
+        "ReplyDynamic": "REPLY_DYNAMIC",
+        "RequestSongLearning": "REQUEST_SONG_LEARNING",
+        "CognitiveMaintenance": "COGNITIVE_MAINTENANCE",
+        "TextFinalOutput": "TEXT_FINAL",
+        "AudioChunkOutput": "AUDIO_CHUNK",
+        "MessageEndOutput": "MESSAGE_END",
+        "ExpressionOutput": "EXPRESSION",
+    }.items():
         value = make(name)
         assert value.kind.name == kind
         invalid(name, kind=value.kind)
@@ -188,18 +252,31 @@ def test_output_end_kind_replaces_audio_end_and_is_accepted_by_snapshot():
     assert {v.value for v in kind} == {"text_delta", "text_final", "audio_chunk", "message_end", "expression", "motion"}
     from datetime import timezone
     from zoneinfo import ZoneInfo
+
     snapshot = domain.ChatInteractionSnapshot(
-        interaction_id="i", interaction_revision=0, user_id=None, pending_stimuli=(),
-        now=datetime.now(timezone.utc), timezone=ZoneInfo("UTC"), supported_outputs=frozenset({kind.MESSAGE_END}),
-        response_deadline=None, connection_state=domain.ConnectionState.CONNECTED)
+        interaction_id="i",
+        interaction_revision=0,
+        user_id=None,
+        pending_stimuli=(),
+        now=datetime.now(timezone.utc),
+        timezone=ZoneInfo("UTC"),
+        supported_outputs=frozenset({kind.MESSAGE_END}),
+        response_deadline=None,
+        connection_state=domain.ConnectionState.CONNECTED,
+    )
     assert kind.MESSAGE_END in snapshot.supported_outputs
 
 
 def test_say_text_only_and_prepared_ephemeral_audio_are_distinct_modes():
     assert make("Say", sound_content=None).content == "  你好  "
     audio = domain.MediaRef(media_id="media")
-    reaction = make("Say", content="", sound_content=None, prepared_audio_ref=audio,
-                    delivery=member("OutputDelivery", "EPHEMERAL_REACTION"))
+    reaction = make(
+        "Say",
+        content="",
+        sound_content=None,
+        prepared_audio_ref=audio,
+        delivery=member("OutputDelivery", "EPHEMERAL_REACTION"),
+    )
     assert reaction.prepared_audio_ref is audio
     invalid("Say", prepared_audio_ref=audio)
     invalid("Say", content="", sound_content=None)
@@ -241,8 +318,11 @@ def test_message_end_carries_explicit_status_without_requiring_audio(status):
     code = member("AudioErrorCode", "EMPTY_AUDIO") if status == "FAILED" else None
     end = make("MessageEndOutput", status=member("MessageEndStatus", status), error_code=code)
     assert end.error_code is code
-    invalid("MessageEndOutput", status=member("MessageEndStatus", status),
-            error_code=None if code else member("AudioErrorCode", "GENERATION_FAILED"))
+    invalid(
+        "MessageEndOutput",
+        status=member("MessageEndStatus", status),
+        error_code=None if code else member("AudioErrorCode", "GENERATION_FAILED"),
+    )
 
 
 def test_audio_content_and_framing_are_preserved_without_decoding():
@@ -273,11 +353,20 @@ def test_protocol_signatures_and_success_or_exception_contract():
 def test_report_preserves_partial_effect_and_derives_aggregate():
     effect = make("EffectRef")
     done = make("ActionResult", irreversible_effect_committed=True, effect_ref=effect)
-    failed = make("ActionResult", action_id="b", status=member("ActionExecutionStatus", "FAILED"),
-                  error_code=member("ExecutionErrorCode", "PROVIDER_TIMEOUT"))
+    failed = make(
+        "ActionResult",
+        action_id="b",
+        status=member("ActionExecutionStatus", "FAILED"),
+        error_code=member("ExecutionErrorCode", "PROVIDER_TIMEOUT"),
+    )
     pending = make("ActionResult", action_id="c", status=member("ActionExecutionStatus", "NOT_STARTED"))
-    report = make("ExecutionReport", status=member("ExecutionStatus", "FAILED"),
-                  action_results=(done, failed, pending), error_code=failed.error_code, retryable=True)
+    report = make(
+        "ExecutionReport",
+        status=member("ExecutionStatus", "FAILED"),
+        action_results=(done, failed, pending),
+        error_code=failed.error_code,
+        retryable=True,
+    )
     assert report.irreversible_effect_committed is True
     assert make("ExecutionReport").irreversible_effect_committed is False
     with pytest.raises(AttributeError):
@@ -287,14 +376,21 @@ def test_report_preserves_partial_effect_and_derives_aggregate():
     invalid("ExecutionReport", action_results=())
     invalid("ExecutionReport", action_results=(pending, done))
     invalid("ExecutionReport", action_results=(failed, done), status=report.status, error_code=failed.error_code)
-    invalid("ExecutionReport", action_results=(failed,), status=report.status,
-            error_code=member("ExecutionErrorCode", "INTERNAL_ERROR"))
+    invalid(
+        "ExecutionReport",
+        action_results=(failed,),
+        status=report.status,
+        error_code=member("ExecutionErrorCode", "INTERNAL_ERROR"),
+    )
 
 
 @pytest.mark.parametrize("status", ["COMPLETED", "ALREADY_COMPLETED", "NOT_STARTED", "FAILED", "CANCELLED"])
 def test_action_status_error_and_effect_rules(status):
-    code = member("ExecutionErrorCode", "INTERNAL_ERROR") if status == "FAILED" else (
-        member("ExecutionErrorCode", "CANCELLED") if status == "CANCELLED" else None)
+    code = (
+        member("ExecutionErrorCode", "INTERNAL_ERROR")
+        if status == "FAILED"
+        else (member("ExecutionErrorCode", "CANCELLED") if status == "CANCELLED" else None)
+    )
     args = dict(status=member("ActionExecutionStatus", status), error_code=code)
     assert make("ActionResult", **args).error_code is code
     invalid("ActionResult", **(args | {"error_code": None if code else member("ExecutionErrorCode", "INTERNAL_ERROR")}))
@@ -307,14 +403,23 @@ def test_action_status_error_and_effect_rules(status):
 def test_execution_can_stop_before_first_action(status):
     result = make("ActionResult", status=member("ActionExecutionStatus", "NOT_STARTED"))
     code = member("ExecutionErrorCode", "CANCELLED" if status == "CANCELLED" else "SINK_CLOSED")
-    assert make("ExecutionReport", status=member("ExecutionStatus", status), action_results=(result,),
-                error_code=code, output_started=False).output_started is False
+    assert (
+        make(
+            "ExecutionReport",
+            status=member("ExecutionStatus", status),
+            action_results=(result,),
+            error_code=code,
+            output_started=False,
+        ).output_started
+        is False
+    )
     invalid("ExecutionReport", action_results=(result,))
 
 
 def test_enum_strings_and_foreign_enum_are_not_typed_values():
     class Other(str, Enum):
         COMPLETED = "completed"
+
     for value in ("completed", Other.COMPLETED):
         invalid("ActionResult", status=value)
     invalid("PlanReceipt", status=member("OutputAcceptanceStatus", "ACCEPTED"))
@@ -322,7 +427,9 @@ def test_enum_strings_and_foreign_enum_are_not_typed_values():
 
 
 def test_construction_failure_code_is_readonly():
-    error = public("InvalidRealizationContractError")("bad", code=member("RealizationContractErrorCode", "CONTRACT_INVALID_PLAN"))
+    error = public("InvalidRealizationContractError")(
+        "bad", code=member("RealizationContractErrorCode", "CONTRACT_INVALID_PLAN")
+    )
     assert isinstance(error, ValueError)
     with pytest.raises(AttributeError):
         error.code = None

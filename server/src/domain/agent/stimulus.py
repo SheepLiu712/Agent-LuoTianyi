@@ -69,6 +69,11 @@ class StimulusKind(str, Enum):
     SONG_KNOWLEDGE_DISCOVERED = "song_knowledge_discovered"
     SONG_LEARNED = "song_learned"
     NEW_RELATIONSHIP_PROPOSE = "new_relationship_propose"
+    CALL_ANSWER_REQUESTED = "call_answer_requested"
+    CALL_STARTED = "call_started"
+    CALL_TURN_COMPLETED = "call_turn_completed"
+    CALL_SILENCE_ELAPSED = "call_silence_elapsed"
+    CALL_ENDING = "call_ending"
 
 
 class StimulusSource(str, Enum):
@@ -318,6 +323,7 @@ class InteractionEndingReason(str, Enum):
 
     USER_LEFT = "user_left"
     SHUTDOWN = "shutdown"
+    SWITCH_TO_CALL = "switch_to_call"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

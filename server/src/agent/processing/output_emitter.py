@@ -14,10 +14,18 @@ from .output_drafts import OutputDraft
 class OutputEmitter:
     """单个行动的输出入口；只在内存中记录本次交付结果。"""
 
-    def __init__(self, execution, action_id: str, *, message_id: str | None = None) -> None:
+    def __init__(
+        self,
+        execution,
+        action_id: str,
+        *,
+        message_id: str | None = None,
+        call_delivery=None,
+    ) -> None:
         """绑定本次执行和当前行动标识。"""
         self._execution, self._action_id = execution, action_id
         self._message_id = message_id
+        self._call_delivery = call_delivery or d.CallSpeechDelivery()
         self._lock = asyncio.Lock()
         self.error = None
         self.code = None
@@ -57,6 +65,7 @@ class OutputEmitter:
                     action_id=self._action_id,
                     sequence_no=sequence,
                     message_id=self._message_id,
+                    call_delivery=self._call_delivery,
                     **{field.name: getattr(draft, field.name) for field in fields(draft)},
                 )
                 receipt = await execution.sink.emit(output)
