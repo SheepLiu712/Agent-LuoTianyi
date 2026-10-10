@@ -62,6 +62,10 @@ class VectorStore(ABC):
         """添加文档到向量库"""
         pass
 
+    def upsert_documents(self, documents: List[BaseDocument], ids: List[str]) -> List[str]:
+        """按调用方提供的稳定 ID 幂等写入；旧实现须显式选择支持。"""
+        raise NotImplementedError("vector store does not support deterministic upsert")
+
     @abstractmethod
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档"""
@@ -180,6 +184,33 @@ class ChromaVectorStore(VectorStore):
 
         self.logger.info(f"成功添加 {len(documents)} 个文档")
         return ids
+
+    def upsert_documents(self, documents: List[BaseDocument], ids: List[str]) -> List[str]:
+        if len(documents) != len(ids):
+            raise ValueError("documents 与 ids 数量必须一致")
+        for doc in documents:
+            if "user_id" not in doc.get_metadata():
+                raise ValueError("文档的metadata中必须包含'user_id'字段")
+        existing = self.collection.get(ids=ids, include=["documents", "metadatas"])
+        existing_by_id = {
+            document_id: (content, metadata)
+            for document_id, content, metadata in zip(
+                existing.get("ids", []),
+                existing.get("documents", []),
+                existing.get("metadatas", []),
+            )
+        }
+        for document, document_id in zip(documents, ids):
+            persisted = existing_by_id.get(document_id)
+            expected = (document.get_content(), document.get_metadata())
+            if persisted is not None and persisted != expected:
+                raise ValueError("vector identity conflicts with persisted document")
+        self.collection.upsert(
+            documents=[doc.get_content() for doc in documents],
+            metadatas=[doc.get_metadata() for doc in documents],
+            ids=ids,
+        )
+        return list(ids)
 
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档 (异步)"""

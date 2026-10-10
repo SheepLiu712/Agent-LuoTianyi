@@ -32,6 +32,12 @@ class CallTransitionIntent:
     expires_at: float
 
 
+@dataclass(frozen=True, slots=True)
+class CallTransitionOwnership:
+    intent: CallTransitionIntent
+    lease: InteractionLease
+
+
 class InteractionLeaseRegistry:
     """Single-process ownership registry; distributed coordination is out of scope."""
 
@@ -106,6 +112,121 @@ class InteractionLeaseRegistry:
                 return None
             del self._intents[key]
             return intent
+
+    def begin_call_transition(
+        self,
+        *,
+        user_id: str,
+        character_id: str,
+        source_interaction_id: str,
+        client_request_id: str,
+    ) -> CallTransitionOwnership | None:
+        """Consume one intent and atomically replace CHAT ownership with transition ownership."""
+        key = (user_id, character_id)
+        with self._lock:
+            intent = self._live_intent(key)
+            current = self._leases.get(key)
+            if (
+                intent is None
+                or current is None
+                or current.source is not InteractionSource.CHAT
+                or current.interaction_id != source_interaction_id
+                or intent.source_interaction_id != source_interaction_id
+                or intent.client_request_id != client_request_id
+            ):
+                return None
+            del self._intents[key]
+            transition = InteractionLease(
+                user_id=user_id,
+                character_id=character_id,
+                interaction_id=source_interaction_id,
+                source=InteractionSource.CALL_TRANSITION,
+            )
+            self._leases[key] = transition
+            return CallTransitionOwnership(intent=intent, lease=transition)
+
+    def begin_direct_call_transition(
+        self,
+        *,
+        user_id: str,
+        character_id: str,
+        client_request_id: str,
+    ) -> InteractionLease | None:
+        """Claim transition ownership only when no chat, call, or transition owns the key."""
+        if not client_request_id:
+            raise ValueError("client_request_id is required")
+        key = (user_id, character_id)
+        with self._lock:
+            self._live_intent(key)
+            if self._leases.get(key) is not None:
+                return None
+            transition = InteractionLease(
+                user_id=user_id,
+                character_id=character_id,
+                interaction_id=client_request_id,
+                source=InteractionSource.CALL_TRANSITION,
+            )
+            self._leases[key] = transition
+            return transition
+
+    def finish_call_transition(self, ownership: CallTransitionOwnership, *, call_id: str) -> InteractionLease:
+        """Atomically hand transition ownership to a stable call identity."""
+        if not call_id:
+            raise ValueError("call_id is required")
+        key = (ownership.lease.user_id, ownership.lease.character_id)
+        with self._lock:
+            if self._leases.get(key) != ownership.lease:
+                raise ValueError("call transition no longer owns the interaction")
+            call_lease = InteractionLease(
+                user_id=key[0],
+                character_id=key[1],
+                interaction_id=call_id,
+                source=InteractionSource.CALL,
+            )
+            self._leases[key] = call_lease
+            return call_lease
+
+    def finish_direct_call_transition(self, transition: InteractionLease, *, call_id: str) -> InteractionLease:
+        """Finish an empty-slot direct transition without a chat intent."""
+        if transition.source is not InteractionSource.CALL_TRANSITION or not call_id:
+            raise ValueError("valid direct transition and call_id are required")
+        key = (transition.user_id, transition.character_id)
+        with self._lock:
+            if self._leases.get(key) != transition:
+                raise ValueError("direct call transition no longer owns the interaction")
+            call = InteractionLease(key[0], key[1], call_id, InteractionSource.CALL)
+            self._leases[key] = call
+            return call
+
+    def abandon_call_transition(self, ownership: CallTransitionOwnership) -> bool:
+        """Release transition ownership after an irreversible handoff failure."""
+        return self.release(ownership.lease)
+
+    def rollback_call_transition(self, ownership: CallTransitionOwnership) -> InteractionLease:
+        """Restore CHAT ownership after failure before any durable call ledger exists."""
+        key = (ownership.lease.user_id, ownership.lease.character_id)
+        with self._lock:
+            if self._leases.get(key) != ownership.lease:
+                raise ValueError("call transition no longer owns the interaction")
+            chat = InteractionLease(
+                user_id=key[0],
+                character_id=key[1],
+                interaction_id=ownership.intent.source_interaction_id,
+                source=InteractionSource.CHAT,
+            )
+            self._leases[key] = chat
+            self._intents.pop(key, None)
+            return chat
+
+    def current(self, user_id: str, character_id: str) -> InteractionLease | None:
+        with self._lock:
+            return self._leases.get((user_id, character_id))
+
+    def close(self) -> None:
+        """Release all process-local ownership and pending intents at runtime shutdown."""
+        with self._lock:
+            self._leases.clear()
+            self._intents.clear()
 
     def _live_intent(self, key: tuple[str, str]) -> CallTransitionIntent | None:
         intent = self._intents.get(key)

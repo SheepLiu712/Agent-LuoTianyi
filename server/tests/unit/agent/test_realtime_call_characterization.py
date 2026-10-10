@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
-from support.routing_support import Sink
 from support.skill_support import invocation
 
 import src.domain.agent as d
@@ -48,7 +47,7 @@ async def test_tts_cancellation_keeps_completed_chunk_but_drops_unfinished_tail(
 
 
 @pytest.mark.asyncio
-async def test_interaction_ending_only_settles_pending_and_emits_no_maintenance_plan():
+async def test_interaction_ending_emits_only_ending_maintenance_plan():
     handler = InteractionEndingHandler()
     ending = d.InteractionEnding(
         stimulus_id="ending",
@@ -76,9 +75,23 @@ async def test_interaction_ending_only_settles_pending_and_emits_no_maintenance_
         ),
         cancellation=d.CancellationToken(),
     )
-    sink = Sink()
+    emitted = []
+
+    async def accept(draft):
+        emitted.append(draft)
+        return d.PlanReceipt(plan_id="draft", status=d.PlanAcceptanceStatus.ACCEPTED)
+
+    class Plans:
+        accepted_ids = ["ending-plan"]
+
+        async def emit(self, draft):
+            return await accept(draft)
+
+    sink = Plans()
 
     report = await handler.handle(request, sink)
 
-    assert report.emitted_plan_ids == ()
-    assert sink.values == []
+    assert report.emitted_plan_ids == ("ending-plan",)
+    assert len(emitted) == 1
+    assert isinstance(emitted[0].actions[0], d.CognitiveMaintenance)
+    assert emitted[0].actions[0].reason is d.MaintenanceReason.INTERACTION_ENDING

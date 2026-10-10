@@ -58,6 +58,44 @@ class _PlanSink:
         return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
 
 
+class _TerminationPlanSink:
+    """只收集结束 handle 的唯一维护计划，不进入普通队列。"""
+
+    def __init__(self, stage: ChatStage, request: d.HandleStimulusRequest) -> None:
+        self.stage, self.request = stage, request
+        self.ids: list[str] = []
+        self.plan: d.ActionPlan | None = None
+        self.closed = False
+
+    async def emit(self, plan: d.ActionPlan) -> d.PlanReceipt:
+        request, stage = self.request, self.stage
+        if self.closed or request.cancellation.is_cancelled:
+            raise d.SinkRejectedError("termination request is stale", code=d.SinkRejectionCode.STALE_INTERACTION)
+        if (
+            self.plan is not None
+            or plan.origin_request_id != request.request_id
+            or plan.interaction_id != stage.interaction_id
+            or plan.target_character_id != stage.character_id
+            or plan.basis_interaction_revision != request.interaction.interaction_revision
+            or plan.plan_ordinal != 0
+            or len(plan.actions) != 1
+            or not isinstance(plan.actions[0], d.CognitiveMaintenance)
+            or plan.actions[0].reason is not d.MaintenanceReason.INTERACTION_ENDING
+        ):
+            raise d.SinkRejectedError("termination plan mismatch", code=d.SinkRejectionCode.IDENTITY_MISMATCH)
+        self.plan = plan
+        self.ids.append(plan.plan_id)
+        return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
+
+
+class _NoOutputSink:
+    """结束维护禁止产生任何用户输出。"""
+
+    async def emit(self, output: d.AgentOutput) -> d.OutputReceipt:
+        _ = output
+        raise d.SinkRejectedError("termination maintenance cannot emit output", code=d.SinkRejectionCode.SINK_CLOSED)
+
+
 class _AgentOutputSink:
     def __init__(self, stage: ChatStage) -> None:
         self.stage = stage
