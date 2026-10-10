@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Engine,
@@ -130,6 +131,59 @@ class CognitiveMaintenanceBatch(Base):
             "previous_progress_key",
             name="uq_cognitive_maintenance_batch_predecessor",
         ),
+    )
+
+
+class CallSession(Base):
+    """Durable privacy-allowlisted lifecycle facts for one realtime call."""
+
+    __tablename__ = "call_sessions"
+
+    call_id = Column(String, primary_key=True)
+    client_request_id = Column(String, nullable=False, unique=True)
+    user_id = Column(String, nullable=False, index=True)
+    character_id = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    outcome = Column(String, nullable=True)
+    end_reason = Column(String, nullable=True)
+    requested_at = Column(DateTime, nullable=False)
+    connected_at = Column(DateTime, nullable=True)
+    disconnected_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    active_duration_ms = Column(Integer, nullable=False, default=0, server_default="0")
+    summary_status = Column(String, nullable=False, default="pending", server_default="pending")
+    maintenance_status = Column(String, nullable=False, default="pending", server_default="pending")
+    conversation_id = Column(String, nullable=True)
+    maintenance_turn_seq = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("active_duration_ms >= 0", name="ck_call_sessions_active_duration_nonnegative"),
+        CheckConstraint("maintenance_turn_seq >= 0", name="ck_call_sessions_maintenance_turn_seq_nonnegative"),
+        CheckConstraint(
+            "state IN ('preparing', 'ringing', 'active', 'reconnecting', 'ending', 'declined', 'ended', 'failed')",
+            name="ck_call_sessions_state",
+        ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('connected', 'cancelled_before_answer', 'declined')",
+            name="ck_call_sessions_outcome",
+        ),
+        CheckConstraint(
+            "end_reason IS NULL OR end_reason IN "
+            "('user_hangup', 'agent_hangup', 'declined', 'setup_timeout', 'time_limit', "
+            "'provider_failed', 'recovery_timeout', 'system_failure')",
+            name="ck_call_sessions_end_reason",
+        ),
+        CheckConstraint(
+            "summary_status IN ('pending', 'succeeded', 'failed')",
+            name="ck_call_sessions_summary_status",
+        ),
+        CheckConstraint(
+            "maintenance_status IN ('pending', 'succeeded', 'failed')",
+            name="ck_call_sessions_maintenance_status",
+        ),
+        Index("ix_call_sessions_stale", "state", "updated_at"),
     )
 
 
