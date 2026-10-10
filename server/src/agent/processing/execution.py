@@ -62,7 +62,13 @@ class Execution:
             if self.context.cancellation.is_cancelled:
                 return self.report(d.ExecutionErrorCode.CANCELLED)
             message_id = action.message_id if isinstance(action, (d.Say, d.Sing)) else None
-            outputs = OutputEmitter(self, action.action_id, message_id=message_id)
+            call_delivery = action.call_delivery if isinstance(action, d.Say) else None
+            outputs = OutputEmitter(
+                self,
+                action.action_id,
+                message_id=message_id,
+                call_delivery=call_delivery,
+            )
             result = None
             try:
                 result = await call_handler(

@@ -4,6 +4,8 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import ClassVar
 
+from src.domain.call.contracts import CallSpeechDelivery
+
 from ._realization_contract import RealizationContractErrorCode as _Code
 from ._realization_contract import _Value
 from .action_plan import ChangeExpression
@@ -38,6 +40,7 @@ class AgentOutput(_Value):
     sequence_no: int
     delivery: OutputDelivery
     message_id: str | None = None
+    call_delivery: CallSpeechDelivery = CallSpeechDelivery()
 
     @property
     @abstractmethod
