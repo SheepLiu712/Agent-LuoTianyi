@@ -67,19 +67,26 @@ class _PlanSink:
 
 
 class _SpeechStream:
+    def __init__(self):
+        self._chunks = iter((SimpleNamespace(data=b"pcm!"),))
+
     def __aiter__(self):
         return self
 
     async def __anext__(self):
-        raise StopAsyncIteration
+        try:
+            return next(self._chunks)
+        except StopIteration as error:
+            raise StopAsyncIteration from error
 
     async def aclose(self):
         return None
 
 
 class _Speaking:
-    def speak(self, invocation, *, text, tone):
+    def speak(self, invocation, *, text, tone, output_format=None):
         _ = invocation, text, tone
+        assert output_format == d.CALL_PCM_FORMAT
         return _SpeechStream()
 
 
@@ -94,6 +101,18 @@ class _OutputSink:
             sequence_no=output.sequence_no,
             status=d.OutputAcceptanceStatus.ACCEPTED,
         )
+
+
+class _ResponseScopedPermit:
+    def __init__(self, response_id):
+        self._response_id = response_id
+        self._active = True
+
+    def allows(self, response_id):
+        return self._active and response_id == self._response_id
+
+    def revoke(self):
+        self._active = False
 
 
 class _Memory:
@@ -265,6 +284,10 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
     assert len(plan_sink.plans) == 1
     assert isinstance(plan_sink.plans[0].actions[-1], d.EndCall)
     output_sink = _OutputSink()
+    response_id = plan_sink.plans[0].actions[0].call_delivery.response_id
+    permit = _ResponseScopedPermit(response_id)
+    assert permit.allows(response_id)
+    assert not permit.allows("another-response")
     execution = await agent.realize_action_plan(
         plan_sink.plans[0],
         d.ExecutionContext(
@@ -273,6 +296,7 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
             current_interaction_revision=1,
             cancellation=d.CancellationToken(),
             interaction_context=interaction_context,
+            call_output_permit=permit,
         ),
         output_sink,
     )
@@ -282,9 +306,14 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
         d.ActionExecutionStatus.COMPLETED,
         d.ActionExecutionStatus.COMPLETED,
     ]
-    assert len(output_sink.outputs) == 1
-    assert isinstance(output_sink.outputs[0], d.MessageEndOutput)
-    assert output_sink.outputs[0].call_delivery.audio_route.value == "CALL"
+    assert [type(output) for output in output_sink.outputs] == [
+        d.TextFinalOutput,
+        d.AudioChunkOutput,
+        d.MessageEndOutput,
+    ]
+    assert all(output.call_delivery.audio_route.value == "CALL" for output in output_sink.outputs)
+    permit.revoke()
+    assert not permit.allows(response_id)
 
 
 @pytest.mark.asyncio

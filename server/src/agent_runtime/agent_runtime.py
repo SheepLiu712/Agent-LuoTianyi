@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
@@ -76,6 +77,10 @@ class AgentRuntime:
     def singing_backend(self) -> SingingBackend:
         """Expose the shared singing port only to the application composition root."""
         return self.skills.singing.backend
+
+    def release_call_resources(self, call_id: UUID) -> bool:
+        """Release Agent-owned ephemeral resources without exposing SharedSkills."""
+        return self.skills.call_recall.release_call_memory(call_id)
 
     def __init__(
         self,
