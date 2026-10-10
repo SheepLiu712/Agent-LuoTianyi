@@ -4,6 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.domain import MemoryContext, MemoryHit
+from src.domain.agent.maintenance import MaintenanceCandidate
 from src.infrastructure.persistence.database.vector_store import VectorStore
 
 from .profile_updater import UserProfileUpdater
@@ -170,6 +171,34 @@ class AgentMemory:
             owner_character_id=self.owner_character_id,
             commit=commit,
         )
+
+    async def extract_maintenance_candidates(
+        self, *, history: str, current_dialogue: str
+    ) -> tuple[MaintenanceCandidate, ...]:
+        return await self.memory_writer.extract_maintenance_candidates(
+            history=history,
+            current_dialogue=current_dialogue,
+        )
+
+    async def write_maintenance_candidates(
+        self,
+        *,
+        user_id: str,
+        maintenance_id: str,
+        candidates: tuple[MaintenanceCandidate, ...],
+    ) -> None:
+        await self.memory_writer.write_maintenance_candidates(
+            vector_store=self.vector_store,
+            memory_store=self.memory_store,
+            user_id=user_id,
+            owner_character_id=self.owner_character_id,
+            maintenance_id=maintenance_id,
+            candidates=candidates,
+        )
+
+    async def propose_user_profile(self, *, history: dict[str, Any], current_profile: str) -> str | None:
+        proposed = await self.user_profile_updater.update_profile(history=history, current_profile=current_profile)
+        return proposed or None
 
     async def write_user_memory(
         self,
