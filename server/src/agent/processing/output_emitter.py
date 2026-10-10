@@ -39,6 +39,18 @@ class OutputEmitter:
         _check_cancellation(self._execution.context.cancellation)
         self._execution.interruption.allowed = interruptible
 
+    def ensure_call_allowed(self) -> None:
+        """CALL 输出在开始工作及每次进入 sink 前都必须持有 Stage 许可。"""
+        execution = self._execution
+        if execution is None:
+            raise RuntimeError("output emitter is closed")
+        delivery = self._call_delivery
+        if delivery.audio_route is not d.CallAudioRoute.CALL:
+            return
+        permit = execution.context.call_output_permit
+        if permit is None or delivery.response_id is None or not permit.allows(delivery.response_id):
+            raise d.SinkRejectedError("call output permit revoked", code=d.SinkRejectionCode.STALE_INTERACTION)
+
     async def emit(self, draft: OutputDraft) -> d.OutputReceipt:
         """校验并顺序交付一份输出，返回接收确认；首次失败后拒绝继续交付。"""
         async with self._lock:
@@ -49,6 +61,7 @@ class OutputEmitter:
                 raise self.error
             context = execution.context
             _check_cancellation(context.cancellation)
+            self.ensure_call_allowed()
             try:
                 output_types = {
                     drafts.TextFinalDraft: d.TextFinalOutput,

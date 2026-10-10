@@ -18,7 +18,7 @@ ENUMS = {
     "Visibility": "global private",
     "PlanAcceptanceStatus": "accepted already_accepted",
     "OutputAcceptanceStatus": "accepted already_accepted",
-    "AudioFraming": "complete_file file_fragment",
+    "AudioFraming": "complete_file file_fragment raw_pcm",
     "MessageEndStatus": "completed failed cancelled",
     "ExecutionStatus": "completed failed cancelled",
     "ActionExecutionStatus": "completed already_completed cancelled failed not_started",
@@ -327,9 +327,58 @@ def test_message_end_carries_explicit_status_without_requiring_audio(status):
 
 def test_audio_content_and_framing_are_preserved_without_decoding():
     for framing in public("AudioFraming"):
-        assert make("AudioChunkOutput", framing=framing).data == b"encoded"
+        changes = {}
+        if framing is domain.AudioFraming.RAW_PCM:
+            changes["audio_format"] = domain.CALL_PCM_FORMAT
+            changes["data"] = b"pcm!"
+        output = make("AudioChunkOutput", framing=framing, **changes)
+        assert output.data == changes.get("data", b"encoded")
     for data in (b"", bytearray(b"x"), domain.MediaRef(media_id="m")):
         invalid("AudioChunkOutput", data=data)
+
+
+def test_raw_pcm_requires_format_and_only_raw_pcm_may_be_final():
+    invalid("AudioChunkOutput", framing=domain.AudioFraming.RAW_PCM)
+    invalid("AudioChunkOutput", audio_format=domain.CALL_PCM_FORMAT)
+    invalid("AudioChunkOutput", final=True)
+    output = make(
+        "AudioChunkOutput",
+        data=b"pcm!",
+        framing=domain.AudioFraming.RAW_PCM,
+        audio_format=domain.CALL_PCM_FORMAT,
+        final=True,
+    )
+    assert output.final is True
+    invalid(
+        "AudioChunkOutput",
+        framing=domain.AudioFraming.RAW_PCM,
+        audio_format=domain.AudioFormat(
+            encoding=domain.AudioEncoding.PCM_S16LE,
+            sample_rate=16000,
+            channels=1,
+        ),
+    )
+    invalid(
+        "AudioChunkOutput",
+        framing=domain.AudioFraming.RAW_PCM,
+        audio_format=domain.AudioFormat(
+            encoding=domain.AudioEncoding.PCM_S16LE,
+            sample_rate=24000,
+            channels=2,
+        ),
+    )
+    invalid(
+        "AudioChunkOutput",
+        data=b"odd",
+        framing=domain.AudioFraming.RAW_PCM,
+        audio_format=domain.CALL_PCM_FORMAT,
+    )
+    invalid(
+        "AudioChunkOutput",
+        data=b"x" * (domain.MAX_CALL_PCM_CHUNK_BYTES + 2),
+        framing=domain.AudioFraming.RAW_PCM,
+        audio_format=domain.CALL_PCM_FORMAT,
+    )
 
 
 def test_protocol_signatures_and_success_or_exception_contract():
