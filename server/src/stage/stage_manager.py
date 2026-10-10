@@ -74,6 +74,17 @@ class CallStartClaim:
     record: CallSessionRecord
     lease: InteractionLease
     duplicate: bool
+    setup_deadline: float
+
+
+@dataclass(frozen=True, slots=True)
+class CallStageOwnership:
+    call_id: str
+    user_id: str
+    character_id: str
+    client_request_id: str
+    setup_deadline: float
+    generation: int
 
 
 class StageManager:
@@ -119,6 +130,10 @@ class StageManager:
         self._pending_regular_logins: set[tuple[str, str]] = set()
         self._call_starts: dict[str, asyncio.Task[CallStartClaim]] = {}
         self._call_start_operations: dict[str, tuple[str, str, str | None]] = {}
+        self._call_setup_deadlines: dict[str, float] = {}
+        self._call_claims: dict[str, CallStartClaim] = {}
+        self._call_ownerships: dict[str, CallStageOwnership] = {}
+        self._call_ownership_generation = 0
         self._intent_expiry: dict[tuple[str, str], asyncio.Task[None]] = {}
 
     def record_login(
@@ -269,12 +284,17 @@ class StageManager:
         if current_operation is not None and current_operation != operation:
             raise ValueError("client_request_id is already starting another call")
         if task is None:
+            deadline = self._call_setup_deadlines.setdefault(
+                client_request_id,
+                self._monotonic() + self._config.call_setup_timeout,
+            )
             task = asyncio.create_task(
                 self._start_call(
                     user_id=user_id,
                     character_id=character_id,
                     source_interaction_id=source_interaction_id,
                     client_request_id=client_request_id,
+                    setup_deadline=deadline,
                 ),
                 name="call-handoff",
             )
@@ -292,6 +312,7 @@ class StageManager:
             self._call_starts.pop(client_request_id, None)
             self._call_start_operations.pop(client_request_id, None)
         if not task.cancelled() and task.exception() is not None:
+            self._call_setup_deadlines.pop(client_request_id, None)
             get_logger(__name__).debug("Call handoff failed request=%s", client_request_id)
 
     async def _start_call(
@@ -301,14 +322,20 @@ class StageManager:
         character_id: str,
         source_interaction_id: str | None,
         client_request_id: str,
+        setup_deadline: float,
     ) -> CallStartClaim:
         if self._call_sessions is None:
             raise RuntimeError("call session repository is not bound")
-        deadline = self._monotonic() + self._config.call_setup_timeout
+        deadline = setup_deadline
         existing = await self._repository_call(self._call_sessions.find_by_request, client_request_id)
         self._require_setup_time(deadline)
         if existing is not None:
-            return self._existing_call_claim(existing, user_id=user_id, character_id=character_id)
+            return self._existing_call_claim(
+                existing,
+                user_id=user_id,
+                character_id=character_id,
+                setup_deadline=deadline,
+            )
         async with self._lock:
             if self._closed:
                 raise ValueError("stage manager is closed")
@@ -339,7 +366,9 @@ class StageManager:
                 if self._closed:
                     raise RuntimeError("stage manager closed during call handoff")
             call_lease = self._finish_transition(ownership, call_id=str(record.call_id))
-            return CallStartClaim(record, call_lease, False)
+            claim = CallStartClaim(record, call_lease, False, deadline)
+            self._call_claims[str(record.call_id)] = claim
+            return claim
         except BaseException as error:
             await self._cleanup_postledger_failure(record, stage, ownership, error)
             raise
@@ -433,13 +462,68 @@ class StageManager:
         *,
         user_id: str,
         character_id: str,
+        setup_deadline: float,
     ) -> CallStartClaim:
         if record.user_id != user_id or record.character_id != character_id:
             raise ValueError("client_request_id belongs to another call owner")
         lease = self._lease_registry.current(user_id, character_id)
         if lease is None or lease.source is not InteractionSource.CALL or lease.interaction_id != str(record.call_id):
             raise ValueError("existing call is not owned by this runtime")
-        return CallStartClaim(record, lease, True)
+        return CallStartClaim(record, lease, True, setup_deadline)
+
+    def take_call_claim(
+        self,
+        claim: CallStartClaim,
+        *,
+        user_id: str,
+        character_id: str,
+        client_request_id: str,
+    ) -> CallStageOwnership:
+        """Transfer one validated CALL claim to a future CallStage owner."""
+        call_id = str(claim.record.call_id)
+        if self._call_claims.get(call_id) != claim:
+            raise ValueError("call claim is not pending or does not match")
+        if (
+            claim.record.user_id != user_id
+            or claim.record.character_id != character_id
+            or claim.record.client_request_id != client_request_id
+            or claim.lease.user_id != user_id
+            or claim.lease.character_id != character_id
+            or claim.lease.interaction_id != call_id
+            or claim.setup_deadline != self._call_setup_deadlines.get(client_request_id)
+        ):
+            raise ValueError("call claim identity mismatch")
+        current = self._lease_registry.current(user_id, character_id)
+        if current != claim.lease or current.source is not InteractionSource.CALL:
+            raise ValueError("call lease is not current")
+        self._call_ownership_generation += 1
+        ownership = CallStageOwnership(
+            call_id=call_id,
+            user_id=user_id,
+            character_id=character_id,
+            client_request_id=client_request_id,
+            setup_deadline=claim.setup_deadline,
+            generation=self._call_ownership_generation,
+        )
+        self._call_claims.pop(call_id)
+        self._call_ownerships[call_id] = ownership
+        return ownership
+
+    def current_call_ownership(self, call_id: str) -> CallStageOwnership | None:
+        return self._call_ownerships.get(call_id)
+
+    def release_call(self, ownership: CallStageOwnership) -> bool:
+        """Release only the current CallStage ownership generation."""
+        if self._call_ownerships.get(ownership.call_id) != ownership:
+            return False
+        lease = self._lease_registry.current(ownership.user_id, ownership.character_id)
+        if lease is None or lease.source is not InteractionSource.CALL or lease.interaction_id != ownership.call_id:
+            return False
+        if not self._lease_registry.release(lease):
+            return False
+        self._call_ownerships.pop(ownership.call_id)
+        self._call_setup_deadlines.pop(ownership.client_request_id, None)
+        return True
 
     async def _begin_call_handoff(
         self,
@@ -605,6 +689,9 @@ class StageManager:
         if self._retiring:
             await asyncio.gather(*tuple(self._retiring), return_exceptions=True)
         self._lease_registry.close()
+        self._call_setup_deadlines.clear()
+        self._call_claims.clear()
+        self._call_ownerships.clear()
 
     def _schedule_expiry(self, stage: ChatStage) -> None:
         old = self._expiry.pop(stage, None)

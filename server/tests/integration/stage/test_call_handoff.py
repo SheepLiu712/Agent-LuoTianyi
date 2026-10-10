@@ -139,6 +139,103 @@ async def test_duplicate_call_start_returns_same_claim_without_intent():
     assert duplicate.record.call_id == first.record.call_id
     assert duplicate.duplicate is True
     assert duplicate.lease == first.lease
+    assert duplicate.setup_deadline == first.setup_deadline
+
+
+@pytest.mark.asyncio
+async def test_take_call_claim_validates_identity_and_preserves_deadline_for_duplicates():
+    stage_manager, _, _ = manager()
+    connection, stage = await connected(stage_manager)
+    await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
+    claim = await stage_manager.start_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=stage.interaction_id,
+        client_request_id="request-1",
+    )
+
+    with pytest.raises(ValueError, match="identity mismatch"):
+        stage_manager.take_call_claim(
+            claim,
+            user_id="other",
+            character_id="luotianyi",
+            client_request_id="request-1",
+        )
+    ownership = stage_manager.take_call_claim(
+        claim,
+        user_id="user",
+        character_id="luotianyi",
+        client_request_id="request-1",
+    )
+    with pytest.raises(ValueError, match="not pending"):
+        stage_manager.take_call_claim(
+            claim,
+            user_id="user",
+            character_id="luotianyi",
+            client_request_id="request-1",
+        )
+    duplicate = await stage_manager.start_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id="retired",
+        client_request_id="request-1",
+    )
+
+    assert ownership.setup_deadline == claim.setup_deadline == duplicate.setup_deadline
+    assert stage_manager.current_call_ownership(str(claim.record.call_id)) == ownership
+
+
+@pytest.mark.asyncio
+async def test_release_call_rejects_stale_or_wrong_ownership_and_cleans_deadline():
+    stage_manager, _, _ = manager()
+    claim = await stage_manager.start_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="request-direct",
+    )
+    ownership = stage_manager.take_call_claim(
+        claim,
+        user_id="user",
+        character_id="luotianyi",
+        client_request_id="request-direct",
+    )
+    wrong = type(ownership)(
+        call_id="wrong",
+        user_id=ownership.user_id,
+        character_id=ownership.character_id,
+        client_request_id=ownership.client_request_id,
+        setup_deadline=ownership.setup_deadline,
+        generation=ownership.generation,
+    )
+
+    assert not stage_manager.release_call(wrong)
+    assert stage_manager.release_call(ownership)
+    assert not stage_manager.release_call(ownership)
+    assert stage_manager.current_call_ownership(ownership.call_id) is None
+    assert "request-direct" not in stage_manager._call_setup_deadlines
+
+
+@pytest.mark.asyncio
+async def test_setup_deadline_is_captured_before_background_task_runs():
+    calls = []
+
+    def monotonic():
+        calls.append(len(calls))
+        return 100.0 + len(calls) - 1
+
+    stage_manager, _, _ = manager()
+    stage_manager._monotonic = monotonic
+
+    claim = await stage_manager.start_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="request-direct",
+    )
+
+    assert claim.setup_deadline == 110.0
+    assert calls[0] == 0
 
 
 @pytest.mark.asyncio
@@ -163,6 +260,7 @@ async def test_concurrent_duplicate_start_shares_one_handoff_and_one_winner():
     )
 
     assert first.record.call_id == second.record.call_id
+    assert first.setup_deadline == second.setup_deadline
     assert repository.find_by_request("request-1").call_id == first.record.call_id
     assert stage.context.closed is True
 
