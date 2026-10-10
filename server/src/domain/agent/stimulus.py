@@ -318,6 +318,7 @@ class InteractionEndingReason(str, Enum):
 
     USER_LEFT = "user_left"
     SHUTDOWN = "shutdown"
+    SWITCH_TO_CALL = "switch_to_call"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
