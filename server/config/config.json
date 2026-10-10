@@ -1,5 +1,8 @@
 {
     "is_debug": true,
+    "call_transport": {
+        "enabled": false
+    },
     "llm_service": {
         "client_llm_timeout_seconds": 120,
         "prompt_manager": {
