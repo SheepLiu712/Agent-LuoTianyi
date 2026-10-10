@@ -97,6 +97,26 @@ def plan(request, *, ordinal=0, thinking=False):
     )
 
 
+async def ending_plan(request, sink):
+    value = d.ActionPlan(
+        plan_id=str(uuid4()),
+        origin_request_id=request.request_id,
+        plan_ordinal=0,
+        target_character_id="luotianyi",
+        interaction_id=request.interaction.interaction_id,
+        basis_interaction_revision=request.interaction.interaction_revision,
+        source_stimulus_ids=(request.stimulus.stimulus_id,),
+        actions=(
+            d.CognitiveMaintenance(
+                action_id=str(uuid4()),
+                reason=d.MaintenanceReason.INTERACTION_ENDING,
+            ),
+        ),
+    )
+    await sink.emit(value)
+    return report(request, plans=(value.plan_id,))
+
+
 class RecordingAgent:
     def __init__(self, handle=None, realize=None):
         self.requests = asyncio.Queue()
@@ -114,6 +134,8 @@ class RecordingAgent:
         self.requests.put_nowait(request)
         if self.handle is not None:
             return await self.handle(request, sink)
+        if isinstance(request.stimulus, d.InteractionEnding):
+            return await ending_plan(request, sink)
         return report(
             request,
             consumed=(
@@ -259,6 +281,56 @@ async def test_ending_timeout_releases_stage():
 
 
 @pytest.mark.asyncio
+async def test_ending_maintenance_failure_is_reported_and_context_closes():
+    async def realize(value, context, sink):
+        return SimpleNamespace(status=d.ExecutionStatus.FAILED, error_code=d.ExecutionErrorCode.INTERNAL_ERROR)
+
+    stage, _, adapter, _, _ = await setup(RecordingAgent(realize=realize))
+    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
+
+    assert result.error == "interaction ending maintenance failed"
+    assert stage.state is StageState.TERMINATED
+    assert stage.context.closed
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_termination_drops_old_plan_and_realizes_only_ending_maintenance():
+    old_started, old_cancelled = asyncio.Event(), asyncio.Event()
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            return await ending_plan(request, sink)
+        value = plan(request)
+        await sink.emit(value)
+        return report(request, plans=(value.plan_id,))
+
+    async def realize(value, context, sink):
+        if isinstance(value.actions[0], d.Say):
+            old_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                old_cancelled.set()
+        return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
+
+    stage, agent, adapter, _, _ = await setup(RecordingAgent(handle, realize))
+    stage.stimulus_input_sink.submit(stimulus())
+    await asyncio.wait_for(old_started.wait(), 1)
+
+    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
+    assert result.error is None
+    assert old_cancelled.is_set()
+    executed = []
+    while not agent.executions.empty():
+        executed.append((await agent.executions.get())[0])
+    assert isinstance(executed[-1].actions[0], d.CognitiveMaintenance)
+    assert sum(isinstance(value.actions[0], d.CognitiveMaintenance) for value in executed) == 1
+    assert stage.context.closed
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
 async def test_input_capacity_identity_and_inactive_output_rejection():
     stage, _, adapter, _, _ = await setup(config={"max_stimuli": 1})
     assert not stage.stimulus_input_sink.submit(stimulus(user_id="foreign"))
@@ -351,7 +423,27 @@ async def test_stage_releases_context_after_ending_handler():
             return await super().handle(request, plans)
 
     agent = Agent(
-        character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.INTERACTION_ENDING, Ending())])
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter([(d.StimulusKind.INTERACTION_ENDING, Ending())]),
+        action_router=__import__("src.agent.handlers.action.router", fromlist=["ActionRouter"]).ActionRouter(
+            [
+                (
+                    d.ActionKind.COGNITIVE_MAINTENANCE,
+                    SimpleNamespace(
+                        realize=lambda action, context, outputs: asyncio.sleep(
+                            0,
+                            result=d.ActionResult(
+                                action_id=action.action_id,
+                                status=d.ActionExecutionStatus.COMPLETED,
+                                error_code=None,
+                                irreversible_effect_committed=False,
+                                effect_ref=None,
+                            ),
+                        )
+                    ),
+                )
+            ]
+        ),
     )
     stage = await ChatStage.create(
         user_id="user", character_id="luotianyi", agent=agent, adapter=adapter, context_factory=factory

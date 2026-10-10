@@ -7,16 +7,21 @@ Memory Write Module
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import TYPE_CHECKING, Any
+from uuid import UUID, uuid5
 
 from src.agent.skills.adapters.memory.intentional_commit import (
     IntentionalMemoryCommitMixin,
 )
 from src.agent.skills.adapters.memory.operations import MemoryOperationsMixin
+from src.domain.agent.maintenance import MaintenanceCandidate, MaintenanceMemoryType
+from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
+from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.infrastructure.models.llm.module import LLMModule
-from src.infrastructure.persistence.database.vector_store import VectorStore
+from src.infrastructure.persistence.database.vector_store import Document, VectorStore
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -24,6 +29,9 @@ if TYPE_CHECKING:
 
 
 logger = get_logger("MemoryWriter")
+
+_MAINTENANCE_MEMORY_NAMESPACE = UUID("49f9894e-fdc7-5fab-bbb0-3940c0fc02e9")
+_MAINTENANCE_VECTOR_NAMESPACE = UUID("8ad336a2-bd98-52e4-857e-e0feac29e70a")
 
 
 class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
@@ -218,3 +226,72 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
             "user_memory": _clean_items(user_memory),
             "event_memory": _clean_items(event_memory),
         }
+
+    async def extract_maintenance_candidates(
+        self, *, history: str, current_dialogue: str
+    ) -> tuple[MaintenanceCandidate, ...]:
+        """严格提取固定顺序候选；与旧降级为空的显式记忆路径隔离。"""
+        response = await self.llm.generate_response(
+            use_json=True,
+            history=history,
+            current_dialogue=current_dialogue,
+            related_memories=[],
+        )
+        payload = self._parse_memory_json_response(response)
+        return tuple(
+            [MaintenanceCandidate(MaintenanceMemoryType.USER_FACT, value) for value in payload["user_memory"]]
+            + [
+                MaintenanceCandidate(MaintenanceMemoryType.INTERACTION_EVENT, value)
+                for value in payload["event_memory"]
+            ]
+        )
+
+    async def write_maintenance_candidates(
+        self,
+        *,
+        vector_store: VectorStore,
+        memory_store: MemoryStore,
+        user_id: str,
+        owner_character_id: str,
+        maintenance_id: str,
+        candidates: tuple[MaintenanceCandidate, ...],
+    ) -> None:
+        """以 (maintenance_id, candidate_index) 写正本和稳定向量投影。"""
+        for index, candidate in enumerate(candidates):
+            identity = f"{maintenance_id}:{index}"
+            record_id = str(uuid5(_MAINTENANCE_MEMORY_NAMESPACE, identity))
+            vector_id = str(uuid5(_MAINTENANCE_VECTOR_NAMESPACE, identity))
+            memory_type = (
+                MemoryType.USER_FACT
+                if candidate.memory_type is MaintenanceMemoryType.USER_FACT
+                else MemoryType.INTERACTION_EVENT
+            )
+            record = DomainMemoryRecord(
+                id=record_id,
+                owner_character_id=owner_character_id,
+                subject_user_id=user_id,
+                memory_type=memory_type,
+                visibility=MemoryVisibility.PRIVATE,
+                source="cognitive_maintenance",
+                content=candidate.content,
+                metadata={"maintenance_id": maintenance_id, "candidate_index": index},
+            )
+            await asyncio.to_thread(memory_store.write_agent_memory_record_if_absent, record)
+            document = Document(
+                candidate.content,
+                {
+                    "user_id": user_id,
+                    "owner_character_id": owner_character_id,
+                    "memory_type": candidate.memory_type.value,
+                    "maintenance_id": maintenance_id,
+                    "candidate_index": index,
+                },
+                id=vector_id,
+            )
+            await asyncio.to_thread(vector_store.upsert_documents, [document], [vector_id])
+            await asyncio.to_thread(
+                memory_store.link_agent_memory_embeddings,
+                record_id,
+                chunk_texts=[candidate.content],
+                embedding_ids=[vector_id],
+            )

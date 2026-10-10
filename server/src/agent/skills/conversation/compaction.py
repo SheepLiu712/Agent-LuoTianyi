@@ -85,3 +85,7 @@ class ConversationCompactionSkill:
         return ConversationCompaction(
             snapshot.summary, tuple(entry.entry_id for entry in covered), ConversationSummary(summary.strip())
         )
+
+    def requires_compaction(self, conversation_context: ConversationContext) -> bool:
+        """复用本技能配置判断是否超过压缩阈值，不调用模型。"""
+        return len(conversation_context.read().entries) > self._config.raw_conversation_context_limit

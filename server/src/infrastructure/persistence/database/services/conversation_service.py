@@ -1,12 +1,27 @@
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from src.domain import ConversationItem
 from src.domain.conversation_type import ContextInfo
+from src.infrastructure.persistence.cognitive_maintenance import (
+    ORIGIN_PROGRESS_KEY,
+    CognitiveMaintenanceBatch,
+    CognitiveMaintenanceBatchDraft,
+)
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer, WatchError
-from src.infrastructure.persistence.database.sql_database import Conversation, ConversationContext, User
+from src.infrastructure.persistence.database.sql_database import (
+    CognitiveMaintenanceBatch as CognitiveMaintenanceBatchRecord,
+)
+from src.infrastructure.persistence.database.sql_database import (
+    Conversation,
+    ConversationContext,
+    User,
+)
 from src.infrastructure.persistence.database.sql_writer import run_sql_write
 from src.utils.logger import get_logger
 
@@ -265,7 +280,7 @@ class ConversationService:
                     db.query(Conversation)
                     .filter(Conversation.user_id == user_id)
                     .filter(Conversation.character_id == character_id)
-                    .order_by(Conversation.timestamp.desc())
+                    .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
                     .limit(context_memory_count)
                     .all()
                 )
@@ -389,6 +404,433 @@ class ConversationService:
             return False
         finally:
             db.close()
+
+    def get_cognitive_maintenance_progress(self, user_id: str, *, character_id: str) -> str | None:
+        """Return the last conversation covered by successful cognitive maintenance."""
+        db = self._new_session()
+        try:
+            context = (
+                db.query(ConversationContext.maintenance_entry_id)
+                .filter(
+                    ConversationContext.user_id == user_id,
+                    ConversationContext.character_id == character_id,
+                )
+                .first()
+            )
+            return context[0] if context is not None else None
+        finally:
+            db.close()
+
+    def advance_cognitive_maintenance_progress(
+        self,
+        user_id: str,
+        *,
+        character_id: str,
+        expected_entry_id: str | None,
+        new_entry_id: str,
+    ) -> bool:
+        """Atomically advance maintenance progress when its expected predecessor still matches.
+
+        The target must be a conversation for the same user and character.  A
+        target earlier than the expected predecessor is rejected in the same
+        SQL statement, so callers cannot move an already advanced marker back.
+        """
+        if not isinstance(new_entry_id, str) or not new_entry_id or new_entry_id == expected_entry_id:
+            return False
+        if expected_entry_id is not None and not isinstance(expected_entry_id, str):
+            return False
+
+        db = self._new_session()
+        try:
+
+            def _write() -> bool:
+                result = db.execute(
+                    text("""
+                    UPDATE conversation_contexts
+                    SET maintenance_entry_id = :new_entry_id
+                    WHERE user_id = :user_id
+                      AND character_id = :character_id
+                      AND (
+                          (:expected_entry_id IS NULL AND maintenance_entry_id IS NULL)
+                          OR maintenance_entry_id = :expected_entry_id
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM conversations AS target
+                          WHERE target.uuid = :new_entry_id
+                            AND target.user_id = :user_id
+                            AND target.character_id = :character_id
+                      )
+                      AND (
+                          :expected_entry_id IS NULL
+                          OR EXISTS (
+                              SELECT 1
+                              FROM conversations AS current
+                              JOIN conversations AS target
+                                ON target.uuid = :new_entry_id
+                               AND target.user_id = :user_id
+                               AND target.character_id = :character_id
+                              WHERE current.uuid = :expected_entry_id
+                                AND current.user_id = :user_id
+                                AND current.character_id = :character_id
+                                AND (
+                                    target.timestamp > current.timestamp
+                                    OR (target.timestamp = current.timestamp AND target.uuid > current.uuid)
+                                )
+                          )
+                      )
+                        """),
+                    {
+                        "user_id": user_id,
+                        "character_id": character_id,
+                        "expected_entry_id": expected_entry_id,
+                        "new_entry_id": new_entry_id,
+                    },
+                )
+                if result.rowcount != 1:
+                    return False
+                db.commit()
+                return True
+
+            return run_sql_write(_write)
+        except Exception as error:
+            logger.error(f"advance_cognitive_maintenance_progress error: {error}")
+            db.rollback()
+            return False
+        finally:
+            db.close()
+
+    def load_cognitive_maintenance_batch(
+        self, user_id: str, *, character_id: str, previous_progress: str | None
+    ) -> CognitiveMaintenanceBatch | None:
+        """Load the frozen recovery input for one uncommitted predecessor."""
+        db = self._new_session()
+        try:
+            context = (
+                db.query(ConversationContext.maintenance_entry_id)
+                .filter(ConversationContext.user_id == user_id, ConversationContext.character_id == character_id)
+                .first()
+            )
+            if context is None or context[0] != previous_progress:
+                return None
+            record = self._find_cognitive_maintenance_batch(db, user_id, character_id, previous_progress)
+            return self._batch_contract(record) if record is not None else None
+        finally:
+            db.close()
+
+    def create_or_load_cognitive_maintenance_batch(
+        self,
+        user_id: str,
+        *,
+        character_id: str,
+        previous_progress: str | None,
+        draft: CognitiveMaintenanceBatchDraft,
+    ) -> CognitiveMaintenanceBatch:
+        """Persist a complete attempt input once, returning the concurrent winner unchanged."""
+        db = self._new_session()
+        try:
+            self._validate_cognitive_maintenance_draft(db, user_id, character_id, previous_progress, draft)
+            existing = self._find_cognitive_maintenance_batch(db, user_id, character_id, previous_progress)
+            if existing is not None:
+                return self._batch_contract(existing)
+            record = CognitiveMaintenanceBatchRecord(
+                maintenance_id=str(uuid.uuid4()),
+                user_id=user_id,
+                character_id=character_id,
+                previous_progress_key=self._progress_key(previous_progress),
+                previous_entry_id=previous_progress,
+                target_entry_id=draft.target_entry_id,
+                covered_entry_ids=json.dumps(draft.covered_entry_ids, ensure_ascii=False),
+                maintained_entry_ids=json.dumps(draft.maintained_entry_ids, ensure_ascii=False),
+                candidates=json.dumps(draft.candidates, ensure_ascii=False, sort_keys=True),
+                proposed_profile=draft.proposed_profile,
+                input_digest=draft.input_digest,
+                compaction_previous_summary=draft.compaction_previous_summary,
+                compaction_covered_entry_ids=json.dumps(draft.compaction_covered_entry_ids, ensure_ascii=False),
+                compaction_summary=draft.compaction_summary,
+                compaction_expected_count=draft.compaction_expected_count,
+            )
+            db.add(record)
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                record = self._find_cognitive_maintenance_batch(db, user_id, character_id, previous_progress)
+                if record is None:
+                    raise
+            return self._batch_contract(record)
+        finally:
+            db.close()
+
+    def commit_cognitive_maintenance(
+        self,
+        user_id: str,
+        *,
+        character_id: str,
+        compaction,
+        expected_progress: str | None,
+        new_progress: str,
+        maintenance_id: str | None = None,
+    ) -> bool:
+        """Commit compaction and progress in one SQL transaction, or leave both unchanged."""
+        if not isinstance(new_progress, str) or not new_progress or new_progress == expected_progress:
+            return False
+        db = self._new_session()
+        committed = False
+        try:
+
+            def _write() -> bool:
+                nonlocal committed
+                user = db.query(User).filter(User.uuid == user_id).first()
+                if not self._can_commit_cognitive_maintenance(
+                    db, user, user_id, character_id, compaction, expected_progress, new_progress, maintenance_id
+                ):
+                    return False
+                context = self._get_or_create_conversation_context(db, user, character_id)
+                if compaction is not None and not self._apply_maintenance_compaction(
+                    db, context, user, character_id, compaction
+                ):
+                    return False
+                context.maintenance_entry_id = new_progress
+                db.commit()
+                committed = True
+                return True
+
+            return run_sql_write(_write)
+        except Exception as error:
+            logger.error(f"commit_cognitive_maintenance error: {error}")
+            db.rollback()
+            return False
+        finally:
+            db.close()
+            if committed:
+                self._invalidate_context_cache(user_id, character_id)
+
+    def _can_commit_cognitive_maintenance(
+        self, db, user, user_id, character_id, compaction, expected_progress, new_progress, maintenance_id
+    ) -> bool:
+        if user is None:
+            return False
+        context = self._get_or_create_conversation_context(db, user, character_id)
+        if context.maintenance_entry_id != expected_progress:
+            return False
+        if not self._batch_matches_commit(
+            db, maintenance_id, user_id, character_id, compaction, expected_progress, new_progress
+        ):
+            return False
+        return self._is_valid_progress_target(db, user_id, character_id, expected_progress, new_progress)
+
+    @staticmethod
+    def _batch_matches_commit(
+        db, maintenance_id, user_id, character_id, compaction, expected_progress, new_progress
+    ) -> bool:
+        if maintenance_id is None:
+            return True
+        batch = db.query(CognitiveMaintenanceBatchRecord).filter_by(maintenance_id=maintenance_id).first()
+        if batch is None or (
+            batch.user_id,
+            batch.character_id,
+            batch.previous_entry_id,
+            batch.target_entry_id,
+        ) != (user_id, character_id, expected_progress, new_progress):
+            return False
+        return ConversationService._batch_compaction_matches(batch, compaction)
+
+    @staticmethod
+    def _batch_compaction_matches(batch, compaction) -> bool:
+        has_frozen_compaction = batch.compaction_expected_count is not None
+        if not has_frozen_compaction:
+            return compaction is None
+        if compaction is None:
+            return False
+        return (
+            compaction.previous_summary.text == batch.compaction_previous_summary
+            and compaction.covered_entry_ids == tuple(json.loads(batch.compaction_covered_entry_ids))
+            and compaction.summary.text == batch.compaction_summary
+        )
+
+    @staticmethod
+    def _progress_key(progress: str | None) -> str:
+        return progress if progress is not None else ORIGIN_PROGRESS_KEY
+
+    def _find_cognitive_maintenance_batch(self, db, user_id, character_id, previous_progress):
+        return (
+            db.query(CognitiveMaintenanceBatchRecord)
+            .filter(
+                CognitiveMaintenanceBatchRecord.user_id == user_id,
+                CognitiveMaintenanceBatchRecord.character_id == character_id,
+                CognitiveMaintenanceBatchRecord.previous_progress_key == self._progress_key(previous_progress),
+            )
+            .first()
+        )
+
+    @staticmethod
+    def _batch_contract(record) -> CognitiveMaintenanceBatch:
+        return CognitiveMaintenanceBatch(
+            maintenance_id=record.maintenance_id,
+            user_id=record.user_id,
+            character_id=record.character_id,
+            previous_progress_key=record.previous_progress_key,
+            previous_entry_id=record.previous_entry_id,
+            target_entry_id=record.target_entry_id,
+            covered_entry_ids=tuple(json.loads(record.covered_entry_ids)),
+            maintained_entry_ids=tuple(json.loads(record.maintained_entry_ids)),
+            candidates=json.loads(record.candidates),
+            proposed_profile=record.proposed_profile,
+            input_digest=record.input_digest,
+            compaction_previous_summary=record.compaction_previous_summary,
+            compaction_covered_entry_ids=tuple(json.loads(record.compaction_covered_entry_ids)),
+            compaction_summary=record.compaction_summary,
+            compaction_expected_count=record.compaction_expected_count,
+            created_at=record.created_at,
+        )
+
+    def _validate_cognitive_maintenance_draft(self, db, user_id, character_id, previous_progress, draft) -> None:
+        entry_ids = self._draft_entry_ids(draft)
+        context = (
+            db.query(ConversationContext)
+            .filter(ConversationContext.user_id == user_id, ConversationContext.character_id == character_id)
+            .first()
+        )
+        if context is None or context.maintenance_entry_id != previous_progress:
+            raise ValueError("认知维护 predecessor 已变化或上下文不存在")
+        required = set(entry_ids)
+        if previous_progress is not None:
+            required.add(previous_progress)
+        rows = (
+            db.query(Conversation)
+            .filter(
+                Conversation.uuid.in_(required),
+                Conversation.user_id == user_id,
+                Conversation.character_id == character_id,
+            )
+            .all()
+        )
+        by_id = {row.uuid: row for row in rows}
+        if set(by_id) != required:
+            raise ValueError("认知维护批次包含不属于当前用户或角色的对话记录")
+        self._validate_draft_entry_order(by_id, previous_progress, draft)
+        self._validate_frozen_compaction_basis(db, context, user_id, character_id, draft)
+
+    @staticmethod
+    def _draft_entry_ids(draft) -> tuple[str, ...]:
+        if not isinstance(draft, CognitiveMaintenanceBatchDraft):
+            raise TypeError("draft 应为 CognitiveMaintenanceBatchDraft")
+        entry_ids = (*draft.covered_entry_ids, *draft.maintained_entry_ids, draft.target_entry_id)
+        if (
+            not draft.target_entry_id
+            or not draft.input_digest
+            or any(not isinstance(value, str) or not value for value in entry_ids)
+        ):
+            raise ValueError("认知维护批次必须包含有效对话记录和输入摘要")
+        if len(set(draft.covered_entry_ids)) != len(draft.covered_entry_ids):
+            raise ValueError("被覆盖对话记录不能重复")
+        return entry_ids
+
+    @staticmethod
+    def _validate_draft_entry_order(by_id, previous_progress, draft) -> None:
+        target = by_id[draft.target_entry_id]
+        previous = by_id.get(previous_progress) if previous_progress is not None else None
+        if previous is not None and (target.timestamp, target.uuid) <= (previous.timestamp, previous.uuid):
+            raise ValueError("认知维护目标不能倒退")
+        for entry_id in (*draft.covered_entry_ids, *draft.maintained_entry_ids):
+            entry = by_id[entry_id]
+            if previous is not None and (entry.timestamp, entry.uuid) <= (previous.timestamp, previous.uuid):
+                raise ValueError("认知维护记录必须位于 predecessor 之后")
+            if (entry.timestamp, entry.uuid) > (target.timestamp, target.uuid):
+                raise ValueError("认知维护记录不能超过目标记录")
+
+    @staticmethod
+    def _validate_frozen_compaction_basis(db, context, user_id, character_id, draft) -> None:
+        fields = (
+            draft.compaction_previous_summary,
+            draft.compaction_covered_entry_ids,
+            draft.compaction_summary,
+            draft.compaction_expected_count,
+        )
+        if not any(field is not None and field != () for field in fields):
+            return
+        if (
+            draft.compaction_previous_summary is None
+            or draft.compaction_summary is None
+            or draft.compaction_expected_count is None
+            or draft.compaction_expected_count < 0
+        ):
+            raise ValueError("冻结压缩批次必须包含完整 basis")
+        if context.context_summary != draft.compaction_previous_summary:
+            raise ValueError("冻结压缩总结 basis 不匹配")
+        if context.context_memory_count != draft.compaction_expected_count:
+            raise ValueError("冻结压缩窗口计数 basis 不匹配")
+        rows = (
+            db.query(Conversation)
+            .filter(Conversation.user_id == user_id, Conversation.character_id == character_id)
+            .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+            .limit(draft.compaction_expected_count)
+            .all()
+        )
+        ordered_rows = tuple(reversed(rows))
+        prefix = tuple(row.uuid for row in ordered_rows[: len(draft.compaction_covered_entry_ids)])
+        if prefix != draft.compaction_covered_entry_ids:
+            raise ValueError("冻结压缩记录 basis 不匹配")
+
+    def _is_valid_progress_target(self, db, user_id, character_id, expected_progress, new_progress) -> bool:
+        target = (
+            db.query(Conversation)
+            .filter(
+                Conversation.uuid == new_progress,
+                Conversation.user_id == user_id,
+                Conversation.character_id == character_id,
+            )
+            .first()
+        )
+        if target is None:
+            return False
+        if expected_progress is None:
+            return True
+        previous = (
+            db.query(Conversation)
+            .filter(
+                Conversation.uuid == expected_progress,
+                Conversation.user_id == user_id,
+                Conversation.character_id == character_id,
+            )
+            .first()
+        )
+        return previous is not None and (target.timestamp, target.uuid) > (previous.timestamp, previous.uuid)
+
+    def _apply_maintenance_compaction(self, db, context, user, character_id, compaction) -> bool:
+        if not all(hasattr(compaction, name) for name in ("previous_summary", "covered_entry_ids", "summary")):
+            return False
+        count = context.context_memory_count or 0
+        covered = compaction.covered_entry_ids
+        previous_summary = getattr(compaction.previous_summary, "text", None)
+        new_summary = getattr(compaction.summary, "text", None)
+        if not isinstance(covered, tuple) or not isinstance(previous_summary, str) or not isinstance(new_summary, str):
+            return False
+        if len(covered) > count or context.context_summary != previous_summary:
+            return False
+        rows = (
+            db.query(Conversation)
+            .filter(Conversation.user_id == user.uuid, Conversation.character_id == character_id)
+            .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+            .limit(count)
+            .all()
+        )
+        entries = list(reversed(rows))
+        if tuple(row.uuid for row in entries[: len(covered)]) != covered:
+            return False
+        context.context_summary = new_summary
+        context.context_memory_count = count - len(covered)
+        if character_id == "luotianyi":
+            user.context_summary = new_summary
+            user.context_memory_count = context.context_memory_count
+        return True
+
+    def _invalidate_context_cache(self, user_id: str, character_id: str) -> None:
+        try:
+            self._ensure_redis().delete(self._context_redis_key(user_id, character_id))
+        except Exception as error:
+            logger.warning(f"Failed to invalidate conversation context cache: {error}")
 
     def _persist_conversations(self, db, user_id, character_id, conversation_data, commit):
         user = db.query(User).filter(User.uuid == user_id).first()
@@ -515,6 +957,9 @@ class ConversationService:
                 .all()
             ]
             deleted = db.query(Conversation).filter(Conversation.user_id == user_id).delete(synchronize_session=False)
+            db.query(CognitiveMaintenanceBatchRecord).filter(CognitiveMaintenanceBatchRecord.user_id == user_id).delete(
+                synchronize_session=False
+            )
             (
                 db.query(ConversationContext)
                 .filter(ConversationContext.user_id == user_id)
@@ -546,7 +991,9 @@ class ConversationService:
                         return
                     updated = ContextInfo(
                         summary=data.summary,
-                        conversations=[*data.conversations, *rows],
+                        conversations=sorted(
+                            [*data.conversations, *rows], key=lambda row: (row["timestamp"], row["uuid"])
+                        ),
                         context_count=(data.context_count or 0) + len(rows),
                     )
                     pipe.multi()
@@ -687,6 +1134,163 @@ class ConversationService:
             "version": f"{context_count}:{len(conversations)}:{last_uuid}",
         }
 
+    def get_call_conversation_seed_state(
+        self,
+        user_id: str,
+        *,
+        character_id: str,
+        requested_at: datetime,
+    ) -> Dict[str, Any]:
+        """读取通话开始时的只读对话种子，不接触 Redis 或持久化状态。"""
+        if not isinstance(requested_at, datetime) or (
+            requested_at.tzinfo is not None or requested_at.utcoffset() is not None
+        ):
+            raise ValueError("requested_at must be a naive server-local datetime")
+
+        empty_state = {
+            "summary": "",
+            "conversations": [],
+            "context_count": 0,
+            "version": "0:0:",
+        }
+        lower_bound = requested_at - timedelta(minutes=3)
+        db = self._new_session()
+        try:
+            rows = (
+                db.execute(
+                    text("""
+                    WITH scoped_conversations AS (
+                        SELECT uuid, timestamp, source, content, type, meta_data
+                        FROM conversations
+                        WHERE user_id = :user_id AND character_id = :character_id
+                    ),
+                    metadata AS (
+                        SELECT
+                            (SELECT context_summary FROM conversation_contexts
+                             WHERE user_id = :user_id AND character_id = :character_id) AS context_summary,
+                            (SELECT context_memory_count FROM conversation_contexts
+                             WHERE user_id = :user_id AND character_id = :character_id) AS context_memory_count,
+                            (SELECT COUNT(*) FROM scoped_conversations) AS total_count,
+                            (SELECT COUNT(*) FROM scoped_conversations WHERE timestamp > :requested_at) AS future_count,
+                            (SELECT MAX(timestamp) FROM scoped_conversations WHERE timestamp <= :requested_at)
+                                AS latest_timestamp,
+                            (SELECT COUNT(*) FROM scoped_conversations WHERE timestamp <= :requested_at)
+                                AS eligible_count
+                    ),
+                    ranked_eligible AS (
+                        SELECT
+                            uuid,
+                            timestamp,
+                            source,
+                            content,
+                            type,
+                            meta_data,
+                            ROW_NUMBER() OVER (ORDER BY timestamp DESC, uuid DESC) AS recency_rank
+                        FROM scoped_conversations
+                        WHERE timestamp <= :requested_at
+                    )
+                    SELECT
+                        metadata.context_summary,
+                        metadata.context_memory_count,
+                        metadata.total_count,
+                        metadata.future_count,
+                        metadata.latest_timestamp,
+                        metadata.eligible_count,
+                        ranked_eligible.uuid,
+                        ranked_eligible.timestamp,
+                        ranked_eligible.source,
+                        ranked_eligible.content,
+                        ranked_eligible.type,
+                        ranked_eligible.meta_data,
+                        ranked_eligible.recency_rank
+                    FROM metadata
+                    LEFT JOIN ranked_eligible ON ranked_eligible.recency_rank <= 30
+                    ORDER BY ranked_eligible.timestamp ASC, ranked_eligible.uuid ASC
+                    """),
+                    {
+                        "user_id": user_id,
+                        "character_id": character_id,
+                        "requested_at": requested_at.isoformat(sep=" ", timespec="microseconds"),
+                    },
+                )
+                .mappings()
+                .all()
+            )
+        finally:
+            db.close()
+
+        metadata = rows[0]
+        raw_latest_timestamp = metadata["latest_timestamp"]
+        if raw_latest_timestamp is None:
+            return empty_state
+        latest_timestamp = self._as_naive_datetime(raw_latest_timestamp)
+        if latest_timestamp is None:
+            return empty_state
+        if not lower_bound <= latest_timestamp <= requested_at:
+            return empty_state
+
+        summary = metadata["context_summary"] or ""
+        context_count = metadata["context_memory_count"]
+        total_count = metadata["total_count"]
+        if summary:
+            # The schema has no summary coverage boundary. It is safe only when the
+            # complete owner history predates the request and the retained suffix
+            # count can still describe a continuous suffix of that history.
+            if (
+                metadata["future_count"]
+                or not isinstance(context_count, int)
+                or context_count < 0
+                or context_count > total_count
+            ):
+                return empty_state
+            context_count = min(30, context_count)
+            conversation_limit = context_count
+        else:
+            context_count = min(30, metadata["eligible_count"])
+            conversation_limit = context_count
+
+        conversations = []
+        for row in rows:
+            if row["uuid"] is None or row["recency_rank"] > conversation_limit:
+                continue
+            timestamp = self._as_naive_datetime(row["timestamp"])
+            if timestamp is None:
+                return empty_state
+            conversations.append(
+                {
+                    "uuid": row["uuid"],
+                    "timestamp": timestamp.isoformat(sep=" ", timespec="microseconds"),
+                    "source": row["source"],
+                    "content": row["content"],
+                    "type": row["type"],
+                    "meta_data": json.loads(row["meta_data"]) if row["meta_data"] else None,
+                }
+            )
+        context_count = len(conversations)
+        last_uuid = conversations[-1]["uuid"] if conversations else ""
+        return {
+            "summary": summary,
+            "conversations": conversations,
+            "context_count": context_count,
+            "version": f"{context_count}:{len(conversations)}:{last_uuid}",
+        }
+
+    @staticmethod
+    def _as_naive_datetime(value: Any) -> datetime | None:
+        """Accept only real naive datetime values or ISO datetime strings from SQL."""
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        else:
+            return None
+        if parsed.tzinfo is not None or parsed.utcoffset() is not None:
+            return None
+        return parsed
+
     def get_history_from_db(
         self,
         user_id: str,
@@ -704,7 +1308,9 @@ class ConversationService:
             query = db.query(Conversation).filter(Conversation.user_id == user_id)
             if character_id is not None:
                 query = query.filter(Conversation.character_id == character_id)
-            conversations = query.order_by(Conversation.timestamp.asc()).offset(start).limit(limit).all()
+            conversations = (
+                query.order_by(Conversation.timestamp.asc(), Conversation.uuid.asc()).offset(start).limit(limit).all()
+            )
             result = []
             for conv in conversations:
                 result.append(
