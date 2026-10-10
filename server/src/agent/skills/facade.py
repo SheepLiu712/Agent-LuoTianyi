@@ -15,8 +15,10 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
     TopicExtractionSkill,
 )
+from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
+from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression._diary_operations import DiaryOperations
@@ -62,6 +64,7 @@ class SharedSkills:
         reply_composition_config: dict[str, Any],
         topic_extraction_config: dict[str, Any],
         reflection_config: dict[str, Any],
+        call_recall_model: object | None,
         song_knowledge_config: dict[str, Any],
         database_manager: DatabaseManager,
         media_resolver: MediaResolver | None = None,
@@ -109,7 +112,13 @@ class SharedSkills:
                 topic_extraction_config, llm_service, understanding=self.text_preprocessing
             ),
         )
+        self.call_recall = CallRecallDecisionSkill(memories=memories, model=call_recall_model)
+        self.call_reply = CallReplySkill(reply_generators)
         self.reflection = ReflectionSkill(reflection_config, memories)
+        self.cognitive_maintenance = CognitiveMaintenanceSkill(
+            memories=memories,
+            compaction=self.conversation_compaction,
+        )
         self.intentional_memory = IntentionalMemoryCommit(lambda character_id: memories[character_id])
         self.dynamic_topic_memory = DynamicTopicMemorySkill(memories)
         self.learned_song_experience = LearnedSongExperienceSkill(memories)

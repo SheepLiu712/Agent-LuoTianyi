@@ -1,8 +1,13 @@
 """执行上下文与通道无关输出的不可变值。"""
 
+from __future__ import annotations
+
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar
+from enum import Enum
+from typing import ClassVar, Protocol, runtime_checkable
+
+from src.domain.call.contracts import CallSpeechDelivery
 
 from ._realization_contract import RealizationContractErrorCode as _Code
 from ._realization_contract import _Value
@@ -25,6 +30,38 @@ class ExecutionContext(_Value):
     current_interaction_revision: int
     cancellation: CancellationToken
     interaction_context: object | None = None
+    call_output_permit: CallOutputPermit | None = None
+
+
+@runtime_checkable
+class CallOutputPermit(Protocol):
+    """Stage 提供的 CALL response 投递许可，只暴露当前授权状态。"""
+
+    def allows(self, response_id: str) -> bool:
+        """返回该 response 当前是否仍可产生新输出。"""
+
+
+class AudioEncoding(str, Enum):
+    """Agent 可证明的原始音频编码。"""
+
+    PCM_S16LE = "pcm_s16le"
+
+
+@dataclass(frozen=True, slots=True)
+class AudioFormat(_Value):
+    """原始音频字节的编码、采样率和声道数。"""
+
+    encoding: AudioEncoding
+    sample_rate: int
+    channels: int
+
+    def __post_init__(self):
+        _Value.__post_init__(self)
+        self._require(self.sample_rate > 0 and self.channels > 0, "Audio dimensions must be positive")
+
+
+CALL_PCM_FORMAT = AudioFormat(encoding=AudioEncoding.PCM_S16LE, sample_rate=24000, channels=1)
+MAX_CALL_PCM_CHUNK_BYTES = 16 * 1024
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -38,6 +75,7 @@ class AgentOutput(_Value):
     sequence_no: int
     delivery: OutputDelivery
     message_id: str | None = None
+    call_delivery: CallSpeechDelivery = CallSpeechDelivery()
 
     @property
     @abstractmethod
@@ -55,11 +93,23 @@ class TextFinalOutput(AgentOutput):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AudioChunkOutput(AgentOutput):
-    """非空编码音频块，framing 区分独立文件与文件片段；构造不解码媒体。"""
+    """非空音频块；原始 PCM 必须声明格式，文件输出不得伪装格式或 final。"""
 
     kind: ClassVar[AgentOutputKind] = AgentOutputKind.AUDIO_CHUNK
     data: bytes
     framing: AudioFraming
+    audio_format: AudioFormat | None = None
+    final: bool = False
+
+    def __post_init__(self):
+        _Value.__post_init__(self)
+        raw_pcm = self.framing is AudioFraming.RAW_PCM
+        self._require(raw_pcm == (self.audio_format is not None), "Invalid audio format")
+        self._require(raw_pcm or not self.final, "File audio cannot be final-framed")
+        if raw_pcm:
+            self._require(self.audio_format == CALL_PCM_FORMAT, "RAW PCM must use canonical CALL format")
+            self._require(len(self.data) % 2 == 0, "RAW PCM must contain complete PCM16 samples")
+            self._require(len(self.data) <= MAX_CALL_PCM_CHUNK_BYTES, "RAW PCM chunk exceeds maximum size")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

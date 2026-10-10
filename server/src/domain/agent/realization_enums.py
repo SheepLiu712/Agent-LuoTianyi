@@ -14,7 +14,10 @@ class ActionKind(str, Enum):
     PUBLISH_DYNAMIC = "publish_dynamic"
     REPLY_DYNAMIC = "reply_dynamic"
     REQUEST_SONG_LEARNING = "request_song_learning"
+    COGNITIVE_MAINTENANCE = "cognitive_maintenance"
     REFLECTION = "reflection"
+    END_CALL = "end_call"
+    ANSWER_CALL = "answer_call"
 
 
 class OutputDelivery(str, Enum):
@@ -46,10 +49,11 @@ class OutputAcceptanceStatus(str, Enum):
 
 
 class AudioFraming(str, Enum):
-    """音频块是完整编码文件还是需依序拼接的文件片段。"""
+    """音频块是完整文件、文件片段或具有显式格式的原始 PCM。"""
 
     COMPLETE_FILE = "complete_file"
     FILE_FRAGMENT = "file_fragment"
+    RAW_PCM = "raw_pcm"
 
 
 class MessageEndStatus(str, Enum):

@@ -1,0 +1,609 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-luo.example/contracts/call_v1/control.schema.json",
+  "title": "call.v1 control message",
+  "description": "Proposed structural contract. Raw UTF-8 size, duplicate keys, canonical integer tokens, Unicode scalar validity, transport/direction, and playback.stop cross-field ordering require the shared parser fixture.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "client_request_id",
+        "character_id"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.switch_prepare"
+        },
+        "client_request_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "character_id": {
+          "$ref": "#/$defs/characterId"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "client_request_id",
+        "character_id"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.switch_ready"
+        },
+        "client_request_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "character_id": {
+          "$ref": "#/$defs/characterId"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "client_request_id",
+        "character_id",
+        "audio"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.start"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "client_request_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "character_id": {
+          "$ref": "#/$defs/characterId"
+        },
+        "audio": {
+          "$ref": "#/$defs/clientAudio"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "client_request_id",
+        "state"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.state"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "client_request_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "state": {
+          "enum": [
+            "preparing",
+            "ringing"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "connected_at_ms"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.active"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "connected_at_ms": {
+          "$ref": "#/$defs/safeNonNegative"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "reason"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.hangup"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "reason": {
+          "enum": [
+            "user_hangup",
+            "backgrounded"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "outcome",
+        "end_reason",
+        "active_duration_ms"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.ended"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "outcome": {
+          "enum": [
+            "connected",
+            "cancelled_before_answer",
+            "declined"
+          ]
+        },
+        "end_reason": {
+          "$ref": "#/$defs/endReason"
+        },
+        "active_duration_ms": {
+          "$ref": "#/$defs/safeNonNegative"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "call_id",
+        "character_id",
+        "last_contiguous_server_seq"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.resume"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "character_id": {
+          "$ref": "#/$defs/characterId"
+        },
+        "last_contiguous_server_seq": {
+          "$ref": "#/$defs/cursor"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "call_id",
+        "character_id",
+        "last_contiguous_client_seq",
+        "last_contiguous_server_seq"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "call.resumed"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "character_id": {
+          "$ref": "#/$defs/characterId"
+        },
+        "last_contiguous_client_seq": {
+          "$ref": "#/$defs/cursor"
+        },
+        "last_contiguous_server_seq": {
+          "$ref": "#/$defs/cursor"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "call_id",
+        "ack_seq"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "ack"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "ack_seq": {
+          "$ref": "#/$defs/cursor"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "call_id",
+        "missing_seq"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "nack"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "missing_seq": {
+          "$ref": "#/$defs/seq"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "audio_route",
+        "stream_id",
+        "response_id",
+        "encoding",
+        "sample_rate",
+        "channels"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "audio.stream_started"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "audio_route": {
+          "const": "CALL"
+        },
+        "stream_id": {
+          "$ref": "#/$defs/seq"
+        },
+        "response_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "encoding": {
+          "const": "pcm_s16le"
+        },
+        "sample_rate": {
+          "const": 24000
+        },
+        "channels": {
+          "const": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "response_id",
+        "stream_id"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "playback.completed"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "response_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "stream_id": {
+          "$ref": "#/$defs/seq"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "response_id",
+        "stream_id",
+        "retire_server_seq",
+        "reason"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "playback.stop"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "response_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "stream_id": {
+          "$ref": "#/$defs/seq"
+        },
+        "retire_server_seq": {
+          "$ref": "#/$defs/retireRange"
+        },
+        "reason": {
+          "const": "user_interrupted"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "seq",
+        "call_id",
+        "response_id",
+        "stop_seq"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "playback.stopped"
+        },
+        "seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        },
+        "response_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "stop_seq": {
+          "$ref": "#/$defs/seq"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "type",
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "call.v1"
+        },
+        "type": {
+          "const": "error"
+        },
+        "code": {
+          "$ref": "#/$defs/errorCode"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "request_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "request_seq": {
+          "$ref": "#/$defs/seq"
+        },
+        "client_request_id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "call_id": {
+          "$ref": "#/$defs/callId"
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "cursor": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "safeNonNegative": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "callId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "characterId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "errorCode": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "endReason": {
+      "enum": [
+        "user_hangup",
+        "agent_hangup",
+        "declined",
+        "setup_timeout",
+        "time_limit",
+        "provider_failed",
+        "recovery_timeout",
+        "system_failure"
+      ]
+    },
+    "clientAudio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encoding",
+        "sample_rate",
+        "channels"
+      ],
+      "properties": {
+        "encoding": {
+          "const": "pcm_s16le"
+        },
+        "sample_rate": {
+          "const": 16000
+        },
+        "channels": {
+          "const": 1
+        }
+      }
+    },
+    "retireRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "through"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/seq"
+        },
+        "through": {
+          "$ref": "#/$defs/seq"
+        }
+      }
+    }
+  }
+}

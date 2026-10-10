@@ -15,11 +15,30 @@ class TextFinalDraft:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AudioChunkDraft:
-    """编码音频字节及文件分片方式。"""
+    """音频字节、分片方式及可选原始音频格式。"""
 
     delivery: d.OutputDelivery
     data: bytes
     framing: d.AudioFraming
+    audio_format: d.AudioFormat | None = None
+    final: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.data, bytes) or not self.data:
+            raise ValueError("audio data must be nonempty bytes")
+        raw_pcm = self.framing is d.AudioFraming.RAW_PCM
+        if raw_pcm != (self.audio_format is not None):
+            raise ValueError("RAW PCM and audio format must be declared together")
+        if not raw_pcm:
+            if self.final:
+                raise ValueError("file audio cannot be final-framed")
+            return
+        if self.audio_format != d.CALL_PCM_FORMAT:
+            raise ValueError("RAW PCM must use canonical CALL format")
+        if len(self.data) % 2:
+            raise ValueError("RAW PCM must contain complete PCM16 samples")
+        if len(self.data) > d.MAX_CALL_PCM_CHUNK_BYTES:
+            raise ValueError("RAW PCM chunk exceeds maximum size")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

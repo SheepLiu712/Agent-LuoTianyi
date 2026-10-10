@@ -45,6 +45,7 @@ dependencies = [
 # choose a CPU or CUDA wheel source before resolving these extras.
 speech = [
     "gsv-tts-lite>=0.4,<0.5",
+    "scipy>=1.10,<2",
     "soundfile>=0.12",
 ]
 # Heavy, hardware-sensitive dependencies used only by the automatic song

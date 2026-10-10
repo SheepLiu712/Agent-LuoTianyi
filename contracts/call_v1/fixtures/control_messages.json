@@ -1,0 +1,1216 @@
+{
+  "contract": "call.v1.control-message",
+  "status": "proposed",
+  "schema": "../control.schema.json",
+  "limits": {
+    "max_raw_utf8_bytes": 16384,
+    "uint32_max": 4294967295,
+    "javascript_safe_integer_max": 9007199254740991,
+    "opaque_id_max_chars": 128,
+    "character_id_max_chars": 64,
+    "error_message_max_chars": 512
+  },
+  "integer_lexeme": "0|[1-9][0-9]*",
+  "unicode_policy": {
+    "utf8": "strict",
+    "reject_nul": true,
+    "reject_replacement_character": true,
+    "reject_lone_surrogate": true
+  },
+  "error_precedence": [
+    "utf8_or_size",
+    "json_syntax_or_duplicate",
+    "top_level_object",
+    "protocol",
+    "type",
+    "transport_or_direction",
+    "required",
+    "unknown",
+    "field_type",
+    "range",
+    "enum",
+    "cross_field"
+  ],
+  "stable_errors": [
+    "BAD_JSON",
+    "CONTROL_TOO_LARGE",
+    "TOP_LEVEL_NOT_OBJECT",
+    "DUPLICATE_FIELD",
+    "MISSING_FIELD",
+    "UNKNOWN_FIELD",
+    "UNKNOWN_TYPE",
+    "UNSUPPORTED_PROTOCOL",
+    "INVALID_TRANSPORT",
+    "INVALID_DIRECTION",
+    "INVALID_FIELD_TYPE",
+    "FIELD_OUT_OF_RANGE",
+    "INVALID_FIELD_VALUE",
+    "INVALID_ENUM"
+  ],
+  "field_order": {
+    "call.switch_prepare": [
+      "protocol",
+      "type",
+      "client_request_id",
+      "character_id"
+    ],
+    "call.switch_ready": [
+      "protocol",
+      "type",
+      "client_request_id",
+      "character_id"
+    ],
+    "call.start": [
+      "protocol",
+      "type",
+      "seq",
+      "client_request_id",
+      "character_id",
+      "audio"
+    ],
+    "call.state": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "client_request_id",
+      "state"
+    ],
+    "call.active": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "connected_at_ms"
+    ],
+    "call.hangup": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "reason"
+    ],
+    "call.ended": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "outcome",
+      "end_reason",
+      "active_duration_ms"
+    ],
+    "call.resume": [
+      "protocol",
+      "type",
+      "call_id",
+      "character_id",
+      "last_contiguous_server_seq"
+    ],
+    "call.resumed": [
+      "protocol",
+      "type",
+      "call_id",
+      "character_id",
+      "last_contiguous_client_seq",
+      "last_contiguous_server_seq"
+    ],
+    "ack": [
+      "protocol",
+      "type",
+      "call_id",
+      "ack_seq"
+    ],
+    "nack": [
+      "protocol",
+      "type",
+      "call_id",
+      "missing_seq"
+    ],
+    "audio.stream_started": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "audio_route",
+      "stream_id",
+      "response_id",
+      "encoding",
+      "sample_rate",
+      "channels"
+    ],
+    "playback.completed": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "response_id",
+      "stream_id"
+    ],
+    "playback.stop": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "response_id",
+      "stream_id",
+      "retire_server_seq",
+      "reason"
+    ],
+    "playback.stopped": [
+      "protocol",
+      "type",
+      "seq",
+      "call_id",
+      "response_id",
+      "stop_seq"
+    ],
+    "error": [
+      "protocol",
+      "type",
+      "code",
+      "message",
+      "retryable",
+      "request_type",
+      "request_seq",
+      "client_request_id",
+      "call_id"
+    ]
+  },
+  "message_routes": {
+    "call.switch_prepare": {
+      "transport": [
+        "chat_ws"
+      ],
+      "direction": [
+        "client_to_server"
+      ],
+      "sequenced": false
+    },
+    "call.switch_ready": {
+      "transport": [
+        "chat_ws"
+      ],
+      "direction": [
+        "server_to_client"
+      ],
+      "sequenced": false
+    },
+    "call.start": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server"
+      ],
+      "sequenced": true
+    },
+    "call.state": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "server_to_client"
+      ],
+      "sequenced": true
+    },
+    "call.active": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "server_to_client"
+      ],
+      "sequenced": true
+    },
+    "call.hangup": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server"
+      ],
+      "sequenced": true
+    },
+    "call.ended": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "server_to_client"
+      ],
+      "sequenced": true
+    },
+    "call.resume": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server"
+      ],
+      "sequenced": false
+    },
+    "call.resumed": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "server_to_client"
+      ],
+      "sequenced": false
+    },
+    "ack": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server",
+        "server_to_client"
+      ],
+      "sequenced": false
+    },
+    "nack": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server",
+        "server_to_client"
+      ],
+      "sequenced": false
+    },
+    "audio.stream_started": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "server_to_client"
+      ],
+      "sequenced": true
+    },
+    "playback.completed": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server"
+      ],
+      "sequenced": true
+    },
+    "playback.stop": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "server_to_client"
+      ],
+      "sequenced": true
+    },
+    "playback.stopped": {
+      "transport": [
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server"
+      ],
+      "sequenced": true
+    },
+    "error": {
+      "transport": [
+        "chat_ws",
+        "call_ws"
+      ],
+      "direction": [
+        "client_to_server",
+        "server_to_client"
+      ],
+      "sequenced": false
+    }
+  },
+  "valid": [
+    {
+      "id": "switch_prepare",
+      "transport": "chat_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.switch_prepare",
+        "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
+        "character_id": "luotianyi"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.switch_prepare\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\"}"
+    },
+    {
+      "id": "switch_ready",
+      "transport": "chat_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.switch_ready",
+        "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
+        "character_id": "luotianyi"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.switch_ready\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\"}"
+    },
+    {
+      "id": "start",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.start",
+        "seq": 1,
+        "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
+        "character_id": "luotianyi",
+        "audio": {
+          "encoding": "pcm_s16le",
+          "sample_rate": 16000,
+          "channels": 1
+        }
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}"
+    },
+    {
+      "id": "state_preparing",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.state",
+        "seq": 1,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
+        "state": "preparing"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.state\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"state\":\"preparing\"}"
+    },
+    {
+      "id": "state_ringing",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.state",
+        "seq": 2,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
+        "state": "ringing"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.state\",\"seq\":2,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"state\":\"ringing\"}"
+    },
+    {
+      "id": "active_epoch_ms",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.active",
+        "seq": 3,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "connected_at_ms": 1791676800123
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.active\",\"seq\":3,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"connected_at_ms\":1791676800123}"
+    },
+    {
+      "id": "hangup_user",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.hangup",
+        "seq": 2,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "reason": "user_hangup"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.hangup\",\"seq\":2,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"reason\":\"user_hangup\"}"
+    },
+    {
+      "id": "hangup_backgrounded",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.hangup",
+        "seq": 3,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "reason": "backgrounded"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.hangup\",\"seq\":3,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"reason\":\"backgrounded\"}"
+    },
+    {
+      "id": "ended_connected",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.ended",
+        "seq": 88,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "outcome": "connected",
+        "end_reason": "user_hangup",
+        "active_duration_ms": 323000
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.ended\",\"seq\":88,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"outcome\":\"connected\",\"end_reason\":\"user_hangup\",\"active_duration_ms\":323000}"
+    },
+    {
+      "id": "ended_cancelled",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.ended",
+        "seq": 89,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "outcome": "cancelled_before_answer",
+        "end_reason": "user_hangup",
+        "active_duration_ms": 0
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.ended\",\"seq\":89,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"outcome\":\"cancelled_before_answer\",\"end_reason\":\"user_hangup\",\"active_duration_ms\":0}"
+    },
+    {
+      "id": "ended_declined",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.ended",
+        "seq": 90,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "outcome": "declined",
+        "end_reason": "declined",
+        "active_duration_ms": 0
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.ended\",\"seq\":90,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"outcome\":\"declined\",\"end_reason\":\"declined\",\"active_duration_ms\":0}"
+    },
+    {
+      "id": "resume_zero_cursor",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.resume",
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "character_id": "luotianyi",
+        "last_contiguous_server_seq": 0
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.resume\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"character_id\":\"luotianyi\",\"last_contiguous_server_seq\":0}"
+    },
+    {
+      "id": "resumed_zero_cursors",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.resumed",
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "character_id": "luotianyi",
+        "last_contiguous_client_seq": 0,
+        "last_contiguous_server_seq": 0
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.resumed\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"character_id\":\"luotianyi\",\"last_contiguous_client_seq\":0,\"last_contiguous_server_seq\":0}"
+    },
+    {
+      "id": "ack_client_zero",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "ack",
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "ack_seq": 0
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":0}"
+    },
+    {
+      "id": "ack_server_max",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "ack",
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "ack_seq": 4294967295
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":4294967295}"
+    },
+    {
+      "id": "nack_client_min",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "nack",
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "missing_seq": 1
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"nack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"missing_seq\":1}"
+    },
+    {
+      "id": "nack_server_max",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "nack",
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "missing_seq": 4294967295
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"nack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"missing_seq\":4294967295}"
+    },
+    {
+      "id": "stream_started",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "audio.stream_started",
+        "seq": 43,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "audio_route": "CALL",
+        "stream_id": 12,
+        "response_id": "resp_01k",
+        "encoding": "pcm_s16le",
+        "sample_rate": 24000,
+        "channels": 1
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"audio.stream_started\",\"seq\":43,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"audio_route\":\"CALL\",\"stream_id\":12,\"response_id\":\"resp_01k\",\"encoding\":\"pcm_s16le\",\"sample_rate\":24000,\"channels\":1}"
+    },
+    {
+      "id": "playback_completed",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "playback.completed",
+        "seq": 97,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "response_id": "resp_01k",
+        "stream_id": 12
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.completed\",\"seq\":97,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"resp_01k\",\"stream_id\":12}"
+    },
+    {
+      "id": "playback_stop",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "playback.stop",
+        "seq": 61,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "response_id": "resp_01k",
+        "stream_id": 12,
+        "retire_server_seq": {
+          "from": 43,
+          "through": 60
+        },
+        "reason": "user_interrupted"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.stop\",\"seq\":61,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"resp_01k\",\"stream_id\":12,\"retire_server_seq\":{\"from\":43,\"through\":60},\"reason\":\"user_interrupted\"}"
+    },
+    {
+      "id": "playback_stopped",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "message": {
+        "protocol": "call.v1",
+        "type": "playback.stopped",
+        "seq": 98,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "response_id": "resp_01k",
+        "stop_seq": 61
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.stopped\",\"seq\":98,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"resp_01k\",\"stop_seq\":61}"
+    },
+    {
+      "id": "error_minimal",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "error",
+        "code": "INVALID_FIELD_VALUE",
+        "message": "invalid value",
+        "retryable": false
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"error\",\"code\":\"INVALID_FIELD_VALUE\",\"message\":\"invalid value\",\"retryable\":false}"
+    },
+    {
+      "id": "error_correlated_request",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "error",
+        "code": "SETUP_TIMEOUT",
+        "message": "setup timed out",
+        "retryable": true,
+        "request_type": "call.start",
+        "request_seq": 1,
+        "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f"
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"error\",\"code\":\"SETUP_TIMEOUT\",\"message\":\"setup timed out\",\"retryable\":true,\"request_type\":\"call.start\",\"request_seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\"}"
+    },
+    {
+      "id": "seq_and_time_safe_max",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "message": {
+        "protocol": "call.v1",
+        "type": "call.active",
+        "seq": 4294967295,
+        "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+        "connected_at_ms": 9007199254740991
+      },
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.active\",\"seq\":4294967295,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"connected_at_ms\":9007199254740991}"
+    }
+  ],
+  "invalid": [
+    {
+      "id": "bad_json_truncated",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\"",
+      "expected": {
+        "error": "BAD_JSON",
+        "path": "$"
+      }
+    },
+    {
+      "id": "bad_utf8",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw_hex": "7b2270726f746f636f6c223aff7d",
+      "expected": {
+        "error": "BAD_JSON",
+        "path": "$"
+      }
+    },
+    {
+      "id": "lone_surrogate",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"error\",\"code\":\"BAD_JSON\",\"message\":\"\\ud800\",\"retryable\":false}",
+      "expected": {
+        "error": "BAD_JSON",
+        "path": "$.message"
+      }
+    },
+    {
+      "id": "duplicate_protocol",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"protocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":0}",
+      "expected": {
+        "error": "DUPLICATE_FIELD",
+        "path": "$.protocol"
+      }
+    },
+    {
+      "id": "duplicate_unicode_escaped_key",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"\\u0070rotocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":0}",
+      "expected": {
+        "error": "DUPLICATE_FIELD",
+        "path": "$.protocol"
+      }
+    },
+    {
+      "id": "duplicate_nested_audio",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "DUPLICATE_FIELD",
+        "path": "$.audio.sample_rate"
+      }
+    },
+    {
+      "id": "top_level_array",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "[]",
+      "expected": {
+        "error": "TOP_LEVEL_NOT_OBJECT",
+        "path": "$"
+      }
+    },
+    {
+      "id": "unsupported_protocol",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v2\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":0}",
+      "expected": {
+        "error": "UNSUPPORTED_PROTOCOL",
+        "path": "$.protocol"
+      }
+    },
+    {
+      "id": "missing_protocol",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":0}",
+      "expected": {
+        "error": "MISSING_FIELD",
+        "path": "$.protocol"
+      }
+    },
+    {
+      "id": "unknown_type",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.magic\"}",
+      "expected": {
+        "error": "UNKNOWN_TYPE",
+        "path": "$.type"
+      }
+    },
+    {
+      "id": "wrong_transport_switch_prepare",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.switch_prepare\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\"}",
+      "expected": {
+        "error": "INVALID_TRANSPORT",
+        "path": "$"
+      }
+    },
+    {
+      "id": "wrong_direction_switch_ready",
+      "transport": "chat_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.switch_ready\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\"}",
+      "expected": {
+        "error": "INVALID_DIRECTION",
+        "path": "$"
+      }
+    },
+    {
+      "id": "wrong_direction_start",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_DIRECTION",
+        "path": "$"
+      }
+    },
+    {
+      "id": "missing_seq_start",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "MISSING_FIELD",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_on_resume",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.resume\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"character_id\":\"luotianyi\",\"last_contiguous_server_seq\":0}",
+      "expected": {
+        "error": "UNKNOWN_FIELD",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "unknown_top_field",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":0,\"extra\":1}",
+      "expected": {
+        "error": "UNKNOWN_FIELD",
+        "path": "$.extra"
+      }
+    },
+    {
+      "id": "unknown_nested_audio",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1,\"extra\":1}}",
+      "expected": {
+        "error": "UNKNOWN_FIELD",
+        "path": "$.audio.extra"
+      }
+    },
+    {
+      "id": "seq_bool",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":true,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_FIELD_TYPE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_string",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":\"1\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_FIELD_TYPE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_float_token",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1.0,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_FIELD_TYPE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_exponent_token",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1e0,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_FIELD_TYPE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_negative_zero",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":-0,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_FIELD_VALUE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_zero",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":0,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "FIELD_OUT_OF_RANGE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_overflow",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":4294967296,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "FIELD_OUT_OF_RANGE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "cursor_overflow",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":4294967296}",
+      "expected": {
+        "error": "FIELD_OUT_OF_RANGE",
+        "path": "$.ack_seq"
+      }
+    },
+    {
+      "id": "time_overflow",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.active\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"connected_at_ms\":9007199254740992}",
+      "expected": {
+        "error": "FIELD_OUT_OF_RANGE",
+        "path": "$.connected_at_ms"
+      }
+    },
+    {
+      "id": "invalid_call_uuid",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"not-a-uuid\",\"ack_seq\":0}",
+      "expected": {
+        "error": "INVALID_FIELD_VALUE",
+        "path": "$.call_id"
+      }
+    },
+    {
+      "id": "empty_character_id",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.resume\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"character_id\":\"\",\"last_contiguous_server_seq\":0}",
+      "expected": {
+        "error": "FIELD_OUT_OF_RANGE",
+        "path": "$.character_id"
+      }
+    },
+    {
+      "id": "opaque_id_too_long",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.completed\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\"stream_id\":1}",
+      "expected": {
+        "error": "FIELD_OUT_OF_RANGE",
+        "path": "$.response_id"
+      }
+    },
+    {
+      "id": "nul_in_id",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.completed\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"bad\\u0000id\",\"stream_id\":1}",
+      "expected": {
+        "error": "INVALID_FIELD_VALUE",
+        "path": "$.response_id"
+      }
+    },
+    {
+      "id": "replacement_character",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"error\",\"code\":\"BAD_JSON\",\"message\":\"bad\\uFFFDtext\",\"retryable\":false}",
+      "expected": {
+        "error": "INVALID_FIELD_VALUE",
+        "path": "$.message"
+      }
+    },
+    {
+      "id": "invalid_state_enum",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.state\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"state\":\"active\"}",
+      "expected": {
+        "error": "INVALID_ENUM",
+        "path": "$.state"
+      }
+    },
+    {
+      "id": "invalid_hangup_enum",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.hangup\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"reason\":\"agent_hangup\"}",
+      "expected": {
+        "error": "INVALID_ENUM",
+        "path": "$.reason"
+      }
+    },
+    {
+      "id": "invalid_end_reason_enum",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.ended\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"outcome\":\"connected\",\"end_reason\":\"backgrounded\",\"active_duration_ms\":1}",
+      "expected": {
+        "error": "INVALID_ENUM",
+        "path": "$.end_reason"
+      }
+    },
+    {
+      "id": "invalid_audio_encoding",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"opus\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_ENUM",
+        "path": "$.audio.encoding"
+      }
+    },
+    {
+      "id": "invalid_audio_route",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"audio.stream_started\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"audio_route\":\"CHAT\",\"stream_id\":1,\"response_id\":\"r\",\"encoding\":\"pcm_s16le\",\"sample_rate\":24000,\"channels\":1}",
+      "expected": {
+        "error": "INVALID_ENUM",
+        "path": "$.audio_route"
+      }
+    },
+    {
+      "id": "invalid_error_code",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"error\",\"code\":\"bad-code\",\"message\":\"bad\",\"retryable\":false}",
+      "expected": {
+        "error": "INVALID_FIELD_VALUE",
+        "path": "$.code"
+      }
+    },
+    {
+      "id": "retire_from_after_through",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.stop\",\"seq\":61,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"r\",\"stream_id\":1,\"retire_server_seq\":{\"from\":60,\"through\":43},\"reason\":\"user_interrupted\"}",
+      "expected": {
+        "error": "INVALID_FIELD_VALUE",
+        "path": "$.retire_server_seq"
+      }
+    },
+    {
+      "id": "retire_through_equals_stop",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.stop\",\"seq\":61,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"r\",\"stream_id\":1,\"retire_server_seq\":{\"from\":43,\"through\":61},\"reason\":\"user_interrupted\"}",
+      "expected": {
+        "error": "INVALID_FIELD_VALUE",
+        "path": "$.retire_server_seq.through"
+      }
+    },
+    {
+      "id": "playback_stopped_redundant_stream",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"playback.stopped\",\"seq\":1,\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"response_id\":\"r\",\"stream_id\":1,\"stop_seq\":1}",
+      "expected": {
+        "error": "UNKNOWN_FIELD",
+        "path": "$.stream_id"
+      }
+    },
+    {
+      "id": "error_seq_forbidden",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"error\",\"seq\":1,\"code\":\"BAD_JSON\",\"message\":\"bad\",\"retryable\":false}",
+      "expected": {
+        "error": "UNKNOWN_FIELD",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "priority_protocol_before_type",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v2\",\"type\":\"call.magic\",\"extra\":1}",
+      "expected": {
+        "error": "UNSUPPORTED_PROTOCOL",
+        "path": "$.protocol"
+      }
+    },
+    {
+      "id": "priority_required_before_unknown",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"ack\",\"extra\":1}",
+      "expected": {
+        "error": "MISSING_FIELD",
+        "path": "$.call_id"
+      }
+    },
+    {
+      "id": "priority_type_before_range",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"ack\",\"call_id\":\"606ec5e6-a330-4e6c-b07a-8432a5716c8f\",\"ack_seq\":\"999999999999\"}",
+      "expected": {
+        "error": "INVALID_FIELD_TYPE",
+        "path": "$.ack_seq"
+      }
+    },
+    {
+      "id": "seq_negative",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":-1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "FIELD_OUT_OF_RANGE",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_nan",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":NaN,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "BAD_JSON",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "seq_infinity",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":Infinity,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1}}",
+      "expected": {
+        "error": "BAD_JSON",
+        "path": "$.seq"
+      }
+    },
+    {
+      "id": "control_too_large",
+      "transport": "call_ws",
+      "direction": "server_to_client",
+      "raw_pattern": {
+        "prefix": "{\"protocol\":\"call.v1\",\"type\":\"error\",\"code\":\"TOO_LARGE\",\"message\":\"",
+        "repeat": "a",
+        "count": 16384,
+        "suffix": "\",\"retryable\":false}"
+      },
+      "expected": {
+        "error": "CONTROL_TOO_LARGE",
+        "path": "$"
+      }
+    },
+    {
+      "id": "start_invalid_sample_rate",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":24000,\"channels\":1}}",
+      "expected": {
+        "error": "INVALID_ENUM",
+        "path": "$.audio.sample_rate"
+      }
+    },
+    {
+      "id": "start_invalid_channels",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":\"call.start\",\"seq\":1,\"client_request_id\":\"018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a\",\"character_id\":\"luotianyi\",\"audio\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":2}}",
+      "expected": {
+        "error": "INVALID_ENUM",
+        "path": "$.audio.channels"
+      }
+    },
+    {
+      "id": "missing_type",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\"}",
+      "expected": {
+        "error": "MISSING_FIELD",
+        "path": "$.type"
+      }
+    },
+    {
+      "id": "protocol_wrong_type",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":1,\"type\":\"ack\"}",
+      "expected": {
+        "error": "INVALID_FIELD_TYPE",
+        "path": "$.protocol"
+      }
+    },
+    {
+      "id": "type_wrong_type_array",
+      "transport": "call_ws",
+      "direction": "client_to_server",
+      "raw": "{\"protocol\":\"call.v1\",\"type\":[]}",
+      "expected": {
+        "error": "INVALID_FIELD_TYPE",
+        "path": "$.type"
+      }
+    }
+  ],
+  "nested_field_order": {
+    "$.audio": [
+      "encoding",
+      "sample_rate",
+      "channels"
+    ],
+    "$.retire_server_seq": [
+      "from",
+      "through"
+    ]
+  }
+}

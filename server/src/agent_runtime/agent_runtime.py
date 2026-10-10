@@ -2,18 +2,27 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
+from src.agent.handlers.action.call import AnswerCallHandler, EndCallHandler
+from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
-from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.action.write_diary import WriteDiaryHandler
+from src.agent.handlers.stimulus.call import (
+    CallAnswerRequestedHandler,
+    CallEndingHandler,
+    CallSilenceElapsedHandler,
+    CallStartedHandler,
+    CallTurnCompletedHandler,
+)
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReplyHandler,
@@ -68,6 +77,10 @@ class AgentRuntime:
     def singing_backend(self) -> SingingBackend:
         """Expose the shared singing port only to the application composition root."""
         return self.skills.singing.backend
+
+    def release_call_resources(self, call_id: UUID) -> bool:
+        """Release Agent-owned ephemeral resources without exposing SharedSkills."""
+        return self.skills.call_recall.release_call_memory(call_id)
 
     def __init__(
         self,
@@ -124,6 +137,7 @@ class AgentRuntime:
                 reply_composition_config=self.config.get("reply_composition", {}),
                 topic_extraction_config=self.config.get("agent", {}).get("topic_extractor", {}),
                 reflection_config=self.config.get("reflection", {}),
+                call_recall_model=self._shared_call_recall_model(llm_service),
                 song_knowledge_config=self.config.get("agent", {}).get("song_knowledge", {}),
                 database_manager=database_manager,
                 media_resolver=media_resolver,
@@ -184,6 +198,17 @@ class AgentRuntime:
             self.skills.audio_understanding,
         )
         registrations = [
+            (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
+            (StimulusKind.CALL_STARTED, CallStartedHandler(self.skills.call_reply)),
+            (
+                StimulusKind.CALL_TURN_COMPLETED,
+                CallTurnCompletedHandler(self.skills.call_recall, self.skills.call_reply),
+            ),
+            (
+                StimulusKind.CALL_SILENCE_ELAPSED,
+                CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply),
+            ),
+            (StimulusKind.CALL_ENDING, CallEndingHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),
             (
@@ -275,15 +300,22 @@ class AgentRuntime:
                 ),
                 (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary_writing)),
                 (
-                    ActionKind.REFLECTION,
-                    ReflectionActionHandler(
-                        character_id,
-                        self.skills.reflection,
-                        self.skills.conversation_compaction,
-                    ),
+                    ActionKind.COGNITIVE_MAINTENANCE,
+                    CognitiveMaintenanceActionHandler(character_id, self.skills.cognitive_maintenance),
                 ),
+                (ActionKind.ANSWER_CALL, AnswerCallHandler()),
+                (ActionKind.END_CALL, EndCallHandler()),
             )
         )
+
+    def _shared_call_recall_model(self, llm_service: LLMService) -> object | None:
+        config = self.config.get("agent", {}).get("call_recall", {})
+        if not isinstance(config, dict):
+            raise TypeError("agent.call_recall must be a dictionary")
+        module_config = config.get("llm_module")
+        if module_config is None:
+            return None
+        return llm_service.register_llm_module("call_recall", module_config)
 
     def _abort_initialization(self) -> None:
         skills = getattr(self, "skills", None)

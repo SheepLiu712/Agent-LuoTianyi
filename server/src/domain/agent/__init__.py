@@ -1,5 +1,7 @@
 """Agent 领域契约的公开入口：刺激、交互快照、处理请求、取消信号和结算报告。"""
 
+from src.domain.call import CallAudioRoute, CallSpeechDelivery
+
 from ._handle_input_contract import HandleInputErrorCode, InvalidHandleInputError
 from ._realization_contract import (
     InvalidRealizationContractError,
@@ -9,9 +11,12 @@ from ._stimulus_contract import InvalidStimulusError, StimulusErrorCode
 from .action_plan import (
     Action,
     ActionPlan,
+    AnswerCall,
     ChangeExpression,
+    CognitiveMaintenance,
     DynamicReplyTarget,
     DynamicSource,
+    EndCall,
     PublishDynamic,
     Reflection,
     ReplyDynamic,
@@ -23,9 +28,23 @@ from .action_plan import (
     Tone,
     WriteDiary,
 )
+from .call_contracts import (
+    CallAnswerRequested,
+    CallEnding,
+    CallInteractionSnapshot,
+    CallSilenceElapsed,
+    CallStarted,
+    CallStimulus,
+    CallTurnCompleted,
+)
 from .execution_output import (
+    CALL_PCM_FORMAT,
+    MAX_CALL_PCM_CHUNK_BYTES,
     AgentOutput,
     AudioChunkOutput,
+    AudioEncoding,
+    AudioFormat,
+    CallOutputPermit,
     ExecutionContext,
     ExpressionOutput,
     MessageEndOutput,
@@ -52,6 +71,13 @@ from .interaction_snapshot import (
     InteractionSnapshot,
     ToyInteractionSnapshot,
     WorldInteractionSnapshot,
+)
+from .maintenance import (
+    MaintenanceCandidate,
+    MaintenanceMemoryType,
+    MaintenanceReason,
+    MaintenanceReport,
+    MaintenanceStatus,
 )
 from .realization_enums import (
     ActionExecutionStatus,
@@ -125,6 +151,8 @@ from .stimulus_values import (
     WorldObservationKind,
 )
 
+InteractionSnapshot = InteractionSnapshot | CallInteractionSnapshot
+
 __all__ = (
     "InvalidRealizationContractError",
     "RealizationContractErrorCode",
@@ -144,7 +172,9 @@ __all__ = (
     "ChangeExpression",
     "DynamicReplyTarget",
     "DynamicSource",
+    "EndCall",
     "Action",
+    "AnswerCall",
     "StartThinking",
     "Say",
     "Sing",
@@ -153,10 +183,21 @@ __all__ = (
     "PublishDynamic",
     "ReplyDynamic",
     "RequestSongLearning",
+    "CognitiveMaintenance",
     "Reflection",
     "ActionPlan",
+    "MaintenanceCandidate",
+    "MaintenanceMemoryType",
+    "MaintenanceReason",
+    "MaintenanceReport",
+    "MaintenanceStatus",
     "ExecutionContext",
+    "CallOutputPermit",
     "AgentOutput",
+    "AudioEncoding",
+    "AudioFormat",
+    "CALL_PCM_FORMAT",
+    "MAX_CALL_PCM_CHUNK_BYTES",
     "TextFinalOutput",
     "AudioChunkOutput",
     "MessageEndOutput",
@@ -236,4 +277,13 @@ __all__ = (
     "WorldFact",
     "WorldObservation",
     "WorldObservationKind",
+    "CallAudioRoute",
+    "CallAnswerRequested",
+    "CallEnding",
+    "CallInteractionSnapshot",
+    "CallSilenceElapsed",
+    "CallSpeechDelivery",
+    "CallStarted",
+    "CallStimulus",
+    "CallTurnCompleted",
 )

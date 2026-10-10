@@ -100,7 +100,7 @@ async def test_provisional_draft_is_not_delivered_and_formal_reply_is_the_only_r
     assert [action.kind for action in thinking.actions] == [d.ActionKind.START_THINKING]
     assert [action.kind for action in formal.actions] == [d.ActionKind.SAY]
     assert formal.actions[0].content == "我记得你喜欢乌龙茶"
-    assert isinstance(reflection.actions[0], d.Reflection)
+    assert isinstance(reflection.actions[0], d.CognitiveMaintenance)
     assert formal.source_stimulus_ids == ("m2", "m1")
     assert composer.formal_calls == 1
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
