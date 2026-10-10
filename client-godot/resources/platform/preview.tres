@@ -1,0 +1,6 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+[ext_resource type="Script" path="res://src/storage/godot_settings_store.gd" id="1"]
+[resource]
+resource_local_to_scene = true
+script = ExtResource("1")
+file_path = "user://preview_layout.cfg"

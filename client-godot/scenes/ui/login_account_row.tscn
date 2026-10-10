@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[node name="LoginAccountRow" type="HBoxContainer"]
+theme = ExtResource("theme")
+theme_override_constants/separation = 4
+[node name="Choose" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0,42)
+size_flags_horizontal = 3
+alignment = 0
+clip_text = true
+theme_type_variation = &"LoginMenuItem"
+[node name="Remove" type="Button" parent="."]
+unique_name_in_owner = true
+text = "×"
+tooltip_text = "移除此账号的本地记录和登录状态"
+custom_minimum_size = Vector2(36,42)
+theme_type_variation = &"LoginIcon"
