@@ -7,7 +7,6 @@ from support.stage_support import cleanup, setup, stimulus
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
@@ -29,19 +28,6 @@ async def until(predicate):
 class _Understanding:
     def extract_terms(self, text):
         return ()
-
-
-class _NoReflection:
-    async def consolidate_memories(self, invocation, **kwargs):
-        return {}
-
-    async def update_profile(self, invocation, **kwargs):
-        return None
-
-
-class _NoCompaction:
-    async def compact(self, conversation_context):
-        return None
 
 
 class _Composer:
@@ -81,7 +67,6 @@ class _Execute:
 
 
 def build_agent(composer, execute):
-    reflection = ReflectionActionHandler("luotianyi", _NoReflection(), _NoCompaction())
     return Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
@@ -91,7 +76,7 @@ def build_agent(composer, execute):
                 (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             ]
         ),
-        action_router=ActionRouter([(d.ActionKind.SAY, execute), (d.ActionKind.REFLECTION, reflection)]),
+        action_router=ActionRouter([(d.ActionKind.SAY, execute), (d.ActionKind.COGNITIVE_MAINTENANCE, _Execute())]),
     )
 
 
