@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -73,6 +74,19 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         def __init__(self, _config):
             calls.append("database_created")
             self.event_store = object()
+
+        def open_sql_session(self):
+            """协议归档走同一条会话接口（`ServerRuntime.initialize` 第 4 步）。
+
+            这里只提供归档用得到的最小接口：查已有版本、写入新版本、提交与关闭；
+            不往 calls 里记东西，避免影响本用例对回滚顺序的断言。
+            """
+            return SimpleNamespace(
+                query=lambda *_args, **_kwargs: SimpleNamespace(all=lambda: []),
+                add=lambda *_args, **_kwargs: None,
+                commit=lambda: None,
+                close=lambda: None,
+            )
 
         def wire_dependencies(self, **_kwargs):
             pass

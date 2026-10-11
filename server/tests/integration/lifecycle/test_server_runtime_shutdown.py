@@ -25,6 +25,7 @@ def test_server_runtime_shutdown_releases_agent_skills_before_database():
         llm_service=SimpleNamespace(),
         observability=SimpleNamespace(),
         client_llm_executor=ClientLLMExecutor(),
+        agreement_service=SimpleNamespace(),
         owns_observability=False,
     )
 
