@@ -20,34 +20,28 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TextStyle, View } from 'react-native';
 
+import {
+  ALIGN_CENTER,
+  ALIGN_JUSTIFY,
+  AgreementBlock,
+  AgreementPayload,
+  AgreementRun,
+  DEFAULT_BLOCK_FONT_SIZE,
+  MAX_BLOCK_FONT_SIZE,
+  MIN_BLOCK_FONT_SIZE,
+} from '../utils/agreement';
 import type { AppTheme } from '../utils/theme';
 
-export const DEFAULT_BLOCK_FONT_SIZE = 16;
-export const MIN_BLOCK_FONT_SIZE = 12;
-export const MAX_BLOCK_FONT_SIZE = 32;
+export {
+  ALIGN_CENTER,
+  ALIGN_JUSTIFY,
+  DEFAULT_BLOCK_FONT_SIZE,
+  MAX_BLOCK_FONT_SIZE,
+  MIN_BLOCK_FONT_SIZE,
+};
+export type { AgreementBlock as Block, AgreementPayload, AgreementRun as Run };
 
-export const ALIGN_CENTER = 'center';
-export const ALIGN_JUSTIFY = 'justify';
-
-export interface Run {
-  text: string;
-  bold?: boolean;
-}
-
-export interface Block {
-  font_size?: number;
-  align?: string;
-  runs: Run[];
-}
-
-export interface AgreementPayload {
-  version?: string;
-  title?: string;
-  format?: string;
-  blocks?: Block[];
-}
-
-export function blockFontSize(block: Block): number {
+export function blockFontSize(block: AgreementBlock): number {
   const value = block.font_size;
   if (typeof value !== 'number' || !Number.isInteger(value)) {
     return DEFAULT_BLOCK_FONT_SIZE;
@@ -58,11 +52,11 @@ export function blockFontSize(block: Block): number {
   return value;
 }
 
-export function blockTextAlign(block: Block): TextStyle['textAlign'] {
+export function blockTextAlign(block: AgreementBlock): TextStyle['textAlign'] {
   return block.align === ALIGN_CENTER ? 'center' : 'justify';
 }
 
-export function splitRunsOnNewline(runs: Run[]): [string, boolean][][] {
+export function splitRunsOnNewline(runs: AgreementRun[]): [string, boolean][][] {
   const lines: [string, boolean][][] = [[]];
   for (const run of runs) {
     const text = typeof run.text === 'string' ? run.text : String(run.text);
@@ -81,7 +75,7 @@ export function splitRunsOnNewline(runs: Run[]): [string, boolean][][] {
 }
 
 interface BlockViewProps {
-  block: Block;
+  block: AgreementBlock;
   textColor: string;
 }
 

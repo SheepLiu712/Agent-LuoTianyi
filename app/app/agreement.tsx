@@ -30,8 +30,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-import { AgreementPayload, RichAgreement } from '../components/RichAgreement';
+import { RichAgreement } from '../components/RichAgreement';
 import { fetchCurrentAgreement } from '../hooks/useAuth';
+import { AgreementPayload } from '../utils/agreement';
 import { AppTheme } from '../utils/theme';
 
 const TEXT_TITLE = '用户协议';
@@ -55,7 +56,7 @@ export default function AgreementScreen({ onClose, theme }: Props) {
     setFailure('');
     const result = await fetchCurrentAgreement();
     if (result.success) {
-      setData(result.data as AgreementPayload);
+      setData(result.data);
     } else {
       setFailure(result.message || TEXT_LOAD_FAILED);
     }

@@ -7,6 +7,7 @@ import { encryptPassword, getPublicKey, type PublicKeyFailureReason } from '../u
 import { addDebugTrace } from '../utils/debug_trace';
 import { classifyAutoLoginStatus, runAutoLoginWithRetry } from '../utils/auto_login';
 import { voicePlaybackManager } from '../utils/voice_playback_manager';
+import { AgreementPayload, parseAgreementPayload } from '../utils/agreement';
 
 const AUTO_LOGIN_KEY = 'auto_login';
 const USERNAME_KEY = 'saved_username';
@@ -52,17 +53,23 @@ function agreementFailureMessage(detail: unknown): string {
 }
 
 export async function fetchCurrentAgreement(): Promise<
-  { success: true; data: Record<string, unknown> } | { success: false; message: string }
+  { success: true; data: AgreementPayload } | { success: false; message: string }
 > {
   try {
     const response = await fetch(`${server_config.BASE_URL}/auth/agreement`);
+    const result: unknown = await response.json().catch(() => null);
     if (!response.ok) {
-      const result = await response.json().catch(() => null);
       addDebugTrace('auth', 'agreement fetch failed', { status: response.status });
-      return { success: false, message: agreementFailureMessage(result?.detail) };
+      const detail = result && typeof result === 'object' ? (result as { detail?: unknown }).detail : null;
+      return { success: false, message: agreementFailureMessage(detail) };
+    }
+    const data = parseAgreementPayload(result);
+    if (!data) {
+      addDebugTrace('auth', 'agreement fetch invalid payload');
+      return { success: false, message: '用户协议加载失败，请重试' };
     }
     addDebugTrace('auth', 'agreement fetch ok');
-    return { success: true, data: await response.json() };
+    return { success: true, data };
   } catch (e) {
     addDebugTrace('auth', 'agreement fetch error', { error: String(e) });
     return { success: false, message: '用户协议加载失败，请重试' };

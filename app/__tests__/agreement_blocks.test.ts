@@ -41,11 +41,10 @@ describe('RichAgreement 渲染契约', () => {
     expect(blockFontSize({ runs: [], font_size: Number.NaN })).toBe(fallback);
   });
 
-  it('段落对齐只有 center 例外，其余按两端对齐', () => {
+  it('段落对齐按已校验的 center / justify 与缺省值映射', () => {
     expect(blockTextAlign({ runs: [], align: ALIGN_CENTER })).toBe('center');
     expect(blockTextAlign({ runs: [], align: ALIGN_JUSTIFY })).toBe('justify');
     expect(blockTextAlign({ runs: [] })).toBe('justify');
-    expect(blockTextAlign({ runs: [], align: 'right' })).toBe('justify');
   });
 
   it('按 \\n 拆成独立显示行，保留加粗标记', () => {

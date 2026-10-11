@@ -4,6 +4,7 @@ import requests
 
 from ..safety import encrypt_pwd
 from ..utils.http_client import HttpClientFactory
+from .agreement import validate_agreement_payload
 
 
 def _error_detail(response: requests.Response, fallback: str) -> str:
@@ -128,6 +129,9 @@ class AuthApi:
         if resp.status_code != 200:
             return False, _error_detail(resp, "Failed to load agreement"), {}
         try:
-            return True, "", resp.json()
+            payload = validate_agreement_payload(resp.json())
         except Exception:
+            payload = None
+        if payload is None:
             return False, "Failed to load agreement", {}
+        return True, "", payload

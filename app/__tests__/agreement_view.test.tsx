@@ -54,8 +54,8 @@ const BODY_TEXT = '第一条 本协议用于校验查阅页的整屏覆盖。';
 const PAYLOAD = {
   version: VERSION,
   title: PAGE_TITLE,
-  format: 'blocks-v1',
-  blocks: [{ font_size: 16, align: 'left', runs: [{ text: BODY_TEXT }] }],
+  format: 'agreement.richtext.v1',
+  blocks: [{ font_size: 16, align: 'justify', runs: [{ text: BODY_TEXT }] }],
 };
 
 const fetchMock = fetchCurrentAgreement as unknown as jest.Mock;
