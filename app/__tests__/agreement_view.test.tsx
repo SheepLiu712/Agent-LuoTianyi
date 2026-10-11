@@ -111,10 +111,13 @@ function screenRoot(tree: ReactTestRenderer): ReactTestInstance {
   return tree.root.findAllByType(VIEW)[0];
 }
 
-async function renderScreen(onClose: () => void = () => {}) {
+async function renderScreen(
+  onClose: () => void = () => {},
+  theme = THEMES.light,
+) {
   let tree!: ReactTestRenderer;
   await act(async () => {
-    tree = create(<AgreementScreen onClose={onClose} theme={THEMES.light} />);
+    tree = create(<AgreementScreen onClose={onClose} theme={theme} />);
   });
   return tree;
 }
@@ -194,6 +197,23 @@ describe('用户协议查阅页', () => {
     expect(marks[0].props.color).toBe(THEMES.light.dangerText);
   });
 
+  it('深色主题下失败提示与重试按钮使用主题颜色', async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ success: false, message: '网络错误' });
+    const tree = await renderScreen(() => {}, THEMES.dark);
+    const mark = tree.root.findByProps({ name: 'close' });
+    const retryButton = buttonLabeled(tree, TEXT_RETRY);
+
+    expect(mark.props.color).toBe(THEMES.dark.dangerText);
+    expect(flattenStyle(viewWithText(tree.root, '网络错误').props.style).color).toBe(
+      THEMES.dark.dangerText,
+    );
+    expect(flattenStyle(retryButton.props.style).backgroundColor).toBe(THEMES.dark.surfaceAlt);
+    expect(flattenStyle(viewWithText(retryButton, TEXT_RETRY).props.style).color).toBe(
+      THEMES.dark.text,
+    );
+  });
+
   it('渲染服务端返回的版本号与正文', async () => {
     const tree = await renderScreen();
     const texts = textsOf(tree.root);
@@ -201,6 +221,31 @@ describe('用户协议查阅页', () => {
     expect(texts).toContain(VERSION_LABEL);
     expect(texts).toContain(BODY_TEXT);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('深色主题下页面、标题、版本与正文使用主题颜色', async () => {
+    const tree = await renderScreen(() => {}, THEMES.dark);
+    const root = screenRoot(tree);
+    const header = buttonLabeled(tree, TEXT_BACK).parent as ReactTestInstance;
+    const titles = viewsWithText(root, PAGE_TITLE);
+    const bodyRun = viewWithText(root, BODY_TEXT);
+
+    expect(flattenStyle(root.props.style).backgroundColor).toBe(THEMES.dark.surface);
+    expect(flattenStyle(header.props.style)).toMatchObject({
+      backgroundColor: THEMES.dark.surface,
+      borderBottomColor: THEMES.dark.border,
+    });
+    expect(flattenStyle(viewWithText(root, TEXT_BACK).props.style).color).toBe(
+      THEMES.dark.accentText,
+    );
+    expect(titles).toHaveLength(2);
+    titles.forEach((title) => {
+      expect(flattenStyle(title.props.style).color).toBe(THEMES.dark.text);
+    });
+    expect(flattenStyle(viewWithText(root, VERSION_LABEL).props.style).color).toBe(
+      THEMES.dark.textMuted,
+    );
+    expect(flattenStyle(bodyRun.parent?.props.style).color).toBe(THEMES.dark.text);
   });
 
   it('加载失败给出重试，重试成功后展示正文', async () => {

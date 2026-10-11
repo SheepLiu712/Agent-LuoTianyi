@@ -117,7 +117,7 @@ export default function AgreementScreen({ onClose, theme }: Props) {
                 {`版本：${data.version}`}
               </Text>
             ) : null}
-            <RichAgreement data={data} />
+            <RichAgreement data={data} theme={theme} />
           </>
         )}
       </View>

@@ -20,14 +20,14 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TextStyle, View } from 'react-native';
 
+import type { AppTheme } from '../utils/theme';
+
 export const DEFAULT_BLOCK_FONT_SIZE = 16;
 export const MIN_BLOCK_FONT_SIZE = 12;
 export const MAX_BLOCK_FONT_SIZE = 32;
 
 export const ALIGN_CENTER = 'center';
 export const ALIGN_JUSTIFY = 'justify';
-
-export const COLOR_TEXT = '#17283d';
 
 export interface Run {
   text: string;
@@ -82,9 +82,10 @@ export function splitRunsOnNewline(runs: Run[]): Array<Array<[string, boolean]>>
 
 interface BlockViewProps {
   block: Block;
+  textColor: string;
 }
 
-function BlockView({ block }: BlockViewProps) {
+function BlockView({ block, textColor }: BlockViewProps) {
   const fontSize = blockFontSize(block);
   const textAlign = blockTextAlign(block);
   const lines = splitRunsOnNewline(block.runs);
@@ -92,10 +93,7 @@ function BlockView({ block }: BlockViewProps) {
   return (
     <View style={styles.block}>
       {lines.map((line, lineIndex) => (
-        <Text
-          key={lineIndex}
-          style={[styles.line, { fontSize, textAlign, color: COLOR_TEXT }]}
-        >
+        <Text key={lineIndex} style={[styles.line, { fontSize, textAlign, color: textColor }]}>
           {line.map(([text, bold], runIndex) => (
             <Text key={runIndex} style={bold ? styles.bold : undefined}>
               {text}
@@ -107,14 +105,19 @@ function BlockView({ block }: BlockViewProps) {
   );
 }
 
-export function RichAgreement({ data }: { data: AgreementPayload | null }) {
+interface RichAgreementProps {
+  data: AgreementPayload | null;
+  theme: AppTheme;
+}
+
+export function RichAgreement({ data, theme }: RichAgreementProps) {
   if (!data?.blocks?.length) {
     return null;
   }
   return (
     <ScrollView>
       {data.blocks.map((block, index) => (
-        <BlockView key={index} block={block} />
+        <BlockView key={index} block={block} textColor={theme.text} />
       ))}
     </ScrollView>
   );
