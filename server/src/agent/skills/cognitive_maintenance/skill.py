@@ -7,7 +7,13 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from src.agent.context import ConversationCompaction, ConversationEntry, ConversationSummary, UserProfile
+from src.agent.context import (
+    ConversationCompaction,
+    ConversationEntry,
+    ConversationSnapshot,
+    ConversationSummary,
+    UserProfile,
+)
 from src.agent.skills.contracts import SkillInvocation
 from src.domain.agent.maintenance import (
     MaintenanceCandidate,
@@ -68,6 +74,16 @@ class _Memory(Protocol):
     async def propose_user_profile(self, *, history: dict[str, Any], current_profile: str) -> str | None: ...
 
 
+class _BoundedConversation:
+    """Expose one immutable conversation snapshot to a compaction skill."""
+
+    def __init__(self, snapshot: ConversationSnapshot) -> None:
+        self._snapshot = snapshot
+
+    def read(self) -> ConversationSnapshot:
+        return self._snapshot
+
+
 class CognitiveMaintenanceSkill:
     """Freeze model output once per predecessor, then converge projections at-least-once."""
 
@@ -87,16 +103,65 @@ class CognitiveMaintenanceSkill:
     ) -> MaintenanceReport:
         """Run no lifecycle lock around models; the persisted predecessor is the arbiter."""
         self._check_cancelled(invocation)
-        snapshot = context.conversation.read()
-        previous = await context.conversation.read_maintenance_progress()
-        batch = await context.conversation.load_cognitive_maintenance_batch(previous_progress=previous)
+        initial_snapshot = context.conversation.read()
+        ending_boundary = initial_snapshot.entries[-1].entry_id if initial_snapshot.entries else None
         memory = self._memory_for(invocation.character_id)
+        reports = []
+        while True:
+            report = await self._maintain_batch(
+                invocation,
+                context,
+                reason=reason,
+                memory=memory,
+                ending_boundary=ending_boundary,
+                bounded=reason is MaintenanceReason.INTERACTION_ENDING,
+            )
+            reports.append(report)
+            if reason is not MaintenanceReason.INTERACTION_ENDING:
+                return report
+            if report.status is not MaintenanceStatus.COMPLETED:
+                return report
+            if report.new_progress == ending_boundary:
+                return self._combine_reports(reports, reason)
+            self._check_cancelled(invocation)
+
+    async def _maintain_batch(
+        self, invocation, context, *, reason, memory, ending_boundary, bounded
+    ) -> MaintenanceReport:
+        current_snapshot = context.conversation.read()
+        previous = await context.conversation.read_maintenance_progress()
+        entries = self._entries_through_boundary(current_snapshot.entries, ending_boundary, bounded=bounded)
+        if entries is None:
+            if previous == ending_boundary:
+                return MaintenanceReport(MaintenanceStatus.COMPLETED, reason, previous, previous)
+            return MaintenanceReport(MaintenanceStatus.CONFLICT, reason, previous, None)
+        snapshot = ConversationSnapshot(current_snapshot.summary, entries)
+        if bounded and not entries:
+            return MaintenanceReport(MaintenanceStatus.SKIPPED, reason, previous, previous)
+        batch = await context.conversation.load_cognitive_maintenance_batch(previous_progress=previous)
 
         if batch is None:
-            compaction = await self._prepare_compaction(context, reason)
-            covered = self._covered_entries(snapshot.entries, compaction, reason)
-            maintained = self._entries_after_progress(covered, previous)
+            compaction = await self._prepare_compaction(_BoundedConversation(snapshot), reason)
+            covered = self._covered_entries(entries, compaction, reason)
+            maintained = self._entries_after_progress(entries, previous)
+            if compaction is not None:
+                covered_ids = {item.entry_id for item in covered}
+                maintained = tuple(item for item in maintained if item.entry_id in covered_ids)
             if not maintained:
+                if compaction is not None:
+                    committed = await context.conversation.commit_cognitive_maintenance(
+                        compaction=compaction,
+                        expected_progress=previous,
+                        new_progress=previous,
+                    )
+                    return MaintenanceReport(
+                        MaintenanceStatus.COMPLETED if committed else MaintenanceStatus.CONFLICT,
+                        reason,
+                        previous,
+                        previous if committed else None,
+                        covered_entry_ids=tuple(item.entry_id for item in covered),
+                        compacted=committed,
+                    )
                 return MaintenanceReport(
                     MaintenanceStatus.SKIPPED,
                     reason,
@@ -165,11 +230,27 @@ class CognitiveMaintenanceSkill:
             compacted=batch.compaction_expected_count is not None,
         )
 
-    async def _prepare_compaction(self, context: _Context, reason: MaintenanceReason) -> ConversationCompaction | None:
-        if reason is MaintenanceReason.COMPACTION_THRESHOLD or self._compaction.requires_compaction(
-            context.conversation
-        ):
-            return await self._compaction.compact(context.conversation)
+    @staticmethod
+    def _combine_reports(reports, reason):
+        if len(reports) == 1:
+            return reports[0]
+        return MaintenanceReport(
+            MaintenanceStatus.COMPLETED,
+            reason,
+            reports[0].previous_progress,
+            reports[-1].new_progress,
+            covered_entry_ids=tuple(entry_id for report in reports for entry_id in report.covered_entry_ids),
+            maintained_entry_ids=tuple(entry_id for report in reports for entry_id in report.maintained_entry_ids),
+            memory_candidate_count=sum(report.memory_candidate_count for report in reports),
+            profile_updated=any(report.profile_updated for report in reports),
+            compacted=any(report.compacted for report in reports),
+        )
+
+    async def _prepare_compaction(
+        self, conversation: _Conversation, reason: MaintenanceReason
+    ) -> ConversationCompaction | None:
+        if reason is MaintenanceReason.COMPACTION_THRESHOLD or self._compaction.requires_compaction(conversation):
+            return await self._compaction.compact(conversation)
         return None
 
     @staticmethod
@@ -189,6 +270,17 @@ class CognitiveMaintenanceSkill:
             if entry.entry_id == progress:
                 return entries[index + 1 :]
         return entries
+
+    @staticmethod
+    def _entries_through_boundary(entries, boundary, *, bounded):
+        if not bounded:
+            return entries
+        if boundary is None:
+            return ()
+        for index, entry in enumerate(entries):
+            if entry.entry_id == boundary:
+                return entries[: index + 1]
+        return None
 
     @staticmethod
     def _serialize_candidates(candidates):
