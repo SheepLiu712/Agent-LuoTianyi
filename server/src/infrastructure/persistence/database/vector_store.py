@@ -9,6 +9,7 @@ import os
 import threading
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,6 +21,15 @@ from src.utils.logger import get_logger
 
 # 单用户记录删除的分页大小：避免 n_results 上限造成的静默截断。
 _USER_RECORD_PAGE_SIZE = 1000
+
+
+def _reported_delete_count(result: Any) -> Optional[int]:
+    """读取删除接口报告的实际删除条数；后端不报告（返回 None）时返回 None。"""
+    if isinstance(result, Mapping):
+        deleted = result.get("deleted")
+        if isinstance(deleted, int):
+            return deleted
+    return None
 
 
 class BaseDocument(ABC):
@@ -255,22 +265,26 @@ class ChromaVectorStore(VectorStore):
 
         分页删除以避免单次查询上限造成的静默截断。循环只在**再查一次返回空**时才结束——
         最后一页也必须由一次新的查询证实已删干净，否则这一页删除失败会被当成成功。
-        任何失败都抛出：上层据此判断该步骤失败，不能返回 0 伪装成功。
+        某一轮没有真正删掉任何记录（后端报告删了 0 条，或后端不报告条数时同一批 id 又被查了出来）
+        才判为失败并抛出：上层据此判定该步骤失败，不能返回 0 伪装成功。
+        删掉一部分属于正常进展，继续删下一页即可。
         """
         deleted_count = 0
-        previous_ids: set[str] = set()
+        previous_ids: Optional[frozenset[str]] = None
         while True:
             # include=[] 只取 id：删除路径不需要 document/metadata/embedding，避免整页载荷进入内存。
             results = self.collection.get(where={"user_id": user_id}, limit=_USER_RECORD_PAGE_SIZE, include=[])
             doc_ids = [str(value) for value in (results.get("ids") or [])]
             if not doc_ids:
                 break
-            if previous_ids.intersection(doc_ids):
-                # 上一页没有真正删掉（软删/最终一致/部分失败）：报错，而不是继续并重复计数。
+            current_ids = frozenset(doc_ids)
+            reported = _reported_delete_count(self.collection.delete(ids=doc_ids))
+            if reported == 0 or (reported is None and current_ids == previous_ids):
+                # 软删/最终一致/删除失败：同一批 id 会被反复取到，报错而不是继续重放并重复计数。
                 raise RuntimeError(f"vector delete made no progress for user {user_id}")
-            previous_ids = set(doc_ids)
-            self.collection.delete(ids=doc_ids)
-            deleted_count += len(doc_ids)
+            previous_ids = current_ids
+            # 后端报告条数时以报告为准（只删掉一部分时按页长累加会多算），否则按本页条数累计。
+            deleted_count += len(doc_ids) if reported is None else reported
         self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
         return deleted_count
 

@@ -10,12 +10,21 @@ from src.infrastructure.persistence.database.vector_store import ChromaVectorSto
 class _Collection:
     MAX_GET_CALLS = 20
 
-    def __init__(self, ids, *, fail_on_delete=False, delete_is_noop=False, partial_delete_ratio=1.0):
+    def __init__(
+        self,
+        ids,
+        *,
+        fail_on_delete=False,
+        delete_is_noop=False,
+        partial_delete_ratio=1.0,
+        report_delete_count=True,
+    ):
         self.ids = list(ids)
         self.deleted = []
         self.fail_on_delete = fail_on_delete
         self.delete_is_noop = delete_is_noop
         self.partial_delete_ratio = partial_delete_ratio
+        self.report_delete_count = report_delete_count
         self.includes = []
         self.get_calls = 0
 
@@ -33,13 +42,20 @@ class _Collection:
             raise RuntimeError("chroma unavailable")
         self.deleted.extend(ids)
         if self.delete_is_noop:
-            return
+            return self._delete_result(0)
         removed = set(ids)
         if self.partial_delete_ratio < 1.0:
-            # 只删掉一部分：留下与上一页重叠的记录，模拟"后端删不干净"。
-            keep = int(len(removed) * (1.0 - self.partial_delete_ratio))
+            # 只删掉一部分：模拟后端删不干净，剩余条目会在下一页重新出现。
+            keep = max(1, int(len(removed) * (1.0 - self.partial_delete_ratio)))
             removed = set(sorted(removed)[:keep])
         self.ids = [item for item in self.ids if item not in removed]
+        return self._delete_result(len(removed))
+
+    def _delete_result(self, removed: int):
+        # chromadb 1.x 的 delete 返回 DeleteResult（含 deleted 计数）；旧版本不报告返回值。
+        if not self.report_delete_count:
+            return None
+        return {"deleted": removed}
 
 
 def _store(collection) -> ChromaVectorStore:
@@ -92,13 +108,42 @@ def test_delete_user_records_verifies_a_short_final_page():
         store.delete_user_records("user-1")
 
 
-def test_delete_user_records_raises_when_a_page_is_only_partially_deleted():
-    """部分删除（下一页与上一页有交集）同样视为没有进展，且不能把重复页计入条数。"""
+def test_delete_user_records_resumes_partial_deletes_until_empty():
+    """后端只删掉一部分不是失败：剩余条目会在下一页重新出现，继续删到空，条数按实际删除累计。"""
     collection = _Collection([f"doc-{index}" for index in range(1000)], partial_delete_ratio=0.6)
+    store = _store(collection)
+
+    deleted = store.delete_user_records("user-1")
+
+    assert deleted == 1000
+    assert collection.ids == []
+
+
+def test_delete_user_records_detects_no_progress_without_a_reported_count():
+    """后端不报告删除条数时，用“同一批 id 又被查了出来”兜底判为没有进展。"""
+    collection = _Collection(
+        [f"doc-{index}" for index in range(1000)],
+        delete_is_noop=True,
+        report_delete_count=False,
+    )
     store = _store(collection)
 
     with pytest.raises(RuntimeError, match="made no progress"):
         store.delete_user_records("user-1")
+
+
+def test_delete_user_records_legacy_backend_keeps_resuming_partial_deletes():
+    """不报告条数的旧后端碰到部分删除时，也必须在有限步内删空而不是误判失败。"""
+    collection = _Collection(
+        [f"doc-{index}" for index in range(500)],
+        partial_delete_ratio=0.5,
+        report_delete_count=False,
+    )
+    store = _store(collection)
+
+    store.delete_user_records("user-1")
+
+    assert collection.ids == []
 
 
 def test_delete_user_records_contract_against_real_chroma():
