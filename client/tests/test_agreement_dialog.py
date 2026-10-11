@@ -9,11 +9,13 @@
 """
 
 import os
+import threading
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QTimer, Qt
 from PySide6.QtGui import QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import QApplication, QDialog, QLabel
 
@@ -74,6 +76,17 @@ def make_dialog(qapp):
 
     for dialog in dialogs:
         dialog.close()
+
+
+def _wait_until(predicate, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        if predicate():
+            return
+        time.sleep(0.01)
+    QApplication.processEvents()
+    assert predicate()
 
 
 def _layout_document(payload, width=420.0):
@@ -351,7 +364,7 @@ def test_version_label_and_close_action(make_dialog):
 def test_load_success_sets_version_and_clears_error(qapp):
     dialog = AgreementDialog(load_document=lambda: (True, "", DOC))
 
-    assert dialog.version == "terms-2026-10-v1"
+    _wait_until(lambda: dialog.version == "terms-2026-10-v1")
     assert dialog.error_label.isHidden() and dialog.retry_btn.isHidden()
     dialog.close()
 
@@ -367,14 +380,14 @@ def test_load_failure_shows_error_and_retry_then_recovers(qapp):
 
     dialog = AgreementDialog(load_document=flaky)
 
+    _wait_until(lambda: "连接超时" in dialog.error_label.text())
     assert dialog.version is None
     assert not dialog.error_label.isHidden() and not dialog.retry_btn.isHidden()
-    assert "连接超时" in dialog.error_label.text()
 
     dialog.reload_document()
 
+    _wait_until(lambda: dialog.version == "terms-2026-10-v1")
     assert attempts["count"] == 2
-    assert dialog.version == "terms-2026-10-v1"
     assert dialog.error_label.isHidden() and dialog.retry_btn.isHidden()
     dialog.close()
 
@@ -385,7 +398,7 @@ def test_load_exception_is_reported_not_raised(qapp):
 
     dialog = AgreementDialog(load_document=boom)
 
-    assert "网络不可达" in dialog.error_label.text()
+    _wait_until(lambda: "网络不可达" in dialog.error_label.text())
     assert not dialog.retry_btn.isHidden()
     dialog.close()
 
@@ -399,8 +412,7 @@ def test_failure_message_sits_in_the_content_area(qapp):
     dialog = AgreementDialog(load_document=lambda: (False, "连接超时", {}))
     dialog.resize(640, 520)
     dialog.show()
-    for _ in range(4):
-        QApplication.processEvents()
+    _wait_until(lambda: "连接超时" in dialog.error_label.text())
 
     actions_top = dialog.layout().itemAt(1).widget().mapTo(dialog, QPoint(0, 0)).y()
     message_bottom = (
@@ -410,6 +422,49 @@ def test_failure_message_sits_in_the_content_area(qapp):
     assert not dialog.error_label.isHidden()
     assert message_bottom < actions_top
     dialog.close()
+
+
+def test_slow_loader_does_not_block_gui_event_loop(qapp):
+    release = threading.Event()
+    timer_fired = []
+
+    def slow_loader():
+        release.wait(timeout=2)
+        return True, "", DOC
+
+    started = time.monotonic()
+    dialog = AgreementDialog(load_document=slow_loader)
+    constructor_seconds = time.monotonic() - started
+    QTimer.singleShot(0, lambda: timer_fired.append(True))
+
+    _wait_until(lambda: bool(timer_fired))
+    assert constructor_seconds < 0.2
+    assert dialog.version is None
+    assert dialog.error_label.text() == dialog_module.TEXT_LOADING
+
+    release.set()
+    _wait_until(lambda: dialog.version == "terms-2026-10-v1")
+    dialog.close()
+
+
+def test_close_ignores_late_loader_result(qapp):
+    release = threading.Event()
+    completed = threading.Event()
+
+    def slow_loader():
+        release.wait(timeout=2)
+        completed.set()
+        return True, "", DOC
+
+    dialog = AgreementDialog(load_document=slow_loader)
+    dialog.reject()
+    release.set()
+    _wait_until(completed.is_set)
+    for _ in range(4):
+        QApplication.processEvents()
+
+    assert dialog.version is None
+    assert dialog._closed is True
 
 
 def test_reload_without_loader_is_a_noop(make_dialog):

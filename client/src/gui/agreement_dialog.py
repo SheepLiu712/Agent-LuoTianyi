@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot
 from PySide6.QtGui import QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QDialog,
@@ -71,10 +71,31 @@ COLOR_ERROR = "#b91c1c"
 
 TEXT_CLOSE = "关闭"
 TEXT_RETRY = "重试"
+TEXT_LOADING = "正在加载用户协议…"
 TEXT_LOAD_FAILED = "加载用户协议失败"
 
 DocumentLoader = Callable[[], "tuple[bool, str, Mapping[str, Any]]"]
 """取协议正文：返回 ``(ok, detail, payload)``；``payload`` 为 ``GET /auth/agreement`` 的 JSON。"""
+
+
+class _LoadSignals(QObject):
+    finished = Signal(int, object)
+
+
+class _LoadTask(QRunnable):
+    def __init__(self, request_id: int, loader: DocumentLoader, signals: _LoadSignals):
+        super().__init__()
+        self.request_id = request_id
+        self.loader = loader
+        self.signals = signals
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self.loader()
+        except Exception as error:  # noqa: BLE001 - 统一回传给 GUI 线程呈现
+            result = error
+        self.signals.finished.emit(self.request_id, result)
 
 
 def _block_font_size(block: Mapping[str, Any]) -> int:
@@ -170,6 +191,13 @@ class AgreementDialog(QDialog):
         super().__init__(parent)
         self.logger = get_logger(self.__class__.__name__)
         self._load_document = load_document
+        self._thread_pool = QThreadPool.globalInstance()
+        self._load_signals = _LoadSignals()
+        self._load_signals.finished.connect(self._on_load_finished)
+        self._load_request_id = 0
+        self._load_in_flight = False
+        self._closed = False
+        self.finished.connect(self._on_dialog_finished)
         self.version: str | None = None
         self.last_error: str = ""
 
@@ -281,21 +309,35 @@ class AgreementDialog(QDialog):
         self._set_failure(None)
 
     def reload_document(self) -> bool:
-        """按注入的 ``load_document`` 取正文；失败时提示并可重试，不写任何签署。"""
-        if self._load_document is None:
+        """异步获取正文；失败时提示并可重试，不阻塞 GUI 或写入签署状态。"""
+        if self._load_document is None or self._load_in_flight or self._closed:
             return False
-        try:
-            ok, detail, payload = self._load_document()
-        except Exception as error:  # noqa: BLE001 - 网络层异常统一转成界面提示
-            self.logger.error(f"加载用户协议失败: {error}")
-            self._set_failure(f"{TEXT_LOAD_FAILED}：{error}")
-            return False
+        self._load_request_id += 1
+        self._load_in_flight = True
+        self.error_label.setText(TEXT_LOADING)
+        self.error_label.setVisible(True)
+        self.retry_btn.setVisible(False)
+        self.retry_btn.setEnabled(False)
+        task = _LoadTask(self._load_request_id, self._load_document, self._load_signals)
+        self._thread_pool.start(task)
+        return True
+
+    @Slot(int, object)
+    def _on_load_finished(self, request_id: int, result: object) -> None:
+        if self._closed or request_id != self._load_request_id:
+            return
+        self._load_in_flight = False
+        self.retry_btn.setEnabled(True)
+        if isinstance(result, Exception):
+            self.logger.error(f"加载用户协议失败: {result}")
+            self._set_failure(f"{TEXT_LOAD_FAILED}：{result}")
+            return
+        ok, detail, payload = result
         if not ok or not payload:
             self._set_failure(f"{TEXT_LOAD_FAILED}：{detail}")
-            return False
+            return
         self.last_error = ""
         self.set_document(payload)
-        return True
 
     def _set_failure(self, message: str | None) -> None:
         """切换失败态：显示错误与「重试」，成功态恢复设计稿的单一「关闭」。"""
@@ -305,6 +347,16 @@ class AgreementDialog(QDialog):
         self.retry_btn.setVisible(bool(message))
 
     # ── 生命周期 ─────────────────────────────────────────────────
+    def _invalidate_load(self) -> None:
+        self._closed = True
+        self._load_in_flight = False
+        self._load_request_id += 1
+
+    @Slot(int)
+    def _on_dialog_finished(self, _result: int) -> None:
+        self._invalidate_load()
+
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
-        """关闭查阅窗口只结束本次查阅：不写签署、不影响既有会话。"""
+        """关闭查阅窗口只结束本次查阅：迟到结果作废，不写签署、不影响既有会话。"""
+        self._invalidate_load()
         super().closeEvent(event)
