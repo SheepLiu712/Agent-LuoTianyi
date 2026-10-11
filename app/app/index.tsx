@@ -18,6 +18,9 @@ import {
   useColorScheme,
   useWindowDimensions,
   View,
+  Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -33,6 +36,8 @@ import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } fr
 import DynamicsScreen from './dynamics';
 import PreferencesScreen from './preferences';
 import LlmSettingsScreen from './llm_settings';
+import { useCallSession } from '../hooks/useCallSession';
+import { CallScreen } from '../components/call/CallScreen';
 
 const THINKING_BUBBLE_FRAMES = [
   require('../assets/images/thinking_bubble1.png'),
@@ -63,6 +68,23 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const webviewRef = useRef<WebView>(null);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
+  // The production resolver is intentionally not available in this UI slice. Keep the entry visible but disabled rather than simulating a call.
+  const callHangupRef = useRef<() => void>(() => {});
+  const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
+    { text: '继续通话', style: 'cancel' },
+    { text: '结束', style: 'destructive', onPress: () => callHangupRef.current() },
+  ]), []);
+  const handlePermissionSettings = useCallback(() => { void Linking.openSettings(); }, []);
+  const handleCallCleanupError = useCallback((error: unknown) => {
+    addDebugTrace('call', 'call resource cleanup failed', { error: String(error) });
+  }, []);
+  const call = useCallSession({
+    capabilities: { serverAvailable: false, nativeAvailable: false },
+    onBackConfirmation: handleBackConfirmation,
+    onPermissionSettings: handlePermissionSettings,
+    onCleanupError: handleCallCleanupError,
+  });
+  callHangupRef.current = call.hangup;
 
   const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
   const live2dAssetRoot = 'file:///android_asset/public/';
@@ -307,6 +329,15 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     onLogout?.();
   };
 
+  const openCall = () => {
+    if (!call.canStart) {
+      Alert.alert('通话暂不可用', '服务端或设备音频能力尚未就绪。请完成后续配置后再试。');
+      return;
+    }
+    closeDrawer();
+    void call.start(true);
+  };
+
   const handleColorMode = (mode: ColorMode) => {
     setColorMode(mode);
     AsyncStorage.setItem(COLOR_MODE_STORAGE_KEY, mode).catch((error) => {
@@ -318,7 +349,9 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     <View style={[styles.root, { backgroundColor: theme.root }]}>
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
-      <View style={[styles.live2dFixedLayer, { top: insets.top, height: live2dHeight }]}>
+      {call.state.phase !== 'IDLE' ? <CallScreen state={call.state} theme={theme} onHangup={call.hangup} onBack={handleBackConfirmation} /> : null}
+
+      <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
         <Image
           source={require('../assets/live2d/backgrounds/bg2.jpg')}
           style={[StyleSheet.absoluteFillObject, styles.backgroundImage]}
@@ -512,6 +545,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         </TouchableOpacity>
 
+         {Platform.OS === 'android' ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={call.canStart ? '给天依打电话' : '语音通话，暂不可用'} accessibilityState={{ disabled: !call.canStart }} disabled={!call.canStart} style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt, opacity: call.canStart ? 1 : 0.58 }]} onPress={call.canStart ? openCall : undefined} activeOpacity={0.78}>
+          <View style={styles.drawerItemRow}>
+            <Text style={[styles.drawerItemText, { color: theme.text }]}>语音通话</Text>
+            <Text style={[styles.callUnavailable, { color: theme.textMuted }]}>暂不可用</Text>
+          </View>
+         </TouchableOpacity> : null}
+
         <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.drawerSectionLabel, { color: theme.textMuted }]}>颜色模式</Text>
           {(Object.keys(COLOR_MODE_LABELS) as ColorMode[]).map((mode) => (
@@ -561,6 +601,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     zIndex: 10,
     overflow: 'hidden',
+  },
+  live2dCallLayer: {
+    zIndex: 20,
   },
   thinkingBubble: {
     position: 'absolute',
@@ -714,6 +757,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#243447',
+  },
+  callUnavailable: {
+    fontSize: 12,
   },
   drawerItemRow: {
     flexDirection: 'row',
