@@ -1,0 +1,18 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.sheepliu712.callaudio'
+version = '0.1.0'
+
+android {
+  namespace 'com.sheepliu712.callaudio'
+  defaultConfig {
+    minSdkVersion 24
+  }
+}
+
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+}
