@@ -7,7 +7,7 @@
 - Base64 只用于 Expo 原生桥接传递字节；`call.v1` WebSocket 仍使用现有二进制帧 codec
 - 模块不发送 socket ACK，不决定通话生命周期；后台事件、音频错误、路由观察和停止回执交给上层 coordinator
 - Expo Go、非 Android、模块缺失或实际格式初始化失败时能力为 unavailable
-- 当前实现仍是 Proposed 原型；Android SDK 缺失时不能据此宣称原生已编译、真机通过或 AC 完成
+- 当前实现仍是 Proposed 候选；已有编译、APK 和模拟器加载证据，但不能据此宣称真机通过或 AC 完成
 
 ## 完成与停止语义
 
@@ -41,14 +41,17 @@
 
 ## 仍需真机证据
 
-- Android 原生编译与 New Architecture 装配
+- 真机上的 New Architecture 模块装配与长期运行稳定性
 - AEC 在目标设备上的实际效果，而不只是 `AcousticEchoCanceler` 创建/启用结果
 - 有线耳机、听筒、扬声器、蓝牙路由行为；当前只观察系统输出设备，不强制承诺路由
 - 真实播放头、延迟和 stop 延迟；Jest/Kotlin helper 测试不能替代设备证据
 
 ## 当前验证状态
 
-- 候选代码尚未经过 Android/Kotlin 编译；本机没有 Android SDK、ADB、Gradle wrapper、`kotlinc` 或预构建原生工程
-- `npx expo-modules-autolinking verify --verbose` 已从默认 `./modules` 搜索路径解析 package `agent-luotianyi-call-audio@0.1.0`、模块 `com.sheepliu712.callaudio.CallAudioModule` 与本地 source directory；无需根 `dependencies` 或额外 config plugin，但这不证明 Android 能编译或加载模块
-- N9 stop operation registry 已用于生产 stop command path；重复与 global/per-stream 重叠 waiter、termination drain 和迟到 settle-once 有纯 Kotlin 测试源码及 TS mock 证据，但 Kotlin 测试未执行
+- `npx expo-modules-autolinking verify --verbose` 从默认 `./modules` 解析 `agent-luotianyi-call-audio@0.1.0` 与 `com.sheepliu712.callaudio.CallAudioModule`；根 `dependencies` 和额外 config plugin 均不需要。
+- 真实模块任务 `compileDebugKotlin` 与 `testDebugUnitTest` 成功；`PlaybackAccountingTest` 9 passed，`CallAudioModule` 与 `reacquireAudioFocus` 已编译。
+- 完整 New Architecture Debug APK：`ca8acf965a126d8824620f6659394dfad9d3bd0ee2ad3586ce0c0ce8aa0e2179`，四 ABI、minSdk 24、targetSdk 36、Debug v2 签名。`CallAudioModule` 与 `reacquireAudioFocus` 位于 APK DEX。APK 不含 JS bundle，单独 `am start` 只能证明原生壳启动。
+- 隔离 Windows build 使用短 source/cache 和 `CMAKE_OBJECT_PATH_MAX=200`；生成路径实际 hash，完整 `.o` 最大 241 字符。APK、SDK、cache、debug keystore 和代理设置不进入 Git。
+- AOSP ATD API 36 x86_64 + WHPX headless 设备完成安装和真实 Metro（1289 modules）启动；Expo JSI、Fabric 和 Native Module presence 成功。权限拒绝 fail-closed；授权后因模拟器无 AEC 返回 `aec_unavailable`，焦点 API 返回 `session_not_ready`，cleanup 成功且无 FATAL。
+- N9 stop operation registry 已用于生产 stop command path；重复与 global/per-stream 重叠 waiter、termination drain 和迟到 settle-once 同时具有 Kotlin 9 tests 与 TS mock 证据。
 - 历史 Oracle 第三轮仍为 `CHANGES_REQUESTED`；本文件记录的是供后续 focused 核对的 Draft candidate，不是 native gate、AC 或硬件能力通过证明
