@@ -80,6 +80,7 @@ class WebSocketService:
             payload=event.get("payload", {}),
             client_msg_id=event.get("client_msg_id"),
             ts=event.get("ts"),
+            raw_event=event,
         )
 
     async def _reject_oversized_frame(self, connection: "WebSocketConnection", event: dict) -> None:

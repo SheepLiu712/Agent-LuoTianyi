@@ -37,6 +37,10 @@ class CallSummarySkill:
     def __init__(self, models: dict[str, CallSummaryModel]) -> None:
         self._models = models
 
+    def supports_character(self, character_id: str) -> bool:
+        model = self._models.get(character_id)
+        return model is not None and callable(getattr(model, "generate_response", None))
+
     async def summarize(self, invocation: SkillInvocation, snapshot: CallFinalSnapshot) -> str:
         turns = render_call_turns(snapshot)
         if not turns:

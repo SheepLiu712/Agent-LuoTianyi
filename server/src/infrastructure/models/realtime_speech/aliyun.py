@@ -5,16 +5,26 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
+from uuid import UUID
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 
 from src.domain.call import CallAudioSemantic
+from src.infrastructure.observability.call_metrics import (
+    CallCostStatus,
+    CallMetric,
+    CallMetricName,
+    CallMetricResult,
+    CallMetricStatus,
+    CallProvider,
+)
 
 from .config import AliyunRealtimeSpeechConfig
 from .contracts import (
@@ -57,7 +67,14 @@ class _ResponseCleanup:
 class AliyunRealtimeSpeechSession:
     """One isolated provider session with bounded I/O and fail-closed cleanup."""
 
-    def __init__(self, config: AliyunRealtimeSpeechConfig, *, connector: Connector | None = None) -> None:
+    def __init__(
+        self,
+        config: AliyunRealtimeSpeechConfig,
+        *,
+        connector: Connector | None = None,
+        call_id: UUID | None = None,
+        call_metrics=None,
+    ) -> None:
         self._config = config
         self._connector = connector or websockets.connect
         self._socket: _WebSocket | None = None
@@ -83,8 +100,11 @@ class AliyunRealtimeSpeechSession:
         self._retired_responses: set[str] = set()
         self._item_owners: dict[str, str] = {}
         self.usage_totals: dict[str, int] = {}
+        self._call_id = call_id
+        self._call_metrics = call_metrics
 
     async def start(self, config: RealtimeSpeechConfig) -> None:
+        started = time.monotonic()
         if self._closed:
             raise RuntimeError("realtime speech session is closed")
         if self._socket is not None:
@@ -107,23 +127,41 @@ class AliyunRealtimeSpeechSession:
             await self.close()
             raise
         except Exception as exc:
+            self._record_metric(
+                CallMetricName.PROVIDER_ENDPOINT,
+                started,
+                status=CallMetricStatus.ERROR,
+                error_code="PROVIDER_START_FAILED",
+            )
             await self._fail("provider_start_failed", retryable=True)
             raise RuntimeError("realtime speech provider initialization failed") from exc
+        self._record_metric(CallMetricName.PROVIDER_ENDPOINT, started)
 
     async def push_audio(self, frame: AudioFrame) -> None:
-        if self._closed or self._failed:
-            raise RuntimeError("realtime speech session is unavailable")
-        if self._socket is None or self._session_updated is None or not self._session_updated.done():
-            raise RuntimeError("realtime speech session is not ready")
-        if frame.encoding != "pcm_s16le" or frame.sample_rate != 16_000 or frame.channels != 1:
-            raise ValueError("Aliyun realtime speech requires 16 kHz mono PCM16")
-        if len(frame.payload) % 2:
-            raise ValueError("PCM16 payload must contain complete samples")
-        if len(frame.payload) > self._config.max_audio_frame_bytes:
-            raise ValueError("audio frame exceeds configured size limit")
-        await self._enqueue(
-            {"type": "input_audio_buffer.append", "audio": base64.b64encode(frame.payload).decode("ascii")}
-        )
+        started = time.monotonic()
+        try:
+            if self._closed or self._failed:
+                raise RuntimeError("realtime speech session is unavailable")
+            if self._socket is None or self._session_updated is None or not self._session_updated.done():
+                raise RuntimeError("realtime speech session is not ready")
+            if frame.encoding != "pcm_s16le" or frame.sample_rate != 16_000 or frame.channels != 1:
+                raise ValueError("Aliyun realtime speech requires 16 kHz mono PCM16")
+            if len(frame.payload) % 2:
+                raise ValueError("PCM16 payload must contain complete samples")
+            if len(frame.payload) > self._config.max_audio_frame_bytes:
+                raise ValueError("audio frame exceeds configured size limit")
+            await self._enqueue(
+                {"type": "input_audio_buffer.append", "audio": base64.b64encode(frame.payload).decode("ascii")}
+            )
+        except Exception:
+            self._record_metric(
+                CallMetricName.PROVIDER_ENDPOINT,
+                started,
+                status=CallMetricStatus.ERROR,
+                error_code="PROVIDER_PUSH_AUDIO_FAILED",
+            )
+            raise
+        self._record_metric(CallMetricName.PROVIDER_ENDPOINT, started)
 
     async def events(self) -> AsyncIterator[RealtimeSpeechEvent]:
         await self._acquire_event_consumer()
@@ -423,6 +461,52 @@ class AliyunRealtimeSpeechSession:
             amount = usage.get(key)
             if type(amount) is int and amount >= 0:
                 self.usage_totals[key] = self.usage_totals.get(key, 0) + amount
+        total = usage.get("total_tokens")
+        if type(total) is int and total >= 0:
+            self._record_metric(
+                CallMetricName.PROVIDER_USAGE,
+                time.monotonic(),
+                numeric={"usage_units": total, "cost_microunits": None},
+                labels={"provider": CallProvider.ALIYUN.value, "cost_status": CallCostStatus.UNKNOWN.value},
+            )
+
+    def _record_metric(
+        self,
+        name: CallMetricName,
+        started: float,
+        *,
+        status: CallMetricStatus = CallMetricStatus.SUCCESS,
+        error_code: str | None = None,
+        numeric: dict[str, int | float | None] | None = None,
+        labels: dict[str, str] | None = None,
+    ) -> None:
+        if self._call_id is None or self._call_metrics is None:
+            return
+        from datetime import datetime, timezone
+
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        metric_labels = {"provider": CallProvider.ALIYUN.value, "result": CallMetricResult.SUCCEEDED.value}
+        if status is CallMetricStatus.ERROR:
+            metric_labels["result"] = CallMetricResult.FAILED.value
+        if error_code is not None:
+            metric_labels["error_code"] = error_code
+        if labels:
+            metric_labels.update(labels)
+        try:
+            self._call_metrics.record(
+                CallMetric(
+                    call_id=self._call_id,
+                    name=name,
+                    start_ts=timestamp,
+                    end_ts=timestamp,
+                    duration_ms=max(0, (time.monotonic() - started) * 1000),
+                    status=status,
+                    numeric=numeric,
+                    labels=metric_labels,
+                )
+            )
+        except Exception:
+            pass
 
     async def _fail(self, error_code: str, retryable: bool) -> None:
         if self._failed or self._closed:

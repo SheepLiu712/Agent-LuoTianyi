@@ -26,6 +26,7 @@ from .types import (
     PreferenceOverwriteRequest,
     RegisterRequest,
     ResetAccountRequest,
+    UserDataResetRequest,
 )
 
 if TYPE_CHECKING:
@@ -81,6 +82,16 @@ async def reset_account(
 ):
     logger.info("Reset account request for username=%s", req.new_username)
     return await server_runtime.user_interface.reset_account(req, server_runtime, request)
+
+
+@router.post("/user/data/reset")
+async def reset_user_data(
+    req: UserDataResetRequest,
+    authorization: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    token = require_bearer_token(authorization)
+    return await server_runtime.user_interface.reset_user_data(req, token, server_runtime)
 
 
 @router.post("/auth/login")

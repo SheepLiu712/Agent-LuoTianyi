@@ -4,16 +4,20 @@ from __future__ import annotations
 
 
 class UserResetInteractionCoordinator:
-    def __init__(self, *, fence, stage_manager, call_settlements) -> None:
+    def __init__(self, *, fence, stage_manager, call_settlements, call_transports=None) -> None:
         self._fence = fence
         self._stages = stage_manager
         self._settlements = call_settlements
+        self._call_transports = call_transports
 
     async def begin_user_data_reset(self, user_id: str) -> object:
         return await self._fence.begin(user_id)
 
     async def stop_user_interactions(self, user_id: str) -> int:
-        return await self._stages.stop_user_interactions(user_id)
+        closed_transports = 0
+        if self._call_transports is not None:
+            closed_transports = await self._call_transports.close_user_sessions(user_id)
+        return closed_transports + await self._stages.stop_user_interactions(user_id)
 
     async def wait_user_settlements(self, user_id: str) -> None:
         await self._settlements.wait_user(user_id)

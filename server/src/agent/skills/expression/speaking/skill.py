@@ -54,6 +54,13 @@ class SpeakingSkill:
         if self._backend is not None:
             await self._backend.stop()
 
+    def supports_call_audio(self, character_id: str) -> bool:
+        """Report whether the configured character has a live CALL PCM backend."""
+        if self._backend is None:
+            return True
+        module = self._backend.tts_module.get(character_id)
+        return module is not None and callable(getattr(module, "stream_synthesize_call_pcm_with_tone", None))
+
     def abort_initialization(self) -> None:
         """初始化后续 Skill 失败时同步回收已启动的 worker。"""
         if self._backend is not None:

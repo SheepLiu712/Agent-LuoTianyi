@@ -43,6 +43,16 @@ class CallSettlementConsumerImpl:
         self._batches = call_maintenance_batches
         self._call_metrics = call_metrics
 
+    @property
+    def is_ready(self) -> bool:
+        return bool(
+            self._agent_settlement is not None
+            and self._calls is not None
+            and self._conversations is not None
+            and self._batches is not None
+            and self._release_call_maintenance is not None
+        )
+
     async def settle(self, snapshot: CallFinalSnapshot) -> None:
         record = await complete_owned(asyncio.to_thread(self._calls.find_by_id, snapshot.terminal.call_id))
         self._validate_record(record, snapshot)

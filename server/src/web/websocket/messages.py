@@ -77,3 +77,4 @@ class WSMessage:
     client_msg_id: str | None = None
     ts: int | None = None
     reply_to: str | None = None
+    raw_event: dict[str, Any] | None = None

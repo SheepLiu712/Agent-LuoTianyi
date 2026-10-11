@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from src.adapter.websocket import ChatEventAcceptance, EventRejection, VoiceUploadError
+from src.adapter.websocket.call_v1 import ControlProtocolError, decode_control_text, encode_control_message
 from src.application.admin import get_admin_shell
 from src.utils.logger import get_logger
 from src.web.http import runtime_not_ready_detail
@@ -120,6 +122,44 @@ async def _receive_events(server_runtime: "ServerRuntime", connection: WebSocket
             await websocket_service.send_ack_event(connection, event)
 
 
+async def _handle_call_switch_prepare(
+    server_runtime: "ServerRuntime", connection: WebSocketConnection, event: WSMessage
+) -> None:
+    raw = event.raw_event
+    try:
+        if not isinstance(raw, dict):
+            raise ControlProtocolError("BAD_MESSAGE", "$")
+        message = decode_control_text(
+            json.dumps(raw, ensure_ascii=False, separators=(",", ":")),
+            sender="client",
+            transport="chat_ws",
+        )
+        if message["type"] != "call.switch_prepare":
+            raise ControlProtocolError("UNEXPECTED_CONTROL", "$.type")
+        stage_manager = server_runtime.stage_manager
+        if stage_manager is None:
+            raise RuntimeError("StageManager is required for call transition")
+        await stage_manager.prepare_call_transition(
+            connection,
+            character_id=str(message["character_id"]),
+            client_request_id=str(message["client_request_id"]),
+        )
+        response = {
+            "protocol": "call.v1",
+            "type": "call.switch_ready",
+            "client_request_id": str(message["client_request_id"]),
+            "character_id": str(message["character_id"]),
+        }
+        await connection.websocket.send_json(
+            json.loads(encode_control_message(response, sender="server", transport="chat_ws"))
+        )
+    except (ControlProtocolError, ValueError) as error:
+        code = error.code if isinstance(error, ControlProtocolError) else "CALL_SWITCH_REJECTED"
+        await server_runtime.websocket_service.send_nack_event(
+            connection, event, code=code, message="call transition is not available", retryable=False
+        )
+
+
 async def _handle_transport_event(
     server_runtime: "ServerRuntime",
     connection: WebSocketConnection,
@@ -131,6 +171,9 @@ async def _handle_transport_event(
         return True
     if event.event_type == WSEventType.LLM_RESPONSE.value:
         server_runtime.client_llm_executor.on_llm_response(event.payload)
+        return True
+    if event.event_type == "call.switch_prepare":
+        await _handle_call_switch_prepare(server_runtime, connection, event)
         return True
     if event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value):
         _update_client_model_types(connection, event.payload)

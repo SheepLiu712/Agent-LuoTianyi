@@ -27,6 +27,7 @@ from src.web.http.types import (
     PreferenceOverwriteRequest,
     RegisterRequest,
     ResetAccountRequest,
+    UserDataResetRequest,
 )
 
 if TYPE_CHECKING:
@@ -166,6 +167,44 @@ class UserInterface:
         if not success:
             raise HTTPException(status_code=400, detail=msg)
         return {"message": "重置成功", "username": req.new_username}
+
+    async def reset_user_data(
+        self,
+        req: UserDataResetRequest,
+        token: str,
+        server_runtime: ServerRuntime,
+    ):
+        """Delete only data owned by the authenticated user, retaining account credentials."""
+        credentials = server_runtime.database_manager.credential_service
+        if credentials is None:
+            raise RuntimeError("CredentialService is required for user data reset")
+        valid, user_id = await self._run_auth_work(credentials.check_message_token, req.username, token)
+        if not valid or user_id is None:
+            raise HTTPException(status_code=401, detail="消息令牌无效或不属于该用户")
+        reset_service = server_runtime.user_reset_service
+        if reset_service is None:
+            raise RuntimeError("UserResetService is required for user data reset")
+        try:
+            report = await reset_service.reset(user_id)
+        except RuntimeError as error:
+            if str(error) == "USER_DATA_RESET_IN_PROGRESS":
+                raise HTTPException(status_code=409, detail="用户数据重置正在进行") from error
+            raise HTTPException(status_code=500, detail={"code": "USER_DATA_RESET_FAILED"}) from error
+        payload = {
+            "ok": report.success,
+            "steps": [
+                {
+                    "name": step.name,
+                    "success": step.success,
+                    "deleted_count": step.deleted_count,
+                    "error": step.error,
+                }
+                for step in report.steps
+            ],
+        }
+        if not report.success:
+            raise HTTPException(status_code=500, detail={"code": "USER_DATA_RESET_FAILED", **payload})
+        return payload
 
     async def login(
         self,

@@ -90,6 +90,15 @@ class CallStageOwnership:
     generation: int
 
 
+class CallStartFailed(RuntimeError):
+    """Stable duplicate-start failure preserving the durable call identity."""
+
+    def __init__(self, record: CallSessionRecord) -> None:
+        self.call_id = str(record.call_id)
+        self.end_reason = record.end_reason
+        super().__init__("CALL_START_FAILED")
+
+
 class StageManager:
     """按用户与角色管理 Stage，持有共享 adapter 及离线回收任务。"""
 
@@ -329,6 +338,12 @@ class StageManager:
                 task.add_done_callback(lambda finished, key=client_request_id: self._call_start_done(key, finished))
         return await complete_owned(self._await_call_start(task))
 
+    async def infer_call_source_interaction(self, *, user_id: str, character_id: str) -> str | None:
+        """Return the only chat interaction a new call may transition from."""
+        async with self._lock:
+            stage = self._stages.get((user_id, character_id))
+            return None if stage is None else stage.interaction_id
+
     @staticmethod
     async def _await_call_start(task: asyncio.Task[CallStartClaim]) -> CallStartClaim:
         return await asyncio.shield(task)
@@ -473,10 +488,10 @@ class StageManager:
             await self._mark_call_failed(record, original_error)
         except Exception as cleanup_error:  # noqa: BLE001 - preserve original failure and report cleanup loss
             get_logger(__name__).error(
-                "Failed to mark call ledger failed call=%s original=%s cleanup=%s",
+                "Failed to mark call ledger failed call=%s original_type=%s cleanup_type=%s",
                 record.call_id,
-                original_error,
-                cleanup_error,
+                type(original_error).__name__,
+                type(cleanup_error).__name__,
             )
 
     async def _repository_call(self, operation: Callable, *args, **kwargs):
@@ -506,6 +521,8 @@ class StageManager:
     ) -> CallStartClaim:
         if record.user_id != user_id or record.character_id != character_id:
             raise ValueError("client_request_id belongs to another call owner")
+        if record.state is CallState.FAILED:
+            raise CallStartFailed(record)
         lease = self._lease_registry.current(user_id, character_id)
         if lease is None or lease.source is not InteractionSource.CALL or lease.interaction_id != str(record.call_id):
             raise ValueError("existing call is not owned by this runtime")
@@ -550,6 +567,24 @@ class StageManager:
         self._call_claims.pop(call_id)
         self._call_ownerships[call_id] = ownership
         return ownership
+
+    async def fail_pending_call_claim(self, claim: CallStartClaim, error: BaseException) -> bool:
+        """Fail only the still-pending claim identified by this exact value."""
+        call_id = str(claim.record.call_id)
+        async with self._lock:
+            if self._call_claims.get(call_id) != claim:
+                return False
+            if call_id in self._call_ownerships or call_id in self._call_stages:
+                return False
+            current = self._lease_registry.current(claim.record.user_id, claim.record.character_id)
+            if current != claim.lease or current.source is not InteractionSource.CALL:
+                return False
+            self._call_claims.pop(call_id)
+            self._call_setup_deadlines.pop(claim.record.client_request_id, None)
+            if not self._lease_registry.release(claim.lease):
+                raise RuntimeError("pending call lease release failed")
+        await self._mark_call_failed(claim.record, error)
+        return True
 
     def current_call_ownership(self, call_id: str) -> CallStageOwnership | None:
         return self._call_ownerships.get(call_id)
@@ -671,8 +706,9 @@ class StageManager:
         if self._call_sessions is None:
             self.release_call(ownership)
             raise RuntimeError("call session repository is not bound")
+        stage = None
         try:
-            stage = await CallStage.create(
+            stage = CallStage(
                 ownership=ownership,
                 record=claim.record,
                 agent=self._get_agent(character_id),
@@ -687,8 +723,18 @@ class StageManager:
                 wall_clock=self._wall_clock,
                 config=config,
             )
-        except BaseException:
-            self.release_call(ownership)
+            bind_stage = getattr(transport, "bind_stage", None)
+            if bind_stage is not None:
+                bind_stage(stage)
+            await stage.start()
+        except BaseException as original_error:
+            await self._cleanup_failed_call_stage(
+                claim=claim,
+                ownership=ownership,
+                stage=stage,
+                transport=transport,
+                original_error=original_error,
+            )
             raise
         async with self._lock:
             await self._require_generation(user_id, claim.admission_generation)
@@ -698,6 +744,43 @@ class StageManager:
             if stage.snapshot is None and self.current_call_ownership(ownership.call_id) == ownership:
                 self._call_stages[ownership.call_id] = stage
         return stage
+
+    async def _cleanup_failed_call_stage(self, *, claim, ownership, stage, transport, original_error) -> None:
+        if stage is not None and stage.snapshot is None:
+            try:
+                if stage._started:
+                    await stage.close()
+                else:
+                    await stage._cleanup()
+            except BaseException as cleanup_error:
+                self._log_call_cleanup_failure("stage", claim, original_error, cleanup_error)
+        reason = (
+            CallEndReason.SETUP_TIMEOUT
+            if isinstance(original_error, (TimeoutError, asyncio.TimeoutError))
+            or self._monotonic() >= claim.setup_deadline
+            else CallEndReason.SYSTEM_FAILURE
+        )
+        send_failed = getattr(transport, "send_failed", None)
+        if send_failed is not None:
+            try:
+                await send_failed(reason)
+            except BaseException as cleanup_error:
+                self._log_call_cleanup_failure("failure delivery", claim, original_error, cleanup_error)
+        self.release_call(ownership)
+        try:
+            await self._mark_call_failed(claim.record, original_error)
+        except BaseException as cleanup_error:
+            self._log_call_cleanup_failure("ledger", claim, original_error, cleanup_error)
+
+    @staticmethod
+    def _log_call_cleanup_failure(kind, claim, original_error, cleanup_error) -> None:
+        get_logger(__name__).error(
+            "Call postclaim %s cleanup failed call=%s original_type=%s cleanup_type=%s",
+            kind,
+            claim.record.call_id,
+            type(original_error).__name__,
+            type(cleanup_error).__name__,
+        )
 
     def _call_stage_creation_done(self, task: asyncio.Task[Any]) -> None:
         self._call_stage_creations.discard(task)
@@ -828,16 +911,18 @@ class StageManager:
             if isinstance(error, (TimeoutError, asyncio.TimeoutError))
             else CallEndReason.SYSTEM_FAILURE
         )
-        failed = record.with_update(
+        current = await self._repository_call(self._call_sessions.find_by_id, record.call_id)
+        if current is None or current.state is CallState.FAILED:
+            return
+        failed = current.with_update(
             state=CallState.FAILED,
             end_reason=end_reason,
             updated_at=await self._next_call_timestamp(),
         )
-        assert self._call_sessions is not None
         await self._repository_call(
             self._call_sessions.update_if_state,
             record.call_id,
-            expected_state=CallState.PREPARING,
+            expected_state=current.state,
             record=failed,
         )
 

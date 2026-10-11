@@ -5,14 +5,19 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.call_v1 import CallTransportHub, parse_call_transport_enabled
+from src.adapter.websocket.call_v1 import CallStageBinding, CallTransportHub, parse_call_transport_enabled
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
+from src.application.call import CallSettlementConsumerImpl, CallSettlementCoordinator, StaleCallRecoveryService
+from src.application.host_context import ServerHostContext
+from src.application.user import UserResetFence, UserResetInteractionCoordinator, UserResetService
 from src.domain.stage import StageState
-from src.infrastructure.media import MediaResolver, create_media_resolver
+from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
+from src.infrastructure.models.realtime_speech import AliyunRealtimeSpeechSessionFactory
 from src.infrastructure.models.service import LLMService
-from src.infrastructure.observability import ObservabilityService, set_observability_service
+from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
+from src.infrastructure.persistence.call_maintenance_projection import CallMaintenanceProjectionVerifier
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
@@ -27,6 +32,35 @@ from src.world import WorldRuntime
 
 logger = get_logger(__name__)
 DEFAULT_WORLD_ID: Final = "default"
+
+
+@dataclass(frozen=True, slots=True)
+class CallCapabilityStatus:
+    enabled: bool
+    trusted_host: bool
+    provider_ready: bool
+    call_tts_ready: bool
+    summary_ready: bool
+    settlement_ready: bool
+    stage_binding_ready: bool
+    recovery_ready: bool
+    character_ids: tuple[str, ...] = ()
+
+    @property
+    def available(self) -> bool:
+        return all(
+            (
+                self.enabled,
+                self.trusted_host,
+                self.provider_ready,
+                self.call_tts_ready,
+                self.summary_ready,
+                self.settlement_ready,
+                self.stage_binding_ready,
+                self.recovery_ready,
+                bool(self.character_ids),
+            )
+        )
 
 
 @dataclass
@@ -46,7 +80,17 @@ class ServerRuntime:
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
     call_transport_hub: CallTransportHub | None = None
+    call_metrics: CallMetrics | None = None
+    user_reset_fence: UserResetFence | None = None
+    realtime_speech_factory: AliyunRealtimeSpeechSessionFactory | None = None
+    call_settlement_coordinator: CallSettlementCoordinator | None = None
+    stale_call_recovery: StaleCallRecoveryService | None = None
+    user_reset_service: UserResetService | None = None
+    call_capability: CallCapabilityStatus = field(
+        default_factory=lambda: CallCapabilityStatus(False, False, False, False, False, False, False, False, ())
+    )
     _call_transport_requested: bool = field(default=False, repr=False)
+    _host_context: ServerHostContext = field(default_factory=ServerHostContext, repr=False)
     default_world_id: str = DEFAULT_WORLD_ID
     world_stage_config: dict = field(default_factory=dict, repr=False)
     _world_stages: dict[tuple[str, str], WorldStage] = field(default_factory=dict, init=False, repr=False)
@@ -56,7 +100,12 @@ class ServerRuntime:
     _shutdown_completed_stages: set[str] = field(default_factory=set, init=False, repr=False)
 
     @classmethod
-    async def initialize(cls, config: dict, observability: ObservabilityService | None = None) -> ServerRuntime:
+    async def initialize(
+        cls,
+        config: dict,
+        observability: ObservabilityService | None = None,
+        host_context: ServerHostContext | None = None,
+    ) -> ServerRuntime:
         owns_observability = observability is None
         database_manager: DatabaseManager | None = None
         media_resolver: MediaResolver | None = None
@@ -110,6 +159,20 @@ class ServerRuntime:
             )
 
             # 7. 组装系统运行时
+            call_transport_config = config.get("call_transport", {})
+            if not isinstance(call_transport_config, dict):
+                raise ValueError("call_transport must be an object")
+            call_requested = parse_call_transport_enabled(config)
+            resolved_host_context = host_context or ServerHostContext()
+            call_metrics = CallMetrics(observability)
+            speech_factory = (
+                AliyunRealtimeSpeechSessionFactory.from_mapping(
+                    call_transport_config.get("realtime_speech", {}), call_metrics=call_metrics
+                )
+                if call_requested and resolved_host_context.supports_single_process_calls
+                else AliyunRealtimeSpeechSessionFactory(None, call_metrics=call_metrics)
+            )
+            reset_fence = UserResetFence()
             runtime = cls(
                 user_interface=UserInterface(database_manager, media_resolver),
                 websocket_service=WebSocketService(),
@@ -130,8 +193,12 @@ class ServerRuntime:
                 ),
                 default_world_id=str(config.get("world", {}).get("world_id", DEFAULT_WORLD_ID)),
                 world_stage_config=config.get("world_stage", {}),
-                call_transport_hub=CallTransportHub(),
-                _call_transport_requested=parse_call_transport_enabled(config),
+                call_transport_hub=CallTransportHub(user_reset_fence=reset_fence),
+                call_metrics=call_metrics,
+                user_reset_fence=reset_fence,
+                realtime_speech_factory=speech_factory,
+                _call_transport_requested=call_requested,
+                _host_context=resolved_host_context,
             )
 
             event_store = database_manager.event_store
@@ -143,10 +210,73 @@ class ServerRuntime:
                 get_context_factory=agent_runtime.context_factories.__getitem__,
                 due_event_provider=EventStoreDueEventProvider(event_store),
                 call_sessions=database_manager.call_sessions,
+                user_reset_fence=reset_fence,
                 config=config.get("stage_manager", {}),
             )
 
+            if (
+                database_manager.call_sessions is None
+                or database_manager.call_maintenance_batches is None
+                or database_manager.conversation_service is None
+                or database_manager.memory_store is None
+                or database_manager.user_store is None
+            ):
+                raise RuntimeError("Call runtime persistence dependencies are required")
+            projection_verifier = CallMaintenanceProjectionVerifier(
+                memory_store=database_manager.memory_store,
+                vector_store=agent_runtime.vector_store,
+                user_store=database_manager.user_store,
+            )
+            from src.stage.call_settlement import CallAgentSettlement
+
+            settlement_consumer = CallSettlementConsumerImpl(
+                agent_settlement=CallAgentSettlement(
+                    get_agent=agent_runtime.get_agent,
+                    get_context_factory=agent_runtime.context_factories.__getitem__,
+                ),
+                call_sessions=database_manager.call_sessions,
+                conversation_service=database_manager.conversation_service,
+                release_call_maintenance=agent_runtime.release_call_maintenance,
+                call_maintenance_batches=database_manager.call_maintenance_batches,
+                call_metrics=call_metrics,
+            )
+            runtime.call_settlement_coordinator = CallSettlementCoordinator(
+                consumer=settlement_consumer,
+                resources=agent_runtime,
+                user_reset_fence=reset_fence,
+                call_owner=database_manager.call_sessions.find_by_id,
+            )
+            media_store = PermanentMediaStore(media_config) if media_config.get("root") else None
+            if media_store is None:
+                raise RuntimeError("Configured permanent media storage is required for user data reset")
+            runtime.user_reset_service = UserResetService(
+                interactions=UserResetInteractionCoordinator(
+                    fence=reset_fence,
+                    stage_manager=runtime.stage_manager,
+                    call_settlements=runtime.call_settlement_coordinator,
+                    call_transports=runtime.call_transport_hub,
+                ),
+                conversation_service=database_manager.conversation_service,
+                memory_store=database_manager.memory_store,
+                user_store=database_manager.user_store,
+                vector_store=agent_runtime.vector_store,
+                redis_buffer=database_manager.redis,
+                media_store=media_store,
+                call_sessions=database_manager.call_sessions,
+                call_maintenance_batches=database_manager.call_maintenance_batches,
+            )
+            runtime.stale_call_recovery = StaleCallRecoveryService(
+                call_sessions=database_manager.call_sessions,
+                conversation_service=database_manager.conversation_service,
+                call_maintenance_batches=database_manager.call_maintenance_batches,
+                projection_verifier=projection_verifier,
+            )
+
             runtime._wire_dependencies()
+            recovery_report = await runtime.stale_call_recovery.reconcile()
+            if recovery_report.failed or recovery_report.conflicted:
+                raise RuntimeError("stale call recovery did not converge")
+            runtime.call_capability = runtime._build_call_capability(recovery_ready=True)
             runtime._start_background_services()
             runtime.user_interface.generate_rsa_keys()
             return runtime
@@ -164,8 +294,32 @@ class ServerRuntime:
 
     @property
     def call_transport_available(self) -> bool:
-        """Calls stay unavailable until later CLs bind lifecycle, ledger and provider dependencies."""
-        return False
+        return self.call_capability.available
+
+    @property
+    def call_capability_status(self) -> CallCapabilityStatus:
+        return self.call_capability
+
+    def _build_call_capability(self, *, recovery_ready: bool) -> CallCapabilityStatus:
+        character_id = self.agent_runtime.default_character_id
+        speaking = self.agent_runtime.skills.speaking
+        summary = self.agent_runtime.skills.call_summary
+        return CallCapabilityStatus(
+            enabled=self._call_transport_requested,
+            trusted_host=self._host_context.supports_single_process_calls,
+            provider_ready=bool(self.realtime_speech_factory and self.realtime_speech_factory.is_configured),
+            call_tts_ready=speaking.supports_call_audio(character_id),
+            summary_ready=summary.supports_character(character_id),
+            settlement_ready=bool(self.call_settlement_coordinator and self.call_settlement_coordinator.is_ready),
+            stage_binding_ready=isinstance(self.stage_manager, StageManager)
+            and isinstance(self.call_transport_hub, CallTransportHub)
+            and callable(getattr(CallStageBinding, "bind_stage", None)),
+            recovery_ready=recovery_ready and self.stale_call_recovery is not None,
+            character_ids=(character_id,),
+        )
+
+    def supports_call_character(self, character_id: str) -> bool:
+        return self.call_capability.available and character_id in self.call_capability.character_ids
 
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
@@ -219,6 +373,22 @@ class ServerRuntime:
                 "chat stages",
                 runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None,
             ),
+            (
+                "call transport hub",
+                (
+                    runtime.call_transport_hub.close
+                    if runtime is not None and runtime.call_transport_hub is not None
+                    else None
+                ),
+            ),
+            (
+                "call settlement coordinator",
+                (
+                    runtime.call_settlement_coordinator.close
+                    if runtime is not None and runtime.call_settlement_coordinator is not None
+                    else None
+                ),
+            ),
             ("world runtime", world.stop_background_services if world is not None else None),
             (
                 "agent runtime",
@@ -270,6 +440,11 @@ class ServerRuntime:
                 ("world runtime", self.world.stop_background_services),
                 ("world stages", self.close_world_stages),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
+                ("call transport hub", self.call_transport_hub.close if self.call_transport_hub is not None else None),
+                (
+                    "call settlement coordinator",
+                    self.call_settlement_coordinator.close if self.call_settlement_coordinator is not None else None,
+                ),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
                 ("database manager", self.database_manager.shutdown),
                 ("global references", self._shutdown_clear_global_references),

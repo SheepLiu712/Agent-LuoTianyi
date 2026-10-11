@@ -41,6 +41,12 @@ class ResetAccountRequest(BaseModel):
     new_password: str
 
 
+class UserDataResetRequest(BaseModel):
+    """Authenticated request to erase resettable data while retaining credentials."""
+
+    username: str
+
+
 class AutoLoginRequest(BaseModel):
     username: str
     token: str

@@ -41,6 +41,16 @@ class CallSettlementCoordinator:
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._task_users: dict[UUID, str] = {}
 
+    @property
+    def is_ready(self) -> bool:
+        consumer_ready = getattr(self._consumer, "is_ready", False)
+        return bool(
+            consumer_ready
+            and self._resources is not None
+            and self._user_reset_fence is not None
+            and self._call_owner is not None
+        )
+
     async def emit(self, snapshot: CallFinalSnapshot) -> None:
         call_id = snapshot.terminal.call_id
         user_id = self._resolve_user_id(call_id)

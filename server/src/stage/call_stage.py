@@ -41,7 +41,13 @@ from src.infrastructure.models.realtime_speech import (
     SpeechStopped,
     TurnCompleted,
 )
-from src.infrastructure.observability.call_metrics import CallMetric, CallMetricName, CallMetricResult, CallMetricStatus
+from src.infrastructure.observability.call_metrics import (
+    CallMetric,
+    CallMetricName,
+    CallMetricResult,
+    CallMetricStatus,
+    CallProvider,
+)
 from src.infrastructure.persistence.call_sessions.repository import CallSessionRecord, CallSessionRepository
 from src.utils.owned_operation import complete_owned
 
@@ -109,6 +115,7 @@ class _Response:
     playback_completed: bool = False
     failed: bool = False
     settled: asyncio.Event | None = None
+    audio_started_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +146,7 @@ class _Turn:
     semantic: str
     status: CallReplyStatus = CallReplyStatus.NOT_STARTED
     formal_text: str | None = None
+    started_at: float = 0.0
 
 
 class CallStage:
@@ -187,6 +195,7 @@ class CallStage:
         self._context: InteractionContext | None = None
         self._provider: RealtimeSpeechSession | None = None
         self._pcm: asyncio.Queue[AudioFrame] = asyncio.Queue(self._pcm_capacity)
+        self._pcm_buffered_bytes = 0
         self._receipts: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         self._provider_audio_sequence = 0
         self._plans: deque[_QueuedPlan] = deque()
@@ -223,6 +232,8 @@ class CallStage:
         self._lifecycle_lock = asyncio.Lock()
         self._transport_abort_task: asyncio.Task[Any] | None = None
         self._aborting_transport = False
+        self._first_audio_started_at: float | None = None
+        self._reconnect_count = 0
 
     @classmethod
     async def create(cls, **kwargs: object) -> "CallStage":
@@ -291,9 +302,16 @@ class CallStage:
         except asyncio.QueueFull:
             self._provider_audio_sequence -= 1
             return False
+        self._pcm_buffered_bytes += len(payload)
         self._receipts[key] = receipt.fingerprint
         if len(self._receipts) > self._receipt_capacity:
             self._receipts.popitem(last=False)
+        self._record_metric(
+            CallMetricName.BUFFER,
+            duration_ms=0,
+            numeric={"buffered_bytes": self._pcm_buffered_bytes},
+            labels={"result": CallMetricResult.SUCCEEDED.value},
+        )
         return True
 
     async def apply_answer(self, action: d.AnswerCall) -> bool:
@@ -326,6 +344,15 @@ class CallStage:
 
     def playback_stopped(self, response_id: str, stream_id: int) -> bool:
         result = self._playback.settle_stopped_stream(response_id, stream_id)
+        self._record_metric(
+            CallMetricName.STOP_CONFIRMATION,
+            duration_ms=0,
+            status=CallMetricStatus.SUCCESS if result else CallMetricStatus.ERROR,
+            labels={
+                "result": CallMetricResult.SUCCEEDED.value if result else CallMetricResult.FAILED.value,
+                **({} if result else {"error_code": "STOP_CONFIRMATION_REJECTED"}),
+            },
+        )
         self._settle_response_if_complete(response_id)
         self._refresh_silence_task()
         self._finish_pending_end_if_ready()
@@ -340,6 +367,7 @@ class CallStage:
             await self._transition_or_close(CallState.RECONNECTING, ledger_facts={"disconnected_at": disconnected_at})
             if self._first_disconnect_monotonic is None:
                 self._first_disconnect_monotonic = disconnected_monotonic
+            self._reconnect_count += 1
             self._recovery_deadline = disconnected_monotonic + 3.0
             self._cancel_task(self._silence_task)
             self._recovery_task = self._track(asyncio.create_task(self._recover_deadline(), name="call-recovery"))
@@ -349,6 +377,13 @@ class CallStage:
             if self.state is not CallState.RECONNECTING:
                 return False
             if self._recovery_deadline is None or self._monotonic() >= self._recovery_deadline:
+                self._record_metric(
+                    CallMetricName.RECONNECT,
+                    duration_ms=0,
+                    status=CallMetricStatus.ERROR,
+                    numeric={"reconnect_count": self._reconnect_count},
+                    labels={"result": CallMetricResult.TIMEOUT.value, "error_code": "RECONNECT_TIMEOUT"},
+                )
                 await self._terminate_locked(CallEndReason.RECOVERY_TIMEOUT)
                 return False
             self._cancel_task(self._recovery_task)
@@ -362,6 +397,12 @@ class CallStage:
                 except ValueError:
                     pass
             self._refresh_silence_task()
+            self._record_metric(
+                CallMetricName.RECONNECT,
+                duration_ms=0,
+                numeric={"reconnect_count": self._reconnect_count},
+                labels={"result": CallMetricResult.SUCCEEDED.value},
+            )
             return True
 
     async def terminate(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> CallFinalSnapshot | None:
@@ -410,6 +451,16 @@ class CallStage:
             elif isinstance(event, TurnCompleted):
                 self._spawn_handle(self._on_turn(event), name="call-turn-handle")
             elif isinstance(event, ProviderFailed):
+                self._record_metric(
+                    CallMetricName.PROVIDER_ENDPOINT,
+                    duration_ms=0,
+                    status=CallMetricStatus.ERROR,
+                    labels={
+                        "provider": CallProvider.UNKNOWN.value,
+                        "result": CallMetricResult.FAILED.value,
+                        "error_code": "PROVIDER_EVENT_FAILED",
+                    },
+                )
                 await self.terminate(CallEndReason.PROVIDER_FAILED)
                 return
             elif isinstance(event, AmbientAudio):
@@ -419,7 +470,7 @@ class CallStage:
         if self.state is not CallState.ACTIVE:
             return
         sequence = len(self._turns) + 1
-        self._turns[sequence] = _Turn(event.semantic.render())
+        self._turns[sequence] = _Turn(event.semantic.render(), started_at=self._monotonic())
         self._unfinished_turns.add(sequence)
         self._playback.set_unfinished_user_turn_count(len(self._unfinished_turns))
         stimulus = d.CallTurnCompleted(
@@ -551,6 +602,7 @@ class CallStage:
                 if self.state is CallState.ACTIVE and self._provider is not None:
                     await self._provider.push_audio(frame)
             finally:
+                self._pcm_buffered_bytes = max(0, self._pcm_buffered_bytes - len(frame.payload))
                 self._pcm.task_done()
 
     async def _recover_deadline(self) -> None:
@@ -772,7 +824,8 @@ class CallStage:
         cleanup_error = await self._close_resources()
         while not self._pcm.empty():
             try:
-                self._pcm.get_nowait()
+                frame = self._pcm.get_nowait()
+                self._pcm_buffered_bytes = max(0, self._pcm_buffered_bytes - len(frame.payload))
                 self._pcm.task_done()
             except asyncio.QueueEmpty:
                 break
@@ -865,18 +918,21 @@ class CallStage:
         if self._call_metrics is None:
             return
         timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
-        self._call_metrics.record(
-            CallMetric(
-                call_id=self._record.call_id,
-                name=name,
-                start_ts=timestamp,
-                end_ts=timestamp,
-                duration_ms=duration_ms,
-                status=status,
-                numeric=numeric,
-                labels=labels,
+        try:
+            self._call_metrics.record(
+                CallMetric(
+                    call_id=self._record.call_id,
+                    name=name,
+                    start_ts=timestamp,
+                    end_ts=timestamp,
+                    duration_ms=duration_ms,
+                    status=status,
+                    numeric=numeric,
+                    labels=labels,
+                )
             )
-        )
+        except Exception:
+            pass
 
     def _active_duration_ms(self, ended: datetime) -> int:
         _ = ended
@@ -1073,6 +1129,11 @@ class _OutputSink:
         ):
             turn = self._stage._turns[self._turn_seq]
             turn.formal_text = output.text
+            self._stage._record_metric(
+                CallMetricName.FORMAL_REPLY,
+                duration_ms=max(0, (self._stage._monotonic() - turn.started_at) * 1000),
+                labels={"result": CallMetricResult.SUCCEEDED.value},
+            )
 
     async def _deliver(self, output: d.AgentOutput, response_id: str | None) -> None:
         if isinstance(output, d.AudioChunkOutput):
@@ -1099,6 +1160,16 @@ class _OutputSink:
 
     async def _send_audio(self, response_id: str, output: d.AudioChunkOutput) -> None:
         response = self._stage._responses[response_id]
+        now = self._stage._monotonic()
+        if response.audio_started_at is None:
+            response.audio_started_at = now
+            if self._stage._first_audio_started_at is None:
+                self._stage._first_audio_started_at = now
+                self._stage._record_metric(
+                    CallMetricName.FIRST_AUDIO,
+                    duration_ms=0,
+                    labels={"result": CallMetricResult.SUCCEEDED.value},
+                )
         if response.stream_id is None:
             response.stream_id = self._stage._next_stream_id
             self._stage._next_stream_id += 1
@@ -1117,3 +1188,8 @@ class _OutputSink:
             self._stage._playback.set_pending_send_count(self._stage._pending_send)
         if output.final:
             self._stage.playback_final(response_id, response.stream_id)
+            self._stage._record_metric(
+                CallMetricName.TTS,
+                duration_ms=max(0, (self._stage._monotonic() - response.audio_started_at) * 1000),
+                labels={"result": CallMetricResult.SUCCEEDED.value},
+            )
