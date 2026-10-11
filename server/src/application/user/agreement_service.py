@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from importlib.abc import Traversable
 
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 from src.application.user.agreement_loader import (
     AgreementConfigError,
     AgreementDoc,
@@ -49,19 +51,26 @@ def prepare_agreements(session, root: Traversable) -> AgreementService:
 
 def publish_agreements(session, service: AgreementService) -> None:
     try:
-        existing = _validate_archived_agreements(session, service._docs)
-        for version in set(service._docs) - set(existing):
-            doc = service._docs[version]
-            session.add(
-                AgreementVersion(
+        created_at = datetime.now(UTC8).replace(microsecond=0).isoformat()
+        for doc in service._docs.values():
+            statement = (
+                sqlite_insert(AgreementVersion)
+                .values(
                     version=doc.version,
                     title=doc.title,
                     format=doc.format,
                     content_json=doc.content_json,
                     content_sha256=doc.sha256,
-                    created_at=datetime.now(UTC8).replace(microsecond=0).isoformat(),
+                    created_at=created_at,
                 )
+                .on_conflict_do_nothing(index_elements=[AgreementVersion.version])
             )
+            session.execute(statement)
+
+        existing = _validate_archived_agreements(session, service._docs)
+        missing_versions = set(service._docs) - set(existing)
+        if missing_versions:
+            raise AgreementConfigError(f"协议版本未完成归档: {sorted(missing_versions)}")
         session.commit()
     except BaseException:
         session.rollback()

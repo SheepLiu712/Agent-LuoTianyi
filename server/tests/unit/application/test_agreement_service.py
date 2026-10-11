@@ -1,5 +1,7 @@
 import hashlib
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files
 
 import pytest
@@ -7,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.application.user.agreement_loader import AgreementConfigError
-from src.application.user.agreement_service import init_agreements
+from src.application.user.agreement_service import init_agreements, prepare_agreements, publish_agreements
 from src.infrastructure.persistence.database.sql_database import AgreementVersion, Base
 
 
@@ -143,3 +145,62 @@ def test_init_agreements_accepts_packaged_agreement_resources(session):
     assert set(stored) == set(manifest["files"])
     assert stored[current.version].content_json == current.content_json
     assert stored[current.version].content_sha256 == current.sha256
+
+
+def test_publish_agreements_is_idempotent_across_concurrent_sessions(tmp_path):
+    agreement_path = tmp_path / "agreement_v1.json"
+    _write_valid_doc(agreement_path)
+    _write_manifest(tmp_path)
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'agreements.db'}",
+        connect_args={"check_same_thread": False, "timeout": 15},
+    )
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    barrier = threading.Barrier(2)
+
+    def publish() -> None:
+        with SessionLocal() as concurrent_session:
+            service = prepare_agreements(concurrent_session, tmp_path)
+            barrier.wait(timeout=5)
+            publish_agreements(concurrent_session, service)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(publish) for _ in range(2)]
+        for future in futures:
+            future.result(timeout=10)
+
+    with SessionLocal() as verify_session:
+        stored = verify_session.query(AgreementVersion).all()
+        assert [row.version for row in stored] == ["v1"]
+
+    engine.dispose()
+
+
+def test_publish_agreements_rejects_conflicting_concurrent_content(tmp_path):
+    agreement_path = tmp_path / "agreement_v1.json"
+    _write_valid_doc(agreement_path)
+    _write_manifest(tmp_path)
+    engine = create_engine(f"sqlite:///{tmp_path / 'agreements.db'}")
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+
+    with SessionLocal() as publishing_session:
+        service = prepare_agreements(publishing_session, tmp_path)
+        with SessionLocal() as competing_session:
+            competing_session.add(
+                AgreementVersion(
+                    version="v1",
+                    title="被篡改的协议",
+                    format="agreement.richtext.v1",
+                    content_json="{}",
+                    content_sha256="deadbeef",
+                    created_at="2026-10-11T00:00:00+08:00",
+                )
+            )
+            competing_session.commit()
+
+        with pytest.raises(AgreementConfigError, match="原文被覆盖"):
+            publish_agreements(publishing_session, service)
+
+    engine.dispose()
