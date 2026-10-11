@@ -62,8 +62,8 @@ export function blockTextAlign(block: Block): TextStyle['textAlign'] {
   return block.align === ALIGN_CENTER ? 'center' : 'justify';
 }
 
-export function splitRunsOnNewline(runs: Run[]): Array<Array<[string, boolean]>> {
-  const lines: Array<Array<[string, boolean]>> = [[]];
+export function splitRunsOnNewline(runs: Run[]): [string, boolean][][] {
+  const lines: [string, boolean][][] = [[]];
   for (const run of runs) {
     const text = typeof run.text === 'string' ? run.text : String(run.text);
     const bold = Boolean(run.bold);
