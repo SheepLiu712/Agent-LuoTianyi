@@ -33,6 +33,7 @@ import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } fr
 import DynamicsScreen from './dynamics';
 import PreferencesScreen from './preferences';
 import LlmSettingsScreen from './llm_settings';
+import AgreementScreen from './agreement';
 
 const THINKING_BUBBLE_FRAMES = [
   require('../assets/images/thinking_bubble1.png'),
@@ -55,6 +56,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [showPreferences, setShowPreferences] = useState(false);
   const [showLlmSettings, setShowLlmSettings] = useState(false);
   const [showDynamics, setShowDynamics] = useState(false);
+  const [showAgreement, setShowAgreement] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorMode, setColorMode] = useState<ColorMode>('light');
   const [live2dReady, setLive2dReady] = useState(false);
@@ -292,6 +294,11 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     closeDrawer();
   };
 
+  const handleOpenAgreement = () => {
+    setShowAgreement(true);
+    closeDrawer();
+  };
+
   const handleCloseDynamics = useCallback(() => {
     setShowDynamics(false);
     refreshDynamicsUnread();
@@ -398,6 +405,9 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           onUnreadCleared={handleDynamicsUnreadCleared}
           theme={theme}
         />
+      ) : null}
+      {showAgreement ? (
+        <AgreementScreen onClose={() => setShowAgreement(false)} theme={theme} />
       ) : null}
 
       <View style={{ flex: 1, marginTop: live2dHeight, marginBottom: keyboardHeight }}>
@@ -533,6 +543,14 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
         </View>
 
         <View style={styles.drawerSpacer} />
+
+        <TouchableOpacity
+          style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]}
+          onPress={handleOpenAgreement}
+          activeOpacity={0.78}
+        >
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>用户协议</Text>
+        </TouchableOpacity>
 
         {onLogout ? (
           <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.dangerSurface }]} onPress={handleLogout} activeOpacity={0.78}>

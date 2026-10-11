@@ -1,0 +1,146 @@
+/**
+ * 用户协议只读查阅页（UA-1 · issue #295）。
+ *
+ * 范围（对齐 #295 的验收标准与「范围与 PR」）：
+ * - 设置入口点击“用户协议”后全屏只读查阅当前协议正文与版本；
+ *   整屏覆盖：根节点与 preferences / dynamics / llm_settings 一致地用
+ *   absoluteFillObject 铺满窗口，并以高于 Live2D 层（zIndex 10）与抽屉（zIndex 100）
+ *   的层级绘制，否则只会挤占主界面的一块空间、被主界面盖住；
+ * - 失败可重试；关闭返回原界面会话，不写签署；
+ *   header 沿用 preferences / dynamics / llm_settings 的约定（16/12 内边距、
+ *   minWidth 56 的纯文字返回、accentText 16px/600、居中页标题 + 56 宽右侧占位）；
+ *   正文区左上角另设 32px 大标题（ui.svg「03 App · 设置查阅」的大标题形态），
+ *   与版本号共用正文左边缘；两处标题按评审结论并存；
+ * - 不启用登录或注册门禁：没有倒计时、同意或拒绝操作；
+ * - 正文渲染由 RichAgreement 提供，供后续签署流程复用。
+ */
+
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { AgreementPayload, RichAgreement } from '../components/RichAgreement';
+import { fetchCurrentAgreement } from '../hooks/useAuth';
+import { AppTheme } from '../utils/theme';
+
+const TEXT_TITLE = '用户协议';
+const TEXT_BACK = '返回';
+const TEXT_RETRY = '重试';
+const TEXT_LOAD_FAILED = '加载用户协议失败';
+
+interface Props {
+  onClose: () => void;
+  theme: AppTheme;
+}
+
+export default function AgreementScreen({ onClose, theme }: Props) {
+  const insets = useSafeAreaInsets();
+  const [data, setData] = useState<AgreementPayload | null>(null);
+  const [failure, setFailure] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setFailure('');
+    const result = await fetchCurrentAgreement();
+    if (result.success) {
+      setData(result.data as AgreementPayload);
+    } else {
+      setFailure(result.message || TEXT_LOAD_FAILED);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return (
+    <View
+      style={[
+        styles.root,
+        {
+          backgroundColor: theme.surface,
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: theme.surface, borderBottomColor: theme.border },
+        ]}
+      >
+        <TouchableOpacity style={styles.backButton} onPress={onClose} activeOpacity={0.72}>
+          <Text style={[styles.backText, { color: theme.accentText }]}>{TEXT_BACK}</Text>
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>{TEXT_TITLE}</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <View style={styles.body}>
+        <Text style={[styles.pageTitle, { color: theme.text }]}>{TEXT_TITLE}</Text>
+        {loading ? (
+          <View style={styles.centerBlock}>
+            <ActivityIndicator color={theme.accent} />
+          </View>
+        ) : failure !== '' ? (
+          <View style={styles.centerBlock}>
+            <Text style={[styles.failureText, { color: theme.dangerText }]}>
+              {`${TEXT_LOAD_FAILED}：${failure}`}
+            </Text>
+            <TouchableOpacity
+              style={[styles.retryButton, { backgroundColor: theme.accent }]}
+              onPress={reload}
+              activeOpacity={0.78}
+            >
+              <Text style={[styles.retryText, { color: theme.accentText }]}>{TEXT_RETRY}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {data?.version ? (
+              <Text style={[styles.version, { color: theme.textMuted }]}>
+                {`版本：${data.version}`}
+              </Text>
+            ) : null}
+            <RichAgreement data={data} />
+          </>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 140,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  backButton: { minWidth: 56, paddingVertical: 6 },
+  backText: { fontSize: 16, fontWeight: '600' },
+  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700' },
+  headerSpacer: { width: 56 },
+  pageTitle: { fontSize: 32, fontWeight: '700', marginBottom: 6 },
+  body: { flex: 1, paddingHorizontal: 20, paddingTop: 14 },
+  centerBlock: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  failureText: { fontSize: 13, textAlign: 'center' },
+  retryButton: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  retryText: { fontSize: 14, fontWeight: '600' },
+  version: { fontSize: 12, marginBottom: 8 },
+});
