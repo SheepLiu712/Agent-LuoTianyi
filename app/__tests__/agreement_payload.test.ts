@@ -43,6 +43,10 @@ describe('协议响应校验', () => {
     mockFetch.mockReset();
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('接受合法 payload 并保留空格、换行和粗体', () => {
     expect(parseAgreementPayload(VALID_PAYLOAD)).toEqual(VALID_PAYLOAD);
   });
@@ -76,5 +80,45 @@ describe('协议响应校验', () => {
     mockFetch.mockResolvedValue(jsonResponse(VALID_PAYLOAD));
 
     await expect(fetchCurrentAgreement()).resolves.toEqual({ success: true, data: VALID_PAYLOAD });
+  });
+
+  it('超过有限超时时间会取消请求并返回可重试失败', async () => {
+    jest.useFakeTimers();
+    let requestSignal!: AbortSignal;
+    mockFetch.mockImplementation((_url, init) => {
+      requestSignal = init?.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        requestSignal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+
+    const result = fetchCurrentAgreement({ timeoutMs: 25 });
+    await jest.advanceTimersByTimeAsync(25);
+
+    await expect(result).resolves.toEqual({
+      success: false,
+      message: '用户协议加载失败，请重试',
+    });
+    expect(requestSignal.aborted).toBe(true);
+  });
+
+  it('调用方取消会传递到底层请求', async () => {
+    const caller = new AbortController();
+    let requestSignal!: AbortSignal;
+    mockFetch.mockImplementation((_url, init) => {
+      requestSignal = init?.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        requestSignal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+
+    const result = fetchCurrentAgreement({ signal: caller.signal, timeoutMs: 1000 });
+    caller.abort();
+
+    await expect(result).resolves.toEqual({
+      success: false,
+      message: '用户协议加载失败，请重试',
+    });
+    expect(requestSignal.aborted).toBe(true);
   });
 });

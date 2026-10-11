@@ -264,6 +264,42 @@ describe('用户协议查阅页', () => {
     expect(textsOf(tree.root)).toContain(VERSION_LABEL);
   });
 
+  it('旧请求迟到时不会覆盖重试后的最新协议', async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce({ success: false, message: '网络错误' });
+    const tree = await renderScreen();
+    const retry = buttonLabeled(tree, TEXT_RETRY).props.onPress;
+
+    let resolveStale!: (result: unknown) => void;
+    let staleSignal!: AbortSignal;
+    const latest = { ...PAYLOAD, version: 'terms-2026-10-v2' };
+    fetchMock
+      .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        staleSignal = signal;
+        return new Promise((resolve) => {
+          resolveStale = resolve;
+        });
+      })
+      .mockResolvedValueOnce({ success: true, data: latest });
+
+    let staleRequest!: Promise<void>;
+    await act(async () => {
+      staleRequest = retry();
+      await retry();
+    });
+
+    expect(staleSignal.aborted).toBe(true);
+    expect(textsOf(tree.root)).toContain('版本：terms-2026-10-v2');
+
+    await act(async () => {
+      resolveStale({ success: true, data: { ...PAYLOAD, version: 'terms-2026-10-stale' } });
+      await staleRequest;
+    });
+
+    expect(textsOf(tree.root)).toContain('版本：terms-2026-10-v2');
+    expect(textsOf(tree.root)).not.toContain('版本：terms-2026-10-stale');
+  });
+
   it('返回关闭查阅页', async () => {
     const onClose = jest.fn();
     const tree = await renderScreen(onClose);
@@ -273,6 +309,23 @@ describe('用户协议查阅页', () => {
     });
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('卸载时取消尚未完成的协议请求', async () => {
+    let requestSignal!: AbortSignal;
+    fetchMock.mockImplementation(({ signal }: { signal: AbortSignal }) => {
+      requestSignal = signal;
+      return new Promise(() => {});
+    });
+
+    const tree = await renderScreen();
+    expect(requestSignal.aborted).toBe(false);
+
+    await act(async () => {
+      tree.unmount();
+    });
+
+    expect(requestSignal.aborted).toBe(true);
   });
 
   it('只读范围：没有倒计时、同意或拒绝', async () => {

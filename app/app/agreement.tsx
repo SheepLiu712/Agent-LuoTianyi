@@ -19,7 +19,7 @@
  * - 正文渲染由 RichAgreement 提供，供后续签署流程复用。
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -50,11 +50,21 @@ export default function AgreementScreen({ onClose, theme }: Props) {
   const [data, setData] = useState<AgreementPayload | null>(null);
   const [failure, setFailure] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
 
   const reload = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setFailure('');
-    const result = await fetchCurrentAgreement();
+    const result = await fetchCurrentAgreement({ signal: controller.signal });
+    if (requestId !== requestIdRef.current) {
+      return;
+    }
+    abortRef.current = null;
     if (result.success) {
       setData(result.data);
     } else {
@@ -65,6 +75,11 @@ export default function AgreementScreen({ onClose, theme }: Props) {
 
   useEffect(() => {
     reload();
+    return () => {
+      requestIdRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
   }, [reload]);
 
   return (

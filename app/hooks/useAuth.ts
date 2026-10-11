@@ -52,11 +52,30 @@ function agreementFailureMessage(detail: unknown): string {
   return '用户协议加载失败，请重试';
 }
 
-export async function fetchCurrentAgreement(): Promise<
-  { success: true; data: AgreementPayload } | { success: false; message: string }
-> {
+interface AgreementFetchOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export async function fetchCurrentAgreement(
+  options: AgreementFetchOptions = {},
+): Promise<{ success: true; data: AgreementPayload } | { success: false; message: string }> {
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  if (options.signal?.aborted) {
+    controller.abort();
+  } else {
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  }
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? server_config.API_TIMEOUT,
+  );
+
   try {
-    const response = await fetch(`${server_config.BASE_URL}/auth/agreement`);
+    const response = await fetch(`${server_config.BASE_URL}/auth/agreement`, {
+      signal: controller.signal,
+    });
     const result: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       addDebugTrace('auth', 'agreement fetch failed', { status: response.status });
@@ -73,6 +92,9 @@ export async function fetchCurrentAgreement(): Promise<
   } catch (e) {
     addDebugTrace('auth', 'agreement fetch error', { error: String(e) });
     return { success: false, message: '用户协议加载失败，请重试' };
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
