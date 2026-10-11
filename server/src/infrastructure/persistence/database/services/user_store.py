@@ -164,3 +164,23 @@ class UserStore:
         if user is None:
             return ""
         return user.description or ""
+
+    def reset_user_profile(self, user_id: str) -> int:
+        """Clear learned profile fields while preserving account credentials and preferences."""
+        db = self._get_session()
+        try:
+            user = db.query(User).filter(User.uuid == user_id).first()
+            if user is None:
+                return 0
+            user.description = ""
+            user.context_summary = ""
+            user.context_memory_count = 0
+            user.all_memory_count = 0
+            db.commit()
+            self.redis.delete(f"user_description:{user_id}")
+            return 1
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()

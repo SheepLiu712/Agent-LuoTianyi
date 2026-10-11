@@ -10,7 +10,6 @@ from support.stage_support import RecordingAgent, cleanup, plan, report, setup, 
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
 )
@@ -481,19 +480,25 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
                 ActionPlanDraft(
                     source_stimulus_ids=ids(req),
                     actions=(
-                        d.Reflection(
-                            action_id=f"{req.request_id}-reflection",
-                            prepared_inputs=req.prepared_inputs,
+                        d.CognitiveMaintenance(
+                            action_id=f"{req.request_id}-maintenance",
+                            reason=d.MaintenanceReason.COMPACTION_THRESHOLD,
                         ),
                     ),
                 )
             )
             return report(req, consumed=ids(req), plans=(accepted.plan_id, reflection.plan_id))
 
-    class Reflect(ReflectionActionHandler):
+    class Reflect:
         async def realize(self, action, context, outputs):
             events.append("reflection")
-            return await super().realize(action, context, outputs)
+            return d.ActionResult(
+                action_id=action.action_id,
+                status=d.ActionExecutionStatus.COMPLETED,
+                error_code=None,
+                irreversible_effect_committed=False,
+                effect_ref=None,
+            )
 
     from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
@@ -522,7 +527,7 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
         action_router=ActionRouter(
             [
                 (d.ActionKind.SAY, Execute()),
-                (d.ActionKind.REFLECTION, Reflect("luotianyi", _NoReflection(), _NoCompaction())),
+                (d.ActionKind.COGNITIVE_MAINTENANCE, Reflect()),
             ]
         ),
     )

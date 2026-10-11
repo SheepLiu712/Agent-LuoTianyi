@@ -28,7 +28,7 @@ from src.utils.logger import get_logger
 
 from ._config import _StageConfig
 from ._models import _InputStatus, _PendingInput, _ReplyAttempt
-from ._sinks import StimulusInputSink, _AgentOutputSink, _PlanSink
+from ._sinks import StimulusInputSink, _AgentOutputSink, _NoOutputSink, _PlanSink, _TerminationPlanSink
 
 if TYPE_CHECKING:
     from src.adapter.websocket import WebSocketAdapter
@@ -853,18 +853,10 @@ class ChatStage:
         report, error = None, None
         try:
             await self._stop_work()
-            report = await asyncio.wait_for(
-                self._handle(
-                    self._make_request(
-                        d.InteractionEnding(reason=reason, **self._stage_stimulus_fields()),
-                        tuple(e.stimulus for e in self._pending.values()),
-                        tuple(e.prepared for e in self._pending.values()),
-                    )
-                ),
+            report, error = await asyncio.wait_for(
+                self._run_termination_maintenance(reason),
                 timeout=self._config.termination_timeout,
             )
-            if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED:
-                error = "interaction ending handler failed"
         except asyncio.TimeoutError:
             error = "interaction ending timed out"
             self._logger.error("Stage termination timed out interaction=%s", self.interaction_id)
@@ -873,3 +865,46 @@ class ChatStage:
             self._pending.clear()
             self._state = StageState.TERMINATED
         return StageTerminationResult(report=report, error=error)
+
+    async def _run_termination_maintenance(
+        self, reason: d.InteractionEndingReason
+    ) -> tuple[d.HandlingReport | None, str | None]:
+        request = self._make_request(
+            d.InteractionEnding(reason=reason, **self._stage_stimulus_fields()),
+            tuple(e.stimulus for e in self._pending.values()),
+            tuple(e.prepared for e in self._pending.values()),
+        )
+        sink = _TerminationPlanSink(self, request)
+        try:
+            report = await self._agent.handle_stimulus(request, sink, context=self.context)
+        finally:
+            sink.closed = True
+        if (
+            report.request_id != request.request_id
+            or report.trigger_stimulus_id != request.stimulus.stimulus_id
+            or report.basis_interaction_revision != request.interaction.interaction_revision
+            or report.emitted_plan_ids != tuple(sink.ids)
+            or report.request_status is not d.HandlingRequestStatus.COMPLETED
+            or sink.plan is None
+        ):
+            return report, "interaction ending handler failed"
+        execution = d.ExecutionContext(
+            execution_id=str(uuid4()),
+            interaction_id=self.interaction_id,
+            current_interaction_revision=self._revision,
+            cancellation=d.CancellationToken(),
+            interaction_context=self.context,
+        )
+        try:
+            realized = await self._agent.realize_action_plan(sink.plan, execution, _NoOutputSink())
+        except asyncio.CancelledError:
+            execution.cancellation.cancel(d.CancellationReason.NO_LONGER_NEEDED)
+            raise
+        if realized.status is not d.ExecutionStatus.COMPLETED:
+            self._logger.error(
+                "Stage termination maintenance failed interaction=%s code=%s",
+                self.interaction_id,
+                realized.error_code,
+            )
+            return report, "interaction ending maintenance failed"
+        return report, None

@@ -142,6 +142,7 @@ class ServerRuntime:
                 adapter=runtime.chat_adapter,
                 get_context_factory=agent_runtime.context_factories.__getitem__,
                 due_event_provider=EventStoreDueEventProvider(event_store),
+                call_sessions=database_manager.call_sessions,
                 config=config.get("stage_manager", {}),
             )
 

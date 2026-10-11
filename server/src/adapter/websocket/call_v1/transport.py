@@ -186,6 +186,27 @@ class CallTransportSession:
     def last_server_seq(self) -> int:
         return self._server_next_seq - 1
 
+    @property
+    def next_server_seq(self) -> int:
+        """Return the next shared control/audio sequence owned by this session."""
+        self._require_open()
+        return self._server_next_seq
+
+    def response_server_range(self, response_id: str, stream_id: int) -> tuple[int, int]:
+        """Return the allocated replay range for one registered response stream."""
+        registration = self._streams.get(stream_id)
+        if registration is None or registration.response_id != response_id:
+            raise CallTransportError("UNREGISTERED_STREAM")
+        through = max(
+            (
+                seq
+                for seq, entry in self._replay.items()
+                if entry.response_id == response_id and entry.stream_id == stream_id and entry.retired_by is None
+            ),
+            default=registration.first_seq,
+        )
+        return registration.first_seq, through
+
     async def receive_text(self, raw: str) -> list[CallWireOutput]:
         self._require_open()
         try:

@@ -1,6 +1,7 @@
 """说话 Skill 及其私有 TTS 实现。"""
 
 from src.agent.skills.expression.speaking.backend import SpeechBackend
+from src.agent.skills.expression.speaking.call_pcm import UnsupportedCallAudioError
 from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from src.agent.skills.expression.speaking.skill import EmptySpeechError, SpeakingAudioChunk, SpeakingSkill
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
@@ -16,5 +17,6 @@ __all__ = [
     "TTSModule",
     "TTSServer",
     "TTSStreamCancelled",
+    "UnsupportedCallAudioError",
     "init_tts_module",
 ]

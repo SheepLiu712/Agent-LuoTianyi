@@ -53,8 +53,8 @@ class CallAudioSemantic:
         object.__setattr__(self, "transcript", _clean_optional(self.transcript))
         object.__setattr__(self, "emotion", _clean_optional(self.emotion))
         object.__setattr__(self, "sound_description", _clean_optional(self.sound_description))
-        if self.transcript is None and self.sound_description is None:
-            raise ValueError("a call audio semantic requires transcript or sound_description")
+        if self.transcript is None and self.emotion is None and self.sound_description is None:
+            raise ValueError("a call audio semantic requires transcript, emotion, or sound_description")
 
     def render(self) -> str:
         """Render the exact Agent-facing text specified for call audio."""
@@ -69,5 +69,5 @@ class CallAudioSemantic:
 
         text = self.sound_description or ""
         if self.emotion is not None:
-            text += f"；情绪：{self.emotion}"
+            text = f"{text}；情绪：{self.emotion}" if text else f"情绪：{self.emotion}"
         return text
