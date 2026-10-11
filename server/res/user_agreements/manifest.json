@@ -1,6 +1,7 @@
 {
-    "current_version": "terms-2026-10-v1",
+    "current_version": "terms-2026-10-v2",
     "files": {
-        "terms-2026-10-v1": "terms-2026-10-v1.json"
+        "terms-2026-10-v1": "terms-2026-10-v1.json",
+        "terms-2026-10-v2": "terms-2026-10-v2.json"
     }
 }
