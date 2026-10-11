@@ -110,6 +110,7 @@ py-modules = ["server_main"]
 
 [tool.setuptools.package-data]
 "src.world.get_new_songs" = ["vcpedia_templates.json"]
+"src.server.res.user_agreements" = ["*.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]
