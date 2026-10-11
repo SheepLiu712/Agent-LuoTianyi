@@ -74,14 +74,19 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
   private readonly subscriptions: { remove(): void }[] = [];
   private consumptionListener: (receipt: PlaybackConsumptionReceipt) => void = () => {};
   private captureListener: ((frame: CapturedAudioFrame) => void) | undefined;
+  private capturePaused = false;
   private sessionGeneration: number | undefined;
   private terminationFailed = false;
 
   constructor(
-    private readonly events: CallAudioCoordinatorEvents = {},
+    private events: CallAudioCoordinatorEvents = {},
     private readonly native: CallAudioNativeModule | null = loadNativeCallAudio(),
     private readonly platform: string = Platform.OS,
   ) {}
+
+  setCoordinatorEvents(events: CallAudioCoordinatorEvents): void {
+    this.events = events;
+  }
 
   async initialize(): Promise<CallAudioCapability> {
     if (this.terminationFailed || this.platform !== 'android' || this.native === null) return 'unavailable';
@@ -114,6 +119,7 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
     const native = this.requireNative();
     if (!matchesFormat(format, CAPTURE_FORMAT)) throw new Error('unsupported_capture_format');
     this.captureListener = onFrame;
+    this.capturePaused = false;
     const capability = await native.startCapture();
     if (capabilityOf(capability) !== 'available') throw new Error(capability.reason ?? 'capture_unavailable');
   }
@@ -121,6 +127,22 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
   async stopCapture(): Promise<void> {
     if (this.native !== null && this.platform === 'android') await this.native.stopCapture();
     this.captureListener = undefined;
+    this.capturePaused = false;
+  }
+
+  async pauseCapture(): Promise<void> {
+    if (this.native !== null && this.platform === 'android') await this.native.stopCapture();
+    this.capturePaused = true;
+  }
+
+  async resumeCapture(): Promise<void> {
+    if (!this.capturePaused) return;
+    const native = this.requireNative();
+    const focus = await native.reacquireAudioFocus();
+    if (capabilityOf(focus) !== 'available') throw new Error(focus.reason ?? 'audio_focus_denied');
+    const capability = await native.startCapture();
+    if (capabilityOf(capability) !== 'available') throw new Error(capability.reason ?? 'capture_unavailable');
+    this.capturePaused = false;
   }
 
   async enqueue(chunk: CallPlaybackChunk): Promise<void> {
@@ -163,6 +185,13 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
 
   setConsumptionListener(listener: (receipt: PlaybackConsumptionReceipt) => void): void {
     this.consumptionListener = listener;
+  }
+
+  subscribeConsumption(listener: (receipt: PlaybackConsumptionReceipt) => void): () => void {
+    this.setConsumptionListener(listener);
+    return () => {
+      if (this.consumptionListener === listener) this.consumptionListener = () => {};
+    };
   }
 
   async close(): Promise<void> {
@@ -248,6 +277,13 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
 function loadNativeCallAudio(): CallAudioNativeModule | null {
   if (Platform.OS !== 'android') return null;
   return requireOptionalNativeModule<CallAudioNativeModule>('CallAudio');
+}
+
+export function isAndroidCallAudioModuleAvailable(
+  platform: string = Platform.OS,
+  native: CallAudioNativeModule | null = loadNativeCallAudio(),
+): boolean {
+  return platform === 'android' && native !== null;
 }
 
 export { CAPTURE_FORMAT, PLAYBACK_FORMAT };

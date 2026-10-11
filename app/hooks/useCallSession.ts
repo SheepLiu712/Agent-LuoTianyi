@@ -28,6 +28,7 @@ export interface CallSessionOptions {
   onPermissionSettings?: () => void;
   onCleanupError?: (error: unknown) => void;
   ringtone?: { playLoop: () => void; stop: () => void };
+  initializeAttempt?: (session: SessionPort) => Promise<boolean>;
 }
 
 const unavailable: CallCapabilities = { serverAvailable: false, nativeAvailable: false };
@@ -45,6 +46,7 @@ export function useCallSession(options: CallSessionOptions = {}) {
     onPermissionSettings,
     onCleanupError,
     ringtone,
+    initializeAttempt,
   } = options;
   const [state, dispatch] = useReducer((current: CallState, event: CallEvent) => reduceCallState(current, event).state, initialCallState);
   const stateRef = useRef(state);
@@ -56,6 +58,7 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const compatibilityConsumedRef = useRef(false);
   stateRef.current = state;
   const now = suppliedNow ?? Date.now;
+  const ringing = state.phase === 'PREPARING' || state.phase === 'RINGING';
   const canStart = Platform.OS === 'android' && capabilities.serverAvailable && capabilities.nativeAvailable && Boolean(createSession || (compatibilitySession && !compatibilityConsumedRef.current));
 
   const reportCleanupError = useCallback((error: unknown) => {
@@ -118,7 +121,10 @@ export function useCallSession(options: CallSessionOptions = {}) {
     for (const effect of effects) {
       if (effect.type === 'return_to_chat') {
         releaseOwnedSession(generationRef.current);
-        onReturnToChat?.();
+        const returnedGeneration = generationRef.current;
+        queueMicrotask(() => {
+          if (mountedRef.current && returnedGeneration === generationRef.current) onReturnToChat?.();
+        });
         stateRef.current = initialCallState;
         dispatch({ type: 'reset_to_idle' });
       }
@@ -207,12 +213,30 @@ export function useCallSession(options: CallSessionOptions = {}) {
     pending.then((result) => {
       if (cancelled || generation !== generationRef.current) return;
       if (result === 'permanently_denied') onPermissionSettings?.();
-      dispatchEvent({ type: result === 'granted' ? 'permission_granted' : result === 'permanently_denied' ? 'permission_permanently_denied' : 'permission_denied' });
+      if (result !== 'granted') {
+        dispatchEvent({ type: result === 'permanently_denied' ? 'permission_permanently_denied' : 'permission_denied' });
+        return;
+      }
+      const owner = ownerRef.current;
+      const initialize = initializeAttempt ? initializeAttempt(owner!.session) : Promise.resolve(true);
+      initialize.then((available) => {
+        if (cancelled || generation !== generationRef.current) return;
+        if (available) dispatchEvent({ type: 'permission_granted' });
+        else {
+          releaseOwnedSession(generation);
+          dispatchEvent({ type: 'permission_denied' });
+        }
+      }).catch((error) => {
+        if (cancelled || generation !== generationRef.current) return;
+        reportCleanupError(error);
+        releaseOwnedSession(generation);
+        dispatchEvent({ type: 'permission_denied' });
+      });
     }).catch((error) => {
       if (!cancelled && generation === generationRef.current) { reportCleanupError(error); dispatchEvent({ type: 'permission_denied' }); }
     });
     return () => { cancelled = true; };
-  }, [dispatchEvent, onPermissionSettings, reportCleanupError, requestPermission, state.phase]);
+  }, [dispatchEvent, initializeAttempt, onPermissionSettings, releaseOwnedSession, reportCleanupError, requestPermission, state.phase]);
 
   useEffect(() => {
     if (!ownerRef.current || !state.clientRequestId) return undefined;
@@ -236,10 +260,8 @@ export function useCallSession(options: CallSessionOptions = {}) {
   }, [dispatchEvent, now, reportCleanupError, state.clientRequestId, state.phase, state.requiresChatSwitch]);
 
   useEffect(() => {
-    const ringing = state.phase === 'PREPARING' || state.phase === 'RINGING';
     if (ringing) ringtone?.playLoop(); else ringtone?.stop();
-    return () => ringtone?.stop();
-  }, [ringtone, state.phase]);
+  }, [ringing, ringtone]);
 
   useEffect(() => () => {
     mountedRef.current = false;

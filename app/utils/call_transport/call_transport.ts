@@ -131,6 +131,16 @@ export class CallTransportSession {
     void this.terminate('closed', undefined, this.snapshot.activeDurationMs);
   }
 
+  forceRecovery(_reason: 'AUDIO_FOCUS_LOST'): void {
+    if (this.snapshot.status !== 'connected' || !this.snapshot.callId) {
+      this.fail('AUDIO_FOCUS_LOST');
+      return;
+    }
+    const epoch = this.socketEpoch;
+    try { this.socket?.close(1012, 'audio focus lost'); } catch { /* disconnect path still owns recovery */ }
+    this.handleDisconnect(epoch);
+  }
+
   private openSocket(resume: boolean): void {
     const epoch = ++this.socketEpoch;
     const socket = this.options.sockets.create(this.options.url);

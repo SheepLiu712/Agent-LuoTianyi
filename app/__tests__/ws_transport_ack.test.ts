@@ -50,12 +50,12 @@ describe('WebSocketTransport readiness failures', () => {
       onAgentMessage: jest.fn(),
       onAgentStateChanged: jest.fn(),
       onError: jest.fn(),
-    });
+    }, { expectedCharacterId: 'luotianyi' });
   }
 
   it('keeps the same id retryable while temporarily not ready', async () => {
     const ws = transport();
-    (ws as any).waitUntilReady = jest.fn().mockResolvedValue('timeout');
+    (ws as any).waitUntilChatReady = jest.fn().mockResolvedValue('timeout');
 
     await expect(ws.submitUserText('hello', false, 10, 'msg-not-ready')).resolves.toMatchObject({
       ok: false,
@@ -67,7 +67,7 @@ describe('WebSocketTransport readiness failures', () => {
 
   it('drops only an explicit authentication rejection', async () => {
     const ws = transport();
-    (ws as any).waitUntilReady = jest.fn().mockResolvedValue('auth_rejected');
+    (ws as any).waitUntilChatReady = jest.fn().mockResolvedValue('auth_rejected');
 
     await expect(ws.submitUserText('hello', false, 10, 'msg-auth')).resolves.toMatchObject({
       ok: false,
@@ -104,20 +104,20 @@ describe('WebSocketTransport readiness failures', () => {
   it('suppresses reconnect after AUTH_ERROR and resets backoff only on AUTH_OK', () => {
     const ws = transport();
     const close = jest.fn();
-    (ws as any).ws = { close };
+    Object.assign(ws as any, { isStopped: false, socketEpoch: 1, ws: { close } });
     (ws as any).reconnectAttempts = 5;
 
     (ws as any).handleServerMessage(JSON.stringify({
       type: 'auth_error',
       payload: { code: 'INVALID_TOKEN', message: 'invalid token' },
-    }));
+    }), 1);
 
     expect((ws as any).authRejected).toBe(true);
     expect((ws as any).canReconnectAfterClose()).toBe(false);
     expect((ws as any).reconnectAttempts).toBe(5);
     expect(close).toHaveBeenCalledTimes(1);
 
-    (ws as any).handleServerMessage(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    (ws as any).handleServerMessage(JSON.stringify({ type: 'auth_ok', payload: {} }), 1);
     expect((ws as any).authRejected).toBe(false);
     expect((ws as any).canReconnectAfterClose()).toBe(true);
     expect((ws as any).reconnectAttempts).toBe(0);
@@ -143,8 +143,8 @@ describe('WebSocketTransport readiness failures', () => {
 
 describe('voice operation deadline', () => {
   function readyTransport() {
-    const ws = new WebSocketTransport('alice', 'token', { onAgentMessage: jest.fn(), onAgentStateChanged: jest.fn(), onError: jest.fn() });
-    Object.assign(ws, { isStopped: false, isConnected: true, isAuthed: true });
+    const ws = new WebSocketTransport('alice', 'token', { onAgentMessage: jest.fn(), onAgentStateChanged: jest.fn(), onError: jest.fn() }, { expectedCharacterId: 'luotianyi' });
+    Object.assign(ws, { isStopped: false, isConnected: true, isAuthed: true, isChatReady: true });
     const send = jest.fn().mockReturnValue(true);
     (ws as any).sendRaw = send;
     return { ws, send };
@@ -154,10 +154,10 @@ describe('voice operation deadline', () => {
 
   it('connection readiness and ACK share one budget, and late ACK cannot settle an expired waiter', async () => {
     const { ws, send } = readyTransport();
-    Object.assign(ws, { isConnected: false, isAuthed: false });
+    Object.assign(ws, { isConnected: false, isAuthed: false, isChatReady: false });
     const result = ws.submitVoicePhase({ phase: 'chunk', upload_id: 'v' }, 1000, 'v:chunk:0');
     await jest.advanceTimersByTimeAsync(800);
-    Object.assign(ws, { isConnected: true, isAuthed: true });
+    Object.assign(ws, { isConnected: true, isAuthed: true, isChatReady: true });
     await jest.advanceTimersByTimeAsync(80);
     expect(send).toHaveBeenCalledTimes(1);
     await jest.advanceTimersByTimeAsync(120);
@@ -169,20 +169,20 @@ describe('voice operation deadline', () => {
 
   it('never sends expired voice operations after reconnection', async () => {
     const { ws, send } = readyTransport();
-    Object.assign(ws, { isConnected: false, isAuthed: false });
+    Object.assign(ws, { isConnected: false, isAuthed: false, isChatReady: false });
     const result = ws.submitVoicePhase({ phase: 'begin', upload_id: 'v' }, 125, 'v:begin');
     await jest.advanceTimersByTimeAsync(125);
     await expect(result).resolves.toMatchObject({ ok: false });
-    Object.assign(ws, { isConnected: true, isAuthed: true });
+    Object.assign(ws, { isConnected: true, isAuthed: true, isChatReady: true });
     await jest.advanceTimersByTimeAsync(10000);
     expect(send).not.toHaveBeenCalled();
   });
 
   it('does not defer abort until a later connection where the same upload may be retried', async () => {
     const { ws, send } = readyTransport();
-    Object.assign(ws, { isConnected: false, isAuthed: false });
+    Object.assign(ws, { isConnected: false, isAuthed: false, isChatReady: false });
     await expect(ws.submitVoicePhase({ phase: 'abort', upload_id: 'v' }, 1000, 'v:abort')).resolves.toMatchObject({ ok: false });
-    Object.assign(ws, { isConnected: true, isAuthed: true });
+    Object.assign(ws, { isConnected: true, isAuthed: true, isChatReady: true });
     await jest.advanceTimersByTimeAsync(10000);
     expect(send).not.toHaveBeenCalled();
   });

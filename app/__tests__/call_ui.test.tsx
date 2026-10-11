@@ -209,4 +209,29 @@ describe('call UI', () => {
     expect(created[1]).not.toBe(created[0]);
     act(() => root.unmount());
   });
+
+  it('closes a pending native init attempt and ignores its late available result', async () => {
+    let resolveInitialize!: (available: boolean) => void;
+    const close = jest.fn(async () => undefined);
+    const session = {
+      prepare: jest.fn(), start: jest.fn(), hangup: jest.fn(), close,
+      subscribe: jest.fn(() => jest.fn()), onError: jest.fn(() => jest.fn()),
+    } as unknown as CallSession;
+    let result: any; let root!: ReturnType<typeof create>;
+    act(() => {
+      root = create(<Probe options={{
+        createSession: () => session,
+        capabilities: { serverAvailable: true, nativeAvailable: true },
+        requestPermission: async () => 'granted',
+        initializeAttempt: () => new Promise((resolve) => { resolveInitialize = resolve; }),
+      }} onState={(value) => { result = value; }} />);
+    });
+    await act(async () => { expect(await result.start(false)).toBe(true); await Promise.resolve(); });
+    act(() => result.hangup());
+    resolveInitialize(true);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(result.state.phase).toBe('IDLE');
+    act(() => root.unmount());
+  });
 });

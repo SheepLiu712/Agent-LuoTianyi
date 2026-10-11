@@ -15,6 +15,7 @@ export class CallSession {
     private readonly transport: CallTransportSession,
     private readonly switchPort: CallSwitchPort,
     private readonly characterId: string,
+    private readonly release?: () => void | Promise<void>,
   ) {}
 
   get state(): Readonly<CallTransportSnapshot> {
@@ -49,7 +50,8 @@ export class CallSession {
     return this.transport.onError(listener);
   }
 
-  close(): void {
+  close(): void | Promise<void> {
     this.transport.close();
+    return this.release?.();
   }
 }

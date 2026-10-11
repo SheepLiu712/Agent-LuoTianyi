@@ -34,6 +34,7 @@ class FakeNativeCallAudio implements CallAudioNativeModule {
   async stopSession() {}
   async startCapture() { return this.capability; }
   async stopCapture() {}
+  async reacquireAudioFocus() { return this.capability; }
   async acknowledgeCapturedAudio() {}
   async enqueuePlayback() { return ++this.generation; }
   async stopPlayback() {}

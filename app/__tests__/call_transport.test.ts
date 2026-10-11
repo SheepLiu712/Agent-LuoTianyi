@@ -244,8 +244,8 @@ describe('reliable call transport', () => {
     const { native } = await establish();
     const emit = native.frames[0];
     const format = { encoding: 'pcm_s16le', sampleRateHz: 16_000, channels: 1 };
-    for (let index = 0; index < 6; index += 1) emit({ sequence: index + 1, format, payload: new Uint8Array(16_000) });
-    emit({ sequence: 7, format, payload: new Uint8Array(2) });
+    for (let index = 0; index < 6; index += 1) emit({ deviceSequence: index + 1, format, payload: new Uint8Array(16_000) });
+    emit({ deviceSequence: 7, format, payload: new Uint8Array(2) });
     await flush();
     expect(native.pauseCount).toBe(1);
   });
@@ -268,6 +268,15 @@ describe('reliable call transport', () => {
     const messages = socket.sent.filter((wire): wire is string => typeof wire === 'string').map((wire) => JSON.parse(wire));
     expect(messages.some((message) => message.type === 'playback.stopped' && message.stop_seq === 5)).toBe(true);
     expect(messages.some((message) => message.type === 'playback.completed')).toBe(false);
+  });
+
+  test('audio focus loss uses the existing fixed recovery window and resumes the same call', async () => {
+    const { session, sockets } = await establish();
+    session.forceRecovery('AUDIO_FOCUS_LOST');
+    expect(session.state.status).toBe('recovering');
+    expect(session.state.callId).toBe(CALL_ID);
+    expect(sockets.sockets).toHaveLength(2);
+    expect(session.state.recoveryDeadlineMonotonicMs).toBeDefined();
   });
 
   test('a stop placeholder accepts its delayed matching registration without reviving playback', async () => {

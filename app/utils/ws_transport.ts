@@ -21,6 +21,13 @@ interface AckWaiter {
   timer: ReturnType<typeof setTimeout>;
 }
 
+type ChatReadiness = 'ready' | 'auth_rejected' | 'stopped' | 'timeout';
+
+interface WebSocketTransportOptions {
+  ownershipRetryBudgetMs?: number;
+  expectedCharacterId: string;
+}
+
 export interface WsCallbacks {
   onAgentMessage: (payload: AgentMessagePayload) => void;
   onAgentStateChanged: (state: string) => void;
@@ -28,6 +35,7 @@ export interface WsCallbacks {
 
   onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
   getLlmMode?: () => Promise<{ types: string[] }>;
+  onChatReady?: (payload: { characterId: string; interactionId: string }) => void;
 }
 
 export class WebSocketTransport {
@@ -36,6 +44,13 @@ export class WebSocketTransport {
   private readonly token: string;
   private readonly callbacks: WsCallbacks;
   private readonly ackWaiters = new Map<string, AckWaiter>();
+  private readonly callSwitchWaiters = new Map<string, {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+    characterId: string;
+    socketEpoch: number;
+  }>();
   private readonly heartbeatIntervalMs = 10000;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pingId = 0;
@@ -50,9 +65,18 @@ export class WebSocketTransport {
   private isConnected = false;
   private isAuthed = false;
   private authRejected = false;
+  private isChatReady = false;
+  private ownershipRejected = false;
+  private ownershipRetryDeadlineMs: number | null = null;
+  private socketEpoch = 0;
   private clientMode = { types: [] as string[] }; // 服务端当前客户端委托类型列表（随连接重置）
 
-  constructor(username: string, token: string, callbacks: WsCallbacks) {
+  constructor(
+    username: string,
+    token: string,
+    callbacks: WsCallbacks,
+    private readonly options: WebSocketTransportOptions,
+  ) {
     this.username = username;
     this.token = token;
     this.callbacks = callbacks;
@@ -105,6 +129,11 @@ export class WebSocketTransport {
   start() {
     this.isStopped = false;
     this.authRejected = false;
+    this.isChatReady = false;
+    this.ownershipRejected = false;
+    this.ownershipRetryDeadlineMs = this.options.ownershipRetryBudgetMs === undefined
+      ? null
+      : Date.now() + Math.max(0, this.options.ownershipRetryBudgetMs);
     addDebugTrace('ws', 'start transport', { username: this.username });
     if (!this.appStateSubscription) {
       this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
@@ -113,9 +142,11 @@ export class WebSocketTransport {
   }
 
   stop() {
+    this.socketEpoch += 1;
     this.isStopped = true;
     this.isConnected = false;
     this.isAuthed = false;
+    this.isChatReady = false;
     this.hasNotifiedReconnectStruggle = false;
     addDebugTrace('ws', 'stop transport');
     this.clearReconnectTimer();
@@ -125,6 +156,7 @@ export class WebSocketTransport {
       retryable: false,
       drop: true,
     });
+    this.rejectCallSwitchWaiters(new Error('CHAT_TRANSPORT_STOPPED'));
     this.reconnectPausedForBackground = false;
     this.reconnectDueAt = null;
     this.reconnectDelayMs = null;
@@ -140,6 +172,39 @@ export class WebSocketTransport {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  async prepareCallSwitch(clientRequestId: string, characterId: string, timeoutMs = 10_000): Promise<void> {
+    const readiness = await this.waitUntilChatReady(timeoutMs);
+    if (readiness !== 'ready') throw new Error(readiness === 'auth_rejected' ? 'AUTH_REJECTED' : 'CHAT_TRANSPORT_UNAVAILABLE');
+    if (this.callSwitchWaiters.has(clientRequestId)) throw new Error('CALL_SWITCH_ALREADY_PENDING');
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.callSwitchWaiters.delete(clientRequestId);
+        reject(new Error('CALL_SWITCH_TIMEOUT'));
+      }, timeoutMs);
+      this.callSwitchWaiters.set(clientRequestId, {
+        resolve,
+        reject,
+        timeout,
+        characterId,
+        socketEpoch: this.socketEpoch,
+      });
+      if (!this.sendRaw({
+        protocol: 'call.v1',
+        type: 'call.switch_prepare',
+        client_request_id: clientRequestId,
+        character_id: characterId,
+      })) {
+        clearTimeout(timeout);
+        this.callSwitchWaiters.delete(clientRequestId);
+        reject(new Error('CHAT_TRANSPORT_UNAVAILABLE'));
+      }
+    });
+  }
+
+  async waitForChatReady(timeoutMs = 10_000): Promise<boolean> {
+    return (await this.waitUntilChatReady(timeoutMs)) === 'ready';
   }
 
   async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
@@ -230,21 +295,36 @@ export class WebSocketTransport {
     }
 
     const wsUrl = this.buildWsUrl(server_config.BASE_URL);
-    this.ws = new WebSocket(wsUrl);
+    const previous = this.ws;
+    const epoch = ++this.socketEpoch;
+    const socket = new WebSocket(wsUrl);
+    this.ws = socket;
+    if (previous && previous !== socket) {
+      previous.onopen = null;
+      previous.onclose = null;
+      previous.onerror = null;
+      previous.onmessage = null;
+      try { previous.close(); } catch { /* The new epoch already owns the transport. */ }
+    }
+    const current = () => !this.isStopped && epoch === this.socketEpoch && this.ws === socket;
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (!current()) return;
       this.isConnected = true;
+      this.isChatReady = false;
       this.clientMode = { types: [] };
       this.reconnectAttempts = 0;
       this.sendAuth();
       this.startHeartbeat();
     };
 
-    this.ws.onmessage = (event) => {
-      this.handleServerMessage(event.data);
+    socket.onmessage = (event) => {
+      if (!current()) return;
+      this.handleServerMessage(event.data, epoch);
     };
 
-    this.ws.onerror = (event) => {
+    socket.onerror = (event) => {
+      if (!current()) return;
       // 瞬时网络抖动/服务器短暂不可用都会触发 onerror，随后 onclose 会自动重连。
       // 这里不直接向用户抛"连接错误"，避免在自动重连自愈期间刷出多条错误气泡（Bug#10）。
       // 持续重连失败时的提示由 notifyReconnectStruggleIfNeeded 在 onclose 中统一给出。
@@ -252,11 +332,13 @@ export class WebSocketTransport {
       addDebugTrace('ws', 'onerror', detail);
     };
 
-    this.ws.onclose = (event) => {
+    socket.onclose = (event) => {
+      if (!current()) return;
       const detail = this.describeWebSocketEvent(event);
       addDebugTrace('ws', 'onclose', detail);
       this.isConnected = false;
       this.isAuthed = false;
+      this.isChatReady = false;
       this.stopHeartbeat();
       this.rejectAllWaiters('websocket disconnected', {
         code: 'DISCONNECTED',
@@ -321,6 +403,16 @@ export class WebSocketTransport {
 
   private scheduleReconnect() {
     const delay = Math.min(2 ** Math.max(this.reconnectAttempts, 1), 30) * 1000;
+    if (this.ownershipRejected && this.ownershipRetryDeadlineMs !== null) {
+      const remainingMs = this.ownershipRetryDeadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        addDebugTrace('ws', 'ownership retry budget exhausted');
+        return;
+      }
+      this.reconnectAttempts += 1;
+      this.armReconnectTimer(Math.min(delay, remainingMs));
+      return;
+    }
     this.reconnectAttempts += 1;
     this.armReconnectTimer(delay);
   }
@@ -437,6 +529,18 @@ export class WebSocketTransport {
     return 'ready';
   }
 
+  private async waitUntilChatReady(timeoutMs = 10000): Promise<ChatReadiness> {
+    const start = Date.now();
+    while (!this.isStopped && !this.isChatReady) {
+      if (this.authRejected) return 'auth_rejected';
+      if (Date.now() - start >= timeoutMs) return 'timeout';
+      await new Promise((resolve) => setTimeout(resolve, Math.min(80, Math.max(0, timeoutMs - (Date.now() - start)))));
+    }
+    if (this.authRejected) return 'auth_rejected';
+    if (this.isStopped) return 'stopped';
+    return 'ready';
+  }
+
   private canReconnectAfterClose() {
     return !this.authRejected;
   }
@@ -451,7 +555,7 @@ export class WebSocketTransport {
     const requestId = clientMsgId || `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const deadline = totalBudgetMs === undefined ? undefined : Date.now() + Math.max(0, totalBudgetMs);
-    const readiness = await this.waitUntilReady(totalBudgetMs === undefined ? undefined : Math.min(10000, totalBudgetMs));
+    const readiness = await this.waitUntilChatReady(totalBudgetMs === undefined ? undefined : Math.min(10000, totalBudgetMs));
     if (deadline !== undefined) {
       timeoutMs = Math.min(timeoutMs, deadline - Date.now());
       if (timeoutMs <= 0) return { ok: false, request_id: requestId, error: 'voice operation budget exceeded', retryable: true, drop: false };
@@ -519,11 +623,29 @@ export class WebSocketTransport {
     }
   }
 
-  private handleServerMessage(raw: unknown) {
+  private handleServerMessage(raw: unknown, socketEpoch = this.socketEpoch) {
+    if (this.isStopped || socketEpoch !== this.socketEpoch) return;
     try {
       const envelope = JSON.parse(String(raw)) as ServerEnvelope;
       const eventType = envelope.type || '';
       const payload = envelope.payload || {};
+      if (eventType === 'call.switch_ready') {
+        const requestId = String((envelope as Record<string, unknown>).client_request_id || '');
+        const characterId = String((envelope as Record<string, unknown>).character_id || '');
+        const waiter = this.callSwitchWaiters.get(requestId);
+        if (waiter && waiter.socketEpoch === socketEpoch && waiter.characterId !== characterId) {
+          clearTimeout(waiter.timeout);
+          this.callSwitchWaiters.delete(requestId);
+          waiter.reject(new Error('CALL_SWITCH_REJECTED:CHARACTER_ID_MISMATCH'));
+          return;
+        }
+        if (waiter && waiter.socketEpoch === socketEpoch) {
+          clearTimeout(waiter.timeout);
+          this.callSwitchWaiters.delete(requestId);
+          waiter.resolve();
+        }
+        return;
+      }
       if (eventType === WSEventType.SYSTEM_READY) {
         addDebugTrace('ws', 'recv system_ready');
         this.sendAuth();
@@ -535,6 +657,21 @@ export class WebSocketTransport {
         this.isAuthed = true;
         this.reconnectAttempts = 0;
         this.hasNotifiedReconnectStruggle = false;
+        return;
+      }
+
+      if (eventType === 'chat.ready') {
+        const characterId = typeof payload.character_id === 'string' ? payload.character_id : '';
+        const interactionId = typeof payload.interaction_id === 'string' ? payload.interaction_id : '';
+        if (
+          !this.isAuthed || characterId !== this.options.expectedCharacterId || !interactionId
+          || payload.schema_version !== 1
+        ) return;
+        this.isChatReady = true;
+        this.ownershipRejected = false;
+        this.reconnectAttempts = 0;
+        this.hasNotifiedReconnectStruggle = false;
+        this.callbacks.onChatReady?.({ characterId, interactionId });
         return;
       }
 
@@ -585,6 +722,20 @@ export class WebSocketTransport {
       }
 
       if (eventType === WSEventType.SERVER_ERROR) {
+        if (payload.code === 'INTERACTION_OWNED_BY_CALL' && payload.retryable === true) {
+          this.ownershipRejected = true;
+          this.isChatReady = false;
+          addDebugTrace('ws', 'chat ownership retained by call');
+          return;
+        }
+        const requestId = String(payload.client_request_id || '');
+        const switchWaiter = this.callSwitchWaiters.get(requestId);
+        if (switchWaiter && switchWaiter.socketEpoch === socketEpoch) {
+          clearTimeout(switchWaiter.timeout);
+          this.callSwitchWaiters.delete(requestId);
+          switchWaiter.reject(new Error(`CALL_SWITCH_REJECTED:${String(payload.code || 'UNKNOWN')}`));
+          return;
+        }
         addDebugTrace('ws', 'recv protocol error', { message: String(payload.message || '协议错误') });
         this.callbacks.onError(String(payload.message || '协议错误'));
       }
@@ -592,6 +743,14 @@ export class WebSocketTransport {
       addDebugTrace('ws', 'recv parse error');
       this.callbacks.onError('收到无法解析的 WebSocket 消息');
     }
+  }
+
+  private rejectCallSwitchWaiters(error: Error): void {
+    for (const waiter of this.callSwitchWaiters.values()) {
+      clearTimeout(waiter.timeout);
+      waiter.reject(error);
+    }
+    this.callSwitchWaiters.clear();
   }
 
   private async handleLlmRequest(payload: Record<string, unknown>) {

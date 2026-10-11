@@ -38,6 +38,9 @@ import PreferencesScreen from './preferences';
 import LlmSettingsScreen from './llm_settings';
 import { useCallSession } from '../hooks/useCallSession';
 import { CallScreen } from '../components/call/CallScreen';
+import { requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
+import { ExpoCallRingtone } from '../utils/call_session/ringtone';
+import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
 
 const THINKING_BUBBLE_FRAMES = [
   require('../assets/images/thinking_bubble1.png'),
@@ -68,8 +71,9 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const webviewRef = useRef<WebView>(null);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
-  // The production resolver is intentionally not available in this UI slice. Keep the entry visible but disabled rather than simulating a call.
   const callHangupRef = useRef<() => void>(() => {});
+  const onLogoutRef = useRef(onLogout);
+  onLogoutRef.current = onLogout;
   const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
     { text: '继续通话', style: 'cancel' },
     { text: '结束', style: 'destructive', onPress: () => callHangupRef.current() },
@@ -78,14 +82,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const handleCallCleanupError = useCallback((error: unknown) => {
     addDebugTrace('call', 'call resource cleanup failed', { error: String(error) });
   }, []);
-  const call = useCallSession({
-    capabilities: { serverAvailable: false, nativeAvailable: false },
-    onBackConfirmation: handleBackConfirmation,
-    onPermissionSettings: handlePermissionSettings,
-    onCleanupError: handleCallCleanupError,
+  const callSwitchRef = useRef<{ prepare(clientRequestId: string, characterId: string): Promise<void> }>({
+    prepare: async () => { throw new Error('CHAT_TRANSPORT_UNAVAILABLE'); },
   });
-  callHangupRef.current = call.hangup;
-
+  const ringtone = useMemo(() => new ExpoCallRingtone(), []);
   const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
   const live2dAssetRoot = 'file:///android_asset/public/';
   const live2dRoot = __DEV__ ? `http://${debuggerHost}/` : live2dAssetRoot;
@@ -111,7 +111,34 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     toggleVoicePlayback,
     retryVoice,
     voiceInput,
-  } = useChatLogic(webviewRef, username, message_token, !showPreferences && !showLlmSettings && !showDynamics);
+    callSwitch,
+    resumeChat,
+  } = useChatLogic(webviewRef, username, message_token, 'luotianyi', !showPreferences && !showLlmSettings && !showDynamics);
+  callSwitchRef.current = callSwitch;
+
+  const callComposition = useProductionCallComposition({
+    username,
+    token: message_token,
+    characterId: 'luotianyi',
+    switchPort: { prepare: (clientRequestId, characterId) => callSwitchRef.current.prepare(clientRequestId, characterId) },
+    onAuthRequired: () => onLogoutRef.current?.(),
+    onError: (error) => addDebugTrace('call', 'capability probe failed', { error: String(error) }),
+  });
+
+  const call = useCallSession({
+    capabilities: callComposition.capabilities,
+    createSession: callComposition.createSession,
+    initializeAttempt: (session) => callComposition.initializeSession(session as never),
+    requestPermission: requestCallMicrophonePermission,
+    ringtone,
+    onBackConfirmation: handleBackConfirmation,
+    onReturnToChat: () => { void resumeChat(); },
+    onPermissionSettings: handlePermissionSettings,
+    onCleanupError: handleCallCleanupError,
+  });
+  callHangupRef.current = call.hangup;
+
+  useEffect(() => () => ringtone.stop(), [ringtone]);
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
 
@@ -326,6 +353,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
   const handleLogout = () => {
     closeDrawer();
+    void callComposition.closeCurrent();
     onLogout?.();
   };
 
@@ -548,7 +576,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
          {Platform.OS === 'android' ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={call.canStart ? '给天依打电话' : '语音通话，暂不可用'} accessibilityState={{ disabled: !call.canStart }} disabled={!call.canStart} style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt, opacity: call.canStart ? 1 : 0.58 }]} onPress={call.canStart ? openCall : undefined} activeOpacity={0.78}>
           <View style={styles.drawerItemRow}>
             <Text style={[styles.drawerItemText, { color: theme.text }]}>语音通话</Text>
-            <Text style={[styles.callUnavailable, { color: theme.textMuted }]}>暂不可用</Text>
+             {!call.canStart ? <Text style={[styles.callUnavailable, { color: theme.textMuted }]}>暂不可用</Text> : null}
           </View>
          </TouchableOpacity> : null}
 
