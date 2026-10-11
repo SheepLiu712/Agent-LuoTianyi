@@ -33,6 +33,24 @@ export interface AuthState {
   publicKeyLoaded: boolean;  // 公钥是否已加载
 }
 
+/** 失败响应里取一句可显示的文案。
+
+    ``detail`` 可能是字符串，也可能是对象——例如运行时未就绪的 503 返回
+    ``{detail: {ok, code, message, runtime}}``。直接插值对象会渲染成 ``[object Object]``。
+    */
+function agreementFailureMessage(detail: unknown): string {
+  if (typeof detail === 'string' && detail) {
+    return detail;
+  }
+  if (detail && typeof detail === 'object') {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === 'string' && message) {
+      return message;
+    }
+  }
+  return '用户协议加载失败，请重试';
+}
+
 export async function fetchCurrentAgreement(): Promise<
   { success: true; data: Record<string, unknown> } | { success: false; message: string }
 > {
@@ -41,7 +59,7 @@ export async function fetchCurrentAgreement(): Promise<
     if (!response.ok) {
       const result = await response.json().catch(() => null);
       addDebugTrace('auth', 'agreement fetch failed', { status: response.status });
-      return { success: false, message: result?.detail || '用户协议加载失败，请重试' };
+      return { success: false, message: agreementFailureMessage(result?.detail) };
     }
     addDebugTrace('auth', 'agreement fetch ok');
     return { success: true, data: await response.json() };

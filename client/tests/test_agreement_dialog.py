@@ -13,7 +13,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import QApplication, QDialog, QLabel
 
@@ -196,16 +196,20 @@ def test_render_skips_malformed_blocks_without_failing():
 
 # ── 两端对齐：不得静默降级为左对齐 ───────────────────────────────
 def _left_aligned_document(text, point_size=16, width=420.0):
-    """对照组：同样的文本／字号／宽度，但用 Qt 的左对齐。
+    """对照组：同样的文本／字号／宽度／块格式，但用 Qt 的左对齐。
 
     协议契约只允许 ``center`` 与 ``justify``，模块不产出左对齐文档；这里手工构造一份，
     用来判断两端对齐是否真的把非末行拉到了正文宽度（居中会整体位移，不能当对照组）。
+
+    右边距必须与生产块一致：它决定折行宽度，缺了它对照组的折行落点会和正文不同，
+    末行就不是同一段文字，末行行宽的对比也就失去意义。
     """
     document = QTextDocument()
     document.setDocumentMargin(0)
     cursor = QTextCursor(document)
     block_format = QTextBlockFormat()
     block_format.setAlignment(Qt.AlignmentFlag.AlignLeft)
+    block_format.setRightMargin(dialog_module.TEXT_RIGHT_GUTTER)
     cursor.setBlockFormat(block_format)
     char_format = QTextCharFormat()
     font = QFont(document.defaultFont())
@@ -383,6 +387,28 @@ def test_load_exception_is_reported_not_raised(qapp):
 
     assert "网络不可达" in dialog.error_label.text()
     assert not dialog.retry_btn.isHidden()
+    dialog.close()
+
+
+def test_failure_message_sits_in_the_content_area(qapp):
+    """回归守卫：失败提示落在正文区，不被压到底部操作区。
+
+    曾把 error_label 建在底部操作区（分隔线与按钮之间），失败时正文区只剩一个空 view
+    占满高度，提示就贴着按钮出现在窗口最底下。用窗口坐标比较，不依赖提示挂在哪个容器下。
+    """
+    dialog = AgreementDialog(load_document=lambda: (False, "连接超时", {}))
+    dialog.resize(640, 520)
+    dialog.show()
+    for _ in range(4):
+        QApplication.processEvents()
+
+    actions_top = dialog.layout().itemAt(1).widget().mapTo(dialog, QPoint(0, 0)).y()
+    message_bottom = (
+        dialog.error_label.mapTo(dialog, QPoint(0, 0)).y() + dialog.error_label.height()
+    )
+
+    assert not dialog.error_label.isHidden()
+    assert message_bottom < actions_top
     dialog.close()
 
 

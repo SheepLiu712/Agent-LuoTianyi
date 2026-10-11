@@ -6,6 +6,27 @@ from ..safety import encrypt_pwd
 from ..utils.http_client import HttpClientFactory
 
 
+def _error_detail(response: requests.Response, fallback: str) -> str:
+    """从失败响应里取一句可直接显示的文案。
+
+    服务端的 ``detail`` 可能是字符串，也可能是对象——运行时未就绪的 503 会返回
+    ``{"ok": false, "code": "SYSTEM_RUNTIME_NOT_READY", "message": "...", "runtime": {...}}``
+    （见 ``server/src/web/http/runtime_access.py``）。直接把它当字符串插值会把整个信封打印成
+    Python 字典字面量，这里只取可显示的那一层。
+    """
+    try:
+        detail = response.json().get("detail", fallback)
+    except Exception:
+        return fallback
+    if isinstance(detail, str) and detail:
+        return detail
+    if isinstance(detail, dict):
+        message = detail.get("message")
+        if isinstance(message, str) and message:
+            return message
+    return fallback
+
+
 class AuthApi:
     def __init__(self, base_url: str, verify_ssl: bool = True):
         self.base_url = base_url.rstrip("/")
@@ -38,12 +59,7 @@ class AuthApi:
             timeout=15,
         )
         if resp.status_code != 200:
-            detail = "Login Failed"
-            try:
-                detail = resp.json().get("detail", detail)
-            except Exception:
-                pass
-            return False, detail, {}
+            return False, _error_detail(resp, "Login Failed"), {}
 
         data = resp.json()
         return True, "Login Successful", data
@@ -76,11 +92,7 @@ class AuthApi:
         )
         if resp.status_code == 200:
             return True, "Registration Successful"
-        try:
-            detail = resp.json().get("detail", "Registration Failed")
-        except Exception:
-            detail = "Registration Failed"
-        return False, detail
+        return False, _error_detail(resp, "Registration Failed")
 
     def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
         """通过邀请码重置账号的用户名和密码。"""
@@ -104,11 +116,7 @@ class AuthApi:
         )
         if resp.status_code == 200:
             return True, "Reset Successful"
-        try:
-            detail = resp.json().get("detail", "Reset Failed")
-        except Exception:
-            detail = "Reset Failed"
-        return False, detail
+        return False, _error_detail(resp, "Reset Failed")
 
     def fetch_current_agreement(self) -> Tuple[bool, str, dict]:
         """获取当前的用户协议。"""
@@ -118,12 +126,7 @@ class AuthApi:
             timeout=15,
         )
         if resp.status_code != 200:
-            detail = "Failed to load agreement"
-            try:
-                detail = resp.json().get("detail", detail)
-            except Exception:
-                pass
-            return False, detail, {}
+            return False, _error_detail(resp, "Failed to load agreement"), {}
         try:
             return True, "", resp.json()
         except Exception:

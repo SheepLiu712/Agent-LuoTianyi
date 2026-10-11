@@ -204,6 +204,14 @@ class AgreementDialog(QDialog):
         self.version_label.setStyleSheet(f"font-size: 13px; color: {COLOR_MUTED};")
         column.addWidget(self.version_label)
 
+        # 失败提示属于正文区：建在底部操作区里时，失败态正文区只剩一个空 view 占满高度，
+        # 提示会被压到按钮正上方、离阅读位置最远。
+        self.error_label = QLabel("")
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet(f"font-size: 13px; color: {COLOR_ERROR};")
+        self.error_label.setVisible(False)
+        column.addWidget(self.error_label)
+
         self.view = QTextEdit()
         self.view.setReadOnly(True)
         self.view.setFrameShape(QFrame.Shape.NoFrame)
@@ -231,12 +239,6 @@ class AgreementDialog(QDialog):
         self.divider.setStyleSheet(f"background-color: {COLOR_DIVIDER}; border: none;")
         column.addWidget(self.divider)
 
-        self.error_label = QLabel("")
-        self.error_label.setWordWrap(True)
-        self.error_label.setStyleSheet(f"font-size: 13px; color: {COLOR_ERROR};")
-        self.error_label.setVisible(False)
-        column.addWidget(self.error_label)
-
         row = QHBoxLayout()
         row.setSpacing(10)
 
@@ -247,6 +249,8 @@ class AgreementDialog(QDialog):
             f"QPushButton {{ border: none; border-radius: 8px; font-size: 14px; padding: 10px 16px;"
             f" background-color: {COLOR_SECONDARY_BG}; color: {COLOR_TEXT}; }}"
             f"QPushButton:hover {{ background-color: {COLOR_DIVIDER}; }}"
+            # 与其他窗口一致：按钮获得焦点时 Qt 会画一圈黑色点线（PE_FrameFocusRect），设计稿没有这一层
+            f"QPushButton:focus {{ outline: none; }}"
         )
         self.retry_btn.clicked.connect(self.reload_document)
         self.retry_btn.setVisible(False)
@@ -258,6 +262,7 @@ class AgreementDialog(QDialog):
             f"QPushButton {{ border: none; border-radius: 8px; font-size: 14px; padding: 10px 16px;"
             f" background-color: {COLOR_PRIMARY}; color: {COLOR_TEXT}; }}"
             f"QPushButton:hover {{ background-color: {COLOR_PRIMARY}; }}"
+            f"QPushButton:focus {{ outline: none; }}"
         )
         self.close_action_btn.clicked.connect(self.reject)
 

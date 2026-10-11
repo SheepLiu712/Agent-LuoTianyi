@@ -6,7 +6,8 @@
  *   （回归：根节点缺 absoluteFill 时它只是主界面 flex 列的兄弟节点、层级为 0，
  *    会被 Live2D 层与聊天区盖住，只剩中间一条白带）；
  * - 顶栏承载返回与居中标题，正文区左上角另设大标题（排在版本号之前）；
- * - 版本与正文来自 GET /auth/agreement；加载失败可重试；关闭返回原界面；
+ * - 版本与正文来自 GET /auth/agreement；加载失败可重试，失败态显示红叉且只留顶栏标题；
+ *   关闭返回原界面；
  * - 只读范围：没有倒计时、同意或拒绝。
  */
 
@@ -34,6 +35,8 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 jest.mock('../hooks/useAuth', () => ({ fetchCurrentAgreement: jest.fn() }));
+
+jest.mock('@expo/vector-icons/MaterialIcons', () => 'MaterialIcons');
 
 // 与上面 useSafeAreaInsets 的 mock 保持一致。
 const INSETS = { top: 24, bottom: 12, left: 0, right: 0 };
@@ -167,15 +170,28 @@ describe('用户协议查阅页', () => {
     expect(pageTitleStyle.fontSize as number).toBeGreaterThan(versionStyle.fontSize as number);
   });
 
-  it('加载中与加载失败时也保留标题', async () => {
+  it('加载中保留大标题，加载失败时只留顶栏标题', async () => {
     fetchMock.mockImplementation(() => new Promise(() => {}));
     const loadingTree = await renderScreen();
-    expect(textsOf(screenRoot(loadingTree))).toContain(PAGE_TITLE);
+    expect(viewsWithText(screenRoot(loadingTree), PAGE_TITLE)).toHaveLength(2);
 
     fetchMock.mockReset();
     fetchMock.mockResolvedValue({ success: false, message: '网络错误' });
     const failedTree = await renderScreen();
-    expect(textsOf(screenRoot(failedTree))).toContain(PAGE_TITLE);
+    expect(viewsWithText(screenRoot(failedTree), PAGE_TITLE)).toHaveLength(1);
+  });
+
+  it('失败态显示红叉，正常态没有', async () => {
+    const okTree = await renderScreen();
+    expect(okTree.root.findAllByProps({ name: 'close' })).toHaveLength(0);
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ success: false, message: '网络错误' });
+    const failedTree = await renderScreen();
+
+    const marks = failedTree.root.findAllByProps({ name: 'close' });
+    expect(marks).toHaveLength(1);
+    expect(marks[0].props.color).toBe(THEMES.light.dangerText);
   });
 
   it('渲染服务端返回的版本号与正文', async () => {
@@ -192,7 +208,7 @@ describe('用户协议查阅页', () => {
     fetchMock.mockResolvedValueOnce({ success: false, message: '网络错误' });
 
     const tree = await renderScreen();
-    expect(textsOf(tree.root).some((text) => text.includes('加载用户协议失败'))).toBe(true);
+    expect(textsOf(tree.root)).toContain('网络错误');
 
     fetchMock.mockResolvedValueOnce({ success: true, data: PAYLOAD });
     await act(async () => {
