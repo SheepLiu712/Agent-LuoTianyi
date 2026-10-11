@@ -1,5 +1,6 @@
 import hashlib
 import json
+from importlib.resources import files
 
 import pytest
 
@@ -61,6 +62,15 @@ def test_doc_blocks_field_is_allowed(tmp_path):
     _, docs = load_manifest(tmp_path)
 
     assert docs["v1"].blocks[0]["runs"][0]["text"] == "欢迎使用本服务。"
+
+
+def test_load_manifest_reads_packaged_agreement_resources():
+    version, docs = load_manifest(files("res.user_agreements"))
+
+    assert isinstance(version, str) and version
+    assert version in docs
+    assert docs[version].blocks
+    assert docs[version].title
 
 
 def test_doc_unknown_field_is_rejected(tmp_path):

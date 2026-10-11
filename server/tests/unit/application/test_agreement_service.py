@@ -1,5 +1,6 @@
 import hashlib
 import json
+from importlib.resources import files
 
 import pytest
 from sqlalchemy import create_engine
@@ -117,7 +118,7 @@ def test_init_agreements_rejects_modified_content_json(tmp_path, session):
             version="v1",
             title="服务协议",
             format="agreement.richtext.v1",
-            content_json="{\"tampered\": true}",
+            content_json='{"tampered": true}',
             content_sha256=sha,
             created_at="2026-10-11T00:00:00+08:00",
         )
@@ -126,3 +127,14 @@ def test_init_agreements_rejects_modified_content_json(tmp_path, session):
 
     with pytest.raises(AgreementConfigError, match="规范化正文被覆盖"):
         init_agreements(session, tmp_path)
+
+
+def test_init_agreements_accepts_packaged_agreement_resources(session):
+    service = init_agreements(session, files("res.user_agreements"))
+
+    current = service.get_current()
+    assert current.version
+    assert current.blocks
+
+    stored = session.query(AgreementVersion).one()
+    assert stored.version == current.version

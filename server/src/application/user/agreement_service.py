@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from importlib.abc import Traversable
 
 from src.application.user.agreement_loader import (
     AgreementConfigError,
@@ -20,7 +20,7 @@ class AgreementService:
         return self._docs[self._current_version]
 
 
-def init_agreements(session, root: Path) -> AgreementService:
+def init_agreements(session, root: Traversable) -> AgreementService:
     current_version, docs = load_manifest(root)
 
     existing = {row.version: row for row in session.query(AgreementVersion).all()}

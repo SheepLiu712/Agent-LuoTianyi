@@ -1,7 +1,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from pathlib import Path
+from importlib.abc import Traversable
 from typing import cast
 
 
@@ -47,13 +47,13 @@ AGREEMENT_FORMATS: dict[str, AgreementFormat] = {
 }
 
 
-def load_manifest(root: Path) -> tuple[str, dict[str, AgreementDoc]]:
-    manifest = _read_json(root / "manifest.json")
+def load_manifest(root: Traversable) -> tuple[str, dict[str, AgreementDoc]]:
+    manifest = _read_json(root.joinpath("manifest.json"))
     current_version = _validate_manifest(manifest)
 
     docs: dict[str, AgreementDoc] = {}
     for version, filename in manifest["files"].items():
-        docs[version] = _load_doc(root / filename, version)
+        docs[version] = _load_doc(root.joinpath(filename), version)
 
     if current_version not in docs:
         raise AgreementConfigError(f"current_version {current_version} 不在 files 中")
@@ -61,7 +61,7 @@ def load_manifest(root: Path) -> tuple[str, dict[str, AgreementDoc]]:
     return current_version, docs
 
 
-def _read_json(path: Path) -> dict:
+def _read_json(path: Traversable) -> dict:
     if not path.is_file():
         raise AgreementConfigError(f"协议文件不存在: {path}")
     try:
@@ -95,7 +95,7 @@ def _validate_manifest(manifest: dict) -> str:
     return current
 
 
-def _load_doc(path: Path, expected_version: str) -> AgreementDoc:
+def _load_doc(path: Traversable, expected_version: str) -> AgreementDoc:
     raw = _read_json(path)
 
     unknown = set(raw.keys()) - ALLOWED_TOP_KEYS
@@ -119,7 +119,7 @@ def _load_doc(path: Path, expected_version: str) -> AgreementDoc:
     )
 
 
-def _validate_doc_header(raw: dict, expected_version: str, path: Path) -> tuple[str, str, str]:
+def _validate_doc_header(raw: dict, expected_version: str, path: Traversable) -> tuple[str, str, str]:
     version = raw.get("version")
     if not isinstance(version, str) or not version:
         raise AgreementConfigError(f"{path} version 必须是非空字符串")
@@ -137,7 +137,7 @@ def _validate_doc_header(raw: dict, expected_version: str, path: Path) -> tuple[
     return version, title, fmt
 
 
-def _validate_blocks(raw: dict, path: Path, spec: AgreementFormat) -> list[dict[str, object]]:
+def _validate_blocks(raw: dict, path: Traversable, spec: AgreementFormat) -> list[dict[str, object]]:
     blocks = raw.get("blocks")
     if not isinstance(blocks, list) or not blocks:
         raise AgreementConfigError(f"{path} blocks 必须是非空数组")
@@ -153,7 +153,7 @@ def _validate_blocks(raw: dict, path: Path, spec: AgreementFormat) -> list[dict[
     return cast(list[dict[str, object]], blocks)
 
 
-def _validate_block(block, index: int, path: Path, spec: AgreementFormat) -> bool:
+def _validate_block(block, index: int, path: Traversable, spec: AgreementFormat) -> bool:
     if not isinstance(block, dict):
         raise AgreementConfigError(f"{path} blocks[{index}] 必须是对象")
 
@@ -187,7 +187,7 @@ def _validate_block(block, index: int, path: Path, spec: AgreementFormat) -> boo
     return has_text
 
 
-def _validate_run(run, block_index: int, run_index: int, path: Path, spec: AgreementFormat) -> bool:
+def _validate_run(run, block_index: int, run_index: int, path: Traversable, spec: AgreementFormat) -> bool:
     if not isinstance(run, dict):
         raise AgreementConfigError(f"{path} blocks[{block_index}].runs[{run_index}] 必须是对象")
 
