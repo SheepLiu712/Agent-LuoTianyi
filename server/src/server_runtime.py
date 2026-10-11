@@ -9,7 +9,7 @@ from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
-from src.application.user.agreement_service import AgreementService, init_agreements
+from src.application.user.agreement_service import AgreementService, prepare_agreements, publish_agreements
 from src.domain.stage import StageState
 from src.infrastructure.media import MediaResolver, create_media_resolver
 from src.infrastructure.models.service import LLMService
@@ -85,10 +85,10 @@ class ServerRuntime:
             database_manager = DatabaseManager(config.get("database", {}))
             set_default_database_manager(database_manager)
 
-            # 4. 初始化协议归档：发布清单校验、不可变原文归档
+            # 4. 校验协议发布清单与已有归档；新版本在运行时就绪边界再持久化。
             agreement_session = database_manager.open_sql_session()
             try:
-                agreement_service = init_agreements(agreement_session, AGREEMENT_RESOURCE)
+                agreement_service = prepare_agreements(agreement_session, AGREEMENT_RESOURCE)
             finally:
                 agreement_session.close()
 
@@ -155,6 +155,12 @@ class ServerRuntime:
             runtime._wire_dependencies()
             runtime._start_background_services()
             runtime.user_interface.generate_rsa_keys()
+
+            agreement_session = database_manager.open_sql_session()
+            try:
+                publish_agreements(agreement_session, agreement_service)
+            finally:
+                agreement_session.close()
             return runtime
         except BaseException:
             logger.error("ServerRuntime initialization failed, starting rollback...")
