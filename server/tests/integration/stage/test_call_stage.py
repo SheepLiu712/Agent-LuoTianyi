@@ -330,12 +330,18 @@ async def test_real_stage_agent_context_and_sqlite_connect_then_cleanup(call_set
 @pytest.mark.asyncio
 async def test_decline_and_setup_deadline_are_terminal_without_active_duration(call_setup):
     stage, _, _, _ = await _create(call_setup, decision=CallAnswerDecision.DECLINE)
-    await stage.wait_closed()
+    snapshot = await stage.wait_closed()
+    repeated = await stage.terminate(CallEndReason.USER_HANGUP)
+    repository, record, ownership, clock = call_setup
+    persisted = repository.find_by_id(record.call_id)
 
     assert stage.snapshot.terminal.outcome is CallOutcome.DECLINED
     assert stage.snapshot.terminal.active_duration_ms == 0
+    assert snapshot is repeated
+    assert persisted.state is CallState.ENDED
+    assert persisted.outcome is CallOutcome.DECLINED
+    assert persisted.end_reason is CallEndReason.DECLINED
 
-    repository, record, ownership, clock = call_setup
     second = record.with_update(
         call_id=uuid4(),
         client_request_id="request-2",
