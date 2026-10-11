@@ -34,6 +34,7 @@ from src.infrastructure.persistence.database.sql_database import (
 from src.infrastructure.persistence.database.sql_database import (
     CallSession as CallSessionRow,
 )
+from src.server_runtime import CallCapabilityStatus
 from src.web.http import routes
 from src.web.http.user_interface import UserInterface
 
@@ -289,9 +290,22 @@ def test_authenticated_http_reset_preserves_credentials_and_isolates_other_owner
         database_manager=database,
         user_reset_service=reset_service,
         user_interface=UserInterface(database, _Resolver()),
+        call_capability_status=CallCapabilityStatus(False, False, False, False, False, False, False, False, ()),
+        supports_call_character=lambda _character_id: False,
     )
     app.dependency_overrides[routes.get_runtime] = lambda: runtime
     with TestClient(app) as client:
+        assert client.get("/call/capability?character_id=luotianyi").status_code == 401
+        capability = client.get(
+            "/call/capability?character_id=luotianyi&username=other",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert capability.status_code == 200
+        assert capability.json() == {
+            "available": False,
+            "character_id": "luotianyi",
+            "reason": "disabled",
+        }
         unauthorized = client.post("/user/data/reset", json={"username": "owner"})
         assert unauthorized.status_code == 401
         mismatched = client.post(
