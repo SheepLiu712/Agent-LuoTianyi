@@ -194,6 +194,25 @@ class WebSocketService:
         )
         await websocket.send_json(event)
 
+    async def send_chat_ready_event(
+        self,
+        connection: "WebSocketConnection",
+        *,
+        character_id: str,
+        interaction_id: str,
+    ) -> None:
+        """Confirm that authenticated chat transport is bound to a live Stage."""
+        await connection.websocket.send_json(
+            self._make_event(
+                WSEventType.CHAT_READY,
+                {
+                    "character_id": character_id,
+                    "interaction_id": interaction_id,
+                    "schema_version": 1,
+                },
+            )
+        )
+
     async def send_error_event(self, websocket: WebSocket, payload: Dict) -> None:
         event = self._make_event(WSEventType.SERVER_ERROR, payload)
         await websocket.send_json(event)

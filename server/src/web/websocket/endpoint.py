@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from src.adapter.websocket import ChatEventAcceptance, EventRejection, VoiceUploadError
 from src.adapter.websocket.call_v1 import ControlProtocolError, decode_control_text, encode_control_message
 from src.application.admin import get_admin_shell
+from src.stage.stage_manager import InteractionOwnedByCallAdmission
 from src.utils.logger import get_logger
 from src.web.http import runtime_not_ready_detail
 
@@ -54,8 +55,15 @@ async def chat_ws(websocket: WebSocket) -> None:
         if stage_manager is None:
             raise RuntimeError("StageManager is required for production chat connections")
         character_id = server_runtime.agent_runtime.default_character_id
-        await stage_manager.connect(connection, character_id)
+        stage = await stage_manager.connect(connection, character_id)
+        await websocket_service.send_chat_ready_event(
+            connection,
+            character_id=character_id,
+            interaction_id=stage.interaction_id,
+        )
         await _receive_events(server_runtime, connection)
+    except InteractionOwnedByCallAdmission:
+        await _reject_call_owned_chat_admission(websocket_service, connection)
     except WebSocketDisconnect:
         server_runtime.client_llm_executor.clear_user(connection.user_uuid, connection)
         logger.info("WebSocket client disconnected from /chat_ws")
@@ -65,6 +73,24 @@ async def chat_ws(websocket: WebSocket) -> None:
     finally:
         if stage_manager is not None:
             await stage_manager.disconnect(connection)
+
+
+async def _reject_call_owned_chat_admission(
+    websocket_service: WebSocketService, connection: WebSocketConnection
+) -> None:
+    """Return a typed retryable admission error without fabricating chat readiness."""
+    try:
+        await websocket_service.send_error_event(
+            connection.websocket,
+            {
+                "code": "INTERACTION_OWNED_BY_CALL",
+                "message": "chat interaction is temporarily owned by a call",
+                "retryable": True,
+            },
+        )
+        await connection.websocket.close(code=1013)
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected while reporting call-owned chat admission")
 
 
 async def _reject_when_runtime_is_not_ready(websocket: WebSocket) -> None:

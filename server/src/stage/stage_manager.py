@@ -99,6 +99,14 @@ class CallStartFailed(RuntimeError):
         super().__init__("CALL_START_FAILED")
 
 
+class InteractionOwnedByCallAdmission(RuntimeError):
+    """Chat admission was rejected because call ownership is current."""
+
+    def __init__(self, source: InteractionSource) -> None:
+        self.source = source
+        super().__init__("INTERACTION_OWNED_BY_CALL")
+
+
 class StageManager:
     """按用户与角色管理 Stage，持有共享 adapter 及离线回收任务。"""
 
@@ -225,6 +233,7 @@ class StageManager:
             if self._closed or connection.is_closed or not connection.user_uuid:
                 raise ValueError("manager or connection is unavailable")
             key = (connection.user_uuid, character_id)
+            self._require_chat_admission(key)
             stage = self._stages.get(key)
             if stage is None or stage.state in (StageState.TERMINATING, StageState.TERMINATED):
                 if stage is not None:
@@ -264,6 +273,14 @@ class StageManager:
                 self._pending_regular_logins.remove(key)
                 stage.schedule_login_reminders()
             return stage
+
+    def _require_chat_admission(self, key: tuple[str, str]) -> None:
+        current_lease = self._lease_registry.current(*key)
+        if current_lease is not None and current_lease.source in {
+            InteractionSource.CALL,
+            InteractionSource.CALL_TRANSITION,
+        }:
+            raise InteractionOwnedByCallAdmission(current_lease.source)
 
     async def prepare_call_transition(
         self,

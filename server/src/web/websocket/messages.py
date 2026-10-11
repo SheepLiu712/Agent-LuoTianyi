@@ -46,6 +46,7 @@ class WSEventType(str, Enum):
     SERVER_ACK = "server_ack"
     AUTH_ERROR = "auth_error"
     AUTH_OK = "auth_ok"
+    CHAT_READY = "chat.ready"
 
     AGENT_STATE_CHANGED = "agent_state_changed"
     AGENT_MESSAGE = "agent_message"
