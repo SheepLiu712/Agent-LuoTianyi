@@ -24,7 +24,16 @@ class FakeSocket implements CallSocket {
   private listeners = new Map<keyof CallSocketEventMap, Set<(event: never) => void>>();
 
   send(data: string | Uint8Array): void { this.sent.push(data); }
-  close(): void { this.closeCount += 1; this.readyState = 3; }
+  close(code?: number, reason?: string): void {
+    if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999)) {
+      throw new DOMException('invalid close code', 'InvalidAccessError');
+    }
+    if (reason !== undefined && new TextEncoder().encode(reason).byteLength > 123) {
+      throw new DOMException('close reason is too long', 'SyntaxError');
+    }
+    this.closeCount += 1;
+    this.readyState = 3;
+  }
   addEventListener<Type extends keyof CallSocketEventMap>(type: Type, listener: (event: CallSocketEventMap[Type]) => void): void {
     const listeners = this.listeners.get(type) ?? new Set();
     listeners.add(listener as (event: never) => void);
@@ -277,6 +286,34 @@ describe('reliable call transport', () => {
     expect(session.state.callId).toBe(CALL_ID);
     expect(sockets.sockets).toHaveLength(2);
     expect(session.state.recoveryDeadlineMonotonicMs).toBeDefined();
+  });
+
+  test('audio focus recovery uses an application close code and fails closed if close throws', async () => {
+    const established = await establish();
+    established.socket.close = jest.fn((code) => {
+      expect(code).toBe(4000);
+      established.socket.emit('close', { code });
+    });
+    established.session.forceRecovery('AUDIO_FOCUS_LOST');
+    expect(established.session.state.status).toBe('recovering');
+    expect(established.sockets.sockets).toHaveLength(2);
+
+    const failed = await establish();
+    failed.socket.close = jest.fn(() => { throw new DOMException('invalid close code', 'InvalidAccessError'); });
+    failed.session.forceRecovery('AUDIO_FOCUS_LOST');
+    expect(failed.session.state).toMatchObject({ status: 'failed', errorCode: 'AUDIO_FOCUS_CLOSE_FAILED' });
+    expect(failed.sockets.sockets).toHaveLength(1);
+  });
+
+  test('protocol failure closes with a legal private code and content-free bounded reason', async () => {
+    const established = await establish();
+    const close = jest.spyOn(established.socket, 'close');
+    established.socket.message('{bad json');
+    await flush();
+    expect(established.session.state.status).toBe('failed');
+    expect(close).toHaveBeenCalledWith(4001, 'call transport failed');
+    expect(new TextEncoder().encode(close.mock.calls[0][1] || '').byteLength).toBeLessThanOrEqual(123);
+    expect(established.sockets.sockets).toHaveLength(1);
   });
 
   test('a stop placeholder accepts its delayed matching registration without reviving playback', async () => {

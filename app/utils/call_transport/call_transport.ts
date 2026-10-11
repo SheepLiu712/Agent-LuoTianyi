@@ -33,6 +33,9 @@ const CALL_ROUTE = 2;
 const FINAL_FLAG = 1;
 const RECOVERY_WINDOW_MS = 3_000;
 const NATIVE_SETTLE_TIMEOUT_MS = 3_000;
+const AUDIO_FOCUS_LOST_CLOSE_CODE = 4000;
+const CALL_FAILURE_CLOSE_CODE = 4001;
+const CALL_FAILURE_CLOSE_REASON = 'call transport failed';
 const INPUT_AUDIO_FORMAT = { encoding: 'pcm_s16le', sampleRateHz: 16_000, channels: 1 } as const;
 
 interface StreamState {
@@ -137,7 +140,12 @@ export class CallTransportSession {
       return;
     }
     const epoch = this.socketEpoch;
-    try { this.socket?.close(1012, 'audio focus lost'); } catch { /* disconnect path still owns recovery */ }
+    try {
+      this.socket?.close(AUDIO_FOCUS_LOST_CLOSE_CODE, 'audio focus lost');
+    } catch {
+      this.fail('AUDIO_FOCUS_CLOSE_FAILED');
+      return;
+    }
     this.handleDisconnect(epoch);
   }
 
@@ -589,7 +597,9 @@ export class CallTransportSession {
     }
     const socket = this.socket;
     this.socket = null;
-    try { socket?.close(code ? 1002 : 1000, code?.slice(0, 123) ?? 'call ended'); } catch { /* terminal cleanup continues */ }
+    try {
+      socket?.close(code ? CALL_FAILURE_CLOSE_CODE : 1000, code ? CALL_FAILURE_CLOSE_REASON : 'call ended');
+    } catch { /* terminal cleanup continues without opening another connection */ }
     try { this.unsubscribeConsumption(); } catch { /* terminal cleanup continues */ }
     if (code) {
       for (const listener of this.errorListeners) {

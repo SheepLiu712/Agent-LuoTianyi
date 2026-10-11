@@ -5,7 +5,6 @@ import { Platform } from 'react-native';
 import type {
   CallCapabilities,
   CallNativeAudioPort,
-  CallSocket,
   CallSocketFactory,
   CallSwitchPort,
 } from '../../types/call_transport';
@@ -13,6 +12,7 @@ import { server_config } from '../../config';
 import { auth } from '../../components/auth';
 import { CallSession } from './call_session';
 import { CallTransportSession } from '../call_transport/call_transport';
+import { createPlatformCallSocketFactory } from '../call_transport/websocket_adapter';
 import { AndroidCallAudio, isAndroidCallAudioModuleAvailable } from '../call_audio/native_call_audio';
 
 export type CallCapabilityReason =
@@ -282,18 +282,7 @@ export async function requestCallMicrophonePermission(): Promise<'granted' | 'de
   return result.canAskAgain === false ? 'permanently_denied' : 'denied';
 }
 
-const browserSocketFactory: CallSocketFactory = {
-  create(url: string): CallSocket {
-    const socket = new WebSocket(url);
-    return {
-      get readyState() { return socket.readyState; },
-      send: (data) => socket.send(data as never),
-      close: (code, reason) => socket.close(code, reason),
-      addEventListener: (type, listener) => socket.addEventListener(type, listener as unknown as EventListener),
-      removeEventListener: (type, listener) => socket.removeEventListener(type, listener as unknown as EventListener),
-    };
-  },
-};
+const browserSocketFactory: CallSocketFactory = createPlatformCallSocketFactory();
 
 function callWebSocketUrl(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, '');
