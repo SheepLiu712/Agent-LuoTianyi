@@ -15,10 +15,9 @@ import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import QApplication, QDialog, QLabel
-
 from src.gui import agreement_dialog as dialog_module
 from src.gui.agreement_dialog import AgreementDialog
 

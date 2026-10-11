@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping, Sequence
 
-from PySide6.QtCore import QEvent, QObject, QRunnable, QThreadPool, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QDialog,
@@ -261,7 +261,8 @@ class AgreementDialog(QDialog):
         self.view.setStyleSheet(
             f"QTextEdit {{ background: transparent; color: {COLOR_TEXT}; border: none; }}"
             "QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }"
-            f"QScrollBar::handle:vertical {{ background: {COLOR_SCROLL_HANDLE}; min-height: 40px; border-radius: 2px; }}"
+            f"QScrollBar::handle:vertical {{ background: {COLOR_SCROLL_HANDLE}; min-height: 40px;"
+            " border-radius: 2px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
         column.addWidget(self.view, 1)
