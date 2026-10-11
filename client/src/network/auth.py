@@ -109,3 +109,22 @@ class AuthApi:
         except Exception:
             detail = "Reset Failed"
         return False, detail
+
+    def fetch_current_agreement(self) -> Tuple[bool, str, dict]:
+        """获取当前的用户协议。"""
+        resp = self.session.get(
+            f"{self.base_url}/auth/agreement",
+            verify=self.verify_ssl,
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            detail = "Failed to load agreement"
+            try:
+                detail = resp.json().get("detail", detail)
+            except Exception:
+                pass
+            return False, detail, {}
+        try:
+            return True, "", resp.json()
+        except Exception:
+            return False, "Failed to load agreement", {}
