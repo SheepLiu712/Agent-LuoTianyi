@@ -2,6 +2,7 @@
 
 import sqlite3
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -240,6 +241,62 @@ def test_frozen_batch_rejects_a_different_compaction_payload(tmp_path):
             is False
         )
         assert service.get_cognitive_maintenance_progress("user", character_id="luotianyi") is None
+    finally:
+        engine.dispose()
+
+
+def test_batch_allows_covered_history_before_marker_but_not_maintained_history(tmp_path):
+    service, engine = _service(tmp_path)
+    try:
+        service.add_conversations(
+            "user",
+            [
+                _item("first", "2026-10-09 10:00:00"),
+                _item("second", "2026-10-09 10:01:00"),
+                _item("third", "2026-10-09 10:02:00"),
+            ],
+        )
+        assert service.advance_cognitive_maintenance_progress(
+            "user", character_id="luotianyi", expected_entry_id=None, new_entry_id="second"
+        )
+        valid = CognitiveMaintenanceBatchDraft(
+            target_entry_id="third",
+            covered_entry_ids=("first", "second", "third"),
+            maintained_entry_ids=("third",),
+            candidates=[],
+            proposed_profile=None,
+            input_digest="digest",
+        )
+        batch = service.create_or_load_cognitive_maintenance_batch(
+            "user", character_id="luotianyi", previous_progress="second", draft=valid
+        )
+        assert batch.covered_entry_ids == ("first", "second", "third")
+        assert batch.maintained_entry_ids == ("third",)
+
+        invalid = CognitiveMaintenanceBatchDraft(
+            target_entry_id="third",
+            covered_entry_ids=("first", "second", "third"),
+            maintained_entry_ids=("second", "third"),
+            candidates=[],
+            proposed_profile=None,
+            input_digest="other-digest",
+        )
+        service.reset_user_conversations("user")
+        service.add_conversations(
+            "user",
+            [
+                _item("first", "2026-10-09 10:00:00"),
+                _item("second", "2026-10-09 10:01:00"),
+                _item("third", "2026-10-09 10:02:00"),
+            ],
+        )
+        assert service.advance_cognitive_maintenance_progress(
+            "user", character_id="luotianyi", expected_entry_id=None, new_entry_id="second"
+        )
+        with pytest.raises(ValueError, match="predecessor"):
+            service.create_or_load_cognitive_maintenance_batch(
+                "user", character_id="luotianyi", previous_progress="second", draft=invalid
+            )
     finally:
         engine.dispose()
 

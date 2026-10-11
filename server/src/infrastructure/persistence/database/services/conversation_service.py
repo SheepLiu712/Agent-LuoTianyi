@@ -619,7 +619,9 @@ class ConversationService:
         maintenance_id: str | None = None,
     ) -> bool:
         """Commit compaction and progress in one SQL transaction, or leave both unchanged."""
-        if not isinstance(new_progress, str) or not new_progress or new_progress == expected_progress:
+        if not isinstance(new_progress, str) or not new_progress:
+            return False
+        if new_progress == expected_progress and compaction is None:
             return False
         db = self._new_session()
         committed = False
@@ -664,6 +666,8 @@ class ConversationService:
             db, maintenance_id, user_id, character_id, compaction, expected_progress, new_progress
         ):
             return False
+        if new_progress == expected_progress:
+            return compaction is not None
         return self._is_valid_progress_target(db, user_id, character_id, expected_progress, new_progress)
 
     @staticmethod
@@ -779,7 +783,11 @@ class ConversationService:
         previous = by_id.get(previous_progress) if previous_progress is not None else None
         if previous is not None and (target.timestamp, target.uuid) <= (previous.timestamp, previous.uuid):
             raise ValueError("认知维护目标不能倒退")
-        for entry_id in (*draft.covered_entry_ids, *draft.maintained_entry_ids):
+        for entry_id in draft.covered_entry_ids:
+            entry = by_id[entry_id]
+            if (entry.timestamp, entry.uuid) > (target.timestamp, target.uuid):
+                raise ValueError("认知维护记录不能超过目标记录")
+        for entry_id in draft.maintained_entry_ids:
             entry = by_id[entry_id]
             if previous is not None and (entry.timestamp, entry.uuid) <= (previous.timestamp, previous.uuid):
                 raise ValueError("认知维护记录必须位于 predecessor 之后")
@@ -805,13 +813,13 @@ class ConversationService:
             raise ValueError("冻结压缩批次必须包含完整 basis")
         if context.context_summary != draft.compaction_previous_summary:
             raise ValueError("冻结压缩总结 basis 不匹配")
-        if context.context_memory_count != draft.compaction_expected_count:
+        if context.context_memory_count < draft.compaction_expected_count:
             raise ValueError("冻结压缩窗口计数 basis 不匹配")
         rows = (
             db.query(Conversation)
             .filter(Conversation.user_id == user_id, Conversation.character_id == character_id)
             .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
-            .limit(draft.compaction_expected_count)
+            .limit(context.context_memory_count)
             .all()
         )
         ordered_rows = tuple(reversed(rows))
