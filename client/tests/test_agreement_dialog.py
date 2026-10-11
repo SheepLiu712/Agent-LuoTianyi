@@ -89,9 +89,9 @@ def _wait_until(predicate, timeout=2.0):
     assert predicate()
 
 
-def _layout_document(payload, width=420.0):
+def _layout_document(payload, width=420.0, base_point_size=16.0):
     """渲染并按给定宽度排版，返回 (document, [(对齐, 行) ...])。"""
-    document = dialog_module.render_agreement_document(payload)
+    document = dialog_module.render_agreement_document(payload, base_point_size=base_point_size)
     document.setTextWidth(width)
     document.documentLayout().documentSize()  # 强制排版
     blocks = []
@@ -149,7 +149,7 @@ def test_render_maps_block_font_size_and_partial_bold():
         fragment = block.begin()
         while not fragment.atEnd():
             char_format = fragment.fragment().charFormat()
-            sizes.append(char_format.font().pixelSize())
+            sizes.append(char_format.font().pointSizeF())
             bolds.append(char_format.font().bold())
             fragment += 1
         block = block.next()
@@ -172,7 +172,7 @@ def test_render_falls_back_to_default_font_size(bad_size):
     document, _ = _layout_document(payload)
 
     fragment = document.begin().begin().fragment()
-    assert fragment.charFormat().font().pixelSize() == dialog_module.DEFAULT_BLOCK_FONT_SIZE
+    assert fragment.charFormat().font().pointSizeF() == pytest.approx(16.0)
 
 
 def test_render_does_not_execute_html():
@@ -208,7 +208,7 @@ def test_render_skips_malformed_blocks_without_failing():
 
 
 # ── 两端对齐：不得静默降级为左对齐 ───────────────────────────────
-def _left_aligned_document(text, point_size=16, width=420.0):
+def _left_aligned_document(text, point_size=16.0, width=420.0):
     """对照组：同样的文本／字号／宽度／块格式，但用 Qt 的左对齐。
 
     协议契约只允许 ``center`` 与 ``justify``，模块不产出左对齐文档；这里手工构造一份，
@@ -226,7 +226,7 @@ def _left_aligned_document(text, point_size=16, width=420.0):
     cursor.setBlockFormat(block_format)
     char_format = QTextCharFormat()
     font = QFont(document.defaultFont())
-    font.setPixelSize(point_size)
+    font.setPointSizeF(point_size)
     char_format.setFont(font)
     cursor.insertText(text, char_format)
     document.setTextWidth(width)
@@ -263,17 +263,50 @@ def test_reflow_adds_lines_when_window_narrows(make_dialog):
         "blocks": [{"font_size": 16, "runs": [{"text": WRAPPING_TEXT * 3, "bold": False}]}],
     }
     dialog = make_dialog(document=payload)
-    dialog.resize(640, 520)
+    dialog.resize(900, 520)
     dialog.show()
     QApplication.processEvents()
     wide = sum(layout.lineCount() for _, layout in _blocks_of(dialog))
 
-    dialog.resize(340, 520)
+    dialog.resize(560, 520)
     for _ in range(6):
         QApplication.processEvents()
     narrow = sum(layout.lineCount() for _, layout in _blocks_of(dialog))
 
     assert narrow > wide
+
+
+def test_application_font_change_rescales_text_and_reflows(make_dialog):
+    payload = {
+        "version": "v",
+        "title": "t",
+        "blocks": [{"font_size": 16, "runs": [{"text": WRAPPING_TEXT * 3, "bold": False}]}],
+    }
+    dialog = make_dialog(document=payload)
+    dialog.resize(420, 520)
+    small_font = QFont(dialog.font())
+    small_font.setPointSizeF(9.0)
+    dialog.setFont(small_font)
+    dialog.show()
+    QApplication.processEvents()
+
+    small_document = dialog.view.document()
+    small_size = small_document.begin().begin().fragment().charFormat().font().pointSizeF()
+    small_lines = sum(layout.lineCount() for _, layout in _blocks_of(dialog))
+
+    large_font = QFont(dialog.font())
+    large_font.setPointSizeF(24.0)
+    dialog.setFont(large_font)
+    for _ in range(6):
+        QApplication.processEvents()
+
+    large_document = dialog.view.document()
+    large_size = large_document.begin().begin().fragment().charFormat().font().pointSizeF()
+    large_lines = sum(layout.lineCount() for _, layout in _blocks_of(dialog))
+
+    assert small_size == pytest.approx(9.0)
+    assert large_size == pytest.approx(24.0)
+    assert large_lines > small_lines
 
 
 def _blocks_of(dialog):

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping, Sequence
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QRunnable, QThreadPool, Qt, Signal, Slot
 from PySide6.QtGui import QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QDialog,
@@ -133,16 +133,26 @@ def split_runs_on_newline(runs: Sequence[Mapping[str, Any]]) -> list[list[tuple[
     return lines
 
 
-def render_agreement_document(payload: Mapping[str, Any], font_family: str | None = None) -> QTextDocument:
+def render_agreement_document(
+    payload: Mapping[str, Any],
+    font_family: str | None = None,
+    *,
+    base_point_size: float | None = None,
+) -> QTextDocument:
     """把服务端协议正文渲染成富文本文档（供只读查阅与后续签署流程复用）。
 
-    逐段落套用字号与对齐、逐 run 套用粗细；这里刻意不使用 HTML：HTML 会折叠连续空格，
+    逐段落套用逻辑点字号与对齐、逐 run 套用粗细；这里刻意不使用 HTML：HTML 会折叠连续空格，
     也会引入协议未允许的标记与交互行为。
     """
     document = QTextDocument()
     document.setDocumentMargin(0)
-    if font_family:
-        document.setDefaultFont(QFont(font_family))
+    default_font = QFont(font_family) if font_family else QFont()
+    if base_point_size is not None:
+        default_font.setPointSizeF(base_point_size)
+    document.setDefaultFont(default_font)
+    logical_base_size = default_font.pointSizeF()
+    if logical_base_size <= 0:
+        logical_base_size = 9.0
 
     cursor = QTextCursor(document)
     blocks = payload.get("blocks") or []
@@ -170,7 +180,7 @@ def render_agreement_document(payload: Mapping[str, Any], font_family: str | Non
             for text, bold in line:
                 char_format = QTextCharFormat()
                 font = QFont(document.defaultFont())
-                font.setPixelSize(size)
+                font.setPointSizeF(logical_base_size * size / DEFAULT_BLOCK_FONT_SIZE)
                 font.setBold(bold)
                 char_format.setFont(font)
                 cursor.insertText(text, char_format)
@@ -198,6 +208,7 @@ class AgreementDialog(QDialog):
         self._load_in_flight = False
         self._closed = False
         self.finished.connect(self._on_dialog_finished)
+        self._document_payload: Mapping[str, Any] | None = None
         self.version: str | None = None
         self.last_error: str = ""
 
@@ -300,12 +311,28 @@ class AgreementDialog(QDialog):
         return actions
 
     # ── 正文 ─────────────────────────────────────────────────────
+    def _effective_font_point_size(self) -> float:
+        size = self.font().pointSizeF()
+        return size if size > 0 else 9.0
+
+    def _render_current_document(self) -> None:
+        if self._document_payload is None:
+            return
+        self.view.setDocument(
+            render_agreement_document(
+                self._document_payload,
+                self.font().family(),
+                base_point_size=self._effective_font_point_size(),
+            )
+        )
+
     def set_document(self, payload: Mapping[str, Any]) -> None:
         """装载一份协议正文；只读窗口不含任何签署或计时状态。"""
+        self._document_payload = payload
         self.version = str(payload.get("version", "") or "")
         self.setWindowTitle(str(payload.get("title", "") or "用户协议"))
         self.version_label.setText(f"版本：{self.version}" if self.version else "")
-        self.view.setDocument(render_agreement_document(payload, self.font().family()))
+        self._render_current_document()
         self._set_failure(None)
 
     def reload_document(self) -> bool:
@@ -347,6 +374,11 @@ class AgreementDialog(QDialog):
         self.retry_btn.setVisible(bool(message))
 
     # ── 生命周期 ─────────────────────────────────────────────────
+    def changeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        super().changeEvent(event)
+        if event.type() in {QEvent.Type.FontChange, QEvent.Type.ApplicationFontChange}:
+            self._render_current_document()
+
     def _invalidate_load(self) -> None:
         self._closed = True
         self._load_in_flight = False
