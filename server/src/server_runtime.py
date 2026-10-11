@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from importlib.resources import files
 from typing import Final
 
 from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
+from src.application.user.agreement_service import AgreementService, init_agreements
 from src.domain.stage import StageState
 from src.infrastructure.media import MediaResolver, create_media_resolver
 from src.infrastructure.models.service import LLMService
@@ -26,6 +28,7 @@ from src.world import WorldRuntime
 
 logger = get_logger(__name__)
 DEFAULT_WORLD_ID: Final = "default"
+AGREEMENT_RESOURCE: Final = files("res.user_agreements")
 
 
 @dataclass
@@ -41,6 +44,7 @@ class ServerRuntime:
     llm_service: LLMService
     client_llm_executor: ClientLLMExecutor
     observability: ObservabilityService
+    agreement_service: AgreementService
     owns_observability: bool = field(default=True)
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
@@ -81,11 +85,18 @@ class ServerRuntime:
             database_manager = DatabaseManager(config.get("database", {}))
             set_default_database_manager(database_manager)
 
-            # 4. 初始化中立媒体解析适配器；角色音频能力由 Agent Skill 自行拥有。
+            # 4. 初始化协议归档：发布清单校验、不可变原文归档
+            agreement_session = database_manager.open_sql_session()
+            try:
+                agreement_service = init_agreements(agreement_session, AGREEMENT_RESOURCE)
+            finally:
+                agreement_session.close()
+
+            # 5. 初始化中立媒体解析适配器；角色音频能力由 Agent Skill 自行拥有。
             media_config = config.get("infrastructure", {}).get("media_resolution", {})
             media_resolver = create_media_resolver(media_config)
 
-            # 5. 初始化 Agent 运行时
+            # 6. 初始化 Agent 运行时
             agent_config = dict(config.get("agent_runtime", {}))
             skills_config = dict(agent_config.get("skills", {}))
             skills_config.setdefault(
@@ -100,13 +111,13 @@ class ServerRuntime:
                 media_resolver=media_resolver,
             )
 
-            # 6. 初始化箱庭世界运行时，并显式注入它需要的角色能力端口。
+            # 7. 初始化箱庭世界运行时，并显式注入它需要的角色能力端口。
             world = WorldRuntime(
                 config.get("world", {}),
                 singing_backend=agent_runtime.singing_backend,
             )
 
-            # 7. 组装系统运行时
+            # 8. 组装系统运行时
             runtime = cls(
                 user_interface=UserInterface(database_manager, media_resolver),
                 websocket_service=WebSocketService(),
@@ -117,6 +128,7 @@ class ServerRuntime:
                 llm_service=llm_service,
                 client_llm_executor=client_llm_executor,
                 observability=observability,
+                agreement_service=agreement_service,
                 owns_observability=owns_observability,
                 chat_adapter=WebSocketAdapter(
                     {
@@ -312,6 +324,7 @@ class ServerRuntime:
             "media_resolver": self.media_resolver,
             "llm_service": self.llm_service,
             "observability": self.observability,
+            "agreement_service": self.agreement_service,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
