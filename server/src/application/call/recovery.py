@@ -118,6 +118,9 @@ class StaleCallRecoveryService:
     async def _repair_claimed_terminal(self, record) -> str:
         recovery_digest = recovery_settlement_digest(record)
         if record.settlement_input_digest is not None:
+            if record.settlement_input_digest == recovery_digest:
+                await self._repair_recovery_projection(record, recovery_digest)
+                return "recovered"
             repaired = await self._repair_normal_settlement(record, record.settlement_input_digest)
             return "recovered" if repaired else "skipped"
         try:

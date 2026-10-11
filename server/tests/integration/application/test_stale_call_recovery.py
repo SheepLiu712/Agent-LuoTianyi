@@ -252,3 +252,71 @@ def test_existing_normal_digest_repairs_legal_winner_without_creating_fallback(t
     )
     assert winner.data["summary"] == summary
     engine.dispose()
+
+
+def test_recovery_cancellation_waits_for_owned_sql_write_and_converges_on_retry(tmp_path):
+    now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    engine, sessions, repository, conversations = _fixture(tmp_path / "cancel-owned.sqlite")
+    active = _record(
+        CallState.ACTIVE,
+        now,
+        connected_at=now - timedelta(seconds=40),
+        disconnected_at=now - timedelta(seconds=25),
+        active_duration_ms=12_000,
+    )
+    repository.create_if_absent(active)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = conversations.add_call_conversation
+
+    def delayed_add(*args, **kwargs):
+        entered_loop.call_soon_threadsafe(entered.set)
+        asyncio.run_coroutine_threadsafe(release.wait(), entered_loop).result(timeout=5)
+        return original(*args, **kwargs)
+
+    conversations.add_call_conversation = delayed_add
+
+    async def scenario():
+        nonlocal entered_loop
+        entered_loop = asyncio.get_running_loop()
+        service = StaleCallRecoveryService(
+            call_sessions=repository,
+            conversation_service=conversations,
+            call_maintenance_batches=_Batches(),
+            projection_verifier=_Verifier(),
+            stale_after=timedelta(seconds=1),
+            wall_clock=lambda: now,
+        )
+        recovery = asyncio.create_task(service.reconcile())
+        await entered.wait()
+        recovery.cancel()
+        await asyncio.sleep(0)
+        assert not recovery.done()
+        release.set()
+        try:
+            await recovery
+        except asyncio.CancelledError:
+            pass
+
+    entered_loop = None
+    asyncio.run(scenario())
+    conversations.add_call_conversation = original
+
+    report = asyncio.run(
+        StaleCallRecoveryService(
+            call_sessions=repository,
+            conversation_service=conversations,
+            call_maintenance_batches=_Batches(),
+            projection_verifier=_Verifier(),
+            stale_after=timedelta(seconds=1),
+            wall_clock=lambda: now + timedelta(minutes=1),
+        ).reconcile()
+    )
+    assert report.failed == 0
+    terminal = repository.find_by_id(active.call_id)
+    assert terminal.state is CallState.ENDED
+    assert terminal.summary_status is SettlementStatus.SUCCEEDED
+    assert terminal.maintenance_status is SettlementStatus.FAILED
+    with sessions() as session:
+        assert session.query(Conversation).filter_by(user_id="owner", type="call").count() == 1
+    engine.dispose()
