@@ -42,8 +42,11 @@ class DeterministicLLMModule:
 
 
 class DeterministicLLMService:
-    def __init__(self) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         self.modules: dict[str, DeterministicLLMModule] = {}
+
+    def ensure_dependencies(self) -> None:
+        return None
 
     def register_llm_module(self, name, _config):
         module = DeterministicLLMModule(name)
@@ -82,6 +85,9 @@ class DeterministicVectorStore:
         return []
 
     def delete_user_records(self, _user_id):
+        return 0
+
+    def delete_user_records_strict(self, _user_id):
         return 0
 
     def close(self):

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -15,6 +17,7 @@ from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
 from src.infrastructure.persistence.call_sessions import CallSessionRecord, SqlCallSessionRepository
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
 from src.infrastructure.persistence.database.services.conversation_service import ConversationService
+from src.infrastructure.persistence.database.services.credential_service import CredentialService
 from src.infrastructure.persistence.database.services.memory_store import MemoryStore
 from src.infrastructure.persistence.database.services.user_store import UserStore
 from src.infrastructure.persistence.database.sql_database import (
@@ -25,6 +28,14 @@ from src.infrastructure.persistence.database.sql_database import (
     MemoryEdgeRecord,
     User,
 )
+from src.infrastructure.persistence.database.sql_database import (
+    CallMaintenanceBatch as CallMaintenanceBatchRow,
+)
+from src.infrastructure.persistence.database.sql_database import (
+    CallSession as CallSessionRow,
+)
+from src.web.http import routes
+from src.web.http.user_interface import UserInterface
 
 
 class _Fence:
@@ -228,4 +239,97 @@ def test_reset_reports_partial_failure_and_retry_converges(tmp_path):
     second = asyncio.run(service.reset("owner"))
     assert second.success
     assert "owner" not in vectors.owners
+    engine.dispose()
+
+
+def test_authenticated_http_reset_preserves_credentials_and_isolates_other_owner(tmp_path, monkeypatch):
+    """The public reset endpoint authenticates with the real credential service."""
+    engine, sessions, redis, users, conversations, memories, calls, batches = _fixture(tmp_path)
+    monkeypatch.setenv("JWT_SECRET", "http-reset-test-secret")
+    credentials = CredentialService(
+        sql_session_factory=sessions,
+        redis_buffer=redis,
+        jwt_secret="http-reset-test-secret",
+        message_token_ttl_seconds=3600,
+    )
+    with sessions() as session:
+        owner = session.query(User).filter_by(uuid="owner").one()
+        owner.auth_token = "owner-session"
+        owner_password = owner.password
+        other = session.query(User).filter_by(uuid="other").one()
+        other.auth_token = "other-session"
+        session.commit()
+    owner_token = credentials.generate_message_token("owner")
+    other_token = credentials.generate_message_token("other")
+    assert owner_token is not None
+    assert other_token is not None
+
+    fence = _Fence()
+    fence.drained.set()
+    reset_service = UserResetService(
+        interactions=fence,
+        conversation_service=conversations,
+        memory_store=memories,
+        user_store=users,
+        vector_store=_Vectors(),
+        redis_buffer=redis,
+        media_store=_Media(),
+        call_sessions=calls,
+        call_maintenance_batches=batches,
+    )
+    database = SimpleNamespace(credential_service=credentials, conversation_service=conversations)
+
+    class _Resolver:
+        def ensure_dependencies(self):
+            pass
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    runtime = SimpleNamespace(
+        database_manager=database,
+        user_reset_service=reset_service,
+        user_interface=UserInterface(database, _Resolver()),
+    )
+    app.dependency_overrides[routes.get_runtime] = lambda: runtime
+    with TestClient(app) as client:
+        unauthorized = client.post("/user/data/reset", json={"username": "owner"})
+        assert unauthorized.status_code == 401
+        mismatched = client.post(
+            "/user/data/reset",
+            json={"username": "other"},
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert mismatched.status_code == 401
+        response = client.post(
+            "/user/data/reset",
+            json={"username": "owner"},
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        assert {step["name"] for step in response.json()["steps"]} >= {
+            "conversations",
+            "canonical_memory",
+            "call_sessions",
+        }
+        repeated = client.post(
+            "/user/data/reset",
+            json={"username": "owner"},
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert repeated.status_code == 200
+
+    with sessions() as session:
+        assert session.query(Conversation).filter_by(user_id="owner").count() == 0
+        assert session.query(AgentMemoryRecord).filter_by(subject_user_id="owner").count() == 0
+        assert session.query(CallSessionRow).filter_by(user_id="owner").count() == 0
+        assert session.query(CallMaintenanceBatchRow).filter_by(user_id="owner").count() == 0
+        assert session.query(Conversation).filter_by(user_id="other").count() == 1
+        assert session.query(AgentMemoryRecord).filter_by(subject_user_id="other").count() == 1
+        assert session.query(CallSessionRow).filter_by(user_id="other").count() == 1
+        assert session.query(CallMaintenanceBatchRow).filter_by(user_id="other").count() == 1
+        assert session.query(User).filter_by(uuid="owner").one().password == owner_password
+        assert session.query(User).filter_by(uuid="owner").one().auth_token == "owner-session"
+    assert credentials.check_message_token("owner", owner_token) == (True, "owner")
+    assert credentials.check_message_token("other", other_token) == (True, "other")
     engine.dispose()

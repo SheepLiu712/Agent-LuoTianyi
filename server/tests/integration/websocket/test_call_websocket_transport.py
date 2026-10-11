@@ -1,17 +1,21 @@
+import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.adapter.websocket.call_v1 import (
     BinaryAudioFrameCodec,
     CallAcceptanceReceipt,
+    CallStageBinding,
     CallTransportHub,
     CallTransportSession,
     InboundCallFrame,
     WireAudioFrame,
 )
+from src.server_runtime import CallCapabilityStatus
 from src.web.websocket import call_endpoint
 
 CALL_ID = "606ec5e6-a330-4e6c-b07a-8432a5716c8f"
@@ -49,7 +53,8 @@ def runtime(*, available: bool):
         SimpleNamespace(
             websocket_service=WebSocketService(),
             database_manager=SimpleNamespace(credential_service=CredentialService()),
-            call_transport_available=available,
+            call_capability=CallCapabilityStatus(*(available for _ in range(8)), ("luotianyi",) if available else ()),
+            supports_call_character=lambda character_id: available and character_id == "luotianyi",
             call_transport_hub=hub,
         ),
         session,
@@ -137,6 +142,154 @@ def test_call_endpoint_rejects_call_start_without_consuming_business_state(monke
             assert getattr(error, "code", None) == 1013
 
     assert sink.frames == []
+
+
+def test_call_endpoint_rejects_non_ready_character_before_claim(monkeypatch):
+    configured_runtime, _, sink = enabled_test_runtime()
+    configured_runtime.stage_manager = object()
+    configured_runtime.realtime_speech_factory = object()
+    configured_runtime.call_settlement_coordinator = object()
+
+    with TestClient(app_for(monkeypatch, configured_runtime)) as client:
+        with client.websocket_connect("/call_ws") as websocket:
+            auth(websocket)
+            websocket.send_text(
+                json.dumps(
+                    {
+                        "protocol": "call.v1",
+                        "type": "call.start",
+                        "seq": 1,
+                        "client_request_id": "request-other",
+                        "character_id": "other",
+                        "audio": {"encoding": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+                    },
+                    separators=(",", ":"),
+                )
+            )
+            error = json.loads(websocket.receive_text())
+            assert error["code"] == "CALL_CHARACTER_UNAVAILABLE"
+
+    assert sink.frames == []
+
+
+@pytest.mark.asyncio
+async def test_preparing_send_failure_always_fails_claim_and_unregisters_without_masking_original():
+    call_id = CALL_ID
+
+    class Manager:
+        def __init__(self):
+            self.failed = []
+
+        async def fail_pending_call_claim(self, claim, error):
+            self.failed.append((claim, error))
+            return True
+
+    class Bridge:
+        terminal_delivered = asyncio.Event()
+
+        async def send_failed(self, _reason):
+            raise RuntimeError("SOCKET_CLOSED")
+
+    class WebSocket:
+        async def send_text(self, _text):
+            raise RuntimeError("DRAIN_CLOSED")
+
+    hub = CallTransportHub()
+    bridge = Bridge()
+    session = CallTransportSession(
+        call_id=call_id,
+        user_id="user-1",
+        character_id="luotianyi",
+        sink=Sink(),
+    )
+    hub.register(session)
+    binding = await hub.attach_start(session, user_id="user-1", connection_id=object())
+    outputs = asyncio.Queue()
+    outputs.put_nowait(SimpleNamespace(text="{}", binary=None))
+    manager = Manager()
+    claim = SimpleNamespace(record=SimpleNamespace(call_id=call_id))
+    original = RuntimeError("PREPARING_SEND_FAILED")
+
+    await call_endpoint._cleanup_failed_start(
+        websocket=WebSocket(),
+        runtime=SimpleNamespace(call_transport_hub=hub),
+        stage_manager=manager,
+        claim=claim,
+        bridge=bridge,
+        session=session,
+        binding=binding,
+        outputs=outputs,
+        create_started=False,
+        original_error=original,
+    )
+
+    assert manager.failed == [(claim, original)]
+    assert hub.session_for(call_id) is None
+    assert outputs.empty()
+
+
+@pytest.mark.asyncio
+async def test_release_observer_never_expires_active_stage_then_unregisters_after_close():
+    hub = CallTransportHub()
+    transport = CallTransportSession(
+        call_id=CALL_ID,
+        user_id="user-1",
+        character_id="luotianyi",
+        sink=Sink(),
+    )
+    hub.register(transport)
+    closed = asyncio.Event()
+    terminal = asyncio.Event()
+    outputs = asyncio.Queue()
+
+    class Stage:
+        async def wait_closed(self):
+            await closed.wait()
+
+    bridge = CallStageBinding(call_id=CALL_ID, deliver=lambda _output: None)
+    bridge._terminal_delivered = terminal
+    transport._sink = bridge
+    observer = hub.own_task(
+        call_endpoint._release_terminal_session(hub, transport, Stage(), outputs),
+        name="call-transport-release",
+    )
+
+    await asyncio.sleep(0.05)
+    assert hub.session_for(CALL_ID) is transport
+    assert not observer.done()
+    closed.set()
+    terminal.set()
+    await observer
+    assert hub.session_for(CALL_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_release_observer_terminal_timeout_is_bounded_and_unregisters(monkeypatch):
+    hub = CallTransportHub()
+    transport = CallTransportSession(
+        call_id=CALL_ID,
+        user_id="user-1",
+        character_id="luotianyi",
+        sink=Sink(),
+    )
+    hub.register(transport)
+
+    class Stage:
+        async def wait_closed(self):
+            return None
+
+    terminal = asyncio.Event()
+    bridge = CallStageBinding(call_id=CALL_ID, deliver=lambda _output: None)
+    bridge._terminal_delivered = terminal
+    transport._sink = bridge
+    real_wait_for = asyncio.wait_for
+
+    async def short_wait_for(operation, timeout):
+        return await real_wait_for(operation, timeout=0.01 if timeout == 2.0 else timeout)
+
+    monkeypatch.setattr(call_endpoint.asyncio, "wait_for", short_wait_for)
+    await call_endpoint._release_terminal_session(hub, transport, Stage(), asyncio.Queue())
+    assert hub.session_for(CALL_ID) is None
 
 
 def test_real_websocket_auth_mixed_frames_gap_nack_and_duplicate(monkeypatch):

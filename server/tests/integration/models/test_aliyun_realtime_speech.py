@@ -208,6 +208,41 @@ async def test_assistant_output_is_cancelled_once_deleted_and_never_emitted():
 
 
 @pytest.mark.asyncio
+async def test_provider_usage_metric_reports_numeric_usage_and_unknown_cost_only():
+    socket = FakeAliyunWebSocket()
+    captured = []
+
+    class Metrics:
+        def record(self, metric):
+            captured.append(metric)
+
+    factory = AliyunRealtimeSpeechSessionFactory(
+        provider_config(), connector=FakeAliyunConnector(socket), call_metrics=Metrics()
+    )
+    session = await factory.create(uuid4())
+    await session.start(RealtimeSpeechConfig())
+    await socket.server_event({"type": "response.created", "response": {"id": "response-1"}})
+    await socket.server_event(
+        {
+            "type": "response.output_item.added",
+            "response_id": "response-1",
+            "item": {"id": "assistant-1", "role": "assistant"},
+        }
+    )
+    await wait_for_sent_type(socket, "conversation.item.delete")
+    await socket.server_event({"type": "conversation.item.deleted", "item_id": "assistant-1"})
+    await socket.server_event(
+        {"type": "response.done", "response": {"id": "response-1", "status": "cancelled", "usage": {"total_tokens": 7}}}
+    )
+    await wait_for_condition(lambda: any(metric.name.value == "provider_usage" for metric in captured))
+
+    usage = next(metric for metric in captured if metric.name.value == "provider_usage")
+    assert usage.numeric == {"usage_units": 7, "cost_microunits": None}
+    assert usage.labels == {"provider": "aliyun", "result": "succeeded", "cost_status": "unknown"}
+    await session.close()
+
+
+@pytest.mark.asyncio
 async def test_uncertain_assistant_cleanup_fails_closed():
     session, socket = await started_session()
     events = session.events()
