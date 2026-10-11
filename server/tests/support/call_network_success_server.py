@@ -7,7 +7,9 @@ import json
 import os
 import socket
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import HTTPException
 
@@ -45,8 +47,9 @@ class _AddressPublishingLifecycle(ServerLifecycle):
 
         runtime = self.admin_shell.runtime_supervisor.runtime  # type: ignore[union-attr]
         with runtime.database_manager.open_sql_session() as session:
-            session.add(InviteCode(code="invite", is_used=False))
-            session.commit()
+            if session.query(InviteCode).filter_by(code="invite").one_or_none() is None:
+                session.add(InviteCode(code="invite", is_used=False))
+                session.commit()
         self._address_path.write_text(json.dumps({"url": self._url}), encoding="utf-8")
         return status
 
@@ -67,12 +70,14 @@ def _runtime_config(root: Path) -> Path:
     config["database"]["sql_db_file"] = "calls.sqlite"
     config["infrastructure"]["media_resolution"]["root"] = str(root / "media")
     resources = root / "resources"
-    resources.mkdir()
+    resources.mkdir(exist_ok=True)
     for name in ("knowledge.db", "song_names.txt", "song_lyrics.txt", "lyrics.json", "tts.yaml", "interface.json"):
-        (resources / name).write_text("{}" if name.endswith(".json") else "", encoding="utf-8")
+        path = resources / name
+        if not path.exists():
+            path.write_text("{}" if name.endswith(".json") else "", encoding="utf-8")
     for name in ("reference_audio", "songs"):
-        (resources / name).mkdir()
-    (resources / "songs" / "songs").mkdir()
+        (resources / name).mkdir(exist_ok=True)
+    (resources / "songs" / "songs").mkdir(exist_ok=True)
     agent = config["agent_runtime"]
     agent["agent"]["song_knowledge"]["song_database"] = {
         "db_folder": str(resources),
@@ -123,7 +128,7 @@ def _install_external_seams() -> None:
     server_runtime_module.AliyunRealtimeSpeechSessionFactory = _DeterministicSpeechFactory
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901 - production-loopback support exposes bounded evidence routes
     root = Path(sys.argv[1]).resolve()
     root.mkdir(parents=True, exist_ok=True)
     os.environ["JWT_SECRET"] = "call-network-success-isolated-secret"
@@ -182,6 +187,122 @@ def main() -> None:
                     else session.query(AgentMemoryRecord).filter_by(subject_user_id=user_id).count()
                 ),
                 "profile": None if user is None else user.description,
+            }
+
+    @server_main.app.post("/test/seed_stale_calls")
+    async def seed_stale_calls():
+        from src.domain.call import CallState
+        from src.infrastructure.persistence.call_sessions import CallSessionRecord
+        from src.infrastructure.persistence.database.sql_database import User
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            user_id = user.uuid
+        now = datetime.now(timezone.utc)
+        preparing = CallSessionRecord(
+            call_id=uuid4(),
+            client_request_id=f"restart-preparing-{uuid4()}",
+            user_id=user_id,
+            character_id="luotianyi",
+            state=CallState.PREPARING,
+            requested_at=now - timedelta(minutes=4),
+            created_at=now - timedelta(minutes=4),
+            updated_at=now - timedelta(minutes=3),
+        )
+        active = CallSessionRecord(
+            call_id=uuid4(),
+            client_request_id=f"restart-active-{uuid4()}",
+            user_id=user_id,
+            character_id="luotianyi",
+            state=CallState.ACTIVE,
+            requested_at=now - timedelta(minutes=4),
+            created_at=now - timedelta(minutes=4),
+            updated_at=now - timedelta(minutes=3),
+            connected_at=now - timedelta(seconds=90),
+            disconnected_at=now - timedelta(seconds=45),
+            active_duration_ms=20_000,
+        )
+        runtime.database_manager.call_sessions.create_if_absent(preparing)
+        runtime.database_manager.call_sessions.create_if_absent(active)
+        return {"preparing_call_id": str(preparing.call_id), "active_call_id": str(active.call_id)}
+
+    @server_main.app.post("/test/seed_recovery_conflict")
+    async def seed_recovery_conflict():
+        from src.domain.call import CallEndReason, CallOutcome, CallState, derive_call_conversation_id
+        from src.domain.conversation_type import ConversationItem
+        from src.infrastructure.persistence.call_sessions import CallSessionRecord
+        from src.infrastructure.persistence.database.sql_database import User
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            user_id = user.uuid
+        now = datetime.now(timezone.utc)
+        call_id = uuid4()
+        record = CallSessionRecord(
+            call_id=call_id,
+            client_request_id=f"restart-conflict-{uuid4()}",
+            user_id=user_id,
+            character_id="luotianyi",
+            state=CallState.ENDED,
+            requested_at=now - timedelta(minutes=4),
+            created_at=now - timedelta(minutes=4),
+            updated_at=now - timedelta(minutes=3),
+            connected_at=now - timedelta(seconds=90),
+            ended_at=now - timedelta(seconds=45),
+            outcome=CallOutcome.CONNECTED,
+            end_reason=CallEndReason.SYSTEM_FAILURE,
+            active_duration_ms=20_000,
+        )
+        runtime.database_manager.call_sessions.create_if_absent(record)
+        conversation_id = derive_call_conversation_id(user_id=user_id, character_id="luotianyi", call_id=call_id)
+        runtime.database_manager.conversation_service.add_call_conversation(
+            user_id,
+            "luotianyi",
+            ConversationItem(
+                uuid=str(conversation_id),
+                timestamp=record.requested_at.replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds"),
+                source="user",
+                type="call",
+                content="[语音通话]冲突投影",
+                data={
+                    "call_id": str(call_id),
+                    "outcome": "connected",
+                    "active_duration_ms": 20_000,
+                    "summary": "冲突投影",
+                    "end_reason": "user_hangup",
+                },
+            ),
+        )
+        return {"call_id": str(call_id)}
+
+    @server_main.app.get("/test/recovery_counts")
+    async def recovery_counts():
+        from src.infrastructure.persistence.database.sql_database import (
+            CallMaintenanceBatch,
+            CallSession,
+            Conversation,
+            User,
+        )
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            calls = session.query(CallSession).filter_by(user_id=user.uuid).all()
+            return {
+                "calls": [
+                    {
+                        "call_id": row.call_id,
+                        "state": row.state,
+                        "summary_status": row.summary_status,
+                        "maintenance_status": row.maintenance_status,
+                        "conversation_id": row.conversation_id,
+                    }
+                    for row in calls
+                ],
+                "call_conversations": session.query(Conversation).filter_by(user_id=user.uuid, type="call").count(),
+                "maintenance_batches": session.query(CallMaintenanceBatch).filter_by(user_id=user.uuid).count(),
             }
 
     @server_main.app.post("/test/stop")
