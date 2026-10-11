@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QLabel
 
 from src.gui import agreement_dialog as dialog_module
 from src.gui.agreement_dialog import AgreementDialog
@@ -286,19 +286,49 @@ def test_dialog_exposes_no_signing_or_countdown_state(make_dialog, absent):
     assert not hasattr(make_dialog(), absent)
 
 
-def test_window_has_a_single_title_source(make_dialog):
-    """回归守卫：窗口不得再出现"系统标题栏 + 自绘标题栏"的双重标题栏。"""
+def test_title_is_carried_by_the_window_frame_only(make_dialog):
+    """回归守卫：标题只由系统标题栏承载，窗口内容里不再重复出现（曾出现双重标题栏）。
+
+    只断言"标题不重复"这个结果，不检查内部控件名——换实现方式不必改测试。
+    """
     dialog = make_dialog()
 
     assert dialog.windowTitle() == "用户协议"
-    assert not hasattr(dialog, "title_label")
-    assert not hasattr(dialog, "close_btn")
-    assert not hasattr(dialog, "_build_header")
-    assert not hasattr(dialog_module, "COLOR_HEADER_BG")
+    repeated = [label.text() for label in dialog.findChildren(QLabel) if label.text() == dialog.windowTitle()]
+    assert repeated == []
 
-    assert dialog.layout().count() == 2  # 正文区 + 底部操作区
+
+def test_version_body_and_actions_share_one_left_edge(make_dialog):
+    """回归守卫：版本号、正文、底部按钮左缘对齐。
+
+    曾出现"外层边距 + 内层卡片内边距"累加，使正文比按钮多缩进 18px。这里只断言渲染后的
+    左缘一致，不钉具体数值、也不检查控件名——改边距、改配色、换实现方式都不必改测试。
+    """
+    dialog = make_dialog()
+    dialog.resize(640, 520)
+    dialog.show()
+    for _ in range(4):
+        QApplication.processEvents()
+
     body = dialog.layout().itemAt(0).widget()
-    assert dialog.version_label.parent() is body
+    actions = dialog.layout().itemAt(1).widget()
+    left_edges = {
+        body.x() + dialog.version_label.x(),
+        body.x() + dialog.view.x(),
+        actions.x() + dialog.close_action_btn.x(),
+    }
+
+    assert len(left_edges) == 1
+    dialog.close()
+
+
+def test_view_does_not_offer_a_context_menu(make_dialog):
+    """只读查阅窗口不提供右键菜单（QTextEdit 默认会弹 Qt 自带的复制/全选）。
+
+    这里断言策略而不是"发一个右键事件看是否弹窗"：万一有人把菜单放回来，菜单的 exec() 会
+    阻塞测试进程（挂死，而不是干脆失败）。
+    """
+    assert make_dialog().view.contextMenuPolicy() == Qt.ContextMenuPolicy.NoContextMenu
 
 
 def test_version_label_and_close_action(make_dialog):

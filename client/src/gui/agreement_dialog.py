@@ -45,10 +45,26 @@ MAX_BLOCK_FONT_SIZE = 32
 ALIGN_CENTER = "center"
 ALIGN_JUSTIFY = "justify"
 
+BODY_SIDE_MARGIN = 32
+"""正文与底部操作区共用的左右内边距：单一边距，避免嵌套累加。"""
+
+TEXT_RIGHT_GUTTER = 12
+"""正文块额外保留的右侧留白。
+
+滚动条占用 view 自己的宽度、不会盖住正文，但正文的换行边界默认紧贴滚动条；两端对齐又会
+把非末行拉到该边界，视觉上就像被滚动条压住。给块加右边距即可留出这条间隙，同时不影响
+正文左缘（左缘仍由 BODY_SIDE_MARGIN 决定，与底部按钮对齐）。
+"""
+
+LINE_HEIGHT_PERCENT = 150
+"""正文行距（百分比）。中文长段落按 150% 行距更易读。"""
+
 # 配色取自设计稿标注（docs/开发进程文档/assets/用户协议签署-ui.svg）
 COLOR_TEXT = "#17283d"
 COLOR_MUTED = "#64748b"
 COLOR_DIVIDER = "#e2e8f0"
+COLOR_SURFACE = "#ffffff"
+COLOR_SCROLL_HANDLE = "#cbd5e1"
 COLOR_PRIMARY = "#93C5FD"
 COLOR_SECONDARY_BG = "#f1f5f9"
 COLOR_ERROR = "#b91c1c"
@@ -123,6 +139,12 @@ def render_agreement_document(payload: Mapping[str, Any], font_family: str | Non
                 cursor.insertBlock()
             block_format = QTextBlockFormat()
             block_format.setAlignment(alignment)
+            block_format.setRightMargin(TEXT_RIGHT_GUTTER)
+            block_format.setLineHeight(
+                float(LINE_HEIGHT_PERCENT),
+                # PySide6 只接受 int：传枚举对象或 int(枚举) 都会 TypeError，必须取 .value
+                int(QTextBlockFormat.LineHeightTypes.ProportionalHeight.value),
+            )
             cursor.setBlockFormat(block_format)
             for text, bold in line:
                 char_format = QTextCharFormat()
@@ -155,6 +177,8 @@ class AgreementDialog(QDialog):
         self.setModal(True)
         self.setMinimumSize(560, 460)
         self.resize(640, 520)
+        # 窗口整体白底（设计稿 §04：白卡即窗口本身），正文与按钮共用同一个左右边距
+        self.setStyleSheet(f"QDialog {{ background-color: {COLOR_SURFACE}; }}")
         self._build_ui()
 
         if document is not None:
@@ -173,8 +197,8 @@ class AgreementDialog(QDialog):
     def _build_body(self) -> QWidget:
         body = QWidget()
         column = QVBoxLayout(body)
-        column.setContentsMargins(20, 14, 20, 0)
-        column.setSpacing(6)
+        column.setContentsMargins(BODY_SIDE_MARGIN, 14, BODY_SIDE_MARGIN, 0)
+        column.setSpacing(10)
 
         self.version_label = QLabel("")
         self.version_label.setStyleSheet(f"font-size: 13px; color: {COLOR_MUTED};")
@@ -185,10 +209,12 @@ class AgreementDialog(QDialog):
         self.view.setFrameShape(QFrame.Shape.NoFrame)
         self.view.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 只读查阅窗口不提供右键菜单（QTextEdit 默认会弹复制/全选）
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.view.setStyleSheet(
             f"QTextEdit {{ background: transparent; color: {COLOR_TEXT}; border: none; }}"
             "QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }"
-            f"QScrollBar::handle:vertical {{ background: {COLOR_DIVIDER}; min-height: 40px; border-radius: 2px; }}"
+            f"QScrollBar::handle:vertical {{ background: {COLOR_SCROLL_HANDLE}; min-height: 40px; border-radius: 2px; }}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
         column.addWidget(self.view, 1)
@@ -197,7 +223,7 @@ class AgreementDialog(QDialog):
     def _build_actions(self) -> QWidget:
         actions = QWidget()
         column = QVBoxLayout(actions)
-        column.setContentsMargins(20, 0, 20, 16)
+        column.setContentsMargins(BODY_SIDE_MARGIN, 0, BODY_SIDE_MARGIN, 16)
         column.setSpacing(8)
 
         self.divider = QFrame()
