@@ -43,11 +43,29 @@
 - ringtone 使用 desired-state generation 管理异步创建、播放、停止和卸载。停止发生在异步创建完成前时，迟到资源会被卸载，不能重新播放。
 - ACTIVE、终止、logout 和 unmount 都停止或释放相应资源；旧 generation 不得影响新 attempt。
 
+## 真实 JS ↔ FastAPI 离线网络组合
+
+- App Jest 可通过 `CALL_E2E_SERVER_SOURCE` 指向包含 `server/tests/support/call_network_success_server.py` 的只读服务端 checkout，并通过 `CALL_E2E_PYTHON` 指定 Python。环境变量缺失或 source 不含 launcher 时，真实网络测试明确 skip，不能把普通 Jest 全绿冒充为网络证据。
+- 当前 focused 证据使用 clean 服务端候选 `878337d3`，未包含后续 connection-release barrier；App 使用合法关闭帧后仍能恢复原 `call_id`，因此根因修复不依赖该 barrier。
+- 真实内部边界包括生产 `run_server`、ServerLifecycle、RuntimeSupervisor、ServerRuntime、HTTP/WS 鉴权、SQLite、ChatStage、CallStage、call transport、settlement，以及 App 的 ProductionCallResolver、CallSession、CallTransportSession、NetworkClient、WebSocketTransport 和 codec。
+- fake 只位于外部 Native 音频设备、LLM、Vector Store、实时语音供应商和 TTS 边界；测试不伪造整个 Session、NetworkClient、Stage 或 transport。
+- 当前客户端主动关闭码为：正常结束 `1000`、音频焦点丢失 `4000`、transport failure `4001`。`4000/4001` 是 WHATWG 允许的应用私有码；失败 reason 固定为无业务内容的 `call transport failed`，不会携带内部错误或用户内容。
+- 历史诊断中的 `close_requested` 只证明调用进入 wrapper，不证明 close frame 已发送。真实根因是客户端使用非法 `1012`/`1002` 后 WHATWG WebSocket 同步抛出 `InvalidAccessError`，且旧实现吞掉异常。当前证据直接观察真实 close event，并由 test-only ASGI receive wrapper确认服务端收到 `/call_ws` 的 `websocket.disconnect code=4001`；随后真实 Hub detach，连接槽为空，CallStage 进入 `RECONNECTING`。
+- 音频焦点恢复从首次断开开始使用固定 3 秒预算，恢复同一 `call_id`，不因连接尝试重置期限。通话结束后聊天 `INTERACTION_OWNED_BY_CALL` 重连使用独立的固定 10 秒预算，两种预算不得混淆。
+
+复现命令：
+
+```powershell
+$env:CALL_E2E_SERVER_SOURCE='C:\path\to\server-checkout'
+$env:CALL_E2E_PYTHON='C:\path\to\python.exe'
+npx jest __tests__/call_failure_close_network.test.ts __tests__/call_resume_race_diagnostic.test.ts __tests__/call_real_network.test.ts __tests__/call_transport.test.ts __tests__/call_production_resolver.test.ts __tests__/chat_ready_composition.test.ts --runInBand --detectOpenHandles
+```
+
 ## 离线验证证据
 
-- App 全量 Jest：42 suites / 455 tests passed，`--runInBand --detectOpenHandles` 自然退出。
-- App 组合具名范围：8 suites / 88 tests passed。
-- focused 独立探针：3 suites / 5 tests passed。
+- App 全量 Jest（生产源码变更后的快照）：45 suites / 461 tests passed，`--runInBand --detectOpenHandles` 自然退出。
+- 最新真实网络与受影响组合范围：6 suites / 52 tests passed，使用显式 server source 与 Python，自然退出。
+- 两组计数来自不同范围，不相加；缺少 server source 时网络测试会 skip。
 - TypeScript：`npx tsc --noEmit` 通过。
 - touched-scope ESLint：0 warnings。
 - `git diff --check`、严格 UTF-8、raw NUL / U+FFFD 检查通过。
@@ -58,7 +76,7 @@
 
 - Kotlin 新增音频焦点 API 未执行原生编译。
 - 未验证 Android 真机 AEC、噪声抑制、音频焦点、蓝牙路由和设备差异。
-- 未执行真实 App ↔ Server 通话 E2E、真实实时语音供应商或 P95 延迟验证。
+- 已执行 loopback JS ↔ FastAPI 离线网络组合，但未执行 Android 真机 App ↔ Server E2E、真实实时语音供应商或 P95 延迟验证。
 - 未补充真实设备截图或视觉验收；本候选没有改变既有 UI 布局、间距、动效或 Live2D 设计。
 - 仓库完整 App lint 仍有既有 `VoiceRecordingOverlay.tsx` 的 4 个 `react/no-unescaped-entities` 错误；本候选 touched-scope lint 为零警告。
 - CL-11、CL-12 和整个 F2 均不得据此标记为已验收。CL-8 / CL-9 owner publication 仍由后续集成流程处理。
