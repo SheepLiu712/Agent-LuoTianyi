@@ -94,4 +94,61 @@ describe('call lifecycle state skeleton', () => {
     ]);
     expect(reduceCallState(ending.state, { type: 'user_hangup', nowMs: 300 }).effects).toEqual([]);
   });
+
+  it('settles an ACTIVE remote end and stops both native audio directions before returning', () => {
+    const active = {
+      ...initialCallState,
+      phase: 'ACTIVE' as const,
+      audioCapability: 'available' as const,
+      callId: 'call-1',
+      activeStartedAtMs: 100,
+    };
+
+    expect(reduceCallState(active, { type: 'call_ended', nowMs: 1_600 })).toEqual({
+      state: {
+        ...active,
+        phase: 'ENDED',
+        endReason: 'remote_ended',
+        endedActiveDurationMs: 1_500,
+      },
+      effects: [
+        { type: 'stop_capture' },
+        { type: 'stop_playback' },
+        { type: 'return_to_chat' },
+      ],
+    });
+  });
+
+  it('locks a RECONNECTING remote end to the disconnect duration and excludes the recovery gap', () => {
+    const reconnecting = {
+      ...initialCallState,
+      phase: 'RECONNECTING' as const,
+      audioCapability: 'available' as const,
+      callId: 'call-1',
+      activeStartedAtMs: 100,
+      activeDurationAtDisconnectMs: 1_000,
+    };
+
+    const ended = reduceCallState(reconnecting, { type: 'call_ended', nowMs: 9_000 });
+    expect(ended.state).toMatchObject({
+      phase: 'ENDED',
+      endReason: 'remote_ended',
+      endedActiveDurationMs: 1_000,
+    });
+    expect(ended.effects).toEqual([
+      { type: 'stop_capture' },
+      { type: 'stop_playback' },
+      { type: 'return_to_chat' },
+    ]);
+  });
+
+  it('keeps decline distinct from remote-ended and ignores terminal outcome rewrites', () => {
+    const ringing = { ...initialCallState, phase: 'RINGING' as const, callId: 'call-1' };
+    const declined = reduceCallState(ringing, { type: 'declined' });
+    expect(declined.state).toMatchObject({ phase: 'DECLINED', endReason: 'declined' });
+    expect(reduceCallState(declined.state, { type: 'call_ended', nowMs: 1_000 })).toEqual({
+      state: declined.state,
+      effects: [],
+    });
+  });
 });
