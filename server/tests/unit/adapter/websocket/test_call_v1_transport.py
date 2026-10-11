@@ -333,6 +333,180 @@ async def test_old_disconnect_cannot_detach_new_resume_generation() -> None:
     assert hub.is_current(resumed)
 
 
+def resume_raw(*, character_id: str = "luotianyi") -> str:
+    return json.dumps(
+        {
+            "protocol": "call.v1",
+            "type": "call.resume",
+            "call_id": CALL_ID,
+            "character_id": character_id,
+            "last_contiguous_server_seq": 0,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_resume_waits_for_the_observed_connection_to_release() -> None:
+    hub = CallTransportHub(resume_release_timeout=0.2)
+    transport = session()
+    hub.register(transport)
+    old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
+
+    resume = asyncio.create_task(hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object()))
+    await asyncio.sleep(0)
+    assert not resume.done()
+
+    assert await hub.detach(old) is True
+    replacement = await resume
+
+    assert replacement.generation == old.generation + 1
+    assert hub.is_current(replacement)
+
+
+@pytest.mark.asyncio
+async def test_resume_does_not_take_over_a_live_connection_after_release_timeout() -> None:
+    hub = CallTransportHub(resume_release_timeout=0.01)
+    transport = session()
+    hub.register(transport)
+    old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
+
+    with pytest.raises(CallTransportError, match="CALL_CONNECTION_ACTIVE") as rejected:
+        await hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object())
+
+    assert rejected.value.code == "CALL_CONNECTION_ACTIVE"
+    assert hub.is_current(old)
+
+
+@pytest.mark.asyncio
+async def test_only_one_concurrent_resume_owns_the_released_generation() -> None:
+    hub = CallTransportHub(resume_release_timeout=0.2)
+    transport = session()
+    hub.register(transport)
+    old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
+    attempts = [
+        asyncio.create_task(hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object())) for _ in range(2)
+    ]
+    await asyncio.sleep(0)
+
+    assert await hub.detach(old) is True
+    results = await asyncio.gather(*attempts, return_exceptions=True)
+
+    bindings = [result for result in results if not isinstance(result, BaseException)]
+    errors = [result for result in results if isinstance(result, CallTransportError)]
+    assert len(bindings) == 1
+    assert len(errors) == 1
+    assert errors[0].code == "CALL_CONNECTION_ACTIVE"
+    assert hub.is_current(bindings[0])
+
+
+@pytest.mark.asyncio
+async def test_wrong_resume_identity_is_rejected_without_waiting_for_release() -> None:
+    hub = CallTransportHub(resume_release_timeout=10.0)
+    transport = session()
+    hub.register(transport)
+    old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
+
+    with pytest.raises(CallTransportError) as wrong_user:
+        await hub.attach_resume(resume_raw(), user_id="other-user", connection_id=object())
+    with pytest.raises(CallTransportError) as wrong_character:
+        await hub.attach_resume(resume_raw(character_id="other-character"), user_id="user-1", connection_id=object())
+
+    assert wrong_user.value.code == "RESUME_OWNERSHIP_MISMATCH"
+    assert wrong_character.value.code == "RESUME_OWNERSHIP_MISMATCH"
+    assert hub.is_current(old)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("release", ["unregister", "reset", "shutdown"])
+async def test_resume_waiter_is_woken_when_session_can_no_longer_bind(release: str) -> None:
+    hub = CallTransportHub(resume_release_timeout=10.0)
+    transport = session()
+    hub.register(transport)
+    await hub.attach_start(transport, user_id="user-1", connection_id=object())
+    resume = asyncio.create_task(hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object()))
+    await asyncio.sleep(0)
+
+    if release == "unregister":
+        assert await hub.unregister(CALL_ID, expected_session=transport) is True
+    elif release == "reset":
+        assert await hub.close_user_sessions("user-1") == 1
+    else:
+        await hub.close()
+
+    with pytest.raises(CallTransportError) as rejected:
+        await resume
+    assert rejected.value.code == "CALL_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_resume_waiter_does_not_leave_an_owned_task() -> None:
+    hub = CallTransportHub(resume_release_timeout=10.0)
+    transport = session()
+    hub.register(transport)
+    await hub.attach_start(transport, user_id="user-1", connection_id=object())
+    resume = asyncio.create_task(hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object()))
+    await asyncio.sleep(0)
+
+    resume.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await resume
+
+    assert hub._owned_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_late_old_disconnect_cannot_release_the_resumed_generation() -> None:
+    hub = CallTransportHub(resume_release_timeout=0.2)
+    transport = session()
+    hub.register(transport)
+    old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
+    resume = asyncio.create_task(hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object()))
+    await asyncio.sleep(0)
+    assert await hub.detach(old) is True
+    replacement = await resume
+
+    assert await hub.detach(old) is False
+    assert hub.is_current(replacement)
+
+
+@pytest.mark.asyncio
+async def test_resume_rechecks_user_admission_after_waiting_for_release() -> None:
+    admitted = True
+
+    async def require_user_admission(_user_id: str) -> None:
+        if not admitted:
+            raise RuntimeError("USER_DATA_RESET_IN_PROGRESS")
+
+    hub = CallTransportHub(require_user_admission=require_user_admission, resume_release_timeout=0.2)
+    transport = session()
+    hub.register(transport)
+    old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
+    resume = asyncio.create_task(hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object()))
+    await asyncio.sleep(0)
+    admitted = False
+    assert await hub.detach(old) is True
+
+    with pytest.raises(RuntimeError, match="USER_DATA_RESET_IN_PROGRESS"):
+        await resume
+    assert hub.session_for(CALL_ID) is transport
+
+
+@pytest.mark.asyncio
+async def test_resume_release_budget_is_bounded_below_the_stage_recovery_window() -> None:
+    hub = CallTransportHub()
+    transport = session()
+    hub.register(transport)
+    await hub.attach_start(transport, user_id="user-1", connection_id=object())
+    started = asyncio.get_running_loop().time()
+
+    with pytest.raises(CallTransportError) as rejected:
+        await hub.attach_resume(resume_raw(), user_id="user-1", connection_id=object())
+
+    elapsed = asyncio.get_running_loop().time() - started
+    assert rejected.value.code == "CALL_CONNECTION_ACTIVE"
+    assert 2.0 <= elapsed < 3.0
+
+
 @pytest.mark.asyncio
 async def test_terminal_timeout_unregisters_only_expected_session_and_shutdown_leaves_no_tasks():
     hub = CallTransportHub()

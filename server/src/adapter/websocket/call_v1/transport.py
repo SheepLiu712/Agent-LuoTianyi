@@ -726,13 +726,23 @@ class _HubEntry:
 class CallTransportHub:
     """Session registry with atomic single-connection generation bindings."""
 
-    def __init__(self, *, user_reset_fence=None, require_user_admission=None) -> None:
+    def __init__(
+        self,
+        *,
+        user_reset_fence=None,
+        require_user_admission=None,
+        resume_release_timeout: float = 2.5,
+    ) -> None:
+        if resume_release_timeout < 0:
+            raise ValueError("resume_release_timeout must be non-negative")
         self._sessions: dict[str, _HubEntry] = {}
         self._lock = asyncio.Lock()
+        self._connection_released = asyncio.Condition(self._lock)
         self._user_reset_fence = user_reset_fence
         self._require_user_admission = require_user_admission or (
             user_reset_fence.require_admission if user_reset_fence is not None else None
         )
+        self._resume_release_timeout = resume_release_timeout
         self._owned_tasks: set[asyncio.Task] = set()
 
     def own_task(self, operation, *, name: str) -> asyncio.Task:
@@ -823,19 +833,21 @@ class CallTransportHub:
         return None if entry is None else entry.session
 
     async def unregister(self, call_id: str, *, expected_session: CallTransportSession) -> bool:
-        async with self._lock:
+        async with self._connection_released:
             entry = self._sessions.get(call_id)
             if entry is None or entry.session is not expected_session:
                 return False
             self._sessions.pop(call_id)
+            self._connection_released.notify_all()
             expected_session.close()
             return True
 
     async def close(self) -> None:
         """Close every registered session and release bounded replay buffers."""
-        async with self._lock:
+        async with self._connection_released:
             sessions = tuple(entry.session for entry in self._sessions.values())
             self._sessions.clear()
+            self._connection_released.notify_all()
         for session in sessions:
             session.close()
         tasks = tuple(self._owned_tasks)
@@ -846,7 +858,7 @@ class CallTransportHub:
 
     async def close_user_sessions(self, user_id: str) -> int:
         """Remove every replay buffer owned by one user before data deletion."""
-        async with self._lock:
+        async with self._connection_released:
             owned = [
                 (call_id, entry.session)
                 for call_id, entry in self._sessions.items()
@@ -854,6 +866,8 @@ class CallTransportHub:
             ]
             for call_id, _session in owned:
                 self._sessions.pop(call_id, None)
+            if owned:
+                self._connection_released.notify_all()
         for _call_id, session in owned:
             session.close()
         return len(owned)
@@ -867,17 +881,46 @@ class CallTransportHub:
             raise CallTransportError("CALL_START_UNAVAILABLE", close_code=CALL_CLOSE_TRY_AGAIN_LATER)
         if self._require_user_admission is not None:
             await self._require_user_admission(user_id)
-        async with self._lock:
-            entry = self._sessions.get(str(message["call_id"]))
-            if entry is None:
-                raise CallTransportError("CALL_NOT_FOUND", close_code=CALL_CLOSE_POLICY_VIOLATION)
-            if entry.session.user_id != user_id:
-                raise CallTransportError("RESUME_OWNERSHIP_MISMATCH", close_code=CALL_CLOSE_POLICY_VIOLATION)
-            if entry.connection_id is not None:
+        call_id = str(message["call_id"])
+        character_id = str(message["character_id"])
+        loop = asyncio.get_running_loop()
+        release_deadline = loop.time() + self._resume_release_timeout
+        async with self._connection_released:
+            entry = self._sessions.get(call_id)
+            self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
+            observed_generation = entry.generation
+            observed_connection = entry.connection_id
+            while entry.connection_id is not None:
+                if entry.generation != observed_generation or entry.connection_id is not observed_connection:
+                    raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+                remaining = release_deadline - loop.time()
+                if remaining <= 0:
+                    raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+                try:
+                    await asyncio.wait_for(self._connection_released.wait(), timeout=remaining)
+                except (TimeoutError, asyncio.TimeoutError) as error:
+                    raise CallTransportError(
+                        "CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION
+                    ) from error
+                entry = self._sessions.get(call_id)
+                self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
+        if self._require_user_admission is not None:
+            await self._require_user_admission(user_id)
+        async with self._connection_released:
+            entry = self._sessions.get(call_id)
+            self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
+            if entry.generation != observed_generation or entry.connection_id is not None:
                 raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
             entry.generation += 1
             entry.connection_id = connection_id
             return CallTransportBinding(entry.session, entry.generation, connection_id)
+
+    @staticmethod
+    def _require_resume_identity(entry: _HubEntry | None, *, user_id: str, character_id: str) -> None:
+        if entry is None:
+            raise CallTransportError("CALL_NOT_FOUND", close_code=CALL_CLOSE_POLICY_VIOLATION)
+        if entry.session.user_id != user_id or entry.session.character_id != character_id:
+            raise CallTransportError("RESUME_OWNERSHIP_MISMATCH", close_code=CALL_CLOSE_POLICY_VIOLATION)
 
     async def attach_start(
         self, session: CallTransportSession, *, user_id: str, connection_id: object
@@ -915,11 +958,12 @@ class CallTransportHub:
         binding.session.acknowledge_server(ack_seq)
 
     async def detach(self, binding: CallTransportBinding) -> bool:
-        async with self._lock:
+        async with self._connection_released:
             if not self.is_current(binding):
                 return False
             entry = self._sessions[binding.session.call_id]
             entry.connection_id = None
+            self._connection_released.notify_all()
             return True
 
     async def detach_after_disconnect(self, binding: CallTransportBinding, disconnect_stage) -> bool:
