@@ -136,5 +136,10 @@ def test_init_agreements_accepts_packaged_agreement_resources(session):
     assert current.version
     assert current.blocks
 
-    stored = session.query(AgreementVersion).one()
-    assert stored.version == current.version
+    # 归档的是发布清单里的**全部**版本（历史版本必须留档），所以这里断言集合相等：
+    # 一旦发布第二个版本，`query(AgreementVersion).one()` 这类"只有一个版本"的断言会误报失败。
+    manifest = json.loads(files("res.user_agreements").joinpath("manifest.json").read_text(encoding="utf-8"))
+    stored = {row.version: row for row in session.query(AgreementVersion).all()}
+    assert set(stored) == set(manifest["files"])
+    assert stored[current.version].content_json == current.content_json
+    assert stored[current.version].content_sha256 == current.sha256
