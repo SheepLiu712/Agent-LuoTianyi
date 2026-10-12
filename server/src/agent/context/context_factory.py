@@ -2,11 +2,13 @@
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime
 from typing import TYPE_CHECKING
 from weakref import WeakValueDictionary
 
 from ._lifecycle import _complete
-from .conversation_store import ConversationStore
+from ._storage import _Storage
+from .conversation_store import ConversationStore, EphemeralCallConversationStore
 from .interaction_context import InteractionContext
 from .models import ContextIdentity
 
@@ -36,6 +38,36 @@ class ContextFactory:
         调用方负责 close。创建被取消时，等待加载完成并关闭未交付的实例，再传播取消。
         """
         identity = ContextIdentity(self._character_id, interaction_id, user_id)
+        return await self._create(identity)
+
+    async def create_call(
+        self,
+        interaction_id: str,
+        *,
+        user_id: str,
+        requested_at: datetime,
+    ) -> InteractionContext:
+        """创建只以内存 Store 工作的通话上下文；requested_at 使用服务器本地 naive 时间。"""
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("通话上下文需要非空 user_id")
+        if not isinstance(requested_at, datetime) or requested_at.tzinfo is not None:
+            raise ValueError("requested_at 应为不带时区的服务器本地时间")
+        identity = ContextIdentity(self._character_id, interaction_id, user_id)
+
+        def call_store() -> ConversationStore:
+            seed = _Storage(self._database, identity).load_call_conversation_seed(requested_at=requested_at)
+            return EphemeralCallConversationStore(seed)
+
+        return await self._create(identity, store_factory=call_store)
+
+    async def _create(
+        self,
+        identity: ContextIdentity,
+        *,
+        store_factory: Callable[[], ConversationStore] | None = None,
+    ) -> InteractionContext:
+        """在同用户锁内完成全部读取；取消时关闭已经创建但尚未交付的上下文。"""
+        user_id = identity.user_id
         lock = self._user_locks.get(user_id)
         if lock is None:
             lock = asyncio.Lock()
@@ -44,10 +76,24 @@ class ContextFactory:
 
         async def load() -> InteractionContext:
             async with lock:
-                store = self._conversation_store_factory(identity) if self._conversation_store_factory else None
-                context = await asyncio.to_thread(
-                    InteractionContext, identity=identity, database=self._database, conversation_store=store
-                )
+
+                def build() -> InteractionContext:
+                    store = (
+                        store_factory()
+                        if store_factory is not None
+                        else self._conversation_store_factory(identity) if self._conversation_store_factory else None
+                    )
+                    try:
+                        return InteractionContext(identity=identity, database=self._database, conversation_store=store)
+                    except BaseException:
+                        if store is not None:
+                            try:
+                                store.close()
+                            except BaseException:
+                                pass
+                        raise
+
+                context = await asyncio.to_thread(build)
                 context._state.lock = lock
                 created.append(context)
                 return context

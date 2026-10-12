@@ -7,6 +7,7 @@ stream registration deliberately remain Adapter responsibilities.
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Literal, Mapping, TypedDict, Union
 
@@ -189,21 +190,6 @@ class ControlProtocolError(ValueError):
         super().__init__(f"{code} at {path}")
 
 
-class _Pairs(list[tuple[object, object]]):
-    pass
-
-
-class _Integer(int):
-    def __new__(cls, value: str) -> _Integer:
-        result = super().__new__(cls, value)
-        result.lexeme = value
-        return result
-
-
-class _Float(float):
-    pass
-
-
 _FIELDS: dict[str, tuple[str, ...]] = {
     "call.switch_prepare": ("protocol", "type", "client_request_id", "character_id"),
     "call.switch_ready": ("protocol", "type", "client_request_id", "character_id"),
@@ -293,45 +279,25 @@ def decode_control_text(text: str | bytes, *, sender: ControlSender, transport: 
     if _utf8_size(raw, text) > _MAX_RAW_BYTES:
         raise ControlProtocolError("CONTROL_TOO_LARGE", "$")
     try:
-        parsed = json.loads(
-            raw, object_pairs_hook=_Pairs, parse_int=_Integer, parse_float=_Float, parse_constant=_reject_constant
-        )
-    except _JsonConstant as error:
-        raise ControlProtocolError("BAD_JSON", _constant_path(raw, error.token)) from None
-    except (json.JSONDecodeError, RecursionError):
+        # Standard JSON semantics; float conversion avoids Python's huge-int limit
+        # and matches the numeric representation used by the JavaScript peer.
+        parsed = json.loads(raw, parse_int=float, parse_constant=_reject_constant)
+    except (ValueError, RecursionError):
         raise ControlProtocolError("BAD_JSON", "$") from None
-    try:
-        _reject_duplicates_and_surrogates(parsed)
-        if not isinstance(parsed, _Pairs):
-            raise ControlProtocolError("TOP_LEVEL_NOT_OBJECT", "$")
-        return _validate(_pairs_to_dict(parsed), sender=sender, transport=transport)
-    except RecursionError:
-        raise ControlProtocolError("BAD_JSON", "$") from None
+    if not isinstance(parsed, dict):
+        raise ControlProtocolError("TOP_LEVEL_NOT_OBJECT", "$")
+    return _validate(parsed, sender=sender, transport=transport)
 
 
 def encode_control_message(message: Mapping[str, object], *, sender: ControlSender, transport: ControlTransport) -> str:
-    """Validate and encode a control message using the contract's field order."""
+    """Validate known fields and encode JSON without a wire field-order contract."""
     if not isinstance(message, Mapping):
         raise ControlProtocolError("TOP_LEVEL_NOT_OBJECT", "$")
     validated = _validate(dict(message), sender=sender, transport=transport)
-    ordered = _ordered_message(validated)
-    encoded = json.dumps(ordered, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    # This also keeps encoder and raw parser validation at the exact same boundary.
-    decode_control_text(encoded, sender=sender, transport=transport)
+    encoded = json.dumps(validated, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    if _utf8_size(_strict_text(encoded), encoded) > _MAX_RAW_BYTES:
+        raise ControlProtocolError("CONTROL_TOO_LARGE", "$")
     return encoded
-
-
-def _ordered_message(message: ControlMessage) -> dict[str, object]:
-    ordered = {field: message[field] for field in _FIELDS[message["type"]] if field in message}
-    if "audio" in ordered:
-        audio = ordered["audio"]
-        assert isinstance(audio, dict)
-        ordered["audio"] = {field: audio[field] for field in ("encoding", "sample_rate", "channels")}
-    if "retire_server_seq" in ordered:
-        retired = ordered["retire_server_seq"]
-        assert isinstance(retired, dict)
-        ordered["retire_server_seq"] = {field: retired[field] for field in ("from", "through")}
-    return ordered
 
 
 def _strict_text(text: str | bytes) -> str:
@@ -353,53 +319,31 @@ def _utf8_size(raw: str, original: str | bytes) -> int:
     return len(original) if isinstance(original, bytes) else len(raw.encode("utf-8"))
 
 
-class _JsonConstant(Exception):
-    def __init__(self, token: str) -> None:
-        self.token = token
-
-
 def _reject_constant(token: str) -> None:
-    raise _JsonConstant(token)
+    raise ValueError(token)
 
 
-def _constant_path(raw: str, token: str) -> str:
-    match = re.search(r'"([^"\\]+)"\s*:\s*' + re.escape(token) + r"(?=\s*[,}])", raw)
-    return f"$.{match.group(1)}" if match else "$"
+def _known_fields(message: dict[str, object], message_type: str) -> dict[str, object]:
+    result = {key: value for key, value in message.items() if key in _FIELDS[message_type]}
+    for key, fields in (("audio", ("encoding", "sample_rate", "channels")), ("retire_server_seq", ("from", "through"))):
+        if key in result and isinstance(result[key], dict):
+            result[key] = {name: value for name, value in result[key].items() if name in fields}
+    return result
 
 
-def _reject_duplicates_and_surrogates(value: object, path: str = "$") -> None:
-    if isinstance(value, _Pairs):
-        seen: set[object] = set()
-        for key, child in value:
-            if not isinstance(key, str):
-                raise ControlProtocolError("BAD_JSON", path)
-            if key in seen:
-                raise ControlProtocolError("DUPLICATE_FIELD", f"{path}.{key}")
-            seen.add(key)
-            _reject_scalar_surrogate(key, path)
-            _reject_duplicates_and_surrogates(child, f"{path}.{key}")
-    elif isinstance(value, list):
-        for child in value:
-            _reject_duplicates_and_surrogates(child, path)
-    elif isinstance(value, str):
-        _reject_scalar_surrogate(value, path)
-
-
-def _reject_scalar_surrogate(value: str, path: str) -> None:
-    if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
-        raise ControlProtocolError("BAD_JSON", path)
-
-
-def _pairs_to_dict(value: object) -> object:
-    if isinstance(value, _Pairs):
-        return {key: _pairs_to_dict(child) for key, child in value}
-    if isinstance(value, list):
-        return [_pairs_to_dict(child) for child in value]
-    return value
+def _require_integer(value: object, path: str) -> None:
+    if type(value) not in (int, float):
+        raise ControlProtocolError("INVALID_FIELD_TYPE", path)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ControlProtocolError("FIELD_OUT_OF_RANGE", path)
+        if not value.is_integer():
+            raise ControlProtocolError("INVALID_FIELD_TYPE", path)
 
 
 def _validate(message: dict[str, object], *, sender: str, transport: str) -> ControlMessage:
     message_type = _validate_discriminator(message)
+    message = _known_fields(message, message_type)
     _validate_route(message_type, sender=sender, transport=transport)
     _validate_shape(message, message_type)
     _validate_types(message, message_type)
@@ -441,10 +385,6 @@ def _validate_shape(message: dict[str, object], message_type: str) -> None:
     for field in _FIELDS[message_type]:
         if field in required and field not in message:
             raise ControlProtocolError("MISSING_FIELD", f"$.{field}")
-    allowed = set(_FIELDS[message_type])
-    for field in message:
-        if field not in allowed:
-            raise ControlProtocolError("UNKNOWN_FIELD", f"$.{field}")
 
 
 def _validate_types(message: dict[str, object], message_type: str) -> None:
@@ -466,8 +406,11 @@ def _validate_types(message: dict[str, object], message_type: str) -> None:
         if field not in message:
             continue
         value = message[field]
-        if field in int_fields and (type(value) not in (int, _Integer) or isinstance(value, _Float)):
-            raise ControlProtocolError("INVALID_FIELD_TYPE", f"$.{field}")
+        if isinstance(value, str):
+            _validate_scalar_string(value, f"$.{field}")
+        if field in int_fields:
+            _require_integer(value, f"$.{field}")
+            message[field] = int(value)
         if field == "retryable" and type(value) is not bool:
             raise ControlProtocolError("INVALID_FIELD_TYPE", "$.retryable")
         if field in {
@@ -502,15 +445,15 @@ def _validate_object(value: object, path: str, fields: tuple[str, ...]) -> None:
     for field in fields:
         if field not in value:
             raise ControlProtocolError("MISSING_FIELD", f"{path}.{field}")
-    for field in value:
-        if field not in fields:
-            raise ControlProtocolError("UNKNOWN_FIELD", f"{path}.{field}")
     for field in fields:
         item = value[field]
+        if isinstance(item, str):
+            _validate_scalar_string(item, f"{path}.{field}")
         if field == "encoding" and not isinstance(item, str):
             raise ControlProtocolError("INVALID_FIELD_TYPE", f"{path}.{field}")
-        if field != "encoding" and type(item) not in (int, _Integer):
-            raise ControlProtocolError("INVALID_FIELD_TYPE", f"{path}.{field}")
+        if field != "encoding":
+            _require_integer(item, f"{path}.{field}")
+            value[field] = int(item)
 
 
 def _validate_ranges_and_values(message: dict[str, object], message_type: str) -> None:
@@ -564,16 +507,21 @@ def _validate_nested_ranges(message: dict[str, object]) -> None:
 
 
 def _validate_integer(value: object, path: str, minimum: int, maximum: int) -> None:
-    if isinstance(value, _Integer) and value.lexeme == "-0":
-        raise ControlProtocolError("INVALID_FIELD_VALUE", path)
-    if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
+    _require_integer(value, path)
+    if not minimum <= value <= maximum:
         raise ControlProtocolError("FIELD_OUT_OF_RANGE", path)
+
+
+def _validate_scalar_string(value: str, path: str) -> None:
+    if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+        raise ControlProtocolError("BAD_JSON", path)
 
 
 def _validate_string(value: object, path: str, minimum: int, maximum: int | None) -> None:
     assert isinstance(value, str)
     if len(value) < minimum or (maximum is not None and len(value) > maximum):
         raise ControlProtocolError("FIELD_OUT_OF_RANGE", path)
+    _validate_scalar_string(value, path)
     if "\x00" in value or "\ufffd" in value:
         raise ControlProtocolError("INVALID_FIELD_VALUE", path)
 

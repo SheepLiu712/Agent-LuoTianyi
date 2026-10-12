@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
+from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
-from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -275,12 +275,8 @@ class AgentRuntime:
                 ),
                 (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary_writing)),
                 (
-                    ActionKind.REFLECTION,
-                    ReflectionActionHandler(
-                        character_id,
-                        self.skills.reflection,
-                        self.skills.conversation_compaction,
-                    ),
+                    ActionKind.COGNITIVE_MAINTENANCE,
+                    CognitiveMaintenanceActionHandler(character_id, self.skills.cognitive_maintenance),
                 ),
             )
         )
