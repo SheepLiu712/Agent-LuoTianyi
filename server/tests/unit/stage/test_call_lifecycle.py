@@ -70,6 +70,36 @@ def test_declined_call_settlement_cannot_replace_its_business_result():
         )
 
 
+@pytest.mark.parametrize(
+    ("outcome", "end_reason"),
+    [
+        (CallOutcome.CANCELLED_BEFORE_ANSWER, CallEndReason.USER_HANGUP),
+        (CallOutcome.DECLINED, CallEndReason.USER_HANGUP),
+    ],
+)
+def test_declined_result_cannot_change_during_finalization(outcome, end_reason):
+    lifecycle = CallLifecycle()
+    lifecycle.transition(CallState.RINGING)
+    declined = lifecycle.transition(
+        CallState.DECLINED,
+        outcome=CallOutcome.DECLINED,
+        end_reason=CallEndReason.DECLINED,
+    )
+
+    with pytest.raises(InvalidCallTransition, match="declined terminal facts"):
+        lifecycle.transition(CallState.ENDED, outcome=outcome, end_reason=end_reason)
+    assert lifecycle.snapshot is declined
+
+    ended = lifecycle.transition(
+        CallState.ENDED,
+        outcome=CallOutcome.DECLINED,
+        end_reason=CallEndReason.DECLINED,
+    )
+    assert ended.state is CallState.ENDED
+    assert ended.outcome is CallOutcome.DECLINED
+    assert ended.end_reason is CallEndReason.DECLINED
+
+
 def test_setup_failure_is_terminal_and_not_recordable():
     lifecycle = CallLifecycle()
     result = lifecycle.transition(CallState.FAILED, end_reason=CallEndReason.SYSTEM_FAILURE)

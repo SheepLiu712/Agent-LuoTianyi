@@ -4,12 +4,12 @@
 
 本增量实现 `call.v1` 的共享 Draft 2020-12 schema、跨端 fixture，以及 Python / TypeScript 两端无状态 parser/encoder。ADR-0001 仍为 `Proposed`，等待非作者开发者正式审核；当前产物不是生产协议已经采用或 `call_ws` 已经可用的证明。
 
-共享控制契约包含 16 种消息、24 个有效样例和 53 个无效样例，覆盖：
+共享控制契约包含 16 种消息、共享有效与无效样例（数量以 fixture 为准），覆盖：
 
-- 顶层与嵌套重复字段，包括 Unicode escaped 等值键
+- 标准 JSON 解析语义、顶层与嵌套未知字段兼容，输出只包含已定义字段
 - 严格 UTF-8、16384-byte 上限、lone surrogate、NUL 与 U+FFFD
-- 规范整数词法、UINT32、JavaScript safe integer、UUID 与 ID 长度
-- transport / direction、required / unknown field、枚举与 `playback.stop` 范围关系
+- 整数值与范围、UINT32、JavaScript safe integer、UUID 与 ID 长度
+- transport / direction、required field、枚举与 `playback.stop` 范围关系
 - `call.start.audio` 固定 `pcm_s16le / 16000 Hz / mono`
 - protocol / type discriminator 的缺失、类型和未知值错误归一化
 
@@ -26,7 +26,7 @@
 
 当前明确不包含：生产 endpoint、ACK engine、resume replay、retire buffer、Stage 接线、生产 Base64 音频或完整通话功能。音频 codec 保留窄的未来编码替换 seam，不提供自动嗅探、registry 或 plugin loader。
 
-## 2026-10-10 验证证据
+## 2026-10-10 历史验证证据（旧契约，不作为当前编码形式要求）
 
 | 范围 | 命令或方法 | 结果 |
 | --- | --- | --- |
@@ -43,3 +43,9 @@
 更早的相关 WebSocket 回归记录为 111 passed；当时扩大 integration 中有 2 个 TIFF fixture 既有失败。安装依赖时锁文件依赖树曾报告 69 个漏洞提示；本增量没有修改 lockfile，也没有执行 `npm audit fix`，该提示不构成本次安全审计结论。
 
 未验证生产 WebSocket、ACK/replay 状态机、真实设备、供应商、AEC、蓝牙或性能目标。
+
+## 2026-10-12 契约简化
+
+按维护者要求移除手写 JSON scanner、重复键拒绝、整数词法限制及固定编码顺序；未知字段被忽略。双端使用共享 fixtures 验证结构和值；保留字节大小、Unicode、类型、范围、音频声明及业务关系校验。新增超长整数、等值数值形式、未知字段与任意字段顺序回归。当前验证结果以本次 PR 复审为准。
+
+本次修订验证：Python control + audio 137 passed；App 全量 34 suites / 376 tests passed；TypeScript、ESLint、Black、Ruff 及 B1–B10 通过。36 个有效 fixture 通过 schema 及双向 encoder→对端 decoder 验证；不比较编码字节或字段顺序。

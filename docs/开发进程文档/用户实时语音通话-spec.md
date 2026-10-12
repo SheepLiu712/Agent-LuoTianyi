@@ -739,7 +739,7 @@ CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知
 
 #### 8. 共享控制契约
 
-控制消息的完整字段、方向、传输、整数范围、稳定 parser 错误与规范编码顺序见 [`contracts/call_v1/control.schema.json`](../../contracts/call_v1/control.schema.json) 和 [`contracts/call_v1/fixtures/control_messages.json`](../../contracts/call_v1/fixtures/control_messages.json)。该契约仍随 ADR-0001 保持 Proposed；纯 parser 不承担序号单调性、首帧、重放或 Stage 状态校验。
+控制消息的完整字段、方向、传输、整数范围、parser 错误与结构校验规则见 [`contracts/call_v1/control.schema.json`](../../contracts/call_v1/control.schema.json) 和 [`contracts/call_v1/fixtures/control_messages.json`](../../contracts/call_v1/fixtures/control_messages.json)。该契约仍随 ADR-0001 保持 Proposed；纯 parser 不承担序号单调性、首帧、重放或 Stage 状态校验。
 
 #### 9. 结束事件
 

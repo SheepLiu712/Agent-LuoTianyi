@@ -153,13 +153,9 @@ export function reduceCallState(state: CallState, event: CallEvent): CallTransit
       return finish(state, 'DECLINED', 'declined', 0);
 
     case 'call_ended':
-      if (state.phase !== 'ENDING' && state.phase !== 'ACTIVE' && state.phase !== 'RECONNECTING') return transition(state);
-      return transition({
-        ...state,
-        phase: 'ENDED',
-        endReason: state.endReason ?? 'remote_ended',
-        endedActiveDurationMs: state.endedActiveDurationMs ?? activeDurationAt(state, event.nowMs),
-      });
+      if (state.phase === 'ENDING') return transition({ ...state, phase: 'ENDED' });
+      if (state.phase !== 'ACTIVE' && state.phase !== 'RECONNECTING') return transition(state);
+      return finish(state, 'ENDED', 'remote_ended', event.nowMs);
   }
 }
 
