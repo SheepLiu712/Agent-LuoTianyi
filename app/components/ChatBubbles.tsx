@@ -4,6 +4,7 @@ import { CachedImage } from './CachedImage';
 import { ChatMessage } from '../types/chat';
 import { AppTheme, THEMES } from '../utils/theme';
 import { VoiceBubble } from './VoiceBubble';
+import { CallHistoryBubble } from './call/CallHistoryBubble';
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -100,6 +101,7 @@ export const SystemMessage: React.FC<MessageItemProps> = ({ message, theme = THE
 
 // 统一的消息渲染组件
 export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, onToggleVoicePlayback, onRetryVoice, theme = THEMES.light }) => {
+  if (message.type === 'call') return <CallHistoryBubble message={message} theme={theme} />;
   if (message.type === 'system') {
     return <SystemMessage message={message} theme={theme} />;
   }

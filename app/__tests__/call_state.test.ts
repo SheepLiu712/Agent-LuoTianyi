@@ -32,6 +32,36 @@ describe('call lifecycle state skeleton', () => {
     expect(ready.effects).toEqual([{ type: 'close_chat' }, { type: 'open_call' }]);
   });
 
+  it('fails a switch before opening the call transport and returns to chat', () => {
+    const switching = reduce([
+      { type: 'audio_capability', capability: 'available' },
+      { type: 'request_call', requiresChatSwitch: true, clientRequestId: 'request-1' },
+      { type: 'permission_granted' },
+    ]);
+
+    expect(reduceCallState(switching.state, { type: 'switch_failed' })).toEqual({
+      state: { ...switching.state, phase: 'FAILED', endReason: 'failed' },
+      effects: [{ type: 'return_to_chat' }],
+    });
+  });
+
+  it('cleans up an authenticated transport failure without opening a call', () => {
+    const connecting = reduce([
+      { type: 'audio_capability', capability: 'available' },
+      { type: 'request_call', requiresChatSwitch: false, clientRequestId: 'request-1' },
+      { type: 'permission_granted' },
+    ]);
+
+    expect(reduceCallState(connecting.state, { type: 'transport_auth_failed' })).toEqual({
+      state: { ...connecting.state, phase: 'FAILED', endReason: 'failed', endedActiveDurationMs: 0 },
+      effects: [
+        { type: 'stop_capture' },
+        { type: 'stop_playback' },
+        { type: 'return_to_chat' },
+      ],
+    });
+  });
+
   it('returns to chat on permission denial without creating a call', () => {
     const requested = reduce([
       { type: 'audio_capability', capability: 'available' },
@@ -139,5 +169,62 @@ describe('call lifecycle state skeleton', () => {
       { type: 'return_to_chat' },
     ]);
     expect(reduceCallState(ending.state, { type: 'user_hangup', nowMs: 300 }).effects).toEqual([]);
+  });
+
+  it('settles an ACTIVE remote end and stops both native audio directions before returning', () => {
+    const active = {
+      ...initialCallState,
+      phase: 'ACTIVE' as const,
+      audioCapability: 'available' as const,
+      callId: 'call-1',
+      activeStartedAtMs: 100,
+    };
+
+    expect(reduceCallState(active, { type: 'call_ended', nowMs: 1_600 })).toEqual({
+      state: {
+        ...active,
+        phase: 'ENDED',
+        endReason: 'remote_ended',
+        endedActiveDurationMs: 1_500,
+      },
+      effects: [
+        { type: 'stop_capture' },
+        { type: 'stop_playback' },
+        { type: 'return_to_chat' },
+      ],
+    });
+  });
+
+  it('locks a RECONNECTING remote end to the disconnect duration and excludes the recovery gap', () => {
+    const reconnecting = {
+      ...initialCallState,
+      phase: 'RECONNECTING' as const,
+      audioCapability: 'available' as const,
+      callId: 'call-1',
+      activeStartedAtMs: 100,
+      activeDurationAtDisconnectMs: 1_000,
+    };
+
+    const ended = reduceCallState(reconnecting, { type: 'call_ended', nowMs: 9_000 });
+    expect(ended.state).toMatchObject({
+      phase: 'ENDED',
+      endReason: 'remote_ended',
+      endedActiveDurationMs: 1_000,
+    });
+    expect(ended.effects).toEqual([
+      { type: 'stop_capture' },
+      { type: 'stop_playback' },
+      { type: 'return_to_chat' },
+    ]);
+  });
+
+  it('keeps decline distinct from remote-ended and ignores terminal outcome rewrites', () => {
+    const ringing = { ...initialCallState, phase: 'RINGING' as const, callId: 'call-1' };
+    const declined = reduceCallState(ringing, { type: 'declined' });
+    expect(declined.state).toMatchObject({ phase: 'DECLINED', endReason: 'declined' });
+    expect(reduceCallState(declined.state, { type: 'call_ended', nowMs: 1_000 })).toEqual({
+      state: declined.state,
+      effects: [],
+    });
   });
 });

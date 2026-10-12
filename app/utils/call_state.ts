@@ -52,6 +52,7 @@ function finish(
  * transport coordinator; it never performs permission, WebSocket, or audio IO.
  */
 export function reduceCallState(state: CallState, event: CallEvent): CallTransition {
+  if (event.type === 'reset_to_idle') return transition(initialCallState);
   if (isTerminal(state)) return transition(state);
 
   switch (event.type) {
@@ -153,10 +154,14 @@ export function reduceCallState(state: CallState, event: CallEvent): CallTransit
       return finish(state, 'DECLINED', 'declined', 0);
 
     case 'call_ended':
-      if (state.phase === 'ENDING') return transition({ ...state, phase: 'ENDED' });
+      if (state.phase === 'CONNECTING' || state.phase === 'PREPARING' || state.phase === 'RINGING' || state.phase === 'SWITCH_PREPARING') {
+        return finish(state, 'FAILED', 'failed', event.nowMs);
+      }
+      if (state.phase === 'ENDING') return transition({ ...state, phase: 'ENDED', endReason: state.endReason ?? 'remote_ended', endedActiveDurationMs: state.endedActiveDurationMs ?? activeDurationAt(state, event.nowMs) });
       if (state.phase !== 'ACTIVE' && state.phase !== 'RECONNECTING') return transition(state);
       return finish(state, 'ENDED', 'remote_ended', event.nowMs);
   }
+  return transition(state);
 }
 
 /** Duration used by the UI clock; the reconnect overlay continues showing it. */

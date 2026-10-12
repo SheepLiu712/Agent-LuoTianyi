@@ -4,7 +4,9 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
+from src.domain.call import CallContent, CallEndReason, CallOutcome
 from src.domain.conversation_type import ConversationItem
 
 from .models import (
@@ -157,18 +159,41 @@ def _decode_entry(item: dict) -> ConversationEntry:
             raise ValueError("音频历史内容与结构化元数据不一致")
     elif kind == "sing":
         content = SongContent(text, data["song"], data.get("segment"))
+    elif kind == "call":
+        content = _decode_call_content(data, text)
     else:
         raise ValueError(f"不支持的历史对话类型：{kind}")
     return ConversationEntry(item["uuid"], datetime.fromisoformat(item["timestamp"]), item["source"], content)
 
 
+def _decode_call_content(data: dict, text: str) -> CallContent:
+    content = CallContent(
+        call_id=UUID(data["call_id"]),
+        outcome=CallOutcome(data["outcome"]),
+        active_duration_ms=data["active_duration_ms"],
+        summary=data.get("summary"),
+        end_reason=CallEndReason(data["end_reason"]),
+    )
+    if content.text != text:
+        raise ValueError("通话历史内容与结构化元数据不一致")
+    return content
+
+
 def _encode_entry(entry: ConversationEntry) -> ConversationItem:
     content = entry.content
-    kinds = {TextContent: "text", ImageContent: "image", AudioContent: "audio", SongContent: "sing"}
+    kinds = {
+        TextContent: "text",
+        ImageContent: "image",
+        AudioContent: "audio",
+        SongContent: "sing",
+        CallContent: "call",
+    }
     data = asdict(content)
     text = data.pop("text")
     if isinstance(content, AudioContent):
         data["understanding_status"] = content.understanding_status.value
+    elif isinstance(content, CallContent):
+        data.update(call_id=str(content.call_id), outcome=content.outcome.value, end_reason=content.end_reason.value)
     return ConversationItem(
         entry.entry_id,
         entry.timestamp.isoformat(sep=" ", timespec="microseconds"),

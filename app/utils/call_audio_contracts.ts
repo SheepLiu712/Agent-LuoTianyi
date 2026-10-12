@@ -18,9 +18,15 @@ export interface CallAudioStreamIdentity {
 }
 
 export interface CapturedAudioFrame {
-  sequence: number;
+  /** Device-frame counter scoped to one native call session; not a call.v1 wire seq. */
+  deviceSequence: number;
   format: CallAudioFormat;
   payload: Uint8Array;
+}
+
+/** The transport coordinator is the sole authority that assigns call.v1 wire seq values. */
+export interface SequencedCapturedAudioFrame extends CapturedAudioFrame {
+  wireSequence: number;
 }
 
 export interface CallPlaybackChunk {
