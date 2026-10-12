@@ -102,4 +102,23 @@ class CallEnding(Stimulus):
             raise ValueError("call ending reason mismatch")
 
 
-CallStimulus = CallAnswerRequested | CallStarted | CallTurnCompleted | CallSilenceElapsed | CallEnding
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallSettlementRequested(Stimulus):
+    kind: ClassVar[StimulusKind] = StimulusKind.CALL_SETTLEMENT_REQUESTED
+    call_id: UUID
+    final_snapshot: CallFinalSnapshot
+    settlement_input_digest: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_instance(self.call_id, UUID)
+        _require_instance(self.final_snapshot, CallFinalSnapshot)
+        if self.final_snapshot.terminal.call_id != self.call_id:
+            raise ValueError("call settlement identity mismatch")
+        if len(self.settlement_input_digest) != 64:
+            raise ValueError("call settlement digest is invalid")
+
+
+CallStimulus = (
+    CallAnswerRequested | CallStarted | CallTurnCompleted | CallSilenceElapsed | CallEnding | CallSettlementRequested
+)

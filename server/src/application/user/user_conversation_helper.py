@@ -1,7 +1,9 @@
 import asyncio
 from typing import TYPE_CHECKING, Any, List
+from uuid import UUID
 
 from src.domain.agent import MediaRef
+from src.domain.call import CallContent, CallEndReason, CallOutcome
 from src.domain.conversation_type import ConversationItem
 from src.infrastructure.media import MediaResolutionError
 
@@ -64,6 +66,19 @@ class UserConversationHelper:
                 extra = {
                     "duration_ms": duration_ms if type(duration_ms) is int else 0,
                     "audio_available": await self._audio_available(user_id, item),
+                }
+            elif item.type == "call":
+                data = item.data or {}
+                content = CallContent(
+                    call_id=UUID(data["call_id"]),
+                    outcome=CallOutcome(data["outcome"]),
+                    active_duration_ms=int(data["active_duration_ms"]),
+                    summary=data.get("summary"),
+                    end_reason=CallEndReason(data["end_reason"]),
+                ).render_for_history()
+                extra = {
+                    "outcome": data["outcome"],
+                    "active_duration_ms": int(data["active_duration_ms"]),
                 }
             ret["history"].append(
                 {

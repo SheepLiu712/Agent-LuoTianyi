@@ -7,6 +7,7 @@ from uuid import UUID
 from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.action.call import AnswerCallHandler, EndCallHandler
+from src.agent.handlers.action.call_settlement import MaintainCallHandler, SummarizeCallHandler
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
@@ -23,6 +24,7 @@ from src.agent.handlers.stimulus.call import (
     CallStartedHandler,
     CallTurnCompletedHandler,
 )
+from src.agent.handlers.stimulus.call_settlement import CallSettlementRequestedHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReplyHandler,
@@ -82,6 +84,9 @@ class AgentRuntime:
         """Release Agent-owned ephemeral resources without exposing SharedSkills."""
         return self.skills.call_recall.release_call_memory(call_id)
 
+    def release_call_maintenance(self, call_id: UUID) -> None:
+        self.skills.call_maintenance.release(call_id)
+
     def __init__(
         self,
         config: dict[str, Any],
@@ -138,6 +143,8 @@ class AgentRuntime:
                 topic_extraction_config=self.config.get("agent", {}).get("topic_extractor", {}),
                 reflection_config=self.config.get("reflection", {}),
                 call_recall_model=self._shared_call_recall_model(llm_service),
+                call_summary_models=self._call_summary_models(llm_service),
+                call_maintenance_batches=getattr(database_manager, "call_maintenance_batches", None),
                 song_knowledge_config=self.config.get("agent", {}).get("song_knowledge", {}),
                 database_manager=database_manager,
                 media_resolver=media_resolver,
@@ -209,6 +216,7 @@ class AgentRuntime:
                 CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply),
             ),
             (StimulusKind.CALL_ENDING, CallEndingHandler()),
+            (StimulusKind.CALL_SETTLEMENT_REQUESTED, CallSettlementRequestedHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),
             (
@@ -305,6 +313,8 @@ class AgentRuntime:
                 ),
                 (ActionKind.ANSWER_CALL, AnswerCallHandler()),
                 (ActionKind.END_CALL, EndCallHandler()),
+                (ActionKind.SUMMARIZE_CALL, SummarizeCallHandler(character_id, self.skills.call_summary)),
+                (ActionKind.MAINTAIN_CALL, MaintainCallHandler(character_id, self.skills.call_maintenance)),
             )
         )
 
@@ -316,6 +326,20 @@ class AgentRuntime:
         if module_config is None:
             return None
         return llm_service.register_llm_module("call_recall", module_config)
+
+    def _call_summary_models(self, llm_service: LLMService) -> dict[str, object]:
+        config = self.config.get("agent", {}).get("call_summary")
+        if config is None:
+            return {}
+        if not isinstance(config, dict):
+            raise TypeError("agent.call_summary must be a dictionary")
+        module_config = config.get("llm_module")
+        if not isinstance(module_config, dict):
+            raise TypeError("agent.call_summary.llm_module must be a dictionary")
+        return {
+            character_id: llm_service.register_llm_module(f"{character_id}_call_summary", module_config)
+            for character_id in self.character_memories
+        }
 
     def _abort_initialization(self) -> None:
         skills = getattr(self, "skills", None)

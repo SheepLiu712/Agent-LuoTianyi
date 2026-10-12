@@ -23,6 +23,7 @@ from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.infrastructure.models.llm.module import LLMModule
 from src.infrastructure.persistence.database.vector_store import Document, VectorStore
 from src.utils.logger import get_logger
+from src.utils.owned_operation import complete_owned
 
 if TYPE_CHECKING:
     from src.infrastructure.persistence.database.services.memory_store import MemoryStore
@@ -276,7 +277,7 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
                 content=candidate.content,
                 metadata={"maintenance_id": maintenance_id, "candidate_index": index},
             )
-            await asyncio.to_thread(memory_store.write_agent_memory_record_if_absent, record)
+            await complete_owned(asyncio.to_thread(memory_store.write_agent_memory_record_if_absent, record))
             document = Document(
                 candidate.content,
                 {
@@ -288,10 +289,12 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
                 },
                 id=vector_id,
             )
-            await asyncio.to_thread(vector_store.upsert_documents, [document], [vector_id])
-            await asyncio.to_thread(
-                memory_store.link_agent_memory_embeddings,
-                record_id,
-                chunk_texts=[candidate.content],
-                embedding_ids=[vector_id],
+            await complete_owned(asyncio.to_thread(vector_store.upsert_documents, [document], [vector_id]))
+            await complete_owned(
+                asyncio.to_thread(
+                    memory_store.link_agent_memory_embeddings,
+                    record_id,
+                    chunk_texts=[candidate.content],
+                    embedding_ids=[vector_id],
+                )
             )

@@ -80,7 +80,10 @@ class CallFinalTurn:
             _nonblank(self.formal_agent_text, "formal_agent_text")
         if self.reply_status is CallReplyStatus.COMPLETED and self.formal_agent_text is None:
             raise ValueError("completed reply requires formal agent text")
-        if self.reply_status in {CallReplyStatus.NOT_STARTED, CallReplyStatus.FAILED} and self.formal_agent_text is not None:
+        if (
+            self.reply_status in {CallReplyStatus.NOT_STARTED, CallReplyStatus.FAILED}
+            and self.formal_agent_text is not None
+        ):
             raise ValueError("unanswered or failed reply cannot contain formal agent text")
 
 
@@ -104,6 +107,15 @@ class CallFinalSnapshot:
             raise ValueError("maintenance_turn_seq must be nonnegative")
         if self.maintenance_turn_seq > (seqs[-1] if seqs else 0):
             raise ValueError("maintenance progress exceeds final turns")
+
+
+@dataclass(frozen=True, slots=True)
+class CallMaintenanceSnapshot:
+    """Immutable settled prefix supplied by Stage for in-call maintenance."""
+
+    call_id: UUID
+    completed_turns: tuple[CallFinalTurn, ...]
+    maintenance_turn_seq: int = 0
 
 
 @dataclass(frozen=True, slots=True)

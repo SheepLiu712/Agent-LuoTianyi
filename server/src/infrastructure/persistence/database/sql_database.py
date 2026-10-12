@@ -155,6 +155,7 @@ class CallSession(Base):
     maintenance_status = Column(String, nullable=False, default="pending", server_default="pending")
     conversation_id = Column(String, nullable=True)
     maintenance_turn_seq = Column(Integer, nullable=False, default=0, server_default="0")
+    settlement_input_digest = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
 
@@ -184,6 +185,41 @@ class CallSession(Base):
             name="ck_call_sessions_maintenance_status",
         ),
         Index("ix_call_sessions_stale", "state", "updated_at"),
+    )
+
+
+class CallMaintenanceBatch(Base):
+    """Privacy-allowlisted frozen call maintenance results, never raw dialogue input."""
+
+    __tablename__ = "call_maintenance_batches"
+
+    maintenance_id = Column(String, primary_key=True)
+    call_id = Column(String, nullable=False, index=True)
+    user_id = Column(String, nullable=False, index=True)
+    character_id = Column(String, nullable=False)
+    previous_turn_seq = Column(Integer, nullable=False)
+    target_turn_seq = Column(Integer, nullable=False)
+    # Nullable only for pre-migration legacy rows whose original snapshot is unavailable.
+    # New repository writes require a real SHA-256 digest.
+    settlement_input_digest = Column(String, nullable=True)
+    candidates = Column(Text, nullable=False)
+    proposed_profile = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="frozen", server_default="frozen")
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "call_id",
+            "user_id",
+            "character_id",
+            "previous_turn_seq",
+            "target_turn_seq",
+            name="uq_call_maintenance_batch_range",
+        ),
+        CheckConstraint("previous_turn_seq >= 0", name="ck_call_maintenance_previous_nonnegative"),
+        CheckConstraint("target_turn_seq > previous_turn_seq", name="ck_call_maintenance_target_after_previous"),
+        CheckConstraint("status IN ('frozen', 'completed')", name="ck_call_maintenance_status"),
     )
 
 
@@ -513,10 +549,25 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
         _migrate_dynamic_schema(connection)
         _migrate_invite_schema(connection)
         _migrate_memory_chunk_schema(connection)
+        _migrate_call_session_schema(connection)
+        _migrate_call_maintenance_schema(connection)
 
 
 def _table_columns(connection, table_name: str) -> set[str]:
     return {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _migrate_call_session_schema(connection) -> None:
+    columns = _table_columns(connection, "call_sessions")
+    if columns and "settlement_input_digest" not in columns:
+        connection.exec_driver_sql("ALTER TABLE call_sessions ADD COLUMN settlement_input_digest VARCHAR")
+
+
+def _migrate_call_maintenance_schema(connection) -> None:
+    """Add the digest fence without inventing input identity for historical rows."""
+    columns = _table_columns(connection, "call_maintenance_batches")
+    if columns and "settlement_input_digest" not in columns:
+        connection.exec_driver_sql("ALTER TABLE call_maintenance_batches ADD COLUMN settlement_input_digest VARCHAR")
 
 
 def _migrate_memory_chunk_schema(connection) -> None:

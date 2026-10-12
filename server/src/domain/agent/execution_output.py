@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import ClassVar, Protocol, runtime_checkable
 
-from src.domain.call.contracts import CallSpeechDelivery
+from src.domain.call.contracts import CallMaintenanceSnapshot, CallSpeechDelivery
 
 from ._realization_contract import RealizationContractErrorCode as _Code
 from ._realization_contract import _Value
@@ -31,6 +31,7 @@ class ExecutionContext(_Value):
     cancellation: CancellationToken
     interaction_context: object | None = None
     call_output_permit: CallOutputPermit | None = None
+    call_maintenance_snapshot: CallMaintenanceSnapshot | None = None
 
 
 @runtime_checkable

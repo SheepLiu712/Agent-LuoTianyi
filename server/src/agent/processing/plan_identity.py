@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import fields, is_dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 from hashlib import sha256
 from uuid import UUID
@@ -26,6 +26,8 @@ _types = {
         d.Reflection,
         d.EndCall,
         d.AnswerCall,
+        d.SummarizeCall,
+        d.MaintainCall,
         d.MaintenanceReason,
         d.PreprocessedInput,
         d.MediaRef,
@@ -39,6 +41,11 @@ _types = {
         c.CallAudioRoute,
         c.CallAnswerDecision,
         c.CallEndReason,
+        c.CallFinalSnapshot,
+        c.CallFinalTurn,
+        c.CallTerminalFacts,
+        c.CallOutcome,
+        c.CallReplyStatus,
     )
 }
 
@@ -62,6 +69,8 @@ def _encode(value):
         return [type(value).__name__, payload]
     if type(value) is date:
         return ["date", value.isoformat()]
+    if type(value) is datetime:
+        return ["datetime", value.isoformat()]
     if type(value) is UUID:
         return ["UUID", str(value)]
     if type(value) is tuple:
@@ -79,6 +88,8 @@ def _decode(value):
     name, payload = value
     if name == "date":
         return date.fromisoformat(payload)
+    if name == "datetime":
+        return datetime.fromisoformat(payload)
     if name == "UUID":
         return UUID(payload)
     if name == "tuple":

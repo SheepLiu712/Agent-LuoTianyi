@@ -31,11 +31,7 @@ class SayHandler:
             return self._result(action, d.ExecutionErrorCode.CANCELLED)
         if action.call_delivery.audio_route is d.CallAudioRoute.CALL:
             outputs.ensure_call_allowed()
-            if (
-                action.prepared_audio_ref is not None
-                or action.sound_content is None
-                or not action.sound_content.strip()
-            ):
+            if action.prepared_audio_ref is None and (action.sound_content is None or not action.sound_content.strip()):
                 return self._result(action, d.ExecutionErrorCode.UNSUPPORTED_ACTION)
         if action.prepared_audio_ref is not None:
             return await self._realize_prepared(action, execution_context, outputs)
@@ -47,9 +43,11 @@ class SayHandler:
         self, action: d.Say, context: d.ExecutionContext, outputs: OutputEmitter
     ) -> d.ActionResult:
         try:
-            audio = await self._prepared_speech.read_audio(
-                self._character_id,
-                action.prepared_audio_ref.media_id,
+            is_call = action.call_delivery.audio_route is d.CallAudioRoute.CALL
+            audio = await (
+                self._prepared_speech.read_call_pcm(self._character_id, action.prepared_audio_ref.media_id)
+                if is_call
+                else self._prepared_speech.read_audio(self._character_id, action.prepared_audio_ref.media_id)
             )
         except Exception as error:
             get_logger(__name__).exception(
@@ -64,9 +62,23 @@ class SayHandler:
         if context.cancellation.is_cancelled:
             return self._result(action, d.ExecutionErrorCode.CANCELLED)
         await self._emit_presentation(action, outputs)
-        await outputs.emit(
-            AudioChunkDraft(delivery=action.delivery, data=audio.data, framing=d.AudioFraming.COMPLETE_FILE)
-        )
+        if is_call:
+            # 20 ms packets keep prepared resources within the same bounded CALL route.
+            for offset in range(0, len(audio), 960):
+                outputs.ensure_call_allowed()
+                await outputs.emit(
+                    AudioChunkDraft(
+                        delivery=action.delivery,
+                        data=audio[offset : offset + 960],
+                        framing=d.AudioFraming.RAW_PCM,
+                        audio_format=d.CALL_PCM_FORMAT,
+                        final=offset + 960 >= len(audio),
+                    )
+                )
+        else:
+            await outputs.emit(
+                AudioChunkDraft(delivery=action.delivery, data=audio.data, framing=d.AudioFraming.COMPLETE_FILE)
+            )
         await outputs.emit(
             MessageEndDraft(delivery=action.delivery, status=d.MessageEndStatus.COMPLETED, error_code=None)
         )

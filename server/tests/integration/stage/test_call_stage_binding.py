@@ -21,7 +21,8 @@ from src.domain.call import (
     CallState,
     CallTerminalFacts,
 )
-from src.stage.call_stage import CallStateChanged
+from src.stage._call_playback import CallPlaybackCoordinator
+from src.stage.call_stage import CallReplyFailed, CallStateChanged
 
 
 class _Stage:
@@ -45,6 +46,73 @@ class _Stage:
     def playback_stopped(self, response_id, stream_id):
         self.stopped.append((response_id, stream_id))
         return True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ack_seq", [1, 2, 3])
+async def test_interrupt_after_partial_or_full_transport_ack_preserves_retirement(ack_seq):
+    delivered = []
+
+    async def deliver(output):
+        delivered.append(output)
+
+    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
+    binding.bind(stage=_Stage(), session=session)
+    await binding.start_stream("response", 1, CALL_PCM_FORMAT)
+    await binding.send_pcm("response", 1, b"\x00\x01", final=False)
+    await binding.send_pcm("response", 1, b"\x02\x03", final=True)
+    session.acknowledge_server(ack_seq)
+
+    await binding.stop_response("response", (1,))
+
+    stop = json.loads(delivered[-1].text)
+    assert stop["retire_server_seq"] == {"from": 1, "through": 3}
+    assert stop["seq"] == 4
+    assert session.replay_after(ack_seq) == [delivered[-1]]
+    if ack_seq < 3:
+        assert session.replay_missing(ack_seq + 1) == [delivered[-1]]
+    session.acknowledge_server(4)
+    assert session.replay_after(4) == []
+
+
+@pytest.mark.asyncio
+async def test_completion_racing_stop_accepts_both_receipts_and_next_audio():
+    class SettlingStage(_Stage):
+        def __init__(self):
+            super().__init__()
+            self._playback = CallPlaybackCoordinator()
+
+        def playback_completed(self, response_id, stream_id):
+            return self._playback.complete_playback(response_id, stream_id)
+
+        def playback_stopped(self, response_id, stream_id):
+            self.stopped.append((response_id, stream_id))
+            return self._playback.settle_stopped_stream(response_id, stream_id)
+
+    async def deliver(output):
+        pass
+
+    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
+    stage = SettlingStage()
+    binding.bind(stage=stage, session=session)
+    stage._playback.register_stream("response", 1)
+    await binding.start_stream("response", 1, CALL_PCM_FORMAT)
+    await binding.send_pcm("response", 1, b"\x00\x01", final=True)
+    stage._playback.mark_final_sent("response", 1)
+    await binding.stop_response("response", (1,))
+    base = {"protocol": "call.v1", "call_id": binding.call_id, "response_id": "response"}
+    completed = json.dumps({**base, "type": "playback.completed", "seq": 1, "stream_id": 1})
+    stopped = json.dumps({**base, "type": "playback.stopped", "seq": 2, "stop_seq": 3})
+
+    assert json.loads((await session.receive_text(completed))[0].text)["ack_seq"] == 1
+    assert json.loads((await session.receive_text(stopped))[0].text)["ack_seq"] == 2
+    assert json.loads((await session.receive_text(stopped))[0].text)["ack_seq"] == 2
+    raw = BinaryAudioFrameCodec().encode(WireAudioFrame(1, 2, 0, 0, 3, b"\x02\x03"))
+    assert json.loads((await session.receive_binary(raw))[0].text)["ack_seq"] == 3
+    assert stage.stopped == [("response", 1)]
+    assert len(stage.pcm) == 1
 
 
 @pytest.mark.asyncio
@@ -213,3 +281,29 @@ async def test_binding_setup_failure_uses_nonrecordable_error_without_consuming_
     assert failure["retryable"] is False
     assert len(delivered) == 1
     assert session.next_server_seq == 1
+
+
+@pytest.mark.asyncio
+async def test_reply_audio_failure_reports_error_and_keeps_transport_usable():
+    delivered = []
+
+    async def deliver(output):
+        delivered.append(output)
+
+    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
+    binding.bind(stage=_Stage(), session=session)
+
+    await binding.send_state(CallReplyFailed(binding.call_id))
+
+    assert json.loads(delivered[0].text) == {
+        "protocol": "call.v1",
+        "type": "error",
+        "code": "CALL_TTS_FAILED",
+        "message": "call reply audio could not be generated",
+        "retryable": False,
+        "call_id": binding.call_id,
+    }
+    assert not binding.terminal_delivered.is_set()
+    await binding.start_stream("next-response", 1, CALL_PCM_FORMAT)
+    assert json.loads(delivered[1].text)["seq"] == 1

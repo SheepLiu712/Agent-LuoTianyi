@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import wave
 from types import SimpleNamespace
 
 from src.infrastructure.persistence.database.vector_store import Document
@@ -27,6 +28,8 @@ class DeterministicLLMModule:
                     "ack_style": "thinking",
                 }
             )
+        if self.name.endswith("call_summary"):
+            return "用户与角色讨论了音乐喜好，并约定之后继续交流。"
         if self.name.endswith("main_chat"):
             topic = str(kwargs.get("reply_topic") or "")
             if "刚刚接通" in topic:
@@ -40,8 +43,11 @@ class DeterministicLLMModule:
 
 
 class DeterministicLLMService:
-    def __init__(self) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         self.modules: dict[str, DeterministicLLMModule] = {}
+
+    def ensure_dependencies(self) -> None:
+        return None
 
     def register_llm_module(self, name, _config):
         module = DeterministicLLMModule(name)
@@ -80,6 +86,9 @@ class DeterministicVectorStore:
         return []
 
     def delete_user_records(self, _user_id):
+        return 0
+
+    def delete_user_records_strict(self, _user_id):
         return 0
 
     def close(self):
@@ -142,6 +151,15 @@ def runtime_config(tmp_path) -> dict[str, object]:
         ),
         encoding="utf-8",
     )
+    apology = tmp_path / "call-apology.wav"
+    with wave.open(str(apology), "wb") as audio:
+        audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\0\0" * 480)
+    manifest = tmp_path / "prepared.json"
+    manifest.write_text(
+        json.dumps([{"name": "call_apology", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}]),
+        encoding="utf8",
+    )
     songs = tmp_path / "songs"
     songs.mkdir()
     return {
@@ -149,7 +167,7 @@ def runtime_config(tmp_path) -> dict[str, object]:
             "speaking": {"characters": {"luotianyi": {}}},
             "singing": {"characters": {"luotianyi": {"resource_path": str(songs)}}},
         },
-        "prepared_speech": {"characters": {}},
+        "prepared_speech": {"characters": {"luotianyi": {"manifest": str(manifest)}}},
         "character_registry": {
             "characters": {
                 "luotianyi": {
@@ -166,5 +184,6 @@ def runtime_config(tmp_path) -> dict[str, object]:
             },
             "main_chat": {"llm_module": {}},
             "call_recall": {"llm_module": {}},
+            "call_summary": {"llm_module": {}},
         },
     }

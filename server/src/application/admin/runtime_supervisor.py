@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import traceback
 from datetime import datetime
 from typing import Any, Coroutine
 
+from src.application.host_context import ServerHostContext
 from src.infrastructure.config.secrets import SecretStore
 from src.infrastructure.config.store import ConfigStore
 from src.infrastructure.config.validation import RuntimeConfigValidator
@@ -23,11 +23,13 @@ class RuntimeSupervisor:
         secret_store: SecretStore,
         validator: RuntimeConfigValidator,
         observability: ObservabilityService,
+        host_context: ServerHostContext | None = None,
     ) -> None:
         self.config_store = config_store
         self.secret_store = secret_store
         self.validator = validator
         self.observability = observability
+        self._host_context = host_context or ServerHostContext()
         self.logger = get_logger(self.__class__.__name__)
         self._runtime: Any | None = None
         self._lock = asyncio.Lock()
@@ -169,7 +171,7 @@ class RuntimeSupervisor:
             "world_disabled": [],
         }
 
-    async def start(self) -> dict[str, Any]:
+    async def start(self, *, host_context: ServerHostContext | None = None) -> dict[str, Any]:
         async with self._lock:
             if self.is_running():
                 return self.status()
@@ -208,7 +210,15 @@ class RuntimeSupervisor:
 
                 from src.server_runtime import ServerRuntime, set_server_runtime
 
-                runtime = await ServerRuntime.initialize(config, observability=self.observability)
+                if host_context is not None and host_context != self._host_context:
+                    if self._host_context != ServerHostContext():
+                        raise RuntimeError("immutable server host context cannot be replaced")
+                    self._host_context = host_context
+                runtime = await ServerRuntime.initialize(
+                    config,
+                    observability=self.observability,
+                    host_context=self._host_context,
+                )
                 set_server_runtime(runtime)
                 self._runtime = runtime
                 self.state = "running"
@@ -218,8 +228,7 @@ class RuntimeSupervisor:
                 self.state = "failed"
                 self._record_error(
                     "RUNTIME_START_FAILED",
-                    f"{exc}\n{traceback.format_exc()}",
-                    log_exception=True,
+                    type(exc).__name__,
                 )
                 return self.status()
 
@@ -244,8 +253,7 @@ class RuntimeSupervisor:
                 self.state = "failed"
                 self._record_error(
                     "RUNTIME_STOP_FAILED",
-                    f"{exc}\n{traceback.format_exc()}",
-                    log_exception=True,
+                    type(exc).__name__,
                 )
                 return self.status()
 

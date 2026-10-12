@@ -228,6 +228,21 @@ class InteractionLeaseRegistry:
             self._leases.clear()
             self._intents.clear()
 
+    def clear_user_transitions(self, user_id: str) -> int:
+        """Remove one user's intents and transition/call leases without touching other users."""
+        with self._lock:
+            intent_keys = [key for key in self._intents if key[0] == user_id]
+            for key in intent_keys:
+                self._intents.pop(key, None)
+            lease_keys = [
+                key
+                for key, lease in self._leases.items()
+                if key[0] == user_id and lease.source in {InteractionSource.CALL_TRANSITION, InteractionSource.CALL}
+            ]
+            for key in lease_keys:
+                self._leases.pop(key, None)
+            return len(intent_keys) + len(lease_keys)
+
     def _live_intent(self, key: tuple[str, str]) -> CallTransitionIntent | None:
         intent = self._intents.get(key)
         if intent is not None and self._monotonic() >= intent.expires_at:

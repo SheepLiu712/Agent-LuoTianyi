@@ -67,6 +67,7 @@ class CallSessionRecord:
     maintenance_status: SettlementStatus = SettlementStatus.PENDING
     conversation_id: UUID | None = None
     maintenance_turn_seq: int = 0
+    settlement_input_digest: str | None = None
 
     def __post_init__(self) -> None:
         if not self.client_request_id or not self.user_id or not self.character_id:
@@ -82,6 +83,11 @@ class CallSessionRecord:
         )
         if any(value is not None and not isinstance(value, enum_type) for value, enum_type in enum_values):
             raise ValueError("call session statuses must use the declared enum types")
+        if self.settlement_input_digest is not None and (
+            len(self.settlement_input_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.settlement_input_digest)
+        ):
+            raise ValueError("settlement_input_digest must be a lowercase SHA-256 hex digest")
         for field_name in _DATETIME_FIELDS:
             value = getattr(self, field_name)
             if value is not None:
@@ -145,6 +151,8 @@ class CallSessionRepository(Protocol):
 
     def find_by_request(self, client_request_id: str) -> CallSessionRecord | None: ...
 
+    def claim_settlement_input(self, call_id: UUID, *, digest: str) -> bool: ...
+
     def update_if_state(
         self,
         call_id: UUID,
@@ -163,6 +171,8 @@ class CallSessionRepository(Protocol):
         updated_at: datetime,
     ) -> bool: ...
 
+    def advance_maintenance_progress(self, call_id: UUID, *, expected_turn_seq: int, new_turn_seq: int) -> bool: ...
+
     def update_maintenance_settlement(
         self,
         call_id: UUID,
@@ -174,5 +184,7 @@ class CallSessionRepository(Protocol):
     ) -> bool: ...
 
     def list_stale(self, *, before: datetime, states: frozenset[CallState]) -> tuple[CallSessionRecord, ...]: ...
+
+    def list_recovery_pending(self) -> tuple[CallSessionRecord, ...]: ...
 
     def delete_by_user(self, user_id: str) -> int: ...

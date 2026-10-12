@@ -10,6 +10,8 @@ from src.utils.logger import get_logger
 from .runtime_access import require_bearer_token, runtime_not_ready_detail
 from .types import (
     AutoLoginRequest,
+    CallCapabilityQuery,
+    CallCapabilityResponse,
     DynamicCommentCreateRequest,
     DynamicCommentListQuery,
     DynamicCommentListRequest,
@@ -26,6 +28,7 @@ from .types import (
     PreferenceOverwriteRequest,
     RegisterRequest,
     ResetAccountRequest,
+    UserDataResetRequest,
 )
 
 if TYPE_CHECKING:
@@ -83,6 +86,16 @@ async def reset_account(
     return await server_runtime.user_interface.reset_account(req, server_runtime, request)
 
 
+@router.post("/user/data/reset")
+async def reset_user_data(
+    req: UserDataResetRequest,
+    authorization: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    token = require_bearer_token(authorization)
+    return await server_runtime.user_interface.reset_user_data(req, token, server_runtime)
+
+
 @router.post("/auth/login")
 async def login(
     req: LoginRequest,
@@ -124,6 +137,16 @@ async def get_history(
         request.count,
         request.end_index,
     )
+
+
+@router.get("/call/capability", response_model=CallCapabilityResponse)
+async def get_call_capability(
+    request: CallCapabilityQuery = Depends(),
+    authorization: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    token = require_bearer_token(authorization)
+    return await server_runtime.user_interface.get_call_capability(token, request.character_id, server_runtime)
 
 
 @router.get("/media/audio/{message_uuid}")

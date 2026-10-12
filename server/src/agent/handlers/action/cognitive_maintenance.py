@@ -35,7 +35,11 @@ class CognitiveMaintenanceActionHandler:
                 execution_context,
                 user_id=context.identity.user_id,
             )
-            if action.reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
+            if execution_context.call_maintenance_snapshot is not None:
+                await self._skill.maintain_if_compaction_needed(
+                    invocation, context, call_snapshot=execution_context.call_maintenance_snapshot
+                )
+            elif action.reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
                 await self._skill.maintain_if_compaction_needed(invocation, context)
             else:
                 await self._skill.maintain(invocation, context, reason=action.reason)
