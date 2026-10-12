@@ -1,5 +1,7 @@
 """Conversation Store 的持久化包装与呼叫内存窗口行为。"""
 
+import asyncio
+import threading
 from datetime import datetime, timedelta
 
 import pytest
@@ -35,6 +37,7 @@ class Database:
     def __init__(self) -> None:
         self.appended = []
         self.compactions = []
+        self.maintenance_progress = None
 
     def get_conversation_context_state(self, user_id, *, character_id):
         return {"summary": "", "conversations": [], "context_count": 0}
@@ -52,6 +55,15 @@ class Database:
 
     def get_user_preferences(self, user_id):
         return {}
+
+    def get_cognitive_maintenance_progress(self, user_id, *, character_id):
+        return self.maintenance_progress
+
+    def advance_cognitive_maintenance_progress(self, user_id, *, character_id, expected_entry_id, new_entry_id):
+        if self.maintenance_progress != expected_entry_id:
+            return False
+        self.maintenance_progress = new_entry_id
+        return True
 
 
 def test_database_store_preserves_existing_storage_calls():
@@ -115,6 +127,58 @@ def test_database_store_close_is_noop_for_persisted_facts():
     store.close()
     store.append((entry(1),))
     assert len(database.appended) == 1
+
+
+@pytest.mark.asyncio
+async def test_database_context_delegates_maintenance_progress_within_its_operation_lock():
+    database = Database()
+    context = ConversationContext(identity=ContextIdentity("luotianyi", "chat", "u"), database=database)
+
+    assert await context.read_maintenance_progress() is None
+    assert await context.advance_maintenance_progress(expected_entry_id=None, new_entry_id="1") is True
+    assert await context.read_maintenance_progress() == "1"
+    assert await context.advance_maintenance_progress(expected_entry_id=None, new_entry_id="2") is False
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_store_does_not_fake_conversation_maintenance_progress():
+    context = ConversationContext(
+        identity=ContextIdentity("luotianyi", "call", "u"), store=EphemeralCallConversationStore()
+    )
+
+    with pytest.raises(NotImplementedError):
+        await context.read_maintenance_progress()
+    with pytest.raises(NotImplementedError):
+        await context.advance_maintenance_progress(expected_entry_id=None, new_entry_id="1")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_maintenance_commit_waits_for_atomic_store_completion():
+    class BlockingStore(EphemeralCallConversationStore):
+        def __init__(self):
+            super().__init__()
+            self.started = threading.Event()
+            self.proceed = threading.Event()
+            self.committed = False
+
+        def commit_cognitive_maintenance(self, **kwargs):
+            self.started.set()
+            assert self.proceed.wait(5)
+            self.committed = True
+            return True
+
+    store = BlockingStore()
+    context = ConversationContext(identity=ContextIdentity("luotianyi", "chat", "u"), store=store)
+    task = asyncio.create_task(
+        context.commit_cognitive_maintenance(compaction=None, expected_progress=None, new_progress="1")
+    )
+    assert await asyncio.to_thread(store.started.wait, 5)
+    task.cancel()
+    assert not task.done()
+    store.proceed.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert store.committed is True
 
 
 @pytest.mark.asyncio

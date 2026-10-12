@@ -10,6 +10,7 @@ from .action_plan import (
     Action,
     ActionPlan,
     ChangeExpression,
+    CognitiveMaintenance,
     DynamicReplyTarget,
     DynamicSource,
     PublishDynamic,
@@ -52,6 +53,13 @@ from .interaction_snapshot import (
     InteractionSnapshot,
     ToyInteractionSnapshot,
     WorldInteractionSnapshot,
+)
+from .maintenance import (
+    MaintenanceCandidate,
+    MaintenanceMemoryType,
+    MaintenanceReason,
+    MaintenanceReport,
+    MaintenanceStatus,
 )
 from .realization_enums import (
     ActionExecutionStatus,
@@ -153,8 +161,14 @@ __all__ = (
     "PublishDynamic",
     "ReplyDynamic",
     "RequestSongLearning",
+    "CognitiveMaintenance",
     "Reflection",
     "ActionPlan",
+    "MaintenanceCandidate",
+    "MaintenanceMemoryType",
+    "MaintenanceReason",
+    "MaintenanceReport",
+    "MaintenanceStatus",
     "ExecutionContext",
     "AgentOutput",
     "TextFinalOutput",

@@ -79,7 +79,7 @@ class _Storage:
         entries = tuple(
             sorted(
                 (_decode_entry(item) for item in data["conversations"]),
-                key=lambda entry: entry.timestamp,
+                key=lambda entry: (entry.timestamp, entry.entry_id),
             )
         )
         return ConversationSnapshot(ConversationSummary(data["summary"]), entries), data["context_count"]

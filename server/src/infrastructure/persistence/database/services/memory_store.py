@@ -5,6 +5,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy.exc import IntegrityError
+
 from src.domain import MemoryUpdateCommand
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.infrastructure.models.service import LLMService
@@ -162,6 +164,58 @@ class MemoryStore:
         finally:
             db.close()
 
+    def write_agent_memory_record_if_absent(
+        self,
+        memory_record: DomainMemoryRecord,
+        *,
+        commit: bool = True,
+    ) -> bool:
+        """按稳定 ID 创建维护候选；重试内容不一致时明确失败。"""
+        db = self._new_session()
+        try:
+
+            def _write() -> bool:
+                existing = db.query(AgentMemoryRecord).filter(AgentMemoryRecord.id == memory_record.id).first()
+                if existing is not None:
+                    if not self._same_maintenance_row(existing, memory_record):
+                        raise ValueError("maintenance candidate identity conflicts with persisted content")
+                    return False
+                db.add(
+                    AgentMemoryRecord(
+                        id=memory_record.id,
+                        owner_character_id=memory_record.owner_character_id,
+                        subject_user_id=memory_record.subject_user_id,
+                        memory_type=memory_record.memory_type.value,
+                        visibility=memory_record.visibility.value,
+                        source=memory_record.source,
+                        content=memory_record.content,
+                        summary=memory_record.summary,
+                        importance=memory_record.importance,
+                        confidence=memory_record.confidence,
+                        emotional_valence=memory_record.emotional_valence,
+                        happened_at=memory_record.happened_at,
+                        created_at=memory_record.created_at,
+                        last_accessed_at=memory_record.last_accessed_at,
+                        meta_data=json.dumps(dict(memory_record.metadata or {}), ensure_ascii=False),
+                    )
+                )
+                if commit:
+                    db.commit()
+                return True
+
+            return run_sql_write(_write)
+        except IntegrityError:
+            db.rollback()
+            existing = self.get_agent_memory_record(memory_record.id)
+            if existing is None or not self._same_maintenance_record(existing, memory_record):
+                raise ValueError("maintenance candidate identity conflicts with persisted content")
+            return False
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def link_agent_memory_embeddings(
         self,
         memory_record_id: str,
@@ -173,32 +227,107 @@ class MemoryStore:
         """为已提交的规范记忆补写向量 chunk 投影。"""
         chunk_texts = chunk_texts or []
         embedding_ids = embedding_ids or []
+        pairs = self._normalized_embedding_pairs(chunk_texts, embedding_ids)
         db = self._new_session()
         try:
 
             def _write() -> None:
-                for index, chunk_text in enumerate(chunk_texts):
-                    text = (chunk_text or "").strip()
-                    if not text:
+                for text, embedding_id in pairs:
+                    if self._chunk_already_linked(db, memory_record_id, text, embedding_id):
                         continue
                     db.add(
                         MemoryChunkRecord(
                             memory_record_id=memory_record_id,
                             chunk_text=text,
                             chunk_type="content",
-                            embedding_id=embedding_ids[index] if index < len(embedding_ids) else None,
+                            embedding_id=embedding_id,
                         )
                     )
                 if commit:
                     db.commit()
 
             run_sql_write(_write)
+        except IntegrityError:
+            db.rollback()
+            if not all(self._chunk_is_linked(memory_record_id, text, embedding_id) for text, embedding_id in pairs):
+                raise ValueError("embedding identity conflicts with persisted memory chunk")
         except Exception as e:
             self.logger.error(f"link_agent_memory_embeddings error: {e}")
             db.rollback()
             raise
         finally:
             db.close()
+
+    @staticmethod
+    def _normalized_embedding_pairs(chunk_texts: list[str], embedding_ids: list[str]) -> list[tuple[str, str | None]]:
+        return [
+            (text, embedding_ids[index] if index < len(embedding_ids) else None)
+            for index, chunk_text in enumerate(chunk_texts)
+            if (text := (chunk_text or "").strip())
+        ]
+
+    @staticmethod
+    def _chunk_already_linked(db, memory_record_id: str, text: str, embedding_id: str | None) -> bool:
+        if embedding_id is None:
+            return False
+        existing = db.query(MemoryChunkRecord).filter(MemoryChunkRecord.embedding_id == embedding_id).first()
+        if existing is None:
+            return False
+        if existing.memory_record_id != memory_record_id or existing.chunk_text != text:
+            raise ValueError("embedding identity conflicts with persisted memory chunk")
+        return True
+
+    def _chunk_is_linked(self, memory_record_id: str, text: str, embedding_id: str | None) -> bool:
+        if embedding_id is None:
+            return False
+        existing = self._find_memory_chunk_by_embedding_id(embedding_id)
+        return existing is not None and existing.memory_record_id == memory_record_id and existing.chunk_text == text
+
+    def _find_memory_chunk_by_embedding_id(self, embedding_id: str) -> MemoryChunkRecord | None:
+        db = self._new_session()
+        try:
+            return db.query(MemoryChunkRecord).filter(MemoryChunkRecord.embedding_id == embedding_id).first()
+        finally:
+            db.close()
+
+    @staticmethod
+    def _same_maintenance_record(existing: DomainMemoryRecord, expected: DomainMemoryRecord) -> bool:
+        return (
+            existing.owner_character_id == expected.owner_character_id
+            and existing.subject_user_id == expected.subject_user_id
+            and existing.memory_type == expected.memory_type
+            and existing.visibility == expected.visibility
+            and existing.source == expected.source
+            and existing.content == expected.content
+            and existing.summary == expected.summary
+            and existing.importance == expected.importance
+            and existing.confidence == expected.confidence
+            and dict(existing.metadata or {}).get("maintenance_id")
+            == dict(expected.metadata or {}).get("maintenance_id")
+            and dict(existing.metadata or {}).get("candidate_index")
+            == dict(expected.metadata or {}).get("candidate_index")
+        )
+
+    @staticmethod
+    def _same_maintenance_row(existing: AgentMemoryRecord, expected: DomainMemoryRecord) -> bool:
+        expected_metadata = dict(expected.metadata or {})
+        try:
+            existing_metadata = json.loads(existing.meta_data or "{}")
+        except json.JSONDecodeError:
+            return False
+        return (
+            existing.owner_character_id == expected.owner_character_id
+            and existing.subject_user_id == expected.subject_user_id
+            and existing.memory_type == expected.memory_type.value
+            and existing.visibility == expected.visibility.value
+            and existing.source == expected.source
+            and existing.content == expected.content
+            and existing.summary == expected.summary
+            and existing.importance == expected.importance
+            and existing.confidence == expected.confidence
+            and existing_metadata.get("maintenance_id") == expected_metadata.get("maintenance_id")
+            and existing_metadata.get("candidate_index") == expected_metadata.get("candidate_index")
+        )
 
     def delete_agent_memory_record(self, memory_record_id: str, *, commit: bool = True) -> None:
         """删除一条规范记忆及其 chunk，用于投影失败补偿。"""
