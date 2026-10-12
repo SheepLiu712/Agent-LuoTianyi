@@ -14,6 +14,7 @@ import {
   MAX_BLOCK_FONT_SIZE,
   MIN_BLOCK_FONT_SIZE,
   blockFontSize,
+  blockLineHeight,
   blockTextAlign,
   splitRunsOnNewline,
 } from '../components/RichAgreement';
@@ -39,6 +40,12 @@ describe('RichAgreement 渲染契约', () => {
     expect(blockFontSize({ runs: [], font_size: 16.5 })).toBe(fallback);
     expect(blockFontSize({ runs: [] })).toBe(fallback);
     expect(blockFontSize({ runs: [], font_size: Number.NaN })).toBe(fallback);
+  });
+
+  it('行高随段落字号按 1.5 倍增长', () => {
+    expect(blockLineHeight({ runs: [], font_size: 16 })).toBe(24);
+    expect(blockLineHeight({ runs: [], font_size: 24 })).toBe(36);
+    expect(blockLineHeight({ runs: [], font_size: 32 })).toBe(48);
   });
 
   it('段落对齐按已校验的 center / justify 与缺省值映射', () => {

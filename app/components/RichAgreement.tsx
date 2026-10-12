@@ -56,6 +56,10 @@ export function blockTextAlign(block: AgreementBlock): TextStyle['textAlign'] {
   return block.align === ALIGN_CENTER ? 'center' : 'justify';
 }
 
+export function blockLineHeight(block: AgreementBlock): number {
+  return blockFontSize(block) * 1.5;
+}
+
 export function splitRunsOnNewline(runs: AgreementRun[]): [string, boolean][][] {
   const lines: [string, boolean][][] = [[]];
   for (const run of runs) {
@@ -81,13 +85,17 @@ interface BlockViewProps {
 
 function BlockView({ block, textColor }: BlockViewProps) {
   const fontSize = blockFontSize(block);
+  const lineHeight = blockLineHeight(block);
   const textAlign = blockTextAlign(block);
   const lines = splitRunsOnNewline(block.runs);
 
   return (
     <View style={styles.block}>
       {lines.map((line, lineIndex) => (
-        <Text key={lineIndex} style={[styles.line, { fontSize, textAlign, color: textColor }]}>
+        <Text
+          key={lineIndex}
+          style={{ fontSize, lineHeight, textAlign, color: textColor }}
+        >
           {line.map(([text, bold], runIndex) => (
             <Text key={runIndex} style={bold ? styles.bold : undefined}>
               {text}
@@ -119,6 +127,5 @@ export function RichAgreement({ data, theme }: RichAgreementProps) {
 
 const styles = StyleSheet.create({
   block: { marginBottom: 10 },
-  line: { lineHeight: 24 },
   bold: { fontWeight: 'bold' },
 });
