@@ -30,6 +30,10 @@ export class ReliableCallOutbox {
     return this.maxAudioBytes - this.audioBytes;
   }
 
+  pendingControls(): readonly OutboxEntry[] {
+    return [...this.entries.values()].filter((entry) => entry.kind === 'control');
+  }
+
   add(
     kind: OutboxKind,
     wireFactory: (seq: number) => string | Uint8Array,

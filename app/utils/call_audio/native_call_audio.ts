@@ -139,7 +139,9 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
     if (!this.capturePaused) return;
     const native = this.requireNative();
     const focus = await native.reacquireAudioFocus();
-    if (capabilityOf(focus) !== 'available') throw new Error(focus.reason ?? 'audio_focus_denied');
+    // stopCapture releases the recorder and its effects; startCapture recreates
+    // them after focus is restored, so they cannot be required at this step.
+    if (!focus.available || !focus.audioFocus.granted) throw new Error(focus.reason ?? 'audio_focus_denied');
     const capability = await native.startCapture();
     if (capabilityOf(capability) !== 'available') throw new Error(capability.reason ?? 'capture_unavailable');
     this.capturePaused = false;

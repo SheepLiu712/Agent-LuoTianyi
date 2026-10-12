@@ -149,7 +149,13 @@ export class ProductionCallResolver {
     if (this.nativeOwner) throw new Error('NATIVE_INITIALIZATION_BUSY');
     const ownershipToken = Symbol('native-call-attempt');
     if (!this.nativeOwnership.acquire(ownershipToken)) throw new Error('NATIVE_INITIALIZATION_BUSY');
-    const nativeAudio = this.createNativeAudio();
+    let nativeAudio: AndroidCallAudio;
+    try {
+      nativeAudio = this.createNativeAudio();
+    } catch (error) {
+      this.nativeOwnership.release(ownershipToken);
+      throw error;
+    }
     let initialized = false;
     let closed = false;
     let initializePromise: Promise<boolean> | null = null;

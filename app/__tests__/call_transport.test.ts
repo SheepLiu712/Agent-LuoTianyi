@@ -123,6 +123,16 @@ describe('reliable call transport', () => {
     expect(() => outbox.acknowledge(2)).toThrow('INVALID_ACK_CURSOR');
   });
 
+  test('does not NACK future frames while contiguous frames await native acceptance', () => {
+    const incoming = new IncomingCallSequence();
+    const first = { seq: 1, raw: new Uint8Array([1]) };
+    incoming.receive(first);
+    incoming.claimReady();
+    expect(incoming.receive({ seq: 2, raw: new Uint8Array([2]) }).missingSeq).toBeUndefined();
+    expect(incoming.receive(first).missingSeq).toBeUndefined();
+    expect(incoming.receive({ seq: 4, raw: new Uint8Array([4]) }).missingSeq).toBe(3);
+  });
+
   test('allows a matching stop to retire a gap but rejects unrelated received content', () => {
     const incoming = new IncomingCallSequence();
     incoming.receive({ seq: 1, raw: new Uint8Array([1]), control: {
@@ -433,8 +443,32 @@ describe('reliable call transport', () => {
     const acks = socket.sent.filter((wire): wire is string => typeof wire === 'string').map((wire) => JSON.parse(wire))
       .filter((message) => message.type === 'ack').map((message) => message.ack_seq);
     expect(acks.at(-1)).toBe(6);
-    expect(acks.every((value, index) => index === 0 || value > acks[index - 1])).toBe(true);
+    expect(acks.every((value, index) => index === 0 || value >= acks[index - 1])).toBe(true);
     expect(native.stopPlaybackCount).toBeGreaterThan(0);
+  });
+
+  test('later frames cannot ACK a stop before native stopping finishes', async () => {
+    const { socket, native, session } = await establish();
+    let release!: () => void;
+    native.stop = jest.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }))
+      .mockResolvedValue(undefined);
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'playback.stop', seq: 5, call_id: CALL_ID, response_id: 'response-1', stream_id: 9,
+      retire_server_seq: { from: 3, through: 4 }, reason: 'user_interrupted',
+    }));
+    await flush();
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 6, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 10, response_id: 'response-2', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    await flush();
+    const acks = () => socket.sent.filter((wire): wire is string => typeof wire === 'string')
+      .map((wire) => JSON.parse(wire)).filter((message) => message.type === 'ack').map((message) => message.ack_seq);
+    expect(Math.max(...acks())).toBeLessThan(5);
+    release();
+    await flush();
+    expect(acks().at(-1)).toBe(6);
+    session.close();
   });
 
   test('deduplicates native completion and replays the original bytes after ACK loss', async () => {
@@ -482,6 +516,98 @@ describe('reliable call transport', () => {
     socket.emit('close', { code: 1006 });
     clock.advance(3_000);
     expect(session.state).toMatchObject({ status: 'failed', errorCode: 'RECOVERY_TIMEOUT', activeDurationMs: 1_000 });
+  });
+
+  test('network recovery preserves audio and buffers captured PCM until the resumed handshake', async () => {
+    const { sockets, socket, native, session } = await establish();
+    socket.emit('close', { code: 1006 });
+    const recovery = sockets.sockets[1];
+    native.frames[0]({ payload: new Uint8Array([2, 0]) } as CapturedAudioFrame);
+    expect(native.stopCaptureCount).toBe(0);
+    expect(native.stopPlaybackCount).toBe(0);
+    expect(recovery.sent).toHaveLength(0);
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 2,
+    }));
+    await flush();
+    expect(session.state.status).toBe('connected');
+    const audio = recovery.sent.filter((wire): wire is Uint8Array => wire instanceof Uint8Array);
+    expect(audio).toHaveLength(1);
+    expect(new BinaryAudioFrameCodec().decode(audio[0])).toMatchObject({ seq: 2, payload: new Uint8Array([2, 0]) });
+    native.frames[0]({ payload: new Uint8Array([3, 0]) } as CapturedAudioFrame);
+    expect(recovery.sent.filter((wire) => wire instanceof Uint8Array)).toHaveLength(2);
+    session.close();
+  });
+
+  test('an enqueue accepted across disconnect commits once and does not stall the recovered stream', async () => {
+    const { sockets, socket, native, session } = await establish();
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'response-1', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    await flush();
+    let release!: () => void;
+    native.enqueue = jest.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }))
+      .mockResolvedValue(undefined);
+    const audio = new BinaryAudioFrameCodec().encode({ version: 1, route: 2, flags: 0, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]) });
+    socket.message(audio);
+    await flush();
+    socket.emit('close', { code: 1006 });
+    const recovery = sockets.sockets[1];
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    release();
+    await flush();
+    expect(recovery.sent.filter((wire) => typeof wire === 'string' && JSON.parse(wire).type === 'ack')).toHaveLength(0);
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 3,
+    }));
+    recovery.message(audio);
+    recovery.message(new BinaryAudioFrameCodec().encode({ version: 1, route: 2, flags: 1, streamId: 9, seq: 5, payload: new Uint8Array([2, 0]) }));
+    await flush();
+    expect(session.state.status).toBe('connected');
+    expect(native.enqueue).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(recovery.sent.filter((wire): wire is string => typeof wire === 'string').at(-1)!)).toMatchObject({ type: 'ack', ack_seq: 5 });
+    session.close();
+  });
+
+  test('retries completion without a NACK and cancels retry after ACK or close', async () => {
+    const { socket, native, clock, session } = await establish();
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 1 }));
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'response-1', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({ version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]) }));
+    await flush();
+    native.listener?.({ stream: { callId: CALL_ID, responseId: 'response-1', streamId: 9 } });
+    const completed = socket.sent.at(-1);
+    clock.advance(1_000);
+    expect(socket.sent.slice(-2)).toEqual([completed, completed]);
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 2 }));
+    await flush();
+    const acknowledgedCount = socket.sent.length;
+    clock.advance(1_000);
+    expect(socket.sent).toHaveLength(acknowledgedCount);
+    await session.hangup();
+    session.close();
+    const closedCount = socket.sent.length;
+    clock.advance(1_000);
+    expect(socket.sent).toHaveLength(closedCount);
+  });
+
+  test('repeats a cumulative ACK for an identical duplicate after ACK loss', async () => {
+    const { socket, session } = await establish();
+    const before = socket.sent.length;
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 10 }));
+    await flush();
+    expect(socket.sent).toHaveLength(before + 1);
+    expect(JSON.parse(socket.sent.at(-1) as string)).toMatchObject({ type: 'ack', ack_seq: 2 });
+    session.close();
   });
 
   test('rejects a resumed handshake at the exact deadline and an echoed cursor conflict', async () => {

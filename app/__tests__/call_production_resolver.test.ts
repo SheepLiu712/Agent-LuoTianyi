@@ -35,6 +35,27 @@ class Socket {
 }
 
 describe('production call resolver', () => {
+  it('releases native ownership when creating the native adapter throws', async () => {
+    const ownership = new NativeCallOwnership();
+    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const createNativeAudio = jest.fn()
+      .mockImplementationOnce(() => { throw new Error('adapter construction failed'); })
+      .mockReturnValue(audio);
+    const resolver = new ProductionCallResolver({
+      characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
+      fetchImpl: jest.fn(async () => ({
+        ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+      })) as unknown as typeof fetch,
+      createNativeAudio, nativeOwnership: ownership,
+    });
+    await resolver.refreshCapability();
+    expect(() => resolver.createAttempt()).toThrow('adapter construction failed');
+    expect(ownership.available()).toBe(true);
+    const next = resolver.createAttempt();
+    await next.close();
+    await resolver.close();
+  });
+
   beforeEach(() => {
     auth.username = 'alice';
     auth.message_token = 'secret';

@@ -26,7 +26,15 @@ export class ExpoCallRingtone {
         return;
       }
       this.sound = sound;
-      await sound.playAsync();
+      try {
+        await sound.playAsync();
+      } catch {
+        if (this.sound === sound) {
+          this.sound = null;
+          await sound.unloadAsync();
+        }
+        return;
+      }
       if (!this.desiredPlaying || generation !== this.generation) {
         this.sound = null;
         await sound.stopAsync().catch(() => undefined);
@@ -34,7 +42,11 @@ export class ExpoCallRingtone {
       }
     }).catch(() => undefined).finally(() => {
       this.starting = null;
-      if (this.desiredPlaying && !this.sound) queueMicrotask(() => this.playLoop());
+      // Only replace an obsolete creation after a new play request. A backend
+      // failure must not start an unbounded microtask retry loop.
+      if (this.desiredPlaying && generation !== this.generation && !this.sound) {
+        queueMicrotask(() => this.playLoop());
+      }
     });
   }
 

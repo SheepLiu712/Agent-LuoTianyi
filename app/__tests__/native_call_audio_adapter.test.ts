@@ -102,6 +102,56 @@ describe('AndroidCallAudio adapter', () => {
     expect(completed).toHaveBeenCalledTimes(1);
   });
 
+  it('recreates capture effects after reacquiring focus during resume', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const initialized = native.capability;
+    native.stopCapture = async () => {
+      native.capability = {
+        ...initialized,
+        aec: { available: true, enabled: false, error: 'aec_not_initialized' },
+        noiseSuppressor: { available: true, enabled: false, error: 'noise_suppressor_not_initialized' },
+      };
+    };
+    const start = jest.spyOn(native, 'startCapture').mockImplementation(async () => {
+      native.capability = initialized;
+      return native.capability;
+    });
+    await audio.initialize();
+    await audio.startCapture(CAPTURE_FORMAT, jest.fn());
+    await audio.pauseCapture();
+
+    await expect(audio.resumeCapture()).resolves.toBeUndefined();
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not restart capture when focus is denied and still checks recreated effects', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    await audio.initialize();
+    await audio.pauseCapture();
+    const start = jest.spyOn(native, 'startCapture');
+    native.capability = {
+      ...native.capability,
+      available: false,
+      reason: 'audio_focus_denied',
+      audioFocus: { granted: false },
+    };
+
+    await expect(audio.resumeCapture()).rejects.toThrow('audio_focus_denied');
+    expect(start).not.toHaveBeenCalled();
+
+    native.capability = {
+      ...native.capability,
+      available: true,
+      reason: 'aec_unavailable',
+      audioFocus: { granted: true },
+      aec: { available: false, enabled: false },
+    };
+    await expect(audio.resumeCapture()).rejects.toThrow('aec_unavailable');
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a late completion after the native stopped receipt tombstones it', async () => {
     const native = new FakeNativeCallAudio();
     const audio = new AndroidCallAudio({}, native, 'android');

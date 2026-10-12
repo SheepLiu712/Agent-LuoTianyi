@@ -228,10 +228,14 @@ export class IncomingCallSequence {
     this.ownershipRanges.push({ from: seq, through: seq, kind, stopSeq, ...identity });
   }
 
-  private firstMissing(): number {
+  private firstMissing(): number | undefined {
     let seq = this.cursor + 1;
     while (this.retiredAhead.has(seq) || this.pending.has(seq)) seq += 1;
-    return seq;
+    // Native acceptance can lag receipt. Only a received later sequence proves
+    // a wire gap; the next not-yet-sent frame must never be requested.
+    for (const received of this.pending.keys()) if (received > seq) return seq;
+    for (const retired of this.retiredAhead.keys()) if (retired > seq) return seq;
+    return undefined;
   }
 }
 

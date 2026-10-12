@@ -3,8 +3,8 @@ import { createWriteStream, existsSync, mkdtempSync, readFileSync, rmSync } from
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 
-const PYTHON = process.env.CALL_E2E_PYTHON || 'C:/Users/Administrator/.conda/envs/agent/python.exe';
-const DEFAULT_SERVER_SOURCE = resolve(__dirname, '../../../../call-cl-04-plan');
+const PYTHON = process.env.CALL_E2E_PYTHON;
+const DEFAULT_SERVER_SOURCE = resolve(__dirname, '../../..');
 
 export interface RunningCallServer {
   url: string;
@@ -15,9 +15,12 @@ export interface RunningCallServer {
 }
 
 export function resolveCallServerSource(): string | null {
+  // Network integration is opt-in, and uses this checkout unless explicitly overridden.
+  if (!PYTHON) return null;
   const source = resolve(process.env.CALL_E2E_SERVER_SOURCE || DEFAULT_SERVER_SOURCE);
   const launcher = join(source, 'server', 'tests', 'support', 'call_network_success_server.py');
-  return existsSync(launcher) ? source : null;
+  if (!existsSync(launcher)) throw new Error(`call network server launcher not found in ${source}`);
+  return source;
 }
 
 export async function launchCallServer(kind: 'success' | 'disabled' | 'disconnect-evidence'): Promise<RunningCallServer> {
@@ -27,7 +30,7 @@ export async function launchCallServer(kind: 'success' | 'disabled' | 'disconnec
       'CALL_E2E_SERVER_SOURCE must point to checkout containing server/tests/support/call_network_success_server.py',
     );
   }
-  if (!existsSync(PYTHON)) throw new Error(`CALL_E2E_PYTHON does not exist: ${PYTHON}`);
+  if (!PYTHON || !existsSync(PYTHON)) throw new Error(`CALL_E2E_PYTHON does not exist: ${PYTHON}`);
   const root = mkdtempSync(join(tmpdir(), `agent-luo-call-${kind}-`));
   const stdoutPath = join(root, 'stdout.log');
   const stderrPath = join(root, 'stderr.log');

@@ -34,6 +34,45 @@ function Probe({ options, onState }: { options: Parameters<typeof useCallSession
 const theme = THEMES.dark;
 
 describe('call UI', () => {
+  it('keeps one permission, prepare and start across production-shaped callback rerenders', async () => {
+    let resolvePermission!: (value: 'granted') => void;
+    let resolvePrepare!: () => void;
+    const permission = jest.fn(() => new Promise<'granted'>((resolve) => { resolvePermission = resolve; }));
+    const session = {
+      prepare: jest.fn(() => new Promise<void>((resolve) => { resolvePrepare = resolve; })),
+      start: jest.fn(async () => undefined), hangup: jest.fn(), close: jest.fn(),
+      subscribe: jest.fn(() => jest.fn()), onError: jest.fn(() => jest.fn()),
+    };
+    const ringtone = { playLoop: jest.fn(), stop: jest.fn() };
+    const initialize = jest.fn(async (_owned: unknown) => true);
+    let result: any;
+    let root!: ReturnType<typeof create>;
+    const render = () => <Probe options={{
+      createSession: () => session,
+      capabilities: { serverAvailable: true, nativeAvailable: true },
+      requestPermission: permission, ringtone,
+      initializeAttempt: (owned) => initialize(owned),
+      onReturnToChat: () => undefined,
+      onCleanupError: () => undefined,
+    }} onState={(value) => { result = value; }} />;
+    act(() => { root = create(render()); });
+    await act(async () => { await result.start(true); });
+    await act(async () => { root.update(render()); });
+    expect(permission).toHaveBeenCalledTimes(1);
+    await act(async () => { resolvePermission('granted'); });
+    await act(async () => { root.update(render()); });
+    expect(session.prepare).toHaveBeenCalledTimes(1);
+    await act(async () => { resolvePrepare(); });
+    await act(async () => { root.update(render()); });
+    expect(session.start).toHaveBeenCalledTimes(1);
+    expect(initialize).toHaveBeenCalledTimes(1);
+    expect(result.state.phase).toBe('PREPARING');
+    ringtone.stop.mockClear();
+    act(() => root.unmount());
+    expect(ringtone.stop).toHaveBeenCalledTimes(1);
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     jest.useFakeTimers();
     jest.setSystemTime(5_000);

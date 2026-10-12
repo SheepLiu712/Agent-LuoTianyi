@@ -41,7 +41,6 @@ export function CallScreen({ state, theme, onHangup, onBack }: Props) {
     {!ended ? <Pressable accessibilityLabel="挂断通话" onPress={onHangup} style={styles.hangup}><Text style={styles.hangupText}>挂断</Text></Pressable> : null}
     {state.phase === 'REQUESTING_PERMISSION' ? <Text style={styles.notice}>允许麦克风权限后才能开始通话</Text> : null}
     {state.phase === 'ENDING' ? <Text style={styles.notice}>正在停止音频</Text> : null}
-    {state.phase !== 'ENDING' && state.phase !== 'REQUESTING_PERMISSION' && state.phase !== 'IDLE' ? null : null}
   </View>;
 }
 

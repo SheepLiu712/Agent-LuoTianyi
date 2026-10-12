@@ -19,7 +19,6 @@ internal class PlaybackQueue(private val capacityBytes: Int) {
     if (chunk.payload.size > capacityBytes - bytes) return false
     entries.addLast(chunk)
     bytes += chunk.payload.size
-    (this as java.lang.Object).notifyAll()
     return true
   }
 
@@ -36,9 +35,6 @@ internal class PlaybackQueue(private val capacityBytes: Int) {
   }
 
   @Synchronized
-  fun contains(identity: StreamKey): Boolean = entries.any { it.key == identity }
-
-  @Synchronized
   fun remove(identity: StreamKey) {
     val retained = entries.filterNot { it.key == identity }
     entries.clear()
@@ -50,12 +46,6 @@ internal class PlaybackQueue(private val capacityBytes: Int) {
   fun clear() {
     entries.clear()
     bytes = 0
-    (this as java.lang.Object).notifyAll()
-  }
-
-  @Synchronized
-  fun wake() {
-    (this as java.lang.Object).notifyAll()
   }
 }
 
@@ -102,15 +92,6 @@ internal class PlaybackLoopAccounting(initialHead: Long) {
 
   fun markFinal(chunk: PlaybackChunk) {
     finalTarget = chunk to submittedFrames
-  }
-
-  fun recordPlaybackHead(currentHead: Long): PlaybackChunk? {
-    playedFrames += PlaybackAccounting.unsignedDelta(previousHead, currentHead)
-    previousHead = currentHead
-    val target = finalTarget ?: return null
-    if (playedFrames < target.second) return null
-    finalTarget = null
-    return target.first
   }
 
   fun observeHead(currentHead: Long) {
@@ -164,19 +145,6 @@ internal class PlaybackCommandProcessor(
     accounting.applyStop(activeStopped, currentHead)
     return PlaybackStopOutcome(activeStopped, newlyStopped)
   }
-}
-
-internal class WorkerOwnership {
-  private var failed = false
-
-  fun markStopResult(stopped: Boolean) {
-    if (!stopped) failed = true
-  }
-
-  fun canStart(): Boolean = !failed
-
-  fun accepts(eventGeneration: Long, currentGeneration: Long): Boolean =
-    !failed && eventGeneration == currentGeneration
 }
 
 internal data class StopRegistration(

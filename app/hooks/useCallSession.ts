@@ -6,12 +6,11 @@ import type { CallEvent, CallState } from '../types/call';
 import { initialCallState, reduceCallState } from '../utils/call_state';
 
 type SessionPort = Pick<CallSession, 'prepare' | 'start' | 'hangup' | 'subscribe' | 'onError' | 'close'>;
-type Cleanup = () => void | Promise<void>;
 interface SessionOwner {
   generation: number;
   session: SessionPort;
-  unsubscribe?: Cleanup;
-  unsubscribeError?: Cleanup;
+  unsubscribe?: () => void;
+  unsubscribeError?: () => void;
   cleaned: boolean;
 }
 
@@ -39,22 +38,17 @@ export function useCallSession(options: CallSessionOptions = {}) {
     session: compatibilitySession,
     createSession,
     capabilities = unavailable,
-    requestPermission,
     now: suppliedNow,
-    onReturnToChat,
-    onBackConfirmation,
-    onPermissionSettings,
-    onCleanupError,
     ringtone,
-    initializeAttempt,
   } = options;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const [state, dispatch] = useReducer((current: CallState, event: CallEvent) => reduceCallState(current, event).state, initialCallState);
   const stateRef = useRef(state);
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const connectedRef = useRef(false);
   const ownerRef = useRef<SessionOwner | null>(null);
-  const cleanupTasksRef = useRef(new Set<Promise<void>>());
   const compatibilityConsumedRef = useRef(false);
   stateRef.current = state;
   const now = suppliedNow ?? Date.now;
@@ -62,35 +56,21 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const canStart = Platform.OS === 'android' && capabilities.serverAvailable && capabilities.nativeAvailable && Boolean(createSession || (compatibilitySession && !compatibilityConsumedRef.current));
 
   const reportCleanupError = useCallback((error: unknown) => {
-    try { onCleanupError?.(error); } catch { /* diagnostics must not block cleanup */ }
-  }, [onCleanupError]);
-
-  const trackCleanup = useCallback((task: Promise<void>) => {
-    cleanupTasksRef.current.add(task);
-    void task.finally(() => cleanupTasksRef.current.delete(task)).catch(() => undefined);
+    try { optionsRef.current.onCleanupError?.(error); } catch { /* diagnostics must not block cleanup */ }
   }, []);
 
   const cleanupOwner = useCallback((owner: SessionOwner | null) => {
     if (!owner || owner.cleaned) return;
     owner.cleaned = true;
-    const pending: Promise<unknown>[] = [];
-    for (const cleanup of [owner.unsubscribe, owner.unsubscribeError].filter((item): item is Cleanup => Boolean(item))) {
+    for (const cleanup of [owner.unsubscribe, owner.unsubscribeError]) {
       try {
-        const result: unknown = cleanup();
-        if (result && typeof (result as Promise<void>).then === 'function') pending.push(Promise.resolve(result as Promise<void>).catch(reportCleanupError));
+        cleanup?.();
       } catch (error) { reportCleanupError(error); }
     }
-    const close = () => {
-      try {
-        const result: unknown = owner.session.close();
-        if (result && typeof (result as Promise<void>).then === 'function') pending.push(Promise.resolve(result as Promise<void>).catch(reportCleanupError));
-      } catch (error) { reportCleanupError(error); }
-    };
-    if (pending.length === 0) close();
-    else pending.push(Promise.allSettled(pending).then(close));
-    const task = Promise.allSettled(pending).then(() => undefined);
-    trackCleanup(task);
-  }, [reportCleanupError, trackCleanup]);
+    try {
+      void Promise.resolve(owner.session.close()).catch(reportCleanupError);
+    } catch (error) { reportCleanupError(error); }
+  }, [reportCleanupError]);
 
   const releaseOwnedSession = useCallback((generation: number) => {
     const owner = ownerRef.current;
@@ -102,12 +82,11 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const invokePromise = useCallback((operation: () => void | Promise<void>, onError?: (error: unknown) => void) => {
     try {
       const result = operation();
-      const task = Promise.resolve(result).catch((error) => { onError?.(error); });
-      trackCleanup(task);
+      void Promise.resolve(result).catch((error) => { onError?.(error); });
     } catch (error) {
       onError?.(error);
     }
-  }, [trackCleanup]);
+  }, []);
 
   const retireAttempt = useCallback((reason: 'user_hangup' | 'backgrounded') => {
     generationRef.current += 1;
@@ -123,14 +102,14 @@ export function useCallSession(options: CallSessionOptions = {}) {
         releaseOwnedSession(generationRef.current);
         const returnedGeneration = generationRef.current;
         queueMicrotask(() => {
-          if (mountedRef.current && returnedGeneration === generationRef.current) onReturnToChat?.();
+          if (mountedRef.current && returnedGeneration === generationRef.current) optionsRef.current.onReturnToChat?.();
         });
         stateRef.current = initialCallState;
         dispatch({ type: 'reset_to_idle' });
       }
-      if (effect.type === 'show_back_confirmation') onBackConfirmation?.();
+      if (effect.type === 'show_back_confirmation') optionsRef.current.onBackConfirmation?.();
     }
-  }, [onBackConfirmation, onReturnToChat, releaseOwnedSession]);
+  }, [releaseOwnedSession]);
 
   const dispatchEvent = useCallback((event: CallEvent) => {
     if (!mountedRef.current) return;
@@ -209,7 +188,8 @@ export function useCallSession(options: CallSessionOptions = {}) {
     if (state.phase !== 'REQUESTING_PERMISSION') return undefined;
     let cancelled = false;
     const generation = generationRef.current;
-    const pending = (requestPermission ?? (async () => 'denied' as const))();
+    const { requestPermission, initializeAttempt, onPermissionSettings } = optionsRef.current;
+    const pending = Promise.resolve().then(() => requestPermission?.() ?? 'denied' as const);
     pending.then((result) => {
       if (cancelled || generation !== generationRef.current) return;
       if (result === 'permanently_denied') onPermissionSettings?.();
@@ -236,7 +216,7 @@ export function useCallSession(options: CallSessionOptions = {}) {
       if (!cancelled && generation === generationRef.current) { reportCleanupError(error); dispatchEvent({ type: 'permission_denied' }); }
     });
     return () => { cancelled = true; };
-  }, [dispatchEvent, initializeAttempt, onPermissionSettings, releaseOwnedSession, reportCleanupError, requestPermission, state.phase]);
+  }, [dispatchEvent, releaseOwnedSession, reportCleanupError, state.phase]);
 
   useEffect(() => {
     if (!ownerRef.current || !state.clientRequestId) return undefined;
@@ -261,14 +241,18 @@ export function useCallSession(options: CallSessionOptions = {}) {
 
   useEffect(() => {
     if (ringing) ringtone?.playLoop(); else ringtone?.stop();
+    return () => ringtone?.stop();
   }, [ringing, ringtone]);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    generationRef.current += 1;
-    const owner = ownerRef.current;
-    ownerRef.current = null;
-    cleanupOwner(owner);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+      const owner = ownerRef.current;
+      ownerRef.current = null;
+      cleanupOwner(owner);
+    };
   }, [cleanupOwner]);
 
   return useMemo(() => ({ state, canStart, start, hangup, dispatch: dispatchEvent }), [canStart, dispatchEvent, hangup, start, state]);

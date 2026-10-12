@@ -33,6 +33,7 @@ const CALL_ROUTE = 2;
 const FINAL_FLAG = 1;
 const RECOVERY_WINDOW_MS = 3_000;
 const NATIVE_SETTLE_TIMEOUT_MS = 3_000;
+const CONTROL_RETRY_MS = 1_000;
 const AUDIO_FOCUS_LOST_CLOSE_CODE = 4000;
 const CALL_FAILURE_CLOSE_CODE = 4001;
 const CALL_FAILURE_CLOSE_REASON = 'call transport failed';
@@ -69,9 +70,12 @@ export class CallTransportSession {
   private readonly listeners = new Set<CallTransportListener>();
   private readonly errorListeners = new Set<CallTransportErrorListener>();
   private readonly streams = new Map<number, StreamState>();
+  private readonly stopping = new Map<number, Promise<void>>();
   private snapshot: CallTransportSnapshot = { status: 'idle', activeDurationMs: 0 };
   private startRequest: StartCallRequest | null = null;
   private recoveryTimer: unknown | null = null;
+  private controlRetryTimer: unknown | null = null;
+  private capturePause: Promise<void> | null = null;
   private firstDisconnectAt: number | null = null;
   private capturePaused = false;
   private playbackGeneration = 0;
@@ -140,6 +144,7 @@ export class CallTransportSession {
       return;
     }
     const epoch = this.socketEpoch;
+    void this.pauseCapture();
     try {
       this.socket?.close(AUDIO_FOCUS_LOST_CLOSE_CODE, 'audio focus lost');
     } catch {
@@ -239,6 +244,7 @@ export class CallTransportSession {
     if (message.type === 'ack') {
       this.validateCallIdentity(message);
       this.outbox.acknowledge(message.ack_seq);
+      this.scheduleControlRetry();
       await this.maybeResumeCapture();
       return;
     }
@@ -265,7 +271,9 @@ export class CallTransportSession {
       this.registerStream(frame.control);
     }
     if (actions.immediateStop) {
-      await this.applyStop(actions.immediateStop, epoch);
+      const stopping = this.applyStop(actions.immediateStop);
+      this.stopping.set(actions.immediateStop.seq, stopping);
+      await stopping;
     }
     if (actions.missingSeq !== undefined && this.snapshot.callId) this.sendFeedback('nack', actions.missingSeq);
     if (actions.ackSeq > 0 && this.snapshot.callId) this.sendFeedback('ack', actions.ackSeq);
@@ -278,7 +286,7 @@ export class CallTransportSession {
     if (!frame) return;
     this.nativeAccepting = true;
     const operation = this.commitIncoming(frame, epoch).then(() => {
-      if (epoch !== this.socketEpoch) return;
+      if (this.closed) return;
       if (this.incoming.isRetired(frame.seq)) throw new Error('FRAME_RETIRED');
       const ack = this.incoming.commitClaimed(frame.seq);
       this.sendFeedback('ack', ack);
@@ -289,11 +297,11 @@ export class CallTransportSession {
         void this.terminate('closed', undefined, ended.active_duration_ms);
         return;
       }
-      this.startNativeAcceptance(epoch);
+      this.startNativeAcceptance(this.socketEpoch);
     }).catch((error) => {
       this.nativeAccepting = false;
       if (errorCode(error) !== 'FRAME_RETIRED') this.fail(errorCode(error));
-      else this.startNativeAcceptance(epoch);
+      else if (!this.closed) this.startNativeAcceptance(this.socketEpoch);
     });
     const tracked = operation.finally(() => {
       if (this.inflightNativeAccept === tracked) this.inflightNativeAccept = null;
@@ -319,10 +327,10 @@ export class CallTransportSession {
       return;
     }
     if (!frame.control) throw new Error('INVALID_INCOMING_FRAME');
-    await this.commitControl(frame.control, epoch);
+    await this.commitControl(frame.control);
   }
 
-  private async commitControl(message: ControlMessage, epoch: number): Promise<void> {
+  private async commitControl(message: ControlMessage): Promise<void> {
     switch (message.type) {
       case 'call.state':
         this.acceptState(message);
@@ -336,7 +344,8 @@ export class CallTransportSession {
         this.registerStream(message);
         return;
       case 'playback.stop':
-        if (epoch !== this.socketEpoch) throw new Error('STALE_SOCKET_EPOCH');
+        await this.stopping.get(message.seq);
+        this.stopping.delete(message.seq);
         return;
       case 'call.ended':
         this.acceptEnded(message);
@@ -379,7 +388,7 @@ export class CallTransportSession {
     });
   }
 
-  private async applyStop(message: PlaybackStop, epoch: number): Promise<void> {
+  private async applyStop(message: PlaybackStop): Promise<void> {
     this.validateCallIdentity(message);
     let stream = this.streams.get(message.stream_id);
     if (!stream) {
@@ -407,7 +416,7 @@ export class CallTransportSession {
     stream.generation += 1;
     await this.options.nativeAudio.tombstone(stream.identity);
     await this.options.nativeAudio.stop(stream.identity);
-    if (epoch !== this.socketEpoch) throw new Error('STALE_SOCKET_EPOCH');
+    if (this.closed) return;
     this.sendSequencedControl((seq): PlaybackStopped => ({
       protocol: 'call.v1', type: 'playback.stopped', seq, call_id: message.call_id,
       response_id: message.response_id, stop_seq: message.seq,
@@ -432,12 +441,12 @@ export class CallTransportSession {
   }
 
   private onCapturedAudio(payload: Uint8Array): void {
-    if (this.snapshot.status !== 'connected' || this.capturePaused || payload.byteLength === 0) return;
+    if ((this.snapshot.status !== 'connected' && this.firstDisconnectAt === null) || this.closed || this.capturePaused || payload.byteLength === 0) return;
     try {
       const entry = this.outbox.add('audio', (seq) => this.codec.encode({
         version: 1, route: CALL_ROUTE, flags: 0, streamId: 0, seq, payload,
       }), payload.byteLength);
-      this.sendRaw(entry.wire);
+      if (this.firstDisconnectAt === null) this.sendRaw(entry.wire);
       if (this.outbox.audioCapacityRemaining < 16_384) void this.pauseCapture();
     } catch (error) {
       if (errorCode(error) === 'AUDIO_OUTBOX_FULL') void this.pauseCapture();
@@ -449,14 +458,19 @@ export class CallTransportSession {
     if (this.capturePaused) return;
     this.capturePaused = true;
     try {
-      await this.options.nativeAudio.pauseCapture();
+      this.capturePause = this.options.nativeAudio.pauseCapture();
+      await this.capturePause;
     } catch {
       this.fail('CAPTURE_BACKPRESSURE_FAILED');
+    } finally {
+      this.capturePause = null;
     }
   }
 
   private async maybeResumeCapture(): Promise<void> {
     if (!this.capturePaused || this.outbox.audioCapacityRemaining < 32_768 || this.snapshot.status !== 'connected') return;
+    await this.capturePause;
+    if (this.closed || this.firstDisconnectAt !== null) return;
     await this.options.nativeAudio.resumeCapture();
     this.capturePaused = false;
   }
@@ -478,6 +492,9 @@ export class CallTransportSession {
     this.requestedResumeServerCursor = null;
     this.clearRecoveryTimer();
     this.update({ status: 'connected', recoveryDeadlineMonotonicMs: undefined });
+    this.sendFeedback('ack', this.incoming.lastContiguousSeq);
+    this.scheduleControlRetry();
+    this.startNativeAcceptance(epoch);
     await this.maybeResumeCapture();
   }
 
@@ -491,7 +508,7 @@ export class CallTransportSession {
     const now = this.options.clock.monotonicMs();
     this.firstDisconnectAt = now;
     this.update({ status: 'recovering', recoveryDeadlineMonotonicMs: now + RECOVERY_WINDOW_MS });
-    void this.stopAudio();
+    this.clearControlRetry();
     this.recoveryTimer = this.options.clock.setTimeout(() => this.fail('RECOVERY_TIMEOUT'), RECOVERY_WINDOW_MS);
     this.openSocket(true);
   }
@@ -509,13 +526,33 @@ export class CallTransportSession {
     const entry = this.outbox.add('control', (seq) => encodeControlMessage(factory(seq), {
       transport: 'call_ws', direction: 'client_to_server',
     }));
-    this.sendRaw(entry.wire);
+    if (this.firstDisconnectAt === null) this.sendRaw(entry.wire);
+    this.scheduleControlRetry();
+  }
+
+  private scheduleControlRetry(): void {
+    this.clearControlRetry();
+    if (this.closed || this.firstDisconnectAt !== null || this.outbox.pendingControls().length === 0) return;
+    this.controlRetryTimer = this.options.clock.setTimeout(() => {
+      this.controlRetryTimer = null;
+      try {
+        for (const entry of this.outbox.pendingControls()) this.sendRaw(entry.wire);
+        this.scheduleControlRetry();
+      } catch (error) { this.fail(errorCode(error)); }
+    }, CONTROL_RETRY_MS);
+  }
+
+  private clearControlRetry(): void {
+    if (this.controlRetryTimer === null) return;
+    this.options.clock.clearTimeout(this.controlRetryTimer);
+    this.controlRetryTimer = null;
   }
 
   private sendFeedback(type: 'ack' | 'nack', value: number): void {
+    if (this.closed || this.firstDisconnectAt !== null) return;
     if (!this.snapshot.callId) throw new Error('MISSING_CALL_ID');
     if (type === 'ack') {
-      if (value <= this.lastAckSent) return;
+      if (value === 0 || value < this.lastAckSent) return;
       this.lastAckSent = value;
     }
     const message: Ack | Nack = type === 'ack'
@@ -590,6 +627,7 @@ export class CallTransportSession {
     this.closed = true;
     this.update({ status, errorCode: code, activeDurationMs });
     this.clearRecoveryTimer();
+    this.clearControlRetry();
     this.socketEpoch += 1;
     for (const stream of this.streams.values()) {
       stream.stopped = true;
@@ -627,6 +665,7 @@ export class CallTransportSession {
     this.outbox.clear();
     this.incoming.clear();
     this.streams.clear();
+    this.stopping.clear();
     this.completedStreams.clear();
     this.listeners.clear();
     this.errorListeners.clear();
