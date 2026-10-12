@@ -26,7 +26,12 @@ def catalog(tmp_path, *, rate=24000, width=2, channels=1):
         audio.writeframes(b"\0" * 960 * width * channels)
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
-        json.dumps([dict(name="call_apology", audio_path="apology.wav", text="sorry", expression="normal")])
+        json.dumps(
+            [
+                dict(name=f"call_apology_{scene}_1", audio_path="apology.wav", text="sorry", expression="normal")
+                for scene in ("opening", "turn", "silence")
+            ]
+        )
     )
     return PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
 
@@ -65,7 +70,7 @@ class Speech:
 async def setup(call_setup, tmp_path, *, failing=False, failures=0, texts=("answer",)):
     stage, provider, transport, _ = await _create(call_setup)
     replies, speech = Replies(failing=failing, texts=texts), Speech(failures=failures)
-    stage._agent = _agent(CallTurnCompletedHandler(Recall(), replies))
+    stage._agent = _agent(CallTurnCompletedHandler(Recall(), replies, catalog(tmp_path)))
     stage._agent._action_router = ActionRouter(
         ((d.ActionKind.SAY, SayHandler("luotianyi", speech, catalog(tmp_path))),)
     )
@@ -189,7 +194,7 @@ async def test_retry_provisional_remains_formal_reply_barrier(call_setup, tmp_pa
     stage, _, replies, speech = await setup(call_setup, tmp_path, failures=1)
     stage._agent._stimulus_router = base.StimulusRouter(
         (
-            (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler(Recalling(), replies)),
+            (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler(Recalling(), replies, catalog(tmp_path))),
             (d.StimulusKind.CALL_ENDING, base._NoPlanHandler()),
         )
     )

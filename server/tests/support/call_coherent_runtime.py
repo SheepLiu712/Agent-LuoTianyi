@@ -157,7 +157,12 @@ def runtime_config(tmp_path) -> dict[str, object]:
         audio.writeframes(b"\0\0" * 480)
     manifest = tmp_path / "prepared.json"
     manifest.write_text(
-        json.dumps([{"name": "call_apology", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}]),
+        json.dumps(
+            [
+                {"name": f"call_apology_{scene}_1", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}
+                for scene in ("opening", "turn", "silence")
+            ]
+        ),
         encoding="utf8",
     )
     songs = tmp_path / "songs"
