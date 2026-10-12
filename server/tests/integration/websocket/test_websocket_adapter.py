@@ -657,6 +657,23 @@ async def test_adapter_dedup_overload_typing_and_maintenance_bypass():
     await adapter.disconnect(stage)
 
 
+@pytest.mark.asyncio
+async def test_adapter_business_suspension_rejects_without_dedup_or_stage_delivery():
+    _, connection, adapter, stage = await setup_output()
+    event = WSMessage(event_type="user_typing", client_msg_id="suspended", payload={"text_length": 4})
+    adapter.suspend_business_input(connection, interaction_id=stage.interaction_id)
+
+    rejection = await adapter.try_accept_event(connection, event)
+
+    assert rejection.code == "CALL_SWITCH_PENDING"
+    assert rejection.retryable is True
+    assert stage.stimuli == []
+    assert not adapter.is_duplicate_client_message(connection, event)
+    assert adapter.resume_business_input(connection, interaction_id=stage.interaction_id)
+    assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.ACCEPTED
+    await adapter.disconnect(stage)
+
+
 def test_adapter_warns_when_media_store_is_not_configured(caplog, capture_project_log):
     capture_project_log("src.adapter.websocket.adapter")
 

@@ -247,6 +247,9 @@ class ConversationService:
             updated = run_sql_write(_write)
             if updated:
                 redis.setex(f"user_nickname:{user_id}", 3600, new_nickname)
+        except ConversationIdentityConflict:
+            db.rollback()
+            raise
         except Exception as e:
             logger.error(f"update_user_nickname error: {e}")
             db.rollback()
@@ -362,6 +365,49 @@ class ConversationService:
             logger.error(f"add_conversations error: {e}")
             db.rollback()
             return []
+        finally:
+            db.close()
+
+    def add_call_conversation(self, user_id: str, character_id: str, item: ConversationItem) -> str:
+        """Persist one idempotent call record, rejecting any same-UUID content conflict."""
+        if item.type != "call" or item.source != "user":
+            raise ValueError("call conversation must be a user call item")
+        db = self._new_session()
+        try:
+            existing = db.query(Conversation).filter(Conversation.uuid == item.uuid).first()
+            if existing is not None:
+                self._validate_call_conversation_identity(existing, user_id, character_id, item)
+                return existing.uuid
+            result_rows, _ = run_sql_write(lambda: self._persist_conversations(db, user_id, character_id, [item], True))
+            if len(result_rows) != 1:
+                raise RuntimeError("call conversation owner does not exist")
+            self._invalidate_context_cache(user_id, character_id)
+            return result_rows[0]["uuid"]
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def get_call_conversation(
+        self, conversation_id: str, *, user_id: str, character_id: str
+    ) -> ConversationItem | None:
+        """Load one already-committed call fact by its stable identity."""
+        db = self._new_session()
+        try:
+            row = db.query(Conversation).filter(Conversation.uuid == conversation_id).first()
+            if row is None:
+                return None
+            if row.user_id != user_id or row.character_id != character_id or row.type != "call":
+                raise ConversationIdentityConflict(f"CONVERSATION_IDENTITY_CONFLICT: {conversation_id}")
+            return ConversationItem(
+                uuid=row.uuid,
+                timestamp=row.timestamp.isoformat(sep=" ", timespec="microseconds"),
+                source=row.source,
+                type=row.type,
+                content=row.content,
+                data=json.loads(row.meta_data or "null"),
+            )
         finally:
             db.close()
 
@@ -924,6 +970,25 @@ class ConversationService:
                 existing_media_id = None
             incoming_media_id = (item.data or {}).get("media_id")
             matches = existing_media_id == incoming_media_id and isinstance(incoming_media_id, str)
+        if not matches:
+            raise ConversationIdentityConflict(f"CONVERSATION_IDENTITY_CONFLICT: {existing.uuid}")
+
+    @staticmethod
+    def _validate_call_conversation_identity(existing, user_id, character_id, item):
+        try:
+            incoming_meta = json.dumps(item.data, ensure_ascii=False, sort_keys=True)
+            existing_meta = json.dumps(json.loads(existing.meta_data or "null"), ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ConversationIdentityConflict(f"CONVERSATION_IDENTITY_CONFLICT: {existing.uuid}") from error
+        matches = (
+            existing.user_id == user_id
+            and existing.character_id == character_id
+            and existing.source == item.source
+            and existing.type == item.type
+            and existing.content == item.content
+            and existing.timestamp == datetime.fromisoformat(item.timestamp)
+            and existing_meta == incoming_meta
+        )
         if not matches:
             raise ConversationIdentityConflict(f"CONVERSATION_IDENTITY_CONFLICT: {existing.uuid}")
 

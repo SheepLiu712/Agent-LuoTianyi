@@ -4,6 +4,7 @@ import os
 import uvicorn
 from fastapi import FastAPI
 
+from src.application.host_context import ServerHostContext
 from src.application.server_lifecycle import ServerLifecycle
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger, install_access_log_filter
@@ -33,7 +34,7 @@ async def run_server(
             lifespan="off",
         )
     )
-    await lifecycle.start()
+    await lifecycle.start(host_context=ServerHostContext._single_worker_launcher())
     try:
         await web_server.serve()
     finally:

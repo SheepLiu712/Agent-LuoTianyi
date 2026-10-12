@@ -156,6 +156,10 @@ async def take(queue):
     return await asyncio.wait_for(queue.get(), 1)
 
 
+def test_interaction_ending_reason_includes_switch_to_call():
+    assert d.InteractionEndingReason.SWITCH_TO_CALL.value == "switch_to_call"
+
+
 class StageContextFactory:
     def __init__(self, character_id="luotianyi"):
         self.character_id = character_id

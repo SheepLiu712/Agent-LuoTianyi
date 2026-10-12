@@ -42,6 +42,32 @@ def test_declined_call_has_explicit_business_result():
         end_reason=CallEndReason.DECLINED,
     )
     assert result.outcome is CallOutcome.DECLINED
+    assert result.end_reason is CallEndReason.DECLINED
+    assert (
+        lifecycle.transition(
+            CallState.ENDED,
+            outcome=CallOutcome.DECLINED,
+            end_reason=CallEndReason.DECLINED,
+        )
+        is result
+    )
+
+
+def test_declined_call_settlement_cannot_replace_its_business_result():
+    lifecycle = CallLifecycle()
+    lifecycle.transition(CallState.RINGING)
+    lifecycle.transition(
+        CallState.DECLINED,
+        outcome=CallOutcome.DECLINED,
+        end_reason=CallEndReason.DECLINED,
+    )
+
+    with pytest.raises(InvalidCallTransition, match="declined terminal facts"):
+        lifecycle.transition(
+            CallState.ENDED,
+            outcome=CallOutcome.CANCELLED_BEFORE_ANSWER,
+            end_reason=CallEndReason.USER_HANGUP,
+        )
 
 
 @pytest.mark.parametrize(

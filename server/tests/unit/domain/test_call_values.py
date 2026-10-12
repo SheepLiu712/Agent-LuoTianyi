@@ -33,9 +33,8 @@ def test_call_audio_semantic_renders_spec_table(semantic, expected):
     assert semantic.render() == expected
 
 
-def test_call_audio_semantic_rejects_emotion_only():
-    with pytest.raises(ValueError, match="transcript or sound_description"):
-        CallAudioSemantic(emotion="开心")
+def test_call_audio_semantic_accepts_emotion_only():
+    assert CallAudioSemantic(emotion="开心").render() == "情绪：开心"
 
 
 def test_recall_decision_enforces_mode_contract():
@@ -87,17 +86,14 @@ def test_call_content_renders_calls_that_never_connected(outcome, reason, expect
     assert content.render_for_history() == expected
 
 
-def test_call_conversation_id_is_stable_and_namespace_is_explicit():
+def test_call_conversation_id_is_stable_and_uses_project_namespace():
     call_id = UUID("606ec5e6-a330-4e6c-b07a-8432a5716c8f")
-    first_namespace = UUID("11111111-1111-1111-1111-111111111111")
-    second_namespace = UUID("22222222-2222-2222-2222-222222222222")
 
-    first = derive_call_conversation_id(first_namespace, user_id="user", character_id="luotianyi", call_id=call_id)
-    repeated = derive_call_conversation_id(first_namespace, user_id="user", character_id="luotianyi", call_id=call_id)
-    other_policy = derive_call_conversation_id(
-        second_namespace, user_id="user", character_id="luotianyi", call_id=call_id
-    )
+    first = derive_call_conversation_id(user_id="user", character_id="luotianyi", call_id=call_id)
+    repeated = derive_call_conversation_id(user_id="user", character_id="luotianyi", call_id=call_id)
+    other_owner = derive_call_conversation_id(user_id="other", character_id="luotianyi", call_id=call_id)
 
     assert first == repeated
     assert first.version == 5
-    assert first != other_policy
+    assert first != other_owner
+    assert str(first) == "49988d5c-229c-5f22-be70-9a4ac112d773"

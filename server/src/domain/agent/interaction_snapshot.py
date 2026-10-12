@@ -31,6 +31,7 @@ class InteractionKind(str, Enum):
     CHAT = "chat"
     TOY = "toy"
     WORLD = "world"
+    CALL = "call"
 
 
 class ConnectionState(str, Enum):
@@ -158,4 +159,3 @@ class WorldInteractionSnapshot(_InteractionFacts):
 
 
 InteractionSnapshot = ChatInteractionSnapshot | ToyInteractionSnapshot | WorldInteractionSnapshot
-"""聊天、玩偶与世界三种具体快照的联合类型。"""

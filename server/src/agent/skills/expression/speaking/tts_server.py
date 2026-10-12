@@ -18,6 +18,7 @@ import yaml
 
 from src.utils.logger import get_logger
 
+from .call_pcm import normalize_clip_to_pcm16_mono
 from .errors import TTSStreamCancelled
 
 
@@ -206,7 +207,7 @@ def _run_gsv_worker(  # noqa: C901
                 continue
 
             if command != "synthesize":
-                if command == "stream_synthesize":
+                if command in {"stream_synthesize", "stream_synthesize_call_pcm"}:
                     try:
                         spk_audio_path = message["spk_audio_path"]
                         prompt_audio_path = message["prompt_audio_path"]
@@ -222,12 +223,15 @@ def _run_gsv_worker(  # noqa: C901
                         ):
                             if stop_event.is_set():
                                 break
-                            chunk_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
-                            if not is_first_chunk:
-                                chunk_bytes = _strip_wav_header(chunk_bytes)
+                            if command == "stream_synthesize_call_pcm":
+                                chunk_bytes = normalize_clip_to_pcm16_mono(clip.audio_data, clip.samplerate)
                             else:
-                                chunk_bytes = _make_wav_chunk_streamable(chunk_bytes)
-                                is_first_chunk = False
+                                chunk_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
+                                if not is_first_chunk:
+                                    chunk_bytes = _strip_wav_header(chunk_bytes)
+                                else:
+                                    chunk_bytes = _make_wav_chunk_streamable(chunk_bytes)
+                                    is_first_chunk = False
 
                             response_queue.put(
                                 {
@@ -605,6 +609,71 @@ class TTSServer:
 
                     if response.get("is_final"):
                         break
+        finally:
+            self._end_request()
+
+    def stream_synthesize_call_pcm(
+        self,
+        text: str,
+        spk_audio_path: str,
+        prompt_audio_path: str,
+        prompt_audio_text: str,
+        timeout: int = 600,
+        cancel_event: threading.Event | None = None,
+    ) -> Generator[bytes, None, None]:
+        """流式返回 worker 在完整 clip 边界规范化的 24 kHz PCM16 mono。"""
+        yield from self._stream_synthesize_command(
+            "stream_synthesize_call_pcm",
+            text,
+            spk_audio_path,
+            prompt_audio_path,
+            prompt_audio_text,
+            timeout,
+            cancel_event,
+        )
+
+    def _stream_synthesize_command(
+        self,
+        command: str,
+        text: str,
+        spk_audio_path: str,
+        prompt_audio_path: str,
+        prompt_audio_text: str,
+        timeout: int,
+        cancel_event: threading.Event | None,
+    ) -> Generator[bytes, None, None]:
+        self._begin_request()
+        try:
+            if not self.server_process or not self.server_process.is_alive():
+                raise RuntimeError("gsv_tts worker is not running")
+            if not self.request_queue or not self.response_queue:
+                raise RuntimeError("gsv_tts worker queues are not initialized")
+            with self._stream_lock(cancel_event):
+                self._request_counter += 1
+                request_id = f"req-{self._request_counter}"
+                self.request_queue.put(
+                    {
+                        "command": command,
+                        "request_id": request_id,
+                        "text": text,
+                        "spk_audio_path": spk_audio_path,
+                        "prompt_audio_path": prompt_audio_path,
+                        "prompt_audio_text": prompt_audio_text,
+                    }
+                )
+                while True:
+                    response = self._wait_for_response(
+                        request_id=request_id, timeout=timeout, cancel_event=cancel_event
+                    )
+                    if not response.get("ok"):
+                        raise RuntimeError(
+                            f"gsv_tts stream synthesize failed: {response.get('error', 'unknown error')}"
+                        )
+                    chunk = response.get("audio_bytes")
+                    if chunk:
+                        yield chunk
+                    if response.get("is_final"):
+                        return
         finally:
             self._end_request()
 

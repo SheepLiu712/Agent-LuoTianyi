@@ -91,6 +91,10 @@ class VectorStore(ABC):
         """删除指定用户的所有记录，返回删除的记录数"""
         pass
 
+    def delete_user_records_strict(self, user_id: str) -> int:
+        """Delete one user's vectors and surface storage failures."""
+        return self.delete_user_records(user_id)
+
 
 class ChromaVectorStore(VectorStore):
     """Chroma向量数据库实现 (Native Client)"""
@@ -303,6 +307,13 @@ class ChromaVectorStore(VectorStore):
             print(traceback.format_exc())
             self.logger.error(f"删除用户记录失败: {e}")
             return 0
+
+    def delete_user_records_strict(self, user_id: str) -> int:
+        results = self.collection.get(where={"user_id": user_id}, include=[])
+        doc_ids = list(results.get("ids") or [])
+        if doc_ids:
+            self.collection.delete(ids=doc_ids)
+        return len(doc_ids)
 
     def update_document(self, doc_id: str, document: Document) -> bool:
         """更新文档

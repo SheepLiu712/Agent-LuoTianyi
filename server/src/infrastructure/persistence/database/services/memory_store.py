@@ -349,6 +349,29 @@ class MemoryStore:
         finally:
             db.close()
 
+    def delete_user_memory_records(self, user_id: str) -> int:
+        """Delete canonical memories, chunks, and graph links owned by one user."""
+        db = self._new_session()
+        try:
+
+            def _write() -> int:
+                rows = db.query(AgentMemoryRecord).filter(AgentMemoryRecord.subject_user_id == user_id).all()
+                count = len(rows)
+                for row in rows:
+                    db.delete(row)
+                db.query(MemoryUpdateRecord).filter(MemoryUpdateRecord.user_id == user_id).delete(
+                    synchronize_session=False
+                )
+                db.commit()
+                return count
+
+            return run_sql_write(_write)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def agent_memory_record_has_embeddings(self, memory_record_id: str) -> bool:
         """检查规范记忆是否已链接至少一个向量投影。"""
         db = self._new_session()
@@ -358,6 +381,23 @@ class MemoryStore:
                 .filter(
                     MemoryChunkRecord.memory_record_id == memory_record_id,
                     MemoryChunkRecord.embedding_id.isnot(None),
+                )
+                .first()
+                is not None
+            )
+        finally:
+            db.close()
+
+    def agent_memory_record_has_embedding(self, memory_record_id: str, embedding_id: str, chunk_text: str) -> bool:
+        """Verify one exact canonical-memory to vector projection link."""
+        db = self._new_session()
+        try:
+            return (
+                db.query(MemoryChunkRecord)
+                .filter(
+                    MemoryChunkRecord.memory_record_id == memory_record_id,
+                    MemoryChunkRecord.embedding_id == embedding_id,
+                    MemoryChunkRecord.chunk_text == chunk_text,
                 )
                 .first()
                 is not None
