@@ -1,10 +1,12 @@
 """创建交互上下文，不保存交互实例或管理其生命周期。"""
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 from weakref import WeakValueDictionary
 
 from ._lifecycle import _complete
+from .conversation_store import ConversationStore
 from .interaction_context import InteractionContext
 from .models import ContextIdentity
 
@@ -15,10 +17,17 @@ if TYPE_CHECKING:
 class ContextFactory:
     """角色的上下文创建依赖；创建结果由调用方持有并关闭。"""
 
-    def __init__(self, *, character_id: str, database: "ConversationService") -> None:
+    def __init__(
+        self,
+        *,
+        character_id: str,
+        database: "ConversationService",
+        conversation_store_factory: Callable[[ContextIdentity], ConversationStore] | None = None,
+    ) -> None:
         """绑定角色 character_id 与数据库 database，不保存已创建的 context。"""
         self._character_id = character_id
         self._database = database
+        self._conversation_store_factory = conversation_store_factory
         self._user_locks: WeakValueDictionary[str | None, asyncio.Lock] = WeakValueDictionary()
 
     async def create(self, interaction_id: str, *, user_id: str | None) -> InteractionContext:
@@ -35,7 +44,10 @@ class ContextFactory:
 
         async def load() -> InteractionContext:
             async with lock:
-                context = await asyncio.to_thread(InteractionContext, identity=identity, database=self._database)
+                store = self._conversation_store_factory(identity) if self._conversation_store_factory else None
+                context = await asyncio.to_thread(
+                    InteractionContext, identity=identity, database=self._database, conversation_store=store
+                )
                 context._state.lock = lock
                 created.append(context)
                 return context
