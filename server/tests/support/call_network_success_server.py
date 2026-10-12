@@ -105,7 +105,12 @@ def _runtime_config(root: Path) -> Path:
         audio.writeframes(b"\0\0" * 480)
     manifest = resources / "prepared.json"
     manifest.write_text(
-        json.dumps([{"name": "call_apology", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}]),
+        json.dumps(
+            [
+                {"name": f"call_apology_{scene}_1", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}
+                for scene in ("opening", "turn", "silence")
+            ]
+        ),
         encoding="utf8",
     )
     agent["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}

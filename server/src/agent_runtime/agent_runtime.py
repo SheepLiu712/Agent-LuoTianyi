@@ -206,14 +206,14 @@ class AgentRuntime:
         )
         registrations = [
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
-            (StimulusKind.CALL_STARTED, CallStartedHandler(self.skills.call_reply)),
+            (StimulusKind.CALL_STARTED, CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech)),
             (
                 StimulusKind.CALL_TURN_COMPLETED,
-                CallTurnCompletedHandler(self.skills.call_recall, self.skills.call_reply),
+                CallTurnCompletedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
             ),
             (
                 StimulusKind.CALL_SILENCE_ELAPSED,
-                CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply),
+                CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
             ),
             (StimulusKind.CALL_ENDING, CallEndingHandler()),
             (StimulusKind.CALL_SETTLEMENT_REQUESTED, CallSettlementRequestedHandler()),

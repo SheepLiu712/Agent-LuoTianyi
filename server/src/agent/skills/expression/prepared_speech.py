@@ -2,6 +2,7 @@
 
 import io
 import json
+import random
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -128,10 +129,32 @@ class PreparedSpeechCatalog:
     def supports_call_apology(self, character_id: str) -> bool:
         """CALL requires a deployer-supplied, valid apology resource."""
         try:
-            self._read_call_pcm(character_id, "call_apology")
+            for scene in ("opening", "turn", "silence"):
+                entries = self._call_apologies(character_id, scene)
+                if not entries:
+                    return False
+                for entry in entries:
+                    self._read_call_pcm(character_id, entry.name)
             return True
         except (KeyError, OSError, ValueError, EOFError, wave.Error, EmptyPreparedAudioError):
             return False
+
+    def choose_call_apology(self, character_id: str, scene: str) -> PreparedSpeech:
+        """Uniformly choose one configured variant within the requested call scene."""
+        entries = self._call_apologies(character_id, scene)
+        if not entries:
+            raise ValueError(f"Missing call apology variants for {scene}")
+        return random.choice(entries)
+
+    def _call_apologies(self, character_id: str, scene: str) -> tuple[PreparedSpeech, ...]:
+        if scene not in {"opening", "turn", "silence"}:
+            raise ValueError("Unknown call apology scene")
+        prefix = f"call_apology_{scene}_"
+        return tuple(
+            entry
+            for entry in self._entries.get(character_id, {}).values()
+            if entry.name.startswith(prefix) and entry.name[len(prefix) :].strip()
+        )
 
     async def read_call_pcm(self, character_id: str, name: str) -> bytes:
         return await run_sync_owned(self._read_call_pcm, character_id, name)
