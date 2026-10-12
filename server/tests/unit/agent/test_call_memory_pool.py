@@ -1,4 +1,4 @@
-from src.agent.call import CallMemory, CallMemoryPool
+from src.agent.context.memory_pool import CallMemory, CallMemoryPool
 
 
 def test_default_capacity_is_ten_and_eviction_is_deterministic():

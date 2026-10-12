@@ -1,4 +1,4 @@
-"""一个交互持有的三部分上下文。"""
+"""单个交互拥有的上下文及临时召回状态。"""
 
 from typing import TYPE_CHECKING
 
@@ -6,6 +6,7 @@ from ._conversation_store import ConversationStore, DatabaseConversationStore
 from ._lifecycle import _complete, _Lifecycle
 from ._storage import _Storage
 from .conversation_context import ConversationContext
+from .memory_pool import CallMemoryPool
 from .models import ContextIdentity, ConversationSnapshot, UserContextSnapshot
 from .recalled_memory_context import RecalledMemoryContext
 from .user_context import UserContext
@@ -41,7 +42,8 @@ class InteractionContext:
             _store=conversation_store,
         )
         self._recalled_memory = RecalledMemoryContext()
-        for part in (self._user, self._conversation, self._recalled_memory):
+        self._call_memory = CallMemoryPool()
+        for part in (self._user, self._conversation, self._recalled_memory, self._call_memory):
             part._state = self._state
 
     @property
@@ -64,6 +66,12 @@ class InteractionContext:
         """返回按刺激归属管理的召回缓存。"""
         return self._recalled_memory
 
+    @property
+    def call_memory(self) -> CallMemoryPool:
+        """返回当前交互独占、跨通话轮次复用的召回池。"""
+        self._state.check()
+        return self._call_memory
+
     async def close(self) -> None:
         """等待已开始的数据操作结束，清空内存并关闭上下文；重复调用无影响。"""
         await _complete(self._close())
@@ -75,3 +83,4 @@ class InteractionContext:
             self._user._snapshot = UserContextSnapshot()
             self._conversation._snapshot = ConversationSnapshot()
             self._recalled_memory._entries.clear()
+            self._call_memory._close()

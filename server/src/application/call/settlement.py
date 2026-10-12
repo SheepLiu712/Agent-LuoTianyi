@@ -16,7 +16,7 @@ class CallSettlementConsumer(Protocol):
 
 
 class CallResourceReleasePort(Protocol):
-    def release_call_resources(self, call_id: UUID) -> bool: ...
+    def release_call_maintenance(self, call_id: UUID) -> None: ...
 
 
 class CallSettlementCoordinator:
@@ -58,7 +58,7 @@ class CallSettlementCoordinator:
             try:
                 await self._user_reset_fence.require_admission(user_id)
             except Exception:
-                self._release_rejected(call_id)
+                self._resources.release_call_maintenance(call_id)
                 raise
         task = self._tasks.get(call_id)
         if task is not None and not task.done():
@@ -75,7 +75,7 @@ class CallSettlementCoordinator:
                 await asyncio.gather(task, return_exceptions=True)
                 self._tasks.pop(call_id, None)
                 self._task_users.pop(call_id, None)
-                self._release_rejected(call_id)
+                self._resources.release_call_maintenance(call_id)
                 raise
         task.add_done_callback(lambda done, key=call_id: self._discard(key, done))
 
@@ -88,12 +88,6 @@ class CallSettlementCoordinator:
         if record is None or not isinstance(record.user_id, str) or not record.user_id:
             raise RuntimeError("call owner is unavailable")
         return record.user_id
-
-    def _release_rejected(self, call_id: UUID) -> None:
-        release_maintenance = getattr(self._resources, "release_call_maintenance", None)
-        if release_maintenance is not None:
-            release_maintenance(call_id)
-        self._resources.release_call_resources(call_id)
 
     async def close(self) -> None:
         if self._tasks:
@@ -119,7 +113,7 @@ class CallSettlementCoordinator:
             if not operation.done():
                 operation.cancel()
                 await asyncio.gather(operation, return_exceptions=True)
-            self._resources.release_call_resources(call_id)
+            self._resources.release_call_maintenance(call_id)
 
     def _discard(self, call_id: UUID, task: asyncio.Task[None]) -> None:
         if self._tasks.get(call_id) is task:

@@ -20,14 +20,9 @@ def _snapshot(call_id):
 class _Resources:
     def __init__(self):
         self.released = []
-        self.maintenance_released = []
-
-    def release_call_resources(self, call_id):
-        self.released.append(call_id)
-        return True
 
     def release_call_maintenance(self, call_id):
-        self.maintenance_released.append(call_id)
+        self.released.append(call_id)
 
 
 @pytest.mark.asyncio
@@ -141,7 +136,6 @@ async def test_user_reset_fence_blocks_settlement_admission_and_waits_owned_writ
     token = await fence.begin("owner")
     with pytest.raises(RuntimeError, match="RESET_IN_PROGRESS"):
         await coordinator.emit(_snapshot(owner_call))
-    assert resources.maintenance_released == [owner_call]
     assert resources.released == [owner_call]
     assert coordinator._tasks[owner_call] is original_task
     await coordinator.emit(_snapshot(other_call))

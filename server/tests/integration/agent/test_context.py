@@ -477,3 +477,45 @@ async def test_same_user_call_windows_are_independent_and_close_preserves_chat(d
     restored = await contexts.create("restored", mode=ConversationMode.CHAT, user_id="u")
     assert restored.conversation.read() == ConversationSnapshot(entries=(seed,))
     await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
+    from types import SimpleNamespace
+
+    from src.agent.context.memory_pool import CallMemory
+    from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill
+
+    contexts = factory(database)
+    first = await contexts.create("a", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
+    second = await contexts.create("b", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
+    pool = first.call_memory
+    pool.remember(CallMemory("one", "private memory"))
+    assert second.call_memory.snapshot() == ()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Memory:
+        async def search_memory_context_for_topic(self, user_id, queries):
+            entered.set()
+            await release.wait()
+            return SimpleNamespace(hits=(SimpleNamespace(rendered_text="late", memory_record_id="late"),))
+
+    skill = CallRecallDecisionSkill(memories={"luotianyi": Memory()})
+    recall = asyncio.create_task(
+        skill.recall_once(
+            SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),
+            memory_pool=pool,
+            queries=("query",),
+        )
+    )
+    await entered.wait()
+    await first.close()
+    await first.close()
+    release.set()
+    with pytest.raises(RuntimeError):
+        await recall
+    with pytest.raises(RuntimeError):
+        pool.snapshot()
+    assert not pool._items
+    assert second.call_memory.snapshot() == ()
+    await second.close()

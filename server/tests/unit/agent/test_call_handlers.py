@@ -8,6 +8,7 @@ from support.call_apology import _Plans, _request, _stimulus
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.context import ConversationSnapshot
+from src.agent.context.memory_pool import CallMemoryPool
 from src.agent.handlers.action.call import EndCallHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -167,7 +168,7 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
 
     assert report.emitted_plan_ids == ("plan-1", "plan-2", "plan-3")
     assert len(memory.calls) == 1
-    assert recall.pool_texts(call_id) == ("旧记忆", "新记忆")
+    assert tuple(item.content for item in plans.context.call_memory.snapshot()) == ("旧记忆", "新记忆")
     provisional = plans.drafts[0].actions[0]
     formal = plans.drafts[1].actions[0]
     assert provisional.call_delivery.provisional is True
@@ -278,9 +279,10 @@ async def test_call_ending_does_not_fake_maintenance_or_release_pool_before_sett
     memory = _Memory()
     recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
     call_id = uuid4()
+    plans = _Plans()
     await recall.recall_once(
         SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "user"),
-        call_id=call_id,
+        memory_pool=plans.context.call_memory,
         queries=("query",),
     )
     ending = _stimulus(
@@ -299,31 +301,25 @@ async def test_call_ending_does_not_fake_maintenance_or_release_pool_before_sett
             maintenance_turn_seq=0,
         ),
     )
-    plans = _Plans()
-
     report = await CallEndingHandler().handle(_request(ending), plans)
 
     assert report.emitted_plan_ids == ()
     assert plans.drafts == []
-    assert recall.pool_texts(call_id) == ("旧记忆", "新记忆")
+    assert tuple(item.content for item in plans.context.call_memory.snapshot()) == ("旧记忆", "新记忆")
 
 
 @pytest.mark.asyncio
-async def test_release_call_memory_is_identity_checked_idempotent_and_call_isolated():
+async def test_shared_recall_skill_uses_only_the_supplied_interaction_pool():
     memory = _Memory()
     recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
-    first_call = uuid4()
-    second_call = uuid4()
+    first, second = CallMemoryPool(), CallMemoryPool()
     invocation = SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "user")
-    await recall.recall_once(invocation, call_id=first_call, queries=("first",))
-    await recall.recall_once(invocation, call_id=second_call, queries=("second",))
-
-    assert recall.release_call_memory(first_call) is True
-    assert recall.release_call_memory(first_call) is False
-    assert recall.pool_texts(first_call) == ()
-    assert recall.pool_texts(second_call) == ("旧记忆", "新记忆")
-    with pytest.raises(TypeError, match="UUID"):
-        recall.release_call_memory(str(second_call))
+    await recall.recall_once(invocation, memory_pool=first, queries=("first",))
+    assert second.snapshot() == ()
+    await recall.recall_once(invocation, memory_pool=second, queries=("second",))
+    first.clear()
+    assert first.snapshot() == ()
+    assert tuple(item.content for item in second.snapshot()) == ("旧记忆", "新记忆")
 
 
 @pytest.mark.asyncio

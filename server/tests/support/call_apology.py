@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
 from src.agent.context import ConversationSnapshot, UserContextSnapshot
+from src.agent.context.memory_pool import CallMemoryPool
 from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import CallState, RecallMode
@@ -32,6 +33,7 @@ class _Plans:
             identity=SimpleNamespace(character_id="luotianyi", user_id="user", interaction_id="call"),
             user=SimpleNamespace(read=lambda: UserContextSnapshot()),
             conversation=_Conversation(),
+            call_memory=CallMemoryPool(),
         )
 
     async def emit(self, draft):
@@ -91,9 +93,6 @@ def catalog(tmp_path, *, rate=24000, width=2, channels=1):
 class Recall:
     async def decide(self, *args, **kwargs):
         return SimpleNamespace(mode=RecallMode.DIRECT)
-
-    def pool_texts(self, call_id):
-        return ()
 
 
 class Replies:

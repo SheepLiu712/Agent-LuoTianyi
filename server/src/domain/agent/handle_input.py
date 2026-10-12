@@ -72,7 +72,7 @@ _CONTENT_TRIGGER_KINDS = frozenset(
 
 
 class HandlePurpose(str, Enum):
-    """调用用途：PROCESS 按刺激类别处理；认知维护通过 Reflection action 执行。"""
+    """调用用途：PROCESS 按刺激类别处理；认知维护通过 CognitiveMaintenance action 执行。"""
 
     PROCESS = "process"
 

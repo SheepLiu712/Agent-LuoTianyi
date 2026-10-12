@@ -34,7 +34,6 @@ from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchReactionSkill
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
 from src.agent.skills.mutation import IntentionalMemoryCommit
-from src.agent.skills.reflection import ReflectionSkill
 from src.infrastructure.media import MediaResolver
 
 if TYPE_CHECKING:
@@ -64,7 +63,6 @@ class SharedSkills:
         explicit_memory_config: dict[str, Any] | None,
         reply_composition_config: dict[str, Any],
         topic_extraction_config: dict[str, Any],
-        reflection_config: dict[str, Any],
         call_recall_model: object | None,
         call_summary_models: Mapping[str, object],
         call_maintenance_batches: object | None,
@@ -121,7 +119,6 @@ class SharedSkills:
         self.call_maintenance = CallMaintenanceSkill(
             dict(memories), call_maintenance_batches, calls=getattr(database_manager, "call_sessions", None)
         )
-        self.reflection = ReflectionSkill(reflection_config, memories)
         self.cognitive_maintenance = CognitiveMaintenanceSkill(
             memories=memories,
             compaction=self.conversation_compaction,

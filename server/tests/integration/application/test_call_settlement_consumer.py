@@ -426,7 +426,7 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
     released = []
 
     class Resources:
-        def release_call_resources(self, value):
+        def release_call_maintenance(self, value):
             released.append(value)
             return True
 
