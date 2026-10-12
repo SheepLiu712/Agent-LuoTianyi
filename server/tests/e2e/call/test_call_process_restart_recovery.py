@@ -109,7 +109,7 @@ def _login(session, url: str) -> str:
     return response.json()["message_token"]
 
 
-def test_production_process_restart_recovers_stale_calls_once_and_preserves_credentials(tmp_path):
+def test_production_process_restart_recovers_recent_calls_once_and_preserves_credentials(tmp_path):
     root = tmp_path / "restart-runtime"
     root.mkdir()
     first = _start_server(root)

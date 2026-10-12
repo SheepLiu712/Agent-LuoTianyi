@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -80,7 +81,6 @@ def test_recovery_converges_concurrently_and_survives_sqlite_reopen(tmp_path):
                 conversation_service=conversations,
                 call_maintenance_batches=_Batches(),
                 projection_verifier=_Verifier(),
-                stale_after=timedelta(seconds=1),
                 wall_clock=lambda: now,
             ).reconcile()
         )
@@ -115,7 +115,6 @@ def test_recovery_converges_concurrently_and_survives_sqlite_reopen(tmp_path):
             conversation_service=reopened_conversations,
             call_maintenance_batches=_Batches(),
             projection_verifier=_Verifier(),
-            stale_after=timedelta(seconds=1),
             wall_clock=lambda: now + timedelta(minutes=1),
         ).reconcile()
     )
@@ -284,7 +283,6 @@ def test_recovery_cancellation_waits_for_owned_sql_write_and_converges_on_retry(
             conversation_service=conversations,
             call_maintenance_batches=_Batches(),
             projection_verifier=_Verifier(),
-            stale_after=timedelta(seconds=1),
             wall_clock=lambda: now,
         )
         recovery = asyncio.create_task(service.reconcile())
@@ -308,7 +306,6 @@ def test_recovery_cancellation_waits_for_owned_sql_write_and_converges_on_retry(
             conversation_service=conversations,
             call_maintenance_batches=_Batches(),
             projection_verifier=_Verifier(),
-            stale_after=timedelta(seconds=1),
             wall_clock=lambda: now + timedelta(minutes=1),
         ).reconcile()
     )
@@ -320,3 +317,35 @@ def test_recovery_cancellation_waits_for_owned_sql_write_and_converges_on_retry(
     with sessions() as session:
         assert session.query(Conversation).filter_by(user_id="owner", type="call").count() == 1
     engine.dispose()
+
+
+@pytest.mark.parametrize("age_seconds", [10, 0, -10])
+def test_startup_recovers_recent_previous_runtime_calls_without_age_gate(tmp_path, age_seconds):
+    now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    engine, sessions, repository, conversations = _fixture(tmp_path / "recent.sqlite")
+    updated = now - timedelta(seconds=age_seconds)
+    preparing = _record(CallState.PREPARING, now, updated_at=updated)
+    active = _record(CallState.ACTIVE, now, updated_at=updated, connected_at=now - timedelta(seconds=20))
+    repository.create_if_absent(preparing)
+    repository.create_if_absent(active)
+    service = StaleCallRecoveryService(
+        call_sessions=repository,
+        conversation_service=conversations,
+        call_maintenance_batches=_Batches(),
+        projection_verifier=_Verifier(),
+        wall_clock=lambda: now,
+    )
+    try:
+        report = asyncio.run(service.reconcile())
+        assert report.scanned == report.recovered == 2
+        assert report.failed == report.conflicted == 0
+        assert repository.find_by_id(preparing.call_id).state is CallState.FAILED
+        terminal = repository.find_by_id(active.call_id)
+        assert terminal.state is CallState.ENDED
+        assert terminal.summary_status is SettlementStatus.SUCCEEDED
+        assert terminal.maintenance_status is SettlementStatus.FAILED
+        assert asyncio.run(service.reconcile()).scanned == 0
+        with sessions() as session:
+            assert session.query(Conversation).count() == 1
+    finally:
+        engine.dispose()

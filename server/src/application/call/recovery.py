@@ -39,7 +39,12 @@ class CallRecoveryReport:
 
 
 class StaleCallRecoveryService:
-    """Converge stale calls without reconstructing unavailable ephemeral input."""
+    """Recover previous-runtime ledgers before admitting any new calls.
+
+    This startup-only service runs after the previous runtime has stopped and
+    before the new runtime opens admission. Pending calls therefore have no live
+    owner, regardless of their wall-clock age (including clock adjustments).
+    """
 
     def __init__(
         self,
@@ -48,21 +53,17 @@ class StaleCallRecoveryService:
         conversation_service: object,
         call_maintenance_batches: object,
         projection_verifier: CallMaintenanceProjectionVerificationPort,
-        stale_after: timedelta = timedelta(seconds=30),
         wall_clock=None,
     ) -> None:
-        if stale_after.total_seconds() < 0:
-            raise ValueError("stale_after must be nonnegative")
         self._calls = call_sessions
         self._conversations = conversation_service
         self._batches = call_maintenance_batches
         self._projection_verifier = projection_verifier
-        self._stale_after = stale_after
         self._wall_clock = wall_clock or (lambda: datetime.now(BEIJING_TIMEZONE))
 
     async def reconcile(self) -> CallRecoveryReport:
         now = normalize_call_datetime(self._wall_clock(), field_name="recovery wall clock")
-        records = await self._owned(self._calls.list_recovery_pending, before=now - self._stale_after)
+        records = await self._owned(self._calls.list_recovery_pending)
         recovered = skipped = conflicted = failed = 0
         for record in records:
             try:

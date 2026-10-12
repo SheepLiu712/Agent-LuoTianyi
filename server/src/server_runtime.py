@@ -273,6 +273,7 @@ class ServerRuntime:
             )
 
             runtime._wire_dependencies()
+            # No new call admission until all previous-runtime candidates converge.
             recovery_report = await runtime.stale_call_recovery.reconcile()
             if recovery_report.failed or recovery_report.conflicted:
                 raise RuntimeError("stale call recovery did not converge")

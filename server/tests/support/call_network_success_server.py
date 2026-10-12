@@ -208,7 +208,7 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
             state=CallState.PREPARING,
             requested_at=now - timedelta(minutes=4),
             created_at=now - timedelta(minutes=4),
-            updated_at=now - timedelta(minutes=3),
+            updated_at=now,
         )
         active = CallSessionRecord(
             call_id=uuid4(),
@@ -218,7 +218,7 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
             state=CallState.ACTIVE,
             requested_at=now - timedelta(minutes=4),
             created_at=now - timedelta(minutes=4),
-            updated_at=now - timedelta(minutes=3),
+            updated_at=now,
             connected_at=now - timedelta(seconds=90),
             disconnected_at=now - timedelta(seconds=45),
             active_duration_ms=20_000,

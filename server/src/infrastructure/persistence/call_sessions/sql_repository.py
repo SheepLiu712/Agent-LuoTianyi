@@ -345,18 +345,15 @@ class SqlCallSessionRepository:
         finally:
             session.close()
 
-    def list_recovery_pending(self, *, before: datetime) -> tuple[CallSessionRecord, ...]:
-        before = normalize_call_datetime(before, field_name="before")
+    def list_recovery_pending(self) -> tuple[CallSessionRecord, ...]:
+        """List startup recovery candidates without an age/heartbeat heuristic."""
         session = self._sql_session_factory()
         try:
             rows = session.scalars(
                 select(CallSession)
                 .where(
                     or_(
-                        and_(
-                            CallSession.state.in_(state.value for state in STALE_RECOVERABLE_STATES),
-                            CallSession.updated_at < _stored_time(before),
-                        ),
+                        CallSession.state.in_(state.value for state in STALE_RECOVERABLE_STATES),
                         and_(
                             CallSession.state == CallState.ENDED.value,
                             CallSession.outcome == CallOutcome.CONNECTED.value,
