@@ -343,7 +343,7 @@ async def _generate_reply(skill, prepared_speech, scene, plans, request, invocat
         return drafts
     except Exception as error:
         get_logger(__name__).warning(
-            "Call reply generation failed request_id={} error_type={}", request.request_id, type(error).__name__
+            "Call reply generation failed request_id=%s error_type=%s", request.request_id, type(error).__name__
         )
         if request.cancellation.is_cancelled:
             return None
