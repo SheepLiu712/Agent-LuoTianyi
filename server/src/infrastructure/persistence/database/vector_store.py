@@ -24,7 +24,7 @@ _USER_RECORD_PAGE_SIZE = 1000
 
 
 def _reported_delete_count(result: Any) -> Optional[int]:
-    """读取删除接口报告的实际删除条数；后端不报告（返回 None）时返回 None。"""
+    """读取删除接口报告的计数；不保证它代表实际移除的唯一记录数。"""
     if isinstance(result, Mapping):
         deleted = result.get("deleted")
         if isinstance(deleted, int):
@@ -265,9 +265,8 @@ class ChromaVectorStore(VectorStore):
 
         分页删除以避免单次查询上限造成的静默截断。循环只在**再查一次返回空**时才结束——
         最后一页也必须由一次新的查询证实已删干净，否则这一页删除失败会被当成成功。
-        某一轮没有真正删掉任何记录（后端报告删了 0 条，或后端不报告条数时同一批 id 又被查了出来）
-        才判为失败并抛出：上层据此判定该步骤失败，不能返回 0 伪装成功。
-        删掉一部分属于正常进展，继续删下一页即可。
+        若重新查询仍得到同一批 id，或删除接口报告 0，则抛出无进展错误。
+        两页只部分重叠不判失败，继续删除剩余记录；计数不承诺并发写删下的事务快照语义。
         """
         deleted_count = 0
         previous_ids: Optional[frozenset[str]] = None
@@ -278,13 +277,14 @@ class ChromaVectorStore(VectorStore):
             if not doc_ids:
                 break
             current_ids = frozenset(doc_ids)
-            reported = _reported_delete_count(self.collection.delete(ids=doc_ids))
-            if reported == 0 or (reported is None and current_ids == previous_ids):
-                # 软删/最终一致/删除失败：同一批 id 会被反复取到，报错而不是继续重放并重复计数。
+            if current_ids == previous_ids:
                 raise RuntimeError(f"vector delete made no progress for user {user_id}")
+            reported = _reported_delete_count(self.collection.delete(ids=doc_ids))
+            if reported == 0:
+                raise RuntimeError(f"vector delete made no progress for user {user_id}")
+            # 不报告计数时只累计本轮新出现的 id，避免重试残留条目被重复计入。
+            deleted_count += len(current_ids - (previous_ids or frozenset())) if reported is None else reported
             previous_ids = current_ids
-            # 后端报告条数时以报告为准（只删掉一部分时按页长累加会多算），否则按本页条数累计。
-            deleted_count += len(doc_ids) if reported is None else reported
         self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
         return deleted_count
 

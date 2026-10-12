@@ -27,6 +27,8 @@ class _Collection:
         self.report_delete_count = report_delete_count
         self.includes = []
         self.get_calls = 0
+        self.page_sizes = []
+        self.removed_counts = []
 
     def get(self, *, where, limit, include=None):
         assert where == {"user_id": "user-1"}
@@ -35,7 +37,9 @@ class _Collection:
         if self.get_calls > self.MAX_GET_CALLS:
             raise AssertionError("pagination did not terminate")
         self.includes.append(include)
-        return {"ids": self.ids[:limit]}
+        page = self.ids[:limit]
+        self.page_sizes.append(len(page))
+        return {"ids": page}
 
     def delete(self, *, ids):
         if self.fail_on_delete:
@@ -46,13 +50,14 @@ class _Collection:
         removed = set(ids)
         if self.partial_delete_ratio < 1.0:
             # 只删掉一部分：模拟后端删不干净，剩余条目会在下一页重新出现。
-            keep = max(1, int(len(removed) * (1.0 - self.partial_delete_ratio)))
-            removed = set(sorted(removed)[:keep])
+            remove_count = max(1, int(len(removed) * self.partial_delete_ratio))
+            removed = set(sorted(removed)[:remove_count])
         self.ids = [item for item in self.ids if item not in removed]
+        self.removed_counts.append(len(removed))
         return self._delete_result(len(removed))
 
     def _delete_result(self, removed: int):
-        # chromadb 1.x 的 delete 返回 DeleteResult（含 deleted 计数）；旧版本不报告返回值。
+        # 模拟有/无计数两种返回形式；此 fake 的移除计数不代表真实 Chroma 的计数语义。
         if not self.report_delete_count:
             return None
         return {"deleted": removed}
@@ -75,6 +80,7 @@ def test_delete_user_records_removes_every_page():
     assert collection.ids == []
     # 分页大小有上限，必须多轮才能删完，证明没有静默截断。
     assert len(collection.deleted) == 2500
+    assert collection.page_sizes == [1000, 1000, 500, 0]
     # 删除路径只取 id，不把 document/metadata/embedding 拉进内存。
     assert collection.includes and all(item == [] for item in collection.includes)
 
@@ -100,12 +106,24 @@ def test_delete_user_records_fails_fast_when_the_backend_deletes_nothing():
         store.delete_user_records("user-1")
 
 
-def test_delete_user_records_verifies_a_short_final_page():
-    """最后一页不满时也必须再查一次确认：这一页静默删除失败不能返回成功。"""
-    store = _store(_Collection([f"doc-{index}" for index in range(500)], delete_is_noop=True))
+@pytest.mark.parametrize("report_delete_count", [True, False])
+def test_delete_user_records_verifies_a_short_final_page(report_delete_count):
+    """正常短页也必须删后再查空，不能仅凭页长或返回计数提前结束。"""
+    collection = _Collection([f"doc-{index}" for index in range(500)], report_delete_count=report_delete_count)
+
+    assert _store(collection).delete_user_records("user-1") == 500
+    assert collection.page_sizes == [500, 0]
+
+
+@pytest.mark.parametrize("delete_result", [None, {"deleted": 500}])
+def test_delete_user_records_rejects_an_unchanged_short_page(delete_result):
+    """模拟删除未生效：无返回值或只报告接收数量，都须由重新查询识别未清空。"""
+    collection = _Collection([f"doc-{index}" for index in range(500)])
+    collection.delete = lambda *, ids: delete_result
 
     with pytest.raises(RuntimeError, match="made no progress"):
-        store.delete_user_records("user-1")
+        _store(collection).delete_user_records("user-1")
+    assert collection.page_sizes == [500, 500]
 
 
 def test_delete_user_records_resumes_partial_deletes_until_empty():
@@ -117,6 +135,8 @@ def test_delete_user_records_resumes_partial_deletes_until_empty():
 
     assert deleted == 1000
     assert collection.ids == []
+    assert collection.removed_counts[0] == 600
+    assert collection.page_sizes[-1] == 0
 
 
 def test_delete_user_records_detects_no_progress_without_a_reported_count():
@@ -141,9 +161,9 @@ def test_delete_user_records_legacy_backend_keeps_resuming_partial_deletes():
     )
     store = _store(collection)
 
-    store.delete_user_records("user-1")
-
+    assert store.delete_user_records("user-1") == 500
     assert collection.ids == []
+    assert collection.page_sizes[-1] == 0
 
 
 def test_delete_user_records_contract_against_real_chroma():
