@@ -57,7 +57,9 @@ export function parseAgreementPayload(value: unknown): AgreementPayload | null {
       return null;
     }
 
-    const fontSize = candidate.font_size ?? DEFAULT_BLOCK_FONT_SIZE;
+    const fontSize = Object.hasOwn(candidate, 'font_size')
+      ? candidate.font_size
+      : DEFAULT_BLOCK_FONT_SIZE;
     if (
       typeof fontSize !== 'number' ||
       !Number.isInteger(fontSize) ||
@@ -67,7 +69,7 @@ export function parseAgreementPayload(value: unknown): AgreementPayload | null {
       return null;
     }
 
-    const align = candidate.align ?? ALIGN_JUSTIFY;
+    const align = Object.hasOwn(candidate, 'align') ? candidate.align : ALIGN_JUSTIFY;
     if (align !== ALIGN_CENTER && align !== ALIGN_JUSTIFY) {
       return null;
     }
@@ -83,7 +85,7 @@ export function parseAgreementPayload(value: unknown): AgreementPayload | null {
       if (typeof runCandidate.text !== 'string') {
         return null;
       }
-      const bold = runCandidate.bold ?? false;
+      const bold = Object.hasOwn(runCandidate, 'bold') ? runCandidate.bold : false;
       if (typeof bold !== 'boolean') {
         return null;
       }

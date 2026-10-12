@@ -59,6 +59,12 @@ describe('协议响应校验', () => {
     { ...VALID_PAYLOAD, blocks: [{ font_size: 16, align: 'left', runs: [{ text: '正文' }] }] },
     { ...VALID_PAYLOAD, blocks: [{ font_size: 33, align: 'justify', runs: [{ text: '正文' }] }] },
     { ...VALID_PAYLOAD, blocks: [{ font_size: 16, align: 'justify', runs: [] }] },
+    { ...VALID_PAYLOAD, blocks: [{ font_size: null, align: 'justify', runs: [{ text: '正文' }] }] },
+    { ...VALID_PAYLOAD, blocks: [{ font_size: 16, align: null, runs: [{ text: '正文' }] }] },
+    {
+      ...VALID_PAYLOAD,
+      blocks: [{ font_size: 16, align: 'justify', runs: [{ text: '正文', bold: null }] }],
+    },
     {
       ...VALID_PAYLOAD,
       blocks: [{ font_size: 16, align: 'justify', runs: [{ text: '正文', bold: 'yes' }] }],
