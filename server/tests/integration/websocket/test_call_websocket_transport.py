@@ -525,3 +525,53 @@ def test_hub_unregister_requires_expected_session_and_closes_registered_state():
             assert getattr(error, "code", None) == "TRANSPORT_CLOSED"
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", ["cursor", "send"])
+def test_failed_resume_handshake_releases_owner_for_correct_retry(monkeypatch, failure):
+    from starlette.websockets import WebSocketDisconnect
+
+    configured_runtime, _, _ = enabled_test_runtime()
+    configured_runtime.call_transport_hub._resume_release_wait_seconds = 0.01
+    original_send = call_endpoint._send_bound_outputs
+    fail_send = failure == "send"
+
+    async def send_once_failed(*args, **kwargs):
+        nonlocal fail_send
+        if fail_send:
+            fail_send = False
+            raise RuntimeError("injected handshake send failure")
+        return await original_send(*args, **kwargs)
+
+    monkeypatch.setattr(call_endpoint, "_send_bound_outputs", send_once_failed)
+    with TestClient(app_for(monkeypatch, configured_runtime)) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/call_ws") as websocket:
+                auth(websocket)
+                resume(websocket, 1 if failure == "cursor" else 0)
+        with client.websocket_connect("/call_ws") as websocket:
+            auth(websocket)
+            assert resume(websocket)["type"] == "call.resumed"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_handshake_releases_owner_without_touching_new_generation():
+    configured_runtime, session, _ = enabled_test_runtime()
+    hub = configured_runtime.call_transport_hub
+    binding = await hub.attach_start(session, user_id="user-1", connection_id=object())
+    entered = asyncio.Event()
+
+    async def handshake():
+        async with call_endpoint._handshake_ownership(hub, binding, None, None):
+            entered.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(handshake())
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    replacement = await hub.attach_start(session, user_id="user-1", connection_id=object())
+    assert not await hub.detach(binding)
+    assert hub.is_current(replacement)
+    await hub.detach(replacement)

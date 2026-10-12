@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -107,18 +108,18 @@ async def _authenticate_and_attach(
         binding = await runtime.call_transport_hub.attach_resume(
             raw, user_id=connection.user_uuid or "", connection_id=connection
         )
-        _require_current(runtime.call_transport_hub, binding)
-        await _send_bound_outputs(
-            websocket, runtime.call_transport_hub, binding, await binding.session.receive_text(raw)
-        )
         manager = getattr(runtime, "stage_manager", None)
         stage = manager.current_call_stage(binding.session.call_id) if manager is not None else None
-        if stage is not None and not await stage.resume():
-            await runtime.call_transport_hub.detach(binding)
-            raise CallTransportError("CALL_RESUME_UNAVAILABLE", close_code=1008)
         bridge = binding.session.business_sink
         output_queue = bridge.output_queue if isinstance(bridge, CallStageBinding) else None
-        return binding, stage, output_queue or asyncio.Queue()
+        async with _handshake_ownership(runtime.call_transport_hub, binding, stage, output_queue):
+            _require_current(runtime.call_transport_hub, binding)
+            await _send_bound_outputs(
+                websocket, runtime.call_transport_hub, binding, await binding.session.receive_text(raw)
+            )
+            if stage is not None and not await stage.resume():
+                raise CallTransportError("CALL_RESUME_UNAVAILABLE", close_code=1008)
+            return binding, stage, output_queue or asyncio.Queue()
     if message["type"] != "call.start" or int(message["seq"]) != 1:
         raise CallTransportError("CALL_START_REQUIRED", close_code=1002)
     stage_manager = getattr(runtime, "stage_manager", None)
@@ -159,11 +160,13 @@ async def _authenticate_and_attach(
         if session is None:
             raise CallTransportError("CALL_TRANSPORT_MISSING")
         binding = await runtime.call_transport_hub.attach_start(session, user_id=user_id, connection_id=connection)
-        await _send_bound_outputs(websocket, runtime.call_transport_hub, binding, await session.receive_start(raw))
         bridge = session.business_sink
-        if not isinstance(bridge, CallStageBinding) or bridge.output_queue is None:
-            raise CallTransportError("CALL_BINDING_UNAVAILABLE", close_code=1013)
-        return binding, existing, bridge.output_queue
+        output_queue = bridge.output_queue if isinstance(bridge, CallStageBinding) else None
+        async with _handshake_ownership(runtime.call_transport_hub, binding, existing, output_queue):
+            await _send_bound_outputs(websocket, runtime.call_transport_hub, binding, await session.receive_start(raw))
+            if output_queue is None:
+                raise CallTransportError("CALL_BINDING_UNAVAILABLE", close_code=1013)
+            return binding, existing, output_queue
     outputs: asyncio.Queue[CallWireOutput] = asyncio.Queue()
 
     async def deliver(output: object) -> None:
@@ -229,9 +232,41 @@ async def _authenticate_and_attach(
             )
         )
         raise
-    _require_current(runtime.call_transport_hub, binding)
-    await _send_bound_outputs(websocket, runtime.call_transport_hub, binding, await binding.session.receive_start(raw))
-    return binding, stage, outputs
+    async with _handshake_ownership(runtime.call_transport_hub, binding, stage, outputs):
+        _require_current(runtime.call_transport_hub, binding)
+        await _send_bound_outputs(
+            websocket, runtime.call_transport_hub, binding, await binding.session.receive_start(raw)
+        )
+        return binding, stage, outputs
+
+
+@asynccontextmanager
+async def _handshake_ownership(hub, binding, stage, outputs):
+    """Release an attachment if the handshake never transfers it to call_ws."""
+    try:
+        yield
+    except BaseException:
+        if stage is not None:
+            # A newly created Stage must also release its session after recovery
+            # expires, even when its first ACK never reached the physical socket.
+            if outputs is not None:
+                hub.own_task(
+                    _release_terminal_session(hub, binding.session, stage, outputs),
+                    name="call-handshake-release",
+                )
+            await complete_owned(_disconnect_failed_handshake(hub, binding, stage))
+        else:
+            await complete_owned(hub.detach(binding))
+        raise
+
+
+async def _disconnect_failed_handshake(hub, binding, stage):
+    try:
+        if hub.is_current(binding):
+            await stage.disconnect()
+    finally:
+        # detach checks generation again, including if Stage cleanup failed.
+        await hub.detach(binding)
 
 
 async def _send_pump(

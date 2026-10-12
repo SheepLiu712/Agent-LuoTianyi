@@ -965,7 +965,10 @@ class CallStage:
     async def _transport_send(self, operation: Awaitable[None]) -> None:
         try:
             await operation
-        except BaseException:
+        except asyncio.CancelledError:
+            # Interruption and shutdown cancel owned output; neither is a wire failure.
+            raise
+        except Exception:
             if self._lifecycle.snapshot.has_connected and self._final is None:
                 self._request_transport_abort()
             raise
