@@ -33,7 +33,7 @@ describe('recording and playback through chat, processor and native voice manage
   const injectJavaScript = jest.fn();
   const webview = { current: { injectJavaScript } } as any;
   const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
-  function Harness() { state = useChatLogic(webview, 'user', 'token'); return null; }
+  function Harness() { state = useChatLogic(webview, 'user', 'token', 'luotianyi'); return null; }
   const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
   beforeEach(async () => {
     await voicePlaybackManager.clear();
@@ -46,7 +46,7 @@ describe('recording and playback through chat, processor and native voice manage
     (Audio.Sound as unknown as jest.Mock).mockImplementation(() => sound);
     (voiceRecorder.start as jest.Mock).mockResolvedValue({ recordingId: 'recording', localUri: 'file://recording.m4a' });
     (NetworkClient as jest.Mock).mockImplementation(() => ({
-      connectWs: jest.fn((_user, _token, callbacks) => { incoming = callbacks.onAgentMessage; }),
+      connectWs: jest.fn((_user, _token, _character, callbacks) => { incoming = callbacks.onAgentMessage; }),
       disconnectWs: jest.fn(), sendVoicePhase: jest.fn().mockResolvedValue({ ok: true, message_uuid: 'server-recording' }),
       sendVoiceRecordingStarted: jest.fn(), sendVoiceRecordingCancelled: jest.fn(),
     }));

@@ -74,7 +74,9 @@ export type CallEvent =
   | { type: 'transport_resumed'; nowMs: number }
   | { type: 'recovery_timeout' }
   | { type: 'declined' }
-  | { type: 'call_ended'; nowMs: number };
+  | { type: 'call_ended'; nowMs: number }
+  | { type: 'return_to_chat' }
+  | { type: 'reset_to_idle' };
 
 export interface CallTransition {
   state: CallState;

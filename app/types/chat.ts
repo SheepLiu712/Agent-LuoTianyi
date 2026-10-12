@@ -1,4 +1,4 @@
-export type MessageType = 'text' | 'image' | 'audio' | 'sing' | 'system';
+export type MessageType = 'text' | 'image' | 'audio' | 'sing' | 'system' | 'call';
 export type SendStatus = 'waiting' | 'submitted' | 'failed';
 export type AudioPlayState = 'idle' | 'playing';
 export type AudioDownloadState = 'idle' | 'loading' | 'ready' | 'failed';
@@ -16,6 +16,7 @@ export interface ChatMessage {
   audioPlayState?: AudioPlayState;
   durationMs?: number;
   audioDownloadState?: AudioDownloadState;
+  callOutcome?: 'connected' | 'cancelled' | 'declined' | 'failed' | 'remote_ended';
 }
 
 export interface AgentMessagePayload {
