@@ -32,6 +32,36 @@ describe('call lifecycle state skeleton', () => {
     expect(ready.effects).toEqual([{ type: 'close_chat' }, { type: 'open_call' }]);
   });
 
+  it('fails a switch before opening the call transport and returns to chat', () => {
+    const switching = reduce([
+      { type: 'audio_capability', capability: 'available' },
+      { type: 'request_call', requiresChatSwitch: true, clientRequestId: 'request-1' },
+      { type: 'permission_granted' },
+    ]);
+
+    expect(reduceCallState(switching.state, { type: 'switch_failed' })).toEqual({
+      state: { ...switching.state, phase: 'FAILED', endReason: 'failed' },
+      effects: [{ type: 'return_to_chat' }],
+    });
+  });
+
+  it('cleans up an authenticated transport failure without opening a call', () => {
+    const connecting = reduce([
+      { type: 'audio_capability', capability: 'available' },
+      { type: 'request_call', requiresChatSwitch: false, clientRequestId: 'request-1' },
+      { type: 'permission_granted' },
+    ]);
+
+    expect(reduceCallState(connecting.state, { type: 'transport_auth_failed' })).toEqual({
+      state: { ...connecting.state, phase: 'FAILED', endReason: 'failed', endedActiveDurationMs: 0 },
+      effects: [
+        { type: 'stop_capture' },
+        { type: 'stop_playback' },
+        { type: 'return_to_chat' },
+      ],
+    });
+  });
+
   it('returns to chat on permission denial without creating a call', () => {
     const requested = reduce([
       { type: 'audio_capability', capability: 'available' },
