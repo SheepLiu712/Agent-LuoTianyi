@@ -166,6 +166,30 @@ def test_delete_user_records_legacy_backend_keeps_resuming_partial_deletes():
     assert collection.page_sizes[-1] == 0
 
 
+def test_delete_user_records_detects_alternating_stale_pages_without_a_reported_count():
+    """旧后端在 A→B→A 之间交替返回陈旧页时也必须终止，而不是无限重放。"""
+
+    class _Alternating:
+        MAX_GET_CALLS = 8
+
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *, where, limit, include=None):
+            self.calls += 1
+            if self.calls > self.MAX_GET_CALLS:
+                raise AssertionError("pagination did not terminate")
+            return {"ids": ["doc-1"] if self.calls % 2 else ["doc-2"]}
+
+        def delete(self, *, ids):
+            return None
+
+    store = _store(_Alternating())
+
+    with pytest.raises(RuntimeError, match="made no progress"):
+        store.delete_user_records("user-1")
+
+
 def test_delete_user_records_contract_against_real_chroma():
     """用真实 chromadb 校验 get(where, limit, include)/delete(ids) 契约与多页删除（单页上限 1000）。"""
     import chromadb
