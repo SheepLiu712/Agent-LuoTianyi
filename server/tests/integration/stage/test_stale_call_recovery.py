@@ -9,18 +9,34 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.application.call.recovery import (
+from src.domain.call import (
+    CallContent,
+    CallEndReason,
+    CallOutcome,
+    CallState,
+    derive_call_conversation_id,
+)
+from src.domain.conversation_type import ConversationItem
+from src.infrastructure.persistence.call_sessions import (
+    CallSessionRecord,
+    SettlementStatus,
+    SqlCallSessionRepository,
+)
+from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
+from src.infrastructure.persistence.database.services.conversation_service import (
+    ConversationService,
+)
+from src.infrastructure.persistence.database.services.user_store import UserStore
+from src.infrastructure.persistence.database.sql_database import (
+    Base,
+    Conversation,
+    User,
+)
+from src.stage.call_settlement.recovery import (
     INTERRUPTED_CALL_SUMMARY,
     StaleCallRecoveryService,
     recovery_settlement_digest,
 )
-from src.domain.call import CallContent, CallEndReason, CallOutcome, CallState, derive_call_conversation_id
-from src.domain.conversation_type import ConversationItem
-from src.infrastructure.persistence.call_sessions import CallSessionRecord, SettlementStatus, SqlCallSessionRepository
-from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
-from src.infrastructure.persistence.database.services.conversation_service import ConversationService
-from src.infrastructure.persistence.database.services.user_store import UserStore
-from src.infrastructure.persistence.database.sql_database import Base, Conversation, User
 
 
 class _Batches:

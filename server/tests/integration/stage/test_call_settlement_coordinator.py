@@ -4,9 +4,14 @@ from uuid import uuid4
 
 import pytest
 
-from src.application.call import CallSettlementCoordinator
 from src.application.user.reset_fence import UserResetFence
-from src.domain.call import CallEndReason, CallFinalSnapshot, CallOutcome, CallTerminalFacts
+from src.domain.call import (
+    CallEndReason,
+    CallFinalSnapshot,
+    CallOutcome,
+    CallTerminalFacts,
+)
+from src.stage.call_settlement import CallSettlementCoordinator
 
 
 def _snapshot(call_id):

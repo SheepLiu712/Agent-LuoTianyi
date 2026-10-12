@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from src.application.call import get_call_capability
 from src.application.user.account import PasswordDecryptionError, decrypt_password, generate_keys, get_public_key_pem
+from src.application.user.call_capability import get_call_capability
 from src.application.user.user_conversation_helper import UserConversationHelper
 from src.domain.agent import MediaRef
 from src.infrastructure.media import MediaResolutionError, MediaResolver

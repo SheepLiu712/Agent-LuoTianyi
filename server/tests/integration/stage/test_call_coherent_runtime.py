@@ -18,14 +18,22 @@ from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 import src.agent.skills.expression.speaking.backend as speaking_backend
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.call_v1 import BinaryAudioFrameCodec, CallStageBinding, CallTransportSession
+from src.adapter.websocket.call_v1 import (
+    BinaryAudioFrameCodec,
+    CallStageBinding,
+    CallTransportSession,
+)
 from src.agent_runtime import agent_runtime as runtime_module
-from src.application.call import CallSettlementCoordinator
 from src.domain.call import CallAudioSemantic, CallEndReason, CallState
-from src.infrastructure.models.realtime_speech import SpeechStarted, SpeechStopped, TurnCompleted
+from src.infrastructure.models.realtime_speech import (
+    SpeechStarted,
+    SpeechStopped,
+    TurnCompleted,
+)
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage import CallStage, StageManager
+from src.stage.call_settlement import CallSettlementCoordinator
 
 
 async def _eventually(predicate, timeout=2.0):

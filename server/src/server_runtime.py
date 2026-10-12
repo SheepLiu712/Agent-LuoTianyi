@@ -9,7 +9,6 @@ from src.adapter.websocket.call_v1 import CallStageBinding, CallTransportHub, pa
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
-from src.application.call import CallSettlementConsumerImpl, CallSettlementCoordinator, StaleCallRecoveryService
 from src.application.host_context import ServerHostContext
 from src.application.user import UserResetFence, UserResetInteractionCoordinator, UserResetService
 from src.domain.stage import StageState
@@ -21,6 +20,7 @@ from src.infrastructure.persistence.call_maintenance_projection import CallMaint
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
+from src.stage.call_settlement import CallSettlementConsumerImpl, CallSettlementCoordinator, StaleCallRecoveryService
 from src.utils.logger import (
     get_logger,
     install_observability_log_handler,

@@ -13,7 +13,6 @@ from support.call_coherent_runtime import (
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
 from src.agent_runtime import agent_runtime as runtime_module
-from src.application.call import CallSettlementConsumerImpl, CallSettlementCoordinator
 from src.application.user.user_conversation_helper import UserConversationHelper
 from src.domain.call import (
     CallEndReason,
@@ -25,10 +24,21 @@ from src.domain.call import (
     CallTerminalFacts,
     derive_call_conversation_id,
 )
-from src.infrastructure.persistence.call_sessions import CallSessionRecord, SettlementStatus
+from src.infrastructure.persistence.call_sessions import (
+    CallSessionRecord,
+    SettlementStatus,
+)
 from src.infrastructure.persistence.database import DatabaseManager
-from src.infrastructure.persistence.database.sql_database import CallMaintenanceBatch, Conversation, User
-from src.stage.call_settlement import CallAgentSettlement
+from src.infrastructure.persistence.database.sql_database import (
+    CallMaintenanceBatch,
+    Conversation,
+    User,
+)
+from src.stage.call_settlement import (
+    CallAgentSettlement,
+    CallSettlementConsumerImpl,
+    CallSettlementCoordinator,
+)
 
 
 @pytest.mark.asyncio
@@ -344,7 +354,9 @@ async def test_scoped_call_lookup_rejects_wrong_owner_and_character(tmp_path):
             },
         ),
     )
-    from src.infrastructure.persistence.database.services.conversation_service import ConversationIdentityConflict
+    from src.infrastructure.persistence.database.services.conversation_service import (
+        ConversationIdentityConflict,
+    )
 
     with pytest.raises(ConversationIdentityConflict):
         database.conversation_service.get_call_conversation(
