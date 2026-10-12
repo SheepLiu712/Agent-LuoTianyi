@@ -188,14 +188,16 @@ class AliyunRealtimeSpeechSession:
             raise RuntimeError("realtime speech session is unavailable")
         put_task = asyncio.create_task(self._writes.put(message))
         close_task = asyncio.create_task(self._closed_event.wait())
-        done, _ = await asyncio.wait({put_task, close_task}, return_when=asyncio.FIRST_COMPLETED)
-        if close_task in done:
-            put_task.cancel()
-            await asyncio.gather(put_task, return_exceptions=True)
-            raise RuntimeError("realtime speech session is unavailable")
-        close_task.cancel()
-        await asyncio.gather(close_task, return_exceptions=True)
-        await put_task
+        try:
+            done, _ = await asyncio.wait({put_task, close_task}, return_when=asyncio.FIRST_COMPLETED)
+            if close_task in done:
+                raise RuntimeError("realtime speech session is unavailable")
+            await put_task
+        finally:
+            for task in (put_task, close_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(put_task, close_task, return_exceptions=True)
 
     async def _emit(self, event: RealtimeSpeechEvent) -> None:
         async with self._event_condition:

@@ -309,7 +309,8 @@ class ServerRuntime:
             enabled=self._call_transport_requested,
             trusted_host=self._host_context.supports_single_process_calls,
             provider_ready=bool(self.realtime_speech_factory and self.realtime_speech_factory.is_configured),
-            call_tts_ready=speaking.supports_call_audio(character_id),
+            call_tts_ready=speaking.supports_call_audio(character_id)
+            and self.agent_runtime.skills.prepared_speech.supports_call_apology(character_id),
             summary_ready=summary.supports_character(character_id),
             settlement_ready=bool(self.call_settlement_coordinator and self.call_settlement_coordinator.is_ready),
             stage_binding_ready=isinstance(self.stage_manager, StageManager)

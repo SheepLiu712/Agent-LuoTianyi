@@ -45,6 +45,34 @@ async def started_session(socket=None, **config_overrides):
 
 
 @pytest.mark.asyncio
+async def test_cancelled_backpressured_audio_releases_owned_queue_waiters():
+    baseline = asyncio.all_tasks()
+    session, socket = await started_session(write_queue_size=1)
+    socket.release_sends.clear()
+    frame = AudioFrame(b"\x00\x01", "pcm_s16le", 16_000, 1, sequence=1)
+    await session.push_audio(frame)
+    await session.push_audio(frame)
+    blocked = asyncio.create_task(session.push_audio(frame))
+    try:
+        for _ in range(100):
+            if session._writes._putters:
+                break
+            await asyncio.sleep(0)
+        assert session._writes._putters
+        blocked.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocked
+        await session.close()
+        await asyncio.sleep(0)
+        assert not session._writes._putters
+        assert not [task for task in asyncio.all_tasks() - baseline if not task.done()]
+    finally:
+        blocked.cancel()
+        await asyncio.gather(blocked, return_exceptions=True)
+        await session.close()
+
+
+@pytest.mark.asyncio
 async def test_real_adapter_handshake_and_pcm_base64_schema():
     session, socket = await started_session()
     payload = b"\x00\x01\x02\x03"

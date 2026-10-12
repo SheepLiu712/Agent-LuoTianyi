@@ -128,10 +128,12 @@ class _ResponseRegistration:
     response_id: str
     stream_id: int
     first_seq: int
+    last_seq: int
     encoding: str
     sample_rate: int
     channels: int
     final_seen: bool = False
+    contiguous: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,15 +237,14 @@ class CallTransportSession:
         registration = self._streams.get(stream_id)
         if registration is None or registration.response_id != response_id:
             raise CallTransportError("UNREGISTERED_STREAM")
-        through = max(
-            (
-                seq
-                for seq, entry in self._replay.items()
-                if entry.response_id == response_id and entry.stream_id == stream_id and entry.retired_by is None
-            ),
-            default=registration.first_seq,
-        )
-        return registration.first_seq, through
+        return registration.first_seq, registration.last_seq
+
+    def stopped_stream(self, response_id: str, stop_seq: int) -> int:
+        """Resolve the already validated stop receipt independently of pending playback."""
+        stop = self._stop_metadata.get(stop_seq)
+        if stop is None or stop.response_id != response_id:
+            raise CallTransportError("INVALID_PLAYBACK_STOP_CONFIRMATION")
+        return stop.stream_id
 
     async def receive_text(self, raw: str) -> list[CallWireOutput]:
         self._require_open()
@@ -393,6 +394,7 @@ class CallTransportSession:
                 response_id=response_id,
                 stream_id=stream_id,
                 first_seq=seq,
+                last_seq=seq,
                 encoding=audio_format[0],
                 sample_rate=audio_format[1],
                 channels=audio_format[2],
@@ -427,6 +429,8 @@ class CallTransportSession:
             stream_id=registration.stream_id,
             audio_payload_bytes=len(frame.payload),
         )
+        registration.contiguous = registration.contiguous and frame.seq == registration.last_seq + 1
+        registration.last_seq = frame.seq
         self._response_audio_bytes[registration.response_id] += len(frame.payload)
         self._record_metric(
             CallMetricName.BUFFER,
@@ -509,7 +513,9 @@ class CallTransportSession:
         registration = self._streams.get(stream_id)
         if registration is None or registration.response_id != response_id or registration.first_seq != start:
             raise CallTransportError("INVALID_RETIRE_RANGE")
-        for seq in range(start, through + 1):
+        if through > registration.last_seq or not registration.contiguous:
+            raise CallTransportError("INVALID_RETIRE_RANGE")
+        for seq in range(max(start, self._server_ack_cursor + 1), through + 1):
             entry = self._replay.get(seq)
             if entry is None or entry.response_id != response_id or entry.stream_id != stream_id:
                 raise CallTransportError("INVALID_RETIRE_RANGE")
@@ -522,7 +528,7 @@ class CallTransportSession:
         assert isinstance(retired, dict)
         start, through, stop_seq = int(retired["from"]), int(retired["through"]), int(message["seq"])
         stop_bytes = len(output.text.encode("utf-8"))
-        retired_bytes = sum(self._replay[seq].byte_size for seq in range(start, through + 1))
+        retired_bytes = sum(entry.byte_size for seq, entry in self._replay.items() if start <= seq <= through)
         if self._replay_bytes - retired_bytes + stop_bytes > self._config.max_replay_bytes:
             self._replay_capacity_event.clear()
             raise CallTransportBackpressure("REPLAY_BUFFER_FULL")
@@ -547,7 +553,7 @@ class CallTransportSession:
         retired = message["retire_server_seq"]
         assert isinstance(retired, dict)
         start, through, stop_seq = int(retired["from"]), int(retired["through"]), int(message["seq"])
-        for seq in range(start, through + 1):
+        for seq in range(max(start, self._server_ack_cursor + 1), through + 1):
             entry = self._replay[seq]
             self._replay_bytes -= entry.byte_size
             self._release_response_audio(entry)

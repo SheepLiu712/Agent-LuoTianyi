@@ -51,6 +51,7 @@ async def call_ws(websocket: WebSocket) -> None:  # noqa: C901 - lifecycle bound
     connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     binding: CallTransportBinding | None = None
     send_task: asyncio.Task[None] | None = None
+    receive_task: asyncio.Task[None] | None = None
     output_queue: asyncio.Queue[CallWireOutput] | None = None
     stage = None
     try:
@@ -64,7 +65,12 @@ async def call_ws(websocket: WebSocket) -> None:  # noqa: C901 - lifecycle bound
                     _release_terminal_session(runtime.call_transport_hub, binding.session, stage, output_queue),
                     name="call-transport-release",
                 )
-            await _receive_call_frames(websocket, runtime.call_transport_hub, binding)
+            receive_task = asyncio.create_task(
+                _receive_call_frames(websocket, runtime.call_transport_hub, binding), name="call-ws-receive"
+            )
+            done, _ = await asyncio.wait((send_task, receive_task), return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected from /call_ws")
     except CallTransportError as error:
@@ -74,9 +80,11 @@ async def call_ws(websocket: WebSocket) -> None:  # noqa: C901 - lifecycle bound
         logger.error("Call WebSocket failed type=%s", type(error).__name__)
         await websocket.close(code=1011, reason="internal call transport error")
     finally:
-        if send_task is not None:
-            send_task.cancel()
-            await asyncio.gather(send_task, return_exceptions=True)
+        tasks = tuple(task for task in (send_task, receive_task) if task is not None)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if binding is not None:
             if stage is not None:
                 await runtime.call_transport_hub.detach_after_disconnect(binding, stage.disconnect)

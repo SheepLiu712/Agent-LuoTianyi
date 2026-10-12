@@ -12,6 +12,7 @@ from src.adapter.websocket.call_v1 import (
     CallStageBinding,
     CallTransportHub,
     CallTransportSession,
+    CallWireOutput,
     InboundCallFrame,
     WireAudioFrame,
 )
@@ -575,3 +576,60 @@ async def test_cancelled_handshake_releases_owner_without_touching_new_generatio
     assert not await hub.detach(binding)
     assert hub.is_current(replacement)
     await hub.detach(replacement)
+
+
+@pytest.mark.asyncio
+async def test_send_failure_wakes_idle_receive_and_releases_stage_for_resume(monkeypatch):
+    configured_runtime, session, _ = enabled_test_runtime()
+    hub = configured_runtime.call_transport_hub
+    binding = await hub.attach_start(session, user_id="user-1", connection_id=object())
+    receive_started = asyncio.Event()
+    receive_cancelled = asyncio.Event()
+    disconnected = asyncio.Event()
+    outputs = asyncio.Queue()
+    await outputs.put(CallWireOutput(text="queued-output"))
+
+    class Socket:
+        close_code = None
+
+        async def accept(self):
+            pass
+
+        async def receive(self):
+            receive_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                receive_cancelled.set()
+
+        async def send_text(self, text):
+            await receive_started.wait()
+            raise RuntimeError("injected physical send failure")
+
+        async def close(self, *, code, reason):
+            self.close_code = code
+
+    class Stage:
+        async def disconnect(self):
+            disconnected.set()
+
+        async def wait_closed(self):
+            await asyncio.Event().wait()
+
+    async def attach(*args):
+        return binding, Stage(), outputs
+
+    app_for(monkeypatch, configured_runtime)
+    monkeypatch.setattr(call_endpoint, "_authenticate_and_attach", attach)
+    socket = Socket()
+    try:
+        await asyncio.wait_for(call_endpoint.call_ws(socket), 1)
+        assert socket.close_code == 1011
+        assert receive_cancelled.is_set()
+        assert disconnected.is_set()
+        assert not hub.is_current(binding)
+        replacement = await hub.attach_start(session, user_id="user-1", connection_id=object())
+        assert hub.is_current(replacement)
+        await hub.detach(replacement)
+    finally:
+        await hub.close()

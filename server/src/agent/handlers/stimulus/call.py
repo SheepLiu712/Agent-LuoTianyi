@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import src.domain.agent as d
@@ -13,6 +14,7 @@ from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.invocation import handling_invocation
 from src.domain.call import AckStyle, CallAnswerDecision, CallAudioRoute, CallEndReason, CallSpeechDelivery, RecallMode
 from src.utils.enum_type import ConversationSource
+from src.utils.logger import get_logger
 
 _ACK_TEXT = {
     AckStyle.THINKING: "嗯，让我想想。",
@@ -96,13 +98,18 @@ class CallStartedHandler:
         stimulus = request.stimulus
         if not isinstance(stimulus, d.CallStarted):
             raise TypeError("CallStartedHandler requires CallStarted")
-        drafts = await self._replies.generate(
+        drafts = await _generate_reply(
+            self._replies,
+            plans,
+            request,
             handling_invocation(request, plans.context),
             reply_topic="实时语音通话刚刚接通，请用一句简短自然的话向用户打招呼",
             user_context=plans.context.user.read(),
             conversation_history=render_conversation_history(plans.context.conversation.read()),
             memory_pool=(),
         )
+        if drafts is None:
+            return _failed_report(request, plans)
         await _append_agent_entries(plans, "opening", drafts, request)
         await _emit_formal(plans, request, drafts, prefix="opening")
         return _with_emitted(request, plans)
@@ -142,13 +149,18 @@ class CallTurnCompletedHandler:
                 call_id=stimulus.call_id,
                 queries=decision.memory_queries,
             )
-        drafts = await self._replies.generate(
+        drafts = await _generate_reply(
+            self._replies,
+            plans,
+            request,
             invocation,
             reply_topic=semantic,
             user_context=plans.context.user.read(),
             conversation_history=history,
             memory_pool=memory_pool,
         )
+        if drafts is None:
+            return _failed_report(request, plans)
         await _append_formal_reply(plans, stimulus.turn_seq, drafts, request)
         await _emit_formal(plans, request, drafts, prefix=f"turn-{stimulus.turn_seq}")
         return _with_emitted(request, plans)
@@ -178,13 +190,18 @@ class CallSilenceElapsedHandler:
             if decision is SilenceDecision.SPEAK
             else "请用一句自然简短的告别结束这次实时语音通话"
         )
-        drafts = await self._replies.generate(
+        drafts = await _generate_reply(
+            self._replies,
+            plans,
+            request,
             invocation,
             reply_topic=topic,
             user_context=plans.context.user.read(),
             conversation_history=history,
             memory_pool=self._recall.pool_texts(stimulus.call_id),
         )
+        if drafts is None:
+            return _failed_report(request, plans)
         await _append_agent_entries(plans, "silence", drafts, request)
         actions = tuple(
             _call_say(request, draft, suffix=f"silence-{index}", provisional=False)
@@ -301,4 +318,44 @@ def _with_emitted(request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.Han
         emitted_plan_ids=tuple(plans.accepted_ids),
         error_code=None,
         retryable=False,
+    )
+
+
+async def _generate_reply(skill, plans, request, invocation, **kwargs):
+    try:
+        drafts = await skill.generate(invocation, **kwargs)
+        if not drafts:
+            raise ValueError("empty call reply")
+        return drafts
+    except Exception as error:
+        get_logger(__name__).warning(
+            "Call reply generation failed request_id={} error_type={}", request.request_id, type(error).__name__
+        )
+        if request.cancellation.is_cancelled:
+            return None
+        apology = d.Say(
+            action_id=f"{request.request_id}-apology",
+            content="",
+            sound_content=None,
+            prepared_audio_ref=d.MediaRef(media_id="call_apology"),
+            tone=d.Tone(value="normal"),
+            expression=None,
+            delivery=d.OutputDelivery.EPHEMERAL_REACTION,
+            call_delivery=CallSpeechDelivery(
+                audio_route=CallAudioRoute.CALL,
+                display_in_chat=False,
+                is_ephemeral=True,
+                provisional=True,
+                response_id=f"{request.request_id}-apology",
+            ),
+        )
+        await plans.emit(ActionPlanDraft(source_stimulus_ids=(request.stimulus.stimulus_id,), actions=(apology,)))
+        return None
+
+
+def _failed_report(request, plans):
+    return replace(
+        _with_emitted(request, plans),
+        request_status=d.HandlingRequestStatus.FAILED,
+        error_code=d.HandlingErrorCode.INTERNAL_ERROR,
     )

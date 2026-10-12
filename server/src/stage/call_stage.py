@@ -13,7 +13,7 @@ import math
 import time
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
@@ -88,6 +88,11 @@ class CallStateChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class CallReplyFailed:
+    call_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class CallOutput:
     output: d.AgentOutput
 
@@ -117,6 +122,8 @@ class _Response:
     failed: bool = False
     settled: asyncio.Event | None = None
     audio_started_at: float | None = None
+    formal_text: str | None = None
+    request_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +219,8 @@ class CallStage:
         self._playback = CallPlaybackCoordinator(monotonic=monotonic)
         self._revision = 0
         self._turns: dict[int, _Turn] = {}
+        self._reply_failures = 0
+        self._failed_reply_requests: set[str] = set()
         self._unfinished_turns: set[int] = set()
         self._request_turn: dict[str, int | None] = {}
         self._started = False
@@ -502,7 +511,15 @@ class CallStage:
         )
         sink = _PlanSink(self, request_id, token, turn_seq)
         try:
-            await self._agent.handle_stimulus(request, sink, context=self._context)
+            report = await self._agent.handle_stimulus(request, sink, context=self._context)
+            if (
+                isinstance(stimulus, (d.CallTurnCompleted, d.CallStarted, d.CallSilenceElapsed))
+                and report.request_status is d.HandlingRequestStatus.FAILED
+                and not token.is_cancelled
+            ):
+                if turn_seq is not None:
+                    self._turns[turn_seq].status = CallReplyStatus.FAILED
+                self._record_reply_failure(request_id)
         finally:
             self._request_tokens.discard(token)
             if turn_seq is not None and not sink.ids:
@@ -521,6 +538,7 @@ class CallStage:
                     provisional=action.call_delivery.provisional,
                     generation=self._generation,
                     settled=asyncio.Event(),
+                    request_id=plan.origin_request_id,
                 )
         self._plans.append(_QueuedPlan(plan, token, turn_seq, barriers))
         if self._realize_task is None or self._realize_task.done():
@@ -553,7 +571,9 @@ class CallStage:
             )
             await self._realize_plan(queued.plan, turn_seq)
 
-    async def _realize_plan(self, plan: d.ActionPlan, turn_seq: int | None) -> None:
+    async def _realize_plan(
+        self, plan: d.ActionPlan, turn_seq: int | None, *, retried: frozenset[str] = frozenset()
+    ) -> None:
         answer = next((action for action in plan.actions if isinstance(action, d.AnswerCall)), None)
         if answer is not None:
             await self._apply_answer(answer)
@@ -577,12 +597,15 @@ class CallStage:
             call_output_permit=_CallOutputPermit(self, response_ids, self._generation),
             call_maintenance_snapshot=self._maintenance_snapshot(),
         )
-        if turn_seq is not None and turn_seq in self._turns:
+        if (
+            turn_seq is not None
+            and turn_seq in self._turns
+            and any(isinstance(action, d.Say) and not action.call_delivery.provisional for action in plan.actions)
+        ):
             self._turns[turn_seq].status = CallReplyStatus.NOT_STARTED
         try:
             report = await self._agent.realize_action_plan(plan, context, _OutputSink(self, context, turn_seq))
-            if turn_seq is not None and report.status is not d.ExecutionStatus.COMPLETED:
-                self._turns[turn_seq].status = CallReplyStatus.FAILED
+            await self._handle_plan_result(plan, report, turn_seq, execution_token, retried, response_ids)
         except asyncio.CancelledError:
             if turn_seq is not None:
                 self._turns[turn_seq].status = CallReplyStatus.INTERRUPTED
@@ -597,6 +620,87 @@ class CallStage:
                 self._finish_user_turn(turn_seq)
             self._refresh_silence_task()
             self._finish_pending_end_if_ready()
+
+    async def _handle_plan_result(self, plan, report, turn_seq, token, retried, response_ids):
+        if report.status is d.ExecutionStatus.FAILED and not token.is_cancelled:
+            retry = self._retry_say_plan(plan, report, turn_seq, retried)
+            if retry is not None:
+                await self._realize_plan(retry, turn_seq, retried=retried | {retry.actions[0].action_id})
+                return
+            if any(isinstance(action, d.Say) for action in plan.actions):
+                await self._transport_send(self._transport.send_state(CallReplyFailed(self._ownership.call_id)))
+                self._record_reply_failure(plan.origin_request_id)
+                self._retire_unrealized_responses(response_ids)
+            if turn_seq is not None:
+                self._turns[turn_seq].status = CallReplyStatus.FAILED
+
+    def _record_reply_failure(self, request_id: str) -> None:
+        if request_id in self._failed_reply_requests:
+            return
+        self._failed_reply_requests.add(request_id)
+        self._reply_failures += 1
+        if self._reply_failures >= 2:
+            task = self._track(
+                asyncio.create_task(self.terminate(CallEndReason.SYSTEM_FAILURE), name="call-reply-failed")
+            )
+            task.add_done_callback(self._observe_task)
+
+    def _retire_unrealized_responses(self, response_ids) -> None:
+        for response_id in response_ids:
+            response = self._responses[response_id]
+            if response.stream_id is None and not response.message_completed:
+                response.failed = True
+                self._tombstones.add(response_id)
+                response.settled.set()
+
+    def _retry_say_plan(self, plan, report, turn_seq, retried):
+        failed = next(
+            (result for result in report.action_results if result.status is d.ActionExecutionStatus.FAILED), None
+        )
+        if (
+            failed is None
+            or failed.action_id in retried
+            or failed.error_code
+            not in {
+                d.ExecutionErrorCode.AUDIO_EMPTY,
+                d.ExecutionErrorCode.AUDIO_GENERATION_FAILED,
+                d.ExecutionErrorCode.PROVIDER_TIMEOUT,
+            }
+        ):
+            return None
+        index = next(i for i, action in enumerate(plan.actions) if action.action_id == failed.action_id)
+        action = plan.actions[index]
+        if not isinstance(action, d.Say) or action.prepared_audio_ref is not None:
+            return None
+        old_id = action.call_delivery.response_id
+        old = self._responses[old_id]
+        new_id = f"{old_id}-retry"
+        retry = replace(
+            action,
+            action_id=action.action_id,
+            call_delivery=replace(action.call_delivery, response_id=new_id),
+        )
+        replacement = _Response(
+            turn_seq=turn_seq,
+            provisional=old.provisional,
+            generation=self._generation,
+            settled=asyncio.Event(),
+            request_id=old.request_id,
+        )
+        # Preserve utterance ordering while retaining the failed response's tombstone.
+        self._responses = {
+            new_id if key == old_id else key: replacement if key == old_id else value
+            for key, value in self._responses.items()
+        }
+        self._plans = deque(
+            replace(queued, barriers=tuple(new_id if item == old_id else item for item in queued.barriers))
+            for queued in self._plans
+        )
+        old.turn_seq = None
+        old.request_id = None
+        old.formal_text = None
+        self._responses[old_id] = old
+        return replace(plan, plan_id=f"{plan.plan_id}-retry", actions=(retry, *plan.actions[index + 1 :]))
 
     def _maintenance_snapshot(self) -> CallMaintenanceSnapshot:
         turns = []
@@ -727,7 +831,16 @@ class CallStage:
                 await self._transition(CallState.ENDED, outcome=outcome, end_reason=reason, ledger_facts=terminal_facts)
             terminal = CallTerminalFacts(self._record.call_id, outcome, reason, duration, ended)
             completed = tuple(
-                CallFinalTurn(seq, turn.semantic, turn.status, turn.formal_text)
+                CallFinalTurn(
+                    seq,
+                    turn.semantic,
+                    turn.status,
+                    (
+                        turn.formal_text
+                        if turn.status in {CallReplyStatus.COMPLETED, CallReplyStatus.INTERRUPTED}
+                        else None
+                    ),
+                )
                 for seq, turn in sorted(self._turns.items())
             )
             persisted = await complete_owned(asyncio.to_thread(self._repository.find_by_id, self._record.call_id))
@@ -827,7 +940,11 @@ class CallStage:
             self._tombstones.add(affected_response)
             response = self._responses.get(affected_response)
             turn_seq = response.turn_seq if response is not None else None
-            if turn_seq is not None and turn_seq in self._turns:
+            if (
+                turn_seq is not None
+                and turn_seq in self._turns
+                and self._turns[turn_seq].status is not CallReplyStatus.FAILED
+            ):
                 self._turns[turn_seq].status = CallReplyStatus.INTERRUPTED
             stream_ids = tuple(
                 stream_id
@@ -1062,13 +1179,36 @@ class CallStage:
             response.playback_completed = True
             if response.settled is not None:
                 response.settled.set()
+            self._reset_failures_after_playback(response)
             if response.turn_seq is not None and not response.provisional:
                 turn = self._turns[response.turn_seq]
-                turn.status = CallReplyStatus.COMPLETED if turn.formal_text else CallReplyStatus.FAILED
+                formal = [
+                    item
+                    for item in self._responses.values()
+                    if item.turn_seq == response.turn_seq and not item.provisional
+                ]
+                if turn.status not in {CallReplyStatus.FAILED, CallReplyStatus.INTERRUPTED} and all(
+                    item.playback_completed and item.message_completed and not item.failed for item in formal
+                ):
+                    turn.status = CallReplyStatus.COMPLETED if turn.formal_text else CallReplyStatus.FAILED
+                    if turn.status is CallReplyStatus.COMPLETED:
+                        self._reply_failures = 0
                 if not self._turn_has_unsettled_response(response.turn_seq):
                     self._finish_user_turn(response.turn_seq)
         if self._active_response_id == response_id:
             self._active_response_id = None
+
+    def _reset_failures_after_playback(self, response) -> None:
+        if not response.provisional and response.request_id is not None:
+            request_responses = [
+                item
+                for item in self._responses.values()
+                if item.request_id == response.request_id and not item.provisional
+            ]
+            if all(
+                item.playback_completed and item.message_completed and not item.failed for item in request_responses
+            ):
+                self._reply_failures = 0
 
     def _finish_user_turn(self, turn_seq: int) -> None:
         self._unfinished_turns.discard(turn_seq)
@@ -1169,7 +1309,13 @@ class _OutputSink:
             and not output.call_delivery.provisional
         ):
             turn = self._stage._turns[self._turn_seq]
-            turn.formal_text = output.text
+            response = self._stage._responses[output.call_delivery.response_id]
+            response.formal_text = output.text
+            turn.formal_text = "\n".join(
+                item.formal_text
+                for item in self._stage._responses.values()
+                if item.turn_seq == self._turn_seq and not item.provisional and item.formal_text is not None
+            )
             self._stage._record_metric(
                 CallMetricName.FORMAL_REPLY,
                 duration_ms=max(0, (self._stage._monotonic() - turn.started_at) * 1000),
@@ -1188,6 +1334,8 @@ class _OutputSink:
             if response_id is not None:
                 response = self._stage._responses[response_id]
                 response.message_completed = output.status is d.MessageEndStatus.COMPLETED
+                if response.message_completed and response.playback_completed and response.stream_id is not None:
+                    self._stage._settle_response_if_complete(response_id)
                 if not response.message_completed:
                     self._stage._tombstones.add(response_id)
                     response.failed = True

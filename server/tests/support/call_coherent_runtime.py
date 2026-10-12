@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import wave
 from types import SimpleNamespace
 
 from src.infrastructure.persistence.database.vector_store import Document
@@ -150,6 +151,15 @@ def runtime_config(tmp_path) -> dict[str, object]:
         ),
         encoding="utf-8",
     )
+    apology = tmp_path / "call-apology.wav"
+    with wave.open(str(apology), "wb") as audio:
+        audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\0\0" * 480)
+    manifest = tmp_path / "prepared.json"
+    manifest.write_text(
+        json.dumps([{"name": "call_apology", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}]),
+        encoding="utf8",
+    )
     songs = tmp_path / "songs"
     songs.mkdir()
     return {
@@ -157,7 +167,7 @@ def runtime_config(tmp_path) -> dict[str, object]:
             "speaking": {"characters": {"luotianyi": {}}},
             "singing": {"characters": {"luotianyi": {"resource_path": str(songs)}}},
         },
-        "prepared_speech": {"characters": {}},
+        "prepared_speech": {"characters": {"luotianyi": {"manifest": str(manifest)}}},
         "character_registry": {
             "characters": {
                 "luotianyi": {

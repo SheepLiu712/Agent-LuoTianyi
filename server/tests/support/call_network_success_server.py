@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+import wave
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -97,9 +98,17 @@ def _runtime_config(root: Path) -> Path:
         }
     )
     agent["skills"]["singing"]["characters"]["luotianyi"]["resource_path"] = str(resources / "songs")
-    agent["prepared_speech"] = {"characters": {}}
     agent["character_registry"]["characters"]["luotianyi"]["reflex"] = {}
-    agent["prepared_speech"] = {"characters": {}}
+    apology = resources / "call-apology.wav"
+    with wave.open(str(apology), "wb") as audio:
+        audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\0\0" * 480)
+    manifest = resources / "prepared.json"
+    manifest.write_text(
+        json.dumps([{"name": "call_apology", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}]),
+        encoding="utf8",
+    )
+    agent["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     _resolve_test_environment(config)
     path = root / "config.json"
     path.write_text(json.dumps(config), encoding="utf-8")

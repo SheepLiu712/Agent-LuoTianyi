@@ -8,7 +8,7 @@ from datetime import datetime
 
 import src.domain.agent as d
 from src.domain.call import CallEndReason, CallFinalSnapshot, CallState
-from src.stage.call_stage import CallIngressReceipt, CallOutput, CallStage, CallStateChanged
+from src.stage.call_stage import CallIngressReceipt, CallOutput, CallReplyFailed, CallStage, CallStateChanged
 
 from .audio_codec import CALL_ROUTE, FINAL_FLAG, VERSION, BinaryAudioFrameCodec, WireAudioFrame
 from .control import ControlMessage
@@ -69,11 +69,11 @@ class CallStageBinding(CallBusinessAcceptanceSink):
             return True
         if message["type"] == "playback.stopped":
             response_id = str(message["response_id"])
-            return any(
-                stage.playback_stopped(response_id, stream_id)
-                for item_response, stream_id in stage._playback.pending_streams
-                if item_response == response_id
-            )
+            stream_id = self._require_session().stopped_stream(response_id, int(message["stop_seq"]))
+            stage.playback_stopped(response_id, stream_id)
+            # Completion can win the race; an already settled stream is still
+            # a successfully accepted ordered receipt.
+            return True
         if message["type"] == "call.hangup":
             await stage.terminate()
             return True
@@ -83,6 +83,20 @@ class CallStageBinding(CallBusinessAcceptanceSink):
 
     async def send_state(self, item: object) -> None:
         session = self._require_session()
+        if isinstance(item, CallReplyFailed):
+            await self._deliver(
+                session.send_control(
+                    {
+                        "protocol": "call.v1",
+                        "type": "error",
+                        "code": "CALL_TTS_FAILED",
+                        "message": "call reply audio could not be generated",
+                        "retryable": False,
+                        "call_id": self.call_id,
+                    }
+                )
+            )
+            return
         if isinstance(item, CallOutput):
             return
         if not isinstance(item, CallStateChanged):

@@ -867,7 +867,9 @@ async def test_playback_stopped_rejects_unknown_stop_and_wrong_response() -> Non
             await transport.receive_text(stopped)
 
 
-def test_retirement_cannot_cover_unrelated_control_or_other_stream() -> None:
+@pytest.mark.parametrize("acknowledged", [False, True])
+@pytest.mark.parametrize("tail_audio", [False, True])
+def test_retirement_cannot_cover_unrelated_control_or_other_stream(acknowledged, tail_audio) -> None:
     transport = session()
     transport.send_control(
         {
@@ -894,24 +896,27 @@ def test_retirement_cannot_cover_unrelated_control_or_other_stream() -> None:
         }
     )
 
+    if tail_audio:
+        transport.send_audio(WireAudioFrame(1, 2, 1, 1, 3, b"\x00\x01"))
+    last_seq = 3 if tail_audio else 2
+    if acknowledged:
+        transport.acknowledge_server(last_seq)
     with pytest.raises(CallTransportError, match="INVALID_RETIRE_RANGE"):
         transport.send_control(
             {
                 "protocol": "call.v1",
                 "type": "playback.stop",
-                "seq": 3,
+                "seq": last_seq + 1,
                 "call_id": CALL_ID,
                 "response_id": "response-1",
                 "stream_id": 1,
-                "retire_server_seq": {"from": 1, "through": 2},
+                "retire_server_seq": {"from": 1, "through": last_seq},
                 "reason": "user_interrupted",
             }
         )
-    assert transport.last_server_seq == 2
-    assert [json.loads(output.text)["type"] for output in transport.replay_after(0)] == [
-        "audio.stream_started",
-        "call.state",
-    ]
+    assert transport.last_server_seq == last_seq
+    replay = transport.replay_after(last_seq if acknowledged else 0)
+    assert len(replay) == (0 if acknowledged else last_seq)
 
 
 def test_replay_buffer_stops_producer_instead_of_evicting_unacked_oldest() -> None:

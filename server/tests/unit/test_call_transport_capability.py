@@ -22,7 +22,11 @@ def ready_runtime():
         realtime_speech_factory=SimpleNamespace(is_configured=True),
         agent_runtime=SimpleNamespace(
             default_character_id="luotianyi",
-            skills=SimpleNamespace(speaking=speaking, call_summary=summary),
+            skills=SimpleNamespace(
+                speaking=speaking,
+                call_summary=summary,
+                prepared_speech=SimpleNamespace(supports_call_apology=lambda _character: True),
+            ),
         ),
         call_settlement_coordinator=SimpleNamespace(is_ready=True),
         stage_manager=StageManager.__new__(StageManager),
@@ -81,3 +85,9 @@ def test_call_transport_rejects_non_boolean_enabled_values(value):
 def test_call_transport_rejects_non_object_section():
     with pytest.raises(ValueError, match="call_transport must be an object"):
         parse_call_transport_enabled({"call_transport": False})
+
+
+def test_missing_apology_disables_calls():
+    runtime = ready_runtime()
+    runtime.agent_runtime.skills.prepared_speech.supports_call_apology = lambda _character: False
+    assert not ServerRuntime._build_call_capability(runtime, recovery_ready=True).available
