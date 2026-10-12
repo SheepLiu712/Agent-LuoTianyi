@@ -52,6 +52,9 @@ class CallLifecycle:
             raise InvalidCallTransition("an idempotent transition cannot change terminal facts")
         if state not in _ALLOWED_TRANSITIONS[self._snapshot.state]:
             raise InvalidCallTransition(f"cannot transition from {self._snapshot.state.value} to {state.value}")
+        if self._snapshot.state is CallState.DECLINED and state is CallState.ENDED:
+            if outcome is not self._snapshot.outcome or end_reason is not self._snapshot.end_reason:
+                raise InvalidCallTransition("declined terminal facts cannot change during settlement")
         has_connected = self._snapshot.has_connected or state is CallState.ACTIVE
         self._validate_facts(state, has_connected, outcome, end_reason)
         self._snapshot = CallLifecycleSnapshot(
