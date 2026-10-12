@@ -75,19 +75,20 @@ decode(bytes | Uint8Array) -> WireAudioFrame
 
 ### JSON 控制消息
 
-- 控制帧是最大 16384 UTF-8 字节的 JSON 文本对象。UTF-8 必须严格解码；非法字节序列归一化为 `BAD_JSON`，不得替换为 U+FFFD。顶层及嵌套对象都拒绝重复字段和未知字段。
-- `contracts/call_v1/control.schema.json` 是 Draft 2020-12 结构契约；`contracts/call_v1/fixtures/control_messages.json` 是原始文本、方向、传输、稳定错误和路径的共享事实来源。JSON Schema 不能检测重复字段、整数词法、原始 UTF-8 字节数或 lone surrogate，这些由后续双端 raw-text parser 在 schema 校验前后补足。
+- 控制帧是最大 16384 UTF-8 字节的 JSON 文本对象。UTF-8 必须严格解码；非法字节序列归一化为 `BAD_JSON`，不得替换为 U+FFFD。使用标准 JSON 解析器；重复键沿用解析器后值覆盖语义，不额外拒绝。接收端忽略顶层及嵌套未知字段，返回值和编码输出仅保留已定义字段。未知消息类型和协议版本仍拒绝。
+- `contracts/call_v1/control.schema.json` 是 Draft 2020-12 结构契约；`contracts/call_v1/fixtures/control_messages.json` 是原始文本、方向、传输、稳定错误和路径的共享事实来源。Schema 描述结构和值；UTF-8 字节数、Unicode 标量、方向及跨字段关系由消息边界校验，不自行实现 JSON 词法解析器。
 - 普通会话业务消息与二进制音频共享每方向一条 `1..UINT32_MAX` 序列。会话首个有序帧声明为 1，但这是 Adapter 会话状态规则，不是纯 parser 限制；纯 parser 必须接纳范围内任意 `seq`，包括上界。
 - `call.switch_prepare` / `call.switch_ready` 走 `chat_ws` 且不占通话序号；`call.resume` / `call.resumed`、`ack`、`nack` 是 `call_ws` 握手或反馈，也不占序号、不进入重放缓冲。
 - `call.resume` 携带客户端已连续结算的服务端游标；`call.resumed` 同时回传服务端已连续结算的客户端游标和客户端声明的服务端游标。游标与 `ack_seq` 可为 0，`missing_seq` 从 1 开始。
 - `playback.stop` 是服务端有序取消消息；`retire_server_seq.from <= through < playback.stop.seq`。`playback.stopped` 只回传 `response_id` 与 `stop_seq`，不重复 `stream_id`。
 - `connected_at_ms` 与 `active_duration_ms` 使用 `0..9007199254740991`，避免把 Unix epoch 毫秒错误限制为 UINT32，同时保证 Python 与 JavaScript 精确互操作。
-- 所有整数只接受十进制规范词法 `0|[1-9][0-9]*`；拒绝布尔值、负数、`-0`、小数、指数、字符串及 NaN/Infinity。Schema 的 `integer` 不能区分 `1` 与 `1.0`，因此词法限制仍由 raw-text parser 承担。
+- 整数字段校验标准 JSON 解析后的数值：必须有限、为整数且在字段范围内，拒绝布尔值和字符串；允许 `1`、`1.0`、`1e0` 等等值形式。`-0` 按 0 处理（允许零的游标可用，seq 不可用）。两端按 JavaScript Number 的数值表示互操作；不保留原始词法。NaN/Infinity 不是合法 JSON；合法数字溢出归范围错误。
 - 字符串按 Unicode 标量值处理，拒绝 NUL、U+FFFD 与 lone surrogate。非法 UTF-8 或不能形成合法 JSON 字符串的 surrogate 归 `BAD_JSON`；成功解码后字段内出现 NUL 或 U+FFFD 归 `INVALID_FIELD_VALUE`。
 
-控制消息稳定错误码为 `BAD_JSON`、`CONTROL_TOO_LARGE`、`TOP_LEVEL_NOT_OBJECT`、`DUPLICATE_FIELD`、`MISSING_FIELD`、`UNKNOWN_FIELD`、`UNKNOWN_TYPE`、`UNSUPPORTED_PROTOCOL`、`INVALID_TRANSPORT`、`INVALID_DIRECTION`、`INVALID_FIELD_TYPE`、`FIELD_OUT_OF_RANGE`、`INVALID_FIELD_VALUE`、`INVALID_ENUM`。若同一输入有多个问题，按 UTF-8/尺寸 → JSON 语法/重复字段 → 顶层对象 → protocol → type → transport/direction → required → unknown → field type → range → enum → cross-field 的顺序报告首个错误。字段路径使用 JSONPath 风格（如 `$.audio.sample_rate`），消息级错误使用 `$`。
+控制消息稳定错误码为 `BAD_JSON`、`CONTROL_TOO_LARGE`、`TOP_LEVEL_NOT_OBJECT`、`MISSING_FIELD`、`UNKNOWN_TYPE`、`UNSUPPORTED_PROTOCOL`、`INVALID_TRANSPORT`、`INVALID_DIRECTION`、`INVALID_FIELD_TYPE`、`FIELD_OUT_OF_RANGE`、`INVALID_FIELD_VALUE`、`INVALID_ENUM`。不要求多错误输入的全局报错优先级一致。结构和值错误提供字段路径；JSON 语法或解析资源错误统一使用 `BAD_JSON` / `$`，不尝试从坏 JSON 猜字段路径。
 
-JSON 编码器输出无空白 UTF-8，字段顺序按共享 fixture 的 `field_order` 固定，且不得输出 NUL、U+FFFD、lone surrogate、NaN 或 Infinity。双方不依赖对象运行时的默认枚举顺序；跨端 decoder 比较结构值，golden 编码比较各自按该顺序产生的规范文本。
+编码器使用标准 JSON 序列化，只输出已定义字段；不规定字段顺序、空白或转义形式，也不要求双端文本及字节完全相同。互操作验收比较 decode 后的结构和值。重传层保留并重发原始帧，不依赖重新编码排序来实现相同内容重传。整数范围、ID 长度、音频声明及取消范围关系保持不变。
+
 
 控制可靠性机制只借鉴官方文档中已经公开的机制事实：Socket.IO connection-state recovery 保存会话与 offset 并在有限窗口内重放遗漏 packet；ASP.NET Core 9 SignalR stateful reconnect 需要两端启用，并通过 buffer、ACK 与 replay 恢复消息。`call.v1` 的字段、序号和取消范围均为本项目自研契约，不宣称是上述框架的行业标准实现。
 

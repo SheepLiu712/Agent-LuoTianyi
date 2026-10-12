@@ -15,7 +15,7 @@ const ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 type JsonValue = null | boolean | string | JsonNumber | JsonObject | JsonValue[];
 type JsonObject = Map<string, JsonValue>;
-type JsonNumber = { readonly kind: 'number'; readonly token: string; readonly value: number };
+type JsonNumber = number;
 
 type MessageSpec = {
   readonly fields: readonly string[];
@@ -65,8 +65,13 @@ export function decodeControlText(raw: string, context: ControlContext): Control
   if (byteLength > MAX_RAW_BYTES) {
     fail('CONTROL_TOO_LARGE', '$');
   }
-  const parsed = new JsonScanner(raw).parse();
-  return validateParsed(parsed, context);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    fail('BAD_JSON', '$');
+  }
+  return validateMessage(parsed, context);
 }
 
 /** Strict byte entry point for transports that have not decoded their text frame yet. */
@@ -80,16 +85,26 @@ export function decodeControlBytes(raw: Uint8Array, context: ControlContext): Co
   return decodeControlText(decodeUtf8Strict(raw), context);
 }
 
-/** Validate and encode a canonical compact control JSON string. */
+/** Validate known fields and encode JSON without a wire field-order contract. */
 export function encodeControlMessage(message: ControlMessage, context: ControlContext): string {
-  const parsed = valueToParsed(message, '$');
-  const validated = validateParsed(parsed, context);
-  const ordered = orderMessage(validated);
-  const encoded = JSON.stringify(ordered);
+  const validated = validateMessage(message, context);
+  const encoded = JSON.stringify(validated);
   if (strictUtf8Length(encoded) > MAX_RAW_BYTES) {
     fail('CONTROL_TOO_LARGE', '$');
   }
   return encoded;
+}
+
+function validateMessage(message: unknown, context: ControlContext): ControlMessage {
+  if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+    fail('TOP_LEVEL_NOT_OBJECT', '$');
+  }
+  try {
+    return validateParsed(valueToParsed(knownFields(message), '$'), context);
+  } catch (error) {
+    if (error instanceof RangeError) fail('BAD_JSON', '$');
+    throw error;
+  }
 }
 
 function validateParsed(value: JsonValue, context: ControlContext): ControlMessage {
@@ -130,12 +145,6 @@ function validateParsed(value: JsonValue, context: ControlContext): ControlMessa
       fail('MISSING_FIELD', `$.${field}`);
     }
   }
-  const allowed = new Set(messageSpec.fields);
-  for (const field of object.keys()) {
-    if (!allowed.has(field)) {
-      fail('UNKNOWN_FIELD', `$.${field}`);
-    }
-  }
   validateFieldTypes(type, object);
   validateFieldRanges(type, object);
   validateEnums(type, object);
@@ -148,7 +157,7 @@ function validateFieldTypes(type: ControlMessage['type'], object: JsonObject): v
     if (object.has(field)) requireString(object, field);
   }
   for (const field of integerFields(type)) {
-    if (object.has(field)) requireCanonicalInteger(object, field);
+    if (object.has(field)) requireInteger(object, field);
   }
   if (type === 'error' && typeof object.get('retryable') !== 'boolean') {
     fail('INVALID_FIELD_TYPE', '$.retryable');
@@ -157,14 +166,14 @@ function validateFieldTypes(type: ControlMessage['type'], object: JsonObject): v
     requireNestedObject(object, 'audio', ['encoding', 'sample_rate', 'channels']);
     const audio = object.get('audio') as JsonObject;
     requireString(audio, 'encoding', '$.audio');
-    requireCanonicalInteger(audio, 'sample_rate', '$.audio');
-    requireCanonicalInteger(audio, 'channels', '$.audio');
+    requireInteger(audio, 'sample_rate', '$.audio');
+    requireInteger(audio, 'channels', '$.audio');
   }
   if (type === 'playback.stop') {
     requireNestedObject(object, 'retire_server_seq', ['from', 'through']);
     const range = object.get('retire_server_seq') as JsonObject;
-    requireCanonicalInteger(range, 'from', '$.retire_server_seq');
-    requireCanonicalInteger(range, 'through', '$.retire_server_seq');
+    requireInteger(range, 'from', '$.retire_server_seq');
+    requireInteger(range, 'through', '$.retire_server_seq');
   }
 }
 
@@ -244,10 +253,6 @@ function requireNestedObject(object: JsonObject, field: string, fields: readonly
   for (const required of fields) {
     if (!value.has(required)) fail('MISSING_FIELD', `$.${field}.${required}`);
   }
-  const allowed = new Set(fields);
-  for (const nested of value.keys()) {
-    if (!allowed.has(nested)) fail('UNKNOWN_FIELD', `$.${field}.${nested}`);
-  }
 }
 
 function requireString(object: JsonObject, field: string, base = '$'): string {
@@ -257,11 +262,11 @@ function requireString(object: JsonObject, field: string, base = '$'): string {
   return value;
 }
 
-function requireCanonicalInteger(object: JsonObject, field: string, base = '$'): JsonNumber {
+function requireInteger(object: JsonObject, field: string, base = '$'): JsonNumber {
   const value = object.get(field);
   if (!isJsonNumber(value)) fail('INVALID_FIELD_TYPE', `${base}.${field}`);
-  if (value.token === '-0') fail('INVALID_FIELD_VALUE', `${base}.${field}`);
-  if (!/^-?(0|[1-9][0-9]*)$/.test(value.token)) fail('INVALID_FIELD_TYPE', `${base}.${field}`);
+  if (!Number.isFinite(value)) fail('FIELD_OUT_OF_RANGE', `${base}.${field}`);
+  if (!Number.isInteger(value)) fail('INVALID_FIELD_TYPE', `${base}.${field}`);
   return value;
 }
 
@@ -357,20 +362,22 @@ function decodeUtf8Strict(bytes: Uint8Array): string {
   return result;
 }
 
-function orderMessage(message: ControlMessage): Record<string, unknown> {
-  const ordered: Record<string, unknown> = {};
-  for (const field of SPECS[message.type].fields) {
-    const value = (message as unknown as Record<string, unknown>)[field];
-    if (value === undefined) continue;
-    if (field === 'audio') {
-      const audio = value as Record<string, unknown>;
-      ordered[field] = { encoding: audio.encoding, sample_rate: audio.sample_rate, channels: audio.channels };
-    } else if (field === 'retire_server_seq') {
-      const range = value as Record<string, unknown>;
-      ordered[field] = { from: range.from, through: range.through };
-    } else ordered[field] = value;
+function knownFields(value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  const object = value as Record<string, unknown>;
+  const type = object.type;
+  const fields = typeof type === 'string' && hasOwn(SPECS, type)
+    ? SPECS[type as ControlMessage['type']].fields : ['protocol', 'type'];
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(object)) {
+    if (!fields.includes(key)) continue;
+    const item = object[key];
+    const nested = key === 'audio' ? ['encoding', 'sample_rate', 'channels']
+      : key === 'retire_server_seq' ? ['from', 'through'] : undefined;
+    result[key] = nested && item !== null && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).filter(([name]) => nested.includes(name))) : item;
   }
-  return ordered;
+  return result;
 }
 
 function valueToParsed(value: unknown, path: string): JsonValue {
@@ -380,8 +387,7 @@ function valueToParsed(value: unknown, path: string): JsonValue {
   }
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) fail('INVALID_FIELD_TYPE', path);
-    return { kind: 'number', token: Object.is(value, -0) ? '-0' : String(value), value };
+    return value === 0 ? 0 : value;
   }
   if (Array.isArray(value)) return value.map((item, index) => valueToParsed(item, `${path}[${index}]`));
   if (typeof value !== 'object') fail('INVALID_FIELD_TYPE', path);
@@ -412,18 +418,18 @@ function materializeObject(object: JsonObject): Record<string, unknown> {
 }
 
 function materialize(value: JsonValue): unknown {
-  if (isJsonNumber(value)) return value.value;
+  if (isJsonNumber(value)) return value;
   if (value instanceof Map) return materializeObject(value);
   if (Array.isArray(value)) return value.map(materialize);
   return value;
 }
 
 function numberValue(value: JsonValue): number {
-  return (value as JsonNumber).value;
+  return value as number;
 }
 
 function isJsonNumber(value: JsonValue | undefined): value is JsonNumber {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Map) && value.kind === 'number';
+  return typeof value === 'number';
 }
 
 function hasOwn(object: object, key: PropertyKey): boolean {
@@ -477,156 +483,6 @@ function fail(code: ControlErrorCode, path: string): never {
   throw new ControlMessageError(code, path);
 }
 
-class JsonScanner {
-  private index = 0;
-
-  constructor(private readonly source: string) {}
-
-  parse(): JsonValue {
-    try {
-      this.skipWhitespace();
-      const value = this.parseValue('$');
-      this.skipWhitespace();
-      if (this.index !== this.source.length) fail('BAD_JSON', '$');
-      return value;
-    } catch (error) {
-      if (error instanceof ControlMessageError) throw error;
-      fail('BAD_JSON', '$');
-    }
-  }
-
-  private parseValue(path: string): JsonValue {
-    const char = this.source[this.index];
-    if (char === '{') return this.parseObject(path);
-    if (char === '[') return this.parseArray(path);
-    if (char === '"') return this.parseString(path);
-    if (char === 't') return this.parseLiteral('true', true, path);
-    if (char === 'f') return this.parseLiteral('false', false, path);
-    if (char === 'n') return this.parseLiteral('null', null, path);
-    if (char === '-' || (char >= '0' && char <= '9')) return this.parseNumber(path);
-    fail('BAD_JSON', path);
-  }
-
-  private parseObject(path: string): JsonObject {
-    this.index += 1;
-    const object = new Map<string, JsonValue>();
-    this.skipWhitespace();
-    if (this.consume('}')) return object;
-    while (true) {
-      if (this.source[this.index] !== '"') fail('BAD_JSON', path);
-      const key = this.parseString(path);
-      const fieldPath = `${path}.${key}`;
-      if (object.has(key)) fail('DUPLICATE_FIELD', fieldPath);
-      this.skipWhitespace();
-      if (!this.consume(':')) fail('BAD_JSON', fieldPath);
-      this.skipWhitespace();
-      object.set(key, this.parseValue(fieldPath));
-      this.skipWhitespace();
-      if (this.consume('}')) return object;
-      if (!this.consume(',')) fail('BAD_JSON', path);
-      this.skipWhitespace();
-    }
-  }
-
-  private parseArray(path: string): JsonValue[] {
-    this.index += 1;
-    const values: JsonValue[] = [];
-    this.skipWhitespace();
-    if (this.consume(']')) return values;
-    while (true) {
-      values.push(this.parseValue(`${path}[${values.length}]`));
-      this.skipWhitespace();
-      if (this.consume(']')) return values;
-      if (!this.consume(',')) fail('BAD_JSON', path);
-      this.skipWhitespace();
-    }
-  }
-
-  private parseString(path: string): string {
-    this.index += 1;
-    let result = '';
-    while (this.index < this.source.length) {
-      const char = this.source[this.index++];
-      if (char === '"') return result;
-      if (char === '\\') {
-        const escape = this.source[this.index++];
-        const simple: Record<string, string> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
-        if (hasOwn(simple, escape)) result += simple[escape];
-        else if (escape === 'u') result += this.parseUnicodeEscape(path);
-        else fail('BAD_JSON', path);
-      } else {
-        const code = char.charCodeAt(0);
-        if (code < 0x20) fail('BAD_JSON', path);
-        if (code >= 0xd800 && code <= 0xdfff) {
-          if (code > 0xdbff || this.index >= this.source.length) fail('BAD_JSON', path);
-          const next = this.source.charCodeAt(this.index);
-          if (next < 0xdc00 || next > 0xdfff) fail('BAD_JSON', path);
-          result += char + this.source[this.index++];
-        } else result += char;
-      }
-    }
-    fail('BAD_JSON', path);
-  }
-
-  private parseUnicodeEscape(path: string): string {
-    const first = this.parseHexCodeUnit(path);
-    if (first >= 0xdc00 && first <= 0xdfff) fail('BAD_JSON', path);
-    if (first < 0xd800 || first > 0xdbff) return String.fromCharCode(first);
-    if (this.source.slice(this.index, this.index + 2) !== '\\u') fail('BAD_JSON', path);
-    this.index += 2;
-    const second = this.parseHexCodeUnit(path);
-    if (second < 0xdc00 || second > 0xdfff) fail('BAD_JSON', path);
-    return String.fromCharCode(first, second);
-  }
-
-  private parseHexCodeUnit(path: string): number {
-    const hex = this.source.slice(this.index, this.index + 4);
-    if (!/^[0-9a-fA-F]{4}$/.test(hex)) fail('BAD_JSON', path);
-    this.index += 4;
-    return Number.parseInt(hex, 16);
-  }
-
-  private parseNumber(path: string): JsonNumber {
-    const start = this.index;
-    if (this.consume('-') && this.index >= this.source.length) fail('BAD_JSON', path);
-    if (this.consume('0')) {
-      if (/[0-9]/.test(this.source[this.index] ?? '')) fail('BAD_JSON', path);
-    } else {
-      if (!/[1-9]/.test(this.source[this.index] ?? '')) fail('BAD_JSON', path);
-      while (/[0-9]/.test(this.source[this.index] ?? '')) this.index += 1;
-    }
-    if (this.consume('.')) {
-      if (!/[0-9]/.test(this.source[this.index] ?? '')) fail('BAD_JSON', path);
-      while (/[0-9]/.test(this.source[this.index] ?? '')) this.index += 1;
-    }
-    if (this.source[this.index] === 'e' || this.source[this.index] === 'E') {
-      this.index += 1;
-      if (this.source[this.index] === '+' || this.source[this.index] === '-') this.index += 1;
-      if (!/[0-9]/.test(this.source[this.index] ?? '')) fail('BAD_JSON', path);
-      while (/[0-9]/.test(this.source[this.index] ?? '')) this.index += 1;
-    }
-    const token = this.source.slice(start, this.index);
-    const value = Number(token);
-    if (!Number.isFinite(value)) fail('BAD_JSON', path);
-    return { kind: 'number', token, value };
-  }
-
-  private parseLiteral<T extends boolean | null>(literal: string, value: T, path: string): T {
-    if (this.source.slice(this.index, this.index + literal.length) !== literal) fail('BAD_JSON', path);
-    this.index += literal.length;
-    return value;
-  }
-
-  private skipWhitespace(): void {
-    while (' \n\r\t'.includes(this.source[this.index] ?? '\0')) this.index += 1;
-  }
-
-  private consume(char: string): boolean {
-    if (this.source[this.index] !== char) return false;
-    this.index += 1;
-    return true;
-  }
-}
 
 export { ControlMessageError } from './control_types';
 export type { ControlContext, ControlDirection, ControlErrorCode, ControlMessage, ControlTransport } from './control_types';

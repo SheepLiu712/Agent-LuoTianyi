@@ -83,6 +83,52 @@ describe('call lifecycle state skeleton', () => {
     expect(authenticated.effects).toEqual([{ type: 'start', clientRequestId: 'request-1' }]);
   });
 
+  it('stops audio and returns to chat once when the server ends an active call', () => {
+    const active = { ...initialCallState, phase: 'ACTIVE' as const, activeStartedAtMs: 100 };
+    const ended = reduceCallState(active, { type: 'call_ended', nowMs: 2_100 });
+
+    expect(ended.state).toMatchObject({ phase: 'ENDED', endReason: 'remote_ended', endedActiveDurationMs: 2_000 });
+    expect(ended.effects).toEqual([
+      { type: 'stop_capture' },
+      { type: 'stop_playback' },
+      { type: 'return_to_chat' },
+    ]);
+    expect(reduceCallState(ended.state, { type: 'call_ended', nowMs: 3_100 })).toEqual({
+      state: ended.state,
+      effects: [],
+    });
+  });
+
+  it('settles a server-ended reconnect at the initial disconnect and leaves the call screen', () => {
+    const active = {
+      ...initialCallState,
+      phase: 'ACTIVE' as const,
+      callId: 'call-1',
+      activeStartedAtMs: 100,
+    };
+    const reconnecting = reduceCallState(active, { type: 'transport_lost', nowMs: 1_100 }).state;
+    const ended = reduceCallState(reconnecting, { type: 'call_ended', nowMs: 2_100 });
+
+    expect(getCallActiveDurationMs(reconnecting, 2_100)).toBe(2_000);
+    expect(getCallActiveDurationMs(ended.state, 3_100)).toBe(1_000);
+    expect(ended.effects).toEqual([
+      { type: 'stop_capture' },
+      { type: 'stop_playback' },
+      { type: 'return_to_chat' },
+    ]);
+  });
+
+  it('preserves local settlement without repeating cleanup when the server confirms the end', () => {
+    const active = { ...initialCallState, phase: 'ACTIVE' as const, activeStartedAtMs: 100 };
+    const ending = reduceCallState(active, { type: 'user_hangup', nowMs: 1_100 });
+    const ended = reduceCallState(ending.state, { type: 'call_ended', nowMs: 2_100 });
+
+    expect(ended).toEqual({
+      state: { ...ending.state, phase: 'ENDED' },
+      effects: [],
+    });
+  });
+
   it('shows confirmation for back, but backgrounding ends once and stops audio', () => {
     const active = { ...initialCallState, phase: 'ACTIVE' as const, activeStartedAtMs: 100 };
     expect(reduceCallState(active, { type: 'back_requested' }).effects).toEqual([{ type: 'show_back_confirmation' }]);
