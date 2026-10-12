@@ -18,6 +18,8 @@ class ActionKind(str, Enum):
     REFLECTION = "reflection"
     END_CALL = "end_call"
     ANSWER_CALL = "answer_call"
+    SUMMARIZE_CALL = "summarize_call"
+    MAINTAIN_CALL = "maintain_call"
 
 
 class OutputDelivery(str, Enum):
@@ -49,10 +51,11 @@ class OutputAcceptanceStatus(str, Enum):
 
 
 class AudioFraming(str, Enum):
-    """音频块是完整编码文件还是需依序拼接的文件片段。"""
+    """音频块是完整文件、文件片段或具有显式格式的原始 PCM。"""
 
     COMPLETE_FILE = "complete_file"
     FILE_FRAGMENT = "file_fragment"
+    RAW_PCM = "raw_pcm"
 
 
 class MessageEndStatus(str, Enum):
@@ -94,6 +97,8 @@ class EffectKind(str, Enum):
     DYNAMIC_POST = "dynamic_post"
     DYNAMIC_COMMENT = "dynamic_comment"
     SONG_LEARNING_JOB = "song_learning_job"
+    CALL_SUMMARY = "call_summary"
+    CALL_MAINTENANCE = "call_maintenance"
 
 
 class ExecutionErrorCode(str, Enum):

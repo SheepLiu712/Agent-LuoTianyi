@@ -1,6 +1,7 @@
 import os
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from src.infrastructure.persistence.call_maintenance import SqlCallMaintenanceBatchRepository
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer, get_redis_buffer, init_redis_buffer
 from src.infrastructure.persistence.database.services.conversation_service import ConversationService
@@ -51,6 +52,7 @@ class DatabaseManager:
         self.credential_service: Optional[CredentialService] = None
         self.conversation_service: Optional[ConversationService] = None
         self.call_sessions: Optional[SqlCallSessionRepository] = None
+        self.call_maintenance_batches: Optional[SqlCallMaintenanceBatchRepository] = None
         self.init_all_databases()
 
     def init_all_databases(self) -> None:
@@ -95,6 +97,7 @@ class DatabaseManager:
                 user_store=self.user_store,
             )
             self.call_sessions = SqlCallSessionRepository(self.open_sql_session)
+            self.call_maintenance_batches = SqlCallMaintenanceBatchRepository(self.open_sql_session)
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
@@ -122,6 +125,7 @@ class DatabaseManager:
             "credential_service": self.credential_service,
             "conversation_service": self.conversation_service,
             "call_sessions": self.call_sessions,
+            "call_maintenance_batches": self.call_maintenance_batches,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:

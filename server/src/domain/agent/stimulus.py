@@ -74,6 +74,7 @@ class StimulusKind(str, Enum):
     CALL_TURN_COMPLETED = "call_turn_completed"
     CALL_SILENCE_ELAPSED = "call_silence_elapsed"
     CALL_ENDING = "call_ending"
+    CALL_SETTLEMENT_REQUESTED = "call_settlement_requested"
 
 
 class StimulusSource(str, Enum):

@@ -10,7 +10,7 @@ from src.domain.call import CallAudioRoute, CallSpeechDelivery
 
 class Stream:
     def __init__(self):
-        self.values = iter((SimpleNamespace(data=b"pcm", framing=d.AudioFraming.FILE_FRAGMENT),))
+        self.values = iter((SimpleNamespace(data=b"pcm!", framing=d.AudioFraming.FILE_FRAGMENT),))
 
     def __aiter__(self):
         return self
@@ -26,9 +26,15 @@ class Stream:
 
 
 class Speaking:
-    def speak(self, invocation, *, text, tone):
+    def speak(self, invocation, *, text, tone, output_format=None):
         del invocation, text, tone
+        assert output_format == d.CALL_PCM_FORMAT
         return Stream()
+
+
+class Permit:
+    def allows(self, response_id):
+        return response_id == "response-1"
 
 
 class Sink:
@@ -78,6 +84,7 @@ async def test_real_say_handler_propagates_call_metadata_to_every_output():
         interaction_id="call-1",
         current_interaction_revision=0,
         cancellation=d.CancellationToken(),
+        call_output_permit=Permit(),
     )
     sink = Sink()
     handler = SayHandler("luotianyi", Speaking(), SimpleNamespace())
@@ -107,11 +114,17 @@ async def test_real_say_handler_propagates_call_metadata_to_every_output():
 
     assert report.status is d.ExecutionStatus.COMPLETED
     assert [type(output) for output in sink.outputs] == [
+        d.TextFinalOutput,
         d.ExpressionOutput,
         d.AudioChunkOutput,
         d.MessageEndOutput,
     ]
     assert all(output.call_delivery == delivery for output in sink.outputs)
+    assert sink.outputs[0].text == "不显示"
+    audio = sink.outputs[2]
+    assert audio.framing is d.AudioFraming.RAW_PCM
+    assert audio.audio_format == d.CALL_PCM_FORMAT
+    assert audio.final is True
 
 
 def test_chat_output_metadata_defaults_remain_unchanged():

@@ -486,6 +486,20 @@
                     },
                     "prompt_name": "topic_reply_prompt"
                 }
+            },
+            "call_summary": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {
+                            "max_tokens": 300
+                        },
+                        "client_model_type": "assistance"
+                    },
+                    "prompt_name": "call_summary_prompt"
+                }
             }
         }
     },

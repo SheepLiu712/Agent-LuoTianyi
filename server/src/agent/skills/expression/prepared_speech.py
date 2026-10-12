@@ -124,3 +124,26 @@ class PreparedSpeechCatalog:
             if len(audio.readframes(frames)) != expected:
                 raise ValueError("预制音频文件不完整")
         return PreparedAudio(data)
+
+    def supports_call_apology(self, character_id: str) -> bool:
+        """CALL requires a deployer-supplied, valid apology resource."""
+        try:
+            self._read_call_pcm(character_id, "call_apology")
+            return True
+        except (KeyError, OSError, ValueError, EOFError, wave.Error, EmptyPreparedAudioError):
+            return False
+
+    async def read_call_pcm(self, character_id: str, name: str) -> bytes:
+        return await run_sync_owned(self._read_call_pcm, character_id, name)
+
+    def _read_call_pcm(self, character_id: str, name: str) -> bytes:
+        data = self._read_audio(character_id, name).data
+        with wave.open(io.BytesIO(data), "rb") as audio:
+            if (audio.getframerate(), audio.getsampwidth(), audio.getnchannels(), audio.getcomptype()) != (
+                24000,
+                2,
+                1,
+                "NONE",
+            ):
+                raise ValueError("CALL prepared speech requires 24 kHz 16-bit mono PCM WAV")
+            return audio.readframes(audio.getnframes())

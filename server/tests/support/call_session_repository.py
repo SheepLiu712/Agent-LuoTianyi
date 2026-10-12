@@ -56,6 +56,16 @@ class InMemoryCallSessionRepository:
             call_id = self._request_ids.get(client_request_id)
             return self._by_id.get(call_id) if call_id is not None else None
 
+    def claim_settlement_input(self, call_id: UUID, *, digest: str) -> bool:
+        with self._lock:
+            current = self._by_id.get(call_id)
+            if current is None or current.state is not CallState.ENDED:
+                return False
+            if current.settlement_input_digest is not None and current.settlement_input_digest != digest:
+                raise ValueError("SETTLEMENT_INPUT_CONFLICT")
+            self._by_id[call_id] = current.with_update(settlement_input_digest=digest)
+            return True
+
     def update_if_state(
         self,
         call_id: UUID,
@@ -81,6 +91,7 @@ class InMemoryCallSessionRepository:
                 maintenance_status=current.maintenance_status,
                 conversation_id=current.conversation_id,
                 maintenance_turn_seq=current.maintenance_turn_seq,
+                settlement_input_digest=current.settlement_input_digest,
             )
             return True
 

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import case, delete, select, update
+from sqlalchemy import and_, case, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -57,6 +57,7 @@ def _to_record(row: CallSession) -> CallSessionRecord:
         maintenance_status=SettlementStatus(row.maintenance_status),
         conversation_id=UUID(row.conversation_id) if row.conversation_id else None,
         maintenance_turn_seq=row.maintenance_turn_seq,
+        settlement_input_digest=row.settlement_input_digest,
         created_at=_record_time(row.created_at),
         updated_at=_record_time(row.updated_at),
     )
@@ -80,6 +81,7 @@ def _values(record: CallSessionRecord) -> dict[str, object]:
         "maintenance_status": record.maintenance_status.value,
         "conversation_id": str(record.conversation_id) if record.conversation_id else None,
         "maintenance_turn_seq": record.maintenance_turn_seq,
+        "settlement_input_digest": record.settlement_input_digest,
         "created_at": _stored_time(record.created_at),
         "updated_at": _stored_time(record.updated_at),
     }
@@ -140,6 +142,33 @@ class SqlCallSessionRepository:
         finally:
             session.close()
 
+    def claim_settlement_input(self, call_id: UUID, *, digest: str) -> bool:
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError("digest must be lowercase SHA-256 hex")
+        session = self._sql_session_factory()
+        try:
+            result = session.execute(
+                update(CallSession)
+                .where(
+                    CallSession.call_id == str(call_id),
+                    CallSession.state == CallState.ENDED.value,
+                    CallSession.settlement_input_digest.is_(None),
+                )
+                .values(settlement_input_digest=digest)
+            )
+            if result.rowcount == 1:
+                session.commit()
+                return True
+            session.rollback()
+            row = session.get(CallSession, str(call_id))
+            if row is None or row.state != CallState.ENDED.value:
+                return False
+            if row.settlement_input_digest != digest:
+                raise ValueError("SETTLEMENT_INPUT_CONFLICT")
+            return True
+        finally:
+            session.close()
+
     def update_if_state(
         self,
         call_id: UUID,
@@ -153,7 +182,13 @@ class SqlCallSessionRepository:
         session = self._sql_session_factory()
         try:
             lifecycle_values = _values(record)
-            for field in ("summary_status", "maintenance_status", "conversation_id", "maintenance_turn_seq"):
+            for field in (
+                "summary_status",
+                "maintenance_status",
+                "conversation_id",
+                "maintenance_turn_seq",
+                "settlement_input_digest",
+            ):
                 lifecycle_values.pop(field)
             stored_updated_at = lifecycle_values.pop("updated_at")
             result = session.execute(
@@ -211,6 +246,26 @@ class SqlCallSessionRepository:
             updated_at=updated_at,
             values=values,
         )
+
+    def advance_maintenance_progress(self, call_id: UUID, *, expected_turn_seq: int, new_turn_seq: int) -> bool:
+        """Advance an incremental batch without declaring final settlement complete."""
+        if expected_turn_seq < 0 or new_turn_seq <= expected_turn_seq:
+            raise ValueError("maintenance progress must advance")
+        session = self._sql_session_factory()
+        try:
+            result = session.execute(
+                update(CallSession)
+                .where(
+                    CallSession.call_id == str(call_id),
+                    CallSession.maintenance_turn_seq == expected_turn_seq,
+                    CallSession.maintenance_status != SettlementStatus.SUCCEEDED.value,
+                )
+                .values(maintenance_turn_seq=new_turn_seq)
+            )
+            session.commit()
+            return result.rowcount == 1
+        finally:
+            session.close()
 
     def update_maintenance_settlement(
         self,
@@ -303,6 +358,32 @@ class SqlCallSessionRepository:
                 .where(
                     CallSession.state.in_(state.value for state in query_states),
                     CallSession.updated_at < _stored_time(before),
+                )
+                .order_by(CallSession.updated_at, CallSession.call_id)
+            ).all()
+            return tuple(_to_record(row) for row in rows)
+        finally:
+            session.close()
+
+    def list_recovery_pending(self) -> tuple[CallSessionRecord, ...]:
+        """List startup recovery candidates without an age/heartbeat heuristic."""
+        session = self._sql_session_factory()
+        try:
+            rows = session.scalars(
+                select(CallSession)
+                .where(
+                    or_(
+                        CallSession.state.in_(state.value for state in STALE_RECOVERABLE_STATES),
+                        and_(
+                            CallSession.state == CallState.ENDED.value,
+                            CallSession.outcome == CallOutcome.CONNECTED.value,
+                            CallSession.end_reason == CallEndReason.SYSTEM_FAILURE.value,
+                            or_(
+                                CallSession.summary_status != SettlementStatus.SUCCEEDED.value,
+                                CallSession.maintenance_status == SettlementStatus.PENDING.value,
+                            ),
+                        ),
+                    )
                 )
                 .order_by(CallSession.updated_at, CallSession.call_id)
             ).all()

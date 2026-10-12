@@ -1,5 +1,7 @@
+from typing import Literal
+
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
@@ -21,6 +23,28 @@ class HistoryQuery(BaseModel):
     end_index: int = -1
 
 
+class CallCapabilityQuery(BaseModel):
+    character_id: str = Field(min_length=1)
+
+
+class CallCapabilityResponse(BaseModel):
+    available: bool
+    character_id: str
+    reason: Literal[
+        "available",
+        "disabled",
+        "untrusted_host",
+        "provider_unavailable",
+        "call_tts_unavailable",
+        "summary_unavailable",
+        "settlement_unavailable",
+        "stage_binding_unavailable",
+        "recovery_unavailable",
+        "character_unavailable",
+        "runtime_not_ready",
+    ]
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -39,6 +63,12 @@ class ResetAccountRequest(BaseModel):
     invite_code: str
     new_username: str
     new_password: str
+
+
+class UserDataResetRequest(BaseModel):
+    """Authenticated request to erase resettable data while retaining credentials."""
+
+    username: str
 
 
 class AutoLoginRequest(BaseModel):

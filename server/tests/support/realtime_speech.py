@@ -48,12 +48,37 @@ class FakeRealtimeSpeechSession:
             self.closed = True
             await self._events.put(None)
 
+    def pushed_evidence(self) -> list[dict[str, object]]:
+        return [{"payload_hex": frame.payload.hex(), "sequence": frame.sequence} for frame in self.pushed_frames]
+
 
 class FakeRealtimeSpeechSessionFactory:
     def __init__(self) -> None:
         self.sessions: dict[UUID, FakeRealtimeSpeechSession] = {}
 
+    @property
+    def is_configured(self) -> bool:
+        return True
+
     async def create(self, call_id: UUID) -> RealtimeSpeechSession:
         session = FakeRealtimeSpeechSession()
         self.sessions[call_id] = session
         return session
+
+    def evidence(self) -> list[dict[str, object]]:
+        return [
+            {
+                "call_id": str(call_id),
+                "frames": [
+                    {
+                        "payload": frame.payload.hex(),
+                        "sequence": frame.sequence,
+                        "encoding": frame.encoding,
+                        "sample_rate": frame.sample_rate,
+                        "channels": frame.channels,
+                    }
+                    for frame in session.pushed_frames
+                ],
+            }
+            for call_id, session in self.sessions.items()
+        ]

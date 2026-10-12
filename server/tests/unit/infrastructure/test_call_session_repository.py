@@ -26,7 +26,7 @@ def _record(*, call_id=None, request_id="request-1", user_id="user", updated_at=
 def test_ledger_record_excludes_audio_transcript_summary_and_working_context():
     names = {item.name for item in fields(CallSessionRecord)}
     assert not names.intersection({"pcm", "audio", "transcript", "summary", "working_summary", "context"})
-    assert {"summary_status", "maintenance_status", "maintenance_turn_seq"}.issubset(names)
+    assert {"summary_status", "maintenance_status", "maintenance_turn_seq", "settlement_input_digest"}.issubset(names)
 
 
 def test_create_is_idempotent_by_request_and_rejects_owner_conflict():

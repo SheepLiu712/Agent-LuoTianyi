@@ -45,6 +45,34 @@ async def started_session(socket=None, **config_overrides):
 
 
 @pytest.mark.asyncio
+async def test_cancelled_backpressured_audio_releases_owned_queue_waiters():
+    baseline = asyncio.all_tasks()
+    session, socket = await started_session(write_queue_size=1)
+    socket.release_sends.clear()
+    frame = AudioFrame(b"\x00\x01", "pcm_s16le", 16_000, 1, sequence=1)
+    await session.push_audio(frame)
+    await session.push_audio(frame)
+    blocked = asyncio.create_task(session.push_audio(frame))
+    try:
+        for _ in range(100):
+            if session._writes._putters:
+                break
+            await asyncio.sleep(0)
+        assert session._writes._putters
+        blocked.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocked
+        await session.close()
+        await asyncio.sleep(0)
+        assert not session._writes._putters
+        assert not [task for task in asyncio.all_tasks() - baseline if not task.done()]
+    finally:
+        blocked.cancel()
+        await asyncio.gather(blocked, return_exceptions=True)
+        await session.close()
+
+
+@pytest.mark.asyncio
 async def test_real_adapter_handshake_and_pcm_base64_schema():
     session, socket = await started_session()
     payload = b"\x00\x01\x02\x03"
@@ -204,6 +232,41 @@ async def test_assistant_output_is_cancelled_once_deleted_and_never_emitted():
     assert session.usage_totals == {"total_tokens": 7, "input_tokens": 5, "output_tokens": 2}
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(anext(events), 0.02)
+    await session.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_metric_reports_numeric_usage_and_unknown_cost_only():
+    socket = FakeAliyunWebSocket()
+    captured = []
+
+    class Metrics:
+        def record(self, metric):
+            captured.append(metric)
+
+    factory = AliyunRealtimeSpeechSessionFactory(
+        provider_config(), connector=FakeAliyunConnector(socket), call_metrics=Metrics()
+    )
+    session = await factory.create(uuid4())
+    await session.start(RealtimeSpeechConfig())
+    await socket.server_event({"type": "response.created", "response": {"id": "response-1"}})
+    await socket.server_event(
+        {
+            "type": "response.output_item.added",
+            "response_id": "response-1",
+            "item": {"id": "assistant-1", "role": "assistant"},
+        }
+    )
+    await wait_for_sent_type(socket, "conversation.item.delete")
+    await socket.server_event({"type": "conversation.item.deleted", "item_id": "assistant-1"})
+    await socket.server_event(
+        {"type": "response.done", "response": {"id": "response-1", "status": "cancelled", "usage": {"total_tokens": 7}}}
+    )
+    await wait_for_condition(lambda: any(metric.name.value == "provider_usage" for metric in captured))
+
+    usage = next(metric for metric in captured if metric.name.value == "provider_usage")
+    assert usage.numeric == {"usage_units": 7, "cost_microunits": None}
+    assert usage.labels == {"provider": "aliyun", "result": "succeeded", "cost_status": "unknown"}
     await session.close()
 
 

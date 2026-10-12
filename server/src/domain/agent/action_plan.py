@@ -6,7 +6,7 @@ from datetime import date
 from typing import ClassVar
 from uuid import UUID
 
-from src.domain.call.contracts import CallAnswerDecision, CallSpeechDelivery
+from src.domain.call.contracts import CallAnswerDecision, CallFinalSnapshot, CallSpeechDelivery
 from src.domain.call.types import CallEndReason
 
 from ._realization_contract import RealizationContractErrorCode as _Code
@@ -184,6 +184,21 @@ class AnswerCall(Action):
     kind: ClassVar[ActionKind] = ActionKind.ANSWER_CALL
     call_id: UUID
     decision: CallAnswerDecision
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SummarizeCall(Action):
+    kind: ClassVar[ActionKind] = ActionKind.SUMMARIZE_CALL
+    user_id: str
+    final_snapshot: CallFinalSnapshot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MaintainCall(Action):
+    kind: ClassVar[ActionKind] = ActionKind.MAINTAIN_CALL
+    user_id: str
+    final_snapshot: CallFinalSnapshot
+    settlement_input_digest: str
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

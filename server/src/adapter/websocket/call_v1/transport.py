@@ -11,8 +11,11 @@ import asyncio
 import hashlib
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Literal, Protocol
+from uuid import UUID
 
+from src.infrastructure.observability.call_metrics import CallMetric, CallMetricName, CallMetricResult, CallMetricStatus
 from src.utils.owned_operation import complete_owned
 
 from .audio_codec import CALL_ROUTE, FINAL_FLAG, BinaryAudioFrameCodec, WireAudioFrame
@@ -125,10 +128,12 @@ class _ResponseRegistration:
     response_id: str
     stream_id: int
     first_seq: int
+    last_seq: int
     encoding: str
     sample_rate: int
     channels: int
     final_seen: bool = False
+    contiguous: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +154,7 @@ class CallTransportSession:
         character_id: str,
         sink: CallBusinessAcceptanceSink,
         config: CallTransportConfig | None = None,
+        call_metrics=None,
     ) -> None:
         if not call_id or not user_id or not character_id:
             raise ValueError("call_id, user_id and character_id are required")
@@ -173,6 +179,8 @@ class CallTransportSession:
         self._replay_capacity_event = asyncio.Event()
         self._replay_capacity_event.set()
         self._closed = False
+        self._call_metrics = call_metrics
+        self._ack_retry_count = 0
 
     @property
     def client_cursor(self) -> int:
@@ -185,6 +193,58 @@ class CallTransportSession:
     @property
     def last_server_seq(self) -> int:
         return self._server_next_seq - 1
+
+    @property
+    def next_server_seq(self) -> int:
+        """Return the next shared control/audio sequence owned by this session."""
+        self._require_open()
+        return self._server_next_seq
+
+    @property
+    def business_sink(self) -> CallBusinessAcceptanceSink:
+        """Expose the stable business binding to the composition owner."""
+        return self._sink
+
+    async def receive_start(self, raw: str) -> list[CallWireOutput]:
+        """Commit the initial call.start handshake as client sequence one."""
+        self._require_open()
+        try:
+            message = decode_control_text(raw, sender="client", transport="call_ws")
+        except ControlProtocolError as error:
+            raise CallTransportError(error.code) from error
+        if (
+            message["type"] != "call.start"
+            or int(message["seq"]) != 1
+            or str(message["client_request_id"]) == ""
+            or str(message["character_id"]) != self.character_id
+        ):
+            raise CallTransportError("INVALID_CALL_START")
+        frame = InboundCallFrame(seq=1, kind="control", raw=raw.encode("utf-8"), control=message)
+        digest = self._fingerprint(frame)
+        known = self._client_fingerprints.get(1)
+        if known is not None:
+            if known != digest:
+                raise CallTransportError("SEQ_CONFLICT")
+            return [self._ack_output()]
+        if self._client_cursor != 0:
+            raise CallTransportError("INVALID_CALL_START")
+        self._client_fingerprints[1] = digest
+        self._client_cursor = 1
+        return [self._ack_output()]
+
+    def response_server_range(self, response_id: str, stream_id: int) -> tuple[int, int]:
+        """Return the allocated replay range for one registered response stream."""
+        registration = self._streams.get(stream_id)
+        if registration is None or registration.response_id != response_id:
+            raise CallTransportError("UNREGISTERED_STREAM")
+        return registration.first_seq, registration.last_seq
+
+    def stopped_stream(self, response_id: str, stop_seq: int) -> int:
+        """Resolve the already validated stop receipt independently of pending playback."""
+        stop = self._stop_metadata.get(stop_seq)
+        if stop is None or stop.response_id != response_id:
+            raise CallTransportError("INVALID_PLAYBACK_STOP_CONFIRMATION")
+        return stop.stream_id
 
     async def receive_text(self, raw: str) -> list[CallWireOutput]:
         self._require_open()
@@ -334,6 +394,7 @@ class CallTransportSession:
                 response_id=response_id,
                 stream_id=stream_id,
                 first_seq=seq,
+                last_seq=seq,
                 encoding=audio_format[0],
                 sample_rate=audio_format[1],
                 channels=audio_format[2],
@@ -368,7 +429,14 @@ class CallTransportSession:
             stream_id=registration.stream_id,
             audio_payload_bytes=len(frame.payload),
         )
+        registration.contiguous = registration.contiguous and frame.seq == registration.last_seq + 1
+        registration.last_seq = frame.seq
         self._response_audio_bytes[registration.response_id] += len(frame.payload)
+        self._record_metric(
+            CallMetricName.BUFFER,
+            numeric={"buffered_bytes": self._replay_bytes},
+            labels={"result": CallMetricResult.SUCCEEDED.value},
+        )
         if frame.flags & FINAL_FLAG:
             registration.final_seen = True
         self._server_next_seq += 1
@@ -445,7 +513,9 @@ class CallTransportSession:
         registration = self._streams.get(stream_id)
         if registration is None or registration.response_id != response_id or registration.first_seq != start:
             raise CallTransportError("INVALID_RETIRE_RANGE")
-        for seq in range(start, through + 1):
+        if through > registration.last_seq or not registration.contiguous:
+            raise CallTransportError("INVALID_RETIRE_RANGE")
+        for seq in range(max(start, self._server_ack_cursor + 1), through + 1):
             entry = self._replay.get(seq)
             if entry is None or entry.response_id != response_id or entry.stream_id != stream_id:
                 raise CallTransportError("INVALID_RETIRE_RANGE")
@@ -458,7 +528,7 @@ class CallTransportSession:
         assert isinstance(retired, dict)
         start, through, stop_seq = int(retired["from"]), int(retired["through"]), int(message["seq"])
         stop_bytes = len(output.text.encode("utf-8"))
-        retired_bytes = sum(self._replay[seq].byte_size for seq in range(start, through + 1))
+        retired_bytes = sum(entry.byte_size for seq, entry in self._replay.items() if start <= seq <= through)
         if self._replay_bytes - retired_bytes + stop_bytes > self._config.max_replay_bytes:
             self._replay_capacity_event.clear()
             raise CallTransportBackpressure("REPLAY_BUFFER_FULL")
@@ -483,7 +553,7 @@ class CallTransportSession:
         retired = message["retire_server_seq"]
         assert isinstance(retired, dict)
         start, through, stop_seq = int(retired["from"]), int(retired["through"]), int(message["seq"])
-        for seq in range(start, through + 1):
+        for seq in range(max(start, self._server_ack_cursor + 1), through + 1):
             entry = self._replay[seq]
             self._replay_bytes -= entry.byte_size
             self._release_response_audio(entry)
@@ -491,6 +561,11 @@ class CallTransportSession:
             entry.byte_size = 0
             entry.retired_by = stop_seq
         self._replay_capacity_event.set()
+        self._record_metric(
+            CallMetricName.PLAYBACK_BACKLOG,
+            numeric={"buffered_bytes": self._replay_bytes},
+            labels={"result": CallMetricResult.SUCCEEDED.value},
+        )
 
     def _validate_client_control(self, message: ControlMessage) -> None:
         message_type = message["type"]
@@ -533,6 +608,12 @@ class CallTransportSession:
 
     def replay_missing(self, missing_seq: int) -> list[CallWireOutput]:
         self._require_open()
+        self._ack_retry_count += 1
+        self._record_metric(
+            CallMetricName.PLAYBACK_ACK_RETRY,
+            numeric={"ack_retry_count": self._ack_retry_count},
+            labels={"result": CallMetricResult.SUCCEEDED.value},
+        )
         entry = self._replay.get(missing_seq)
         if entry is None:
             raise CallTransportError("REPLAY_NOT_AVAILABLE")
@@ -583,6 +664,26 @@ class CallTransportSession:
         if self._closed:
             raise CallTransportError("TRANSPORT_CLOSED", close_code=CALL_CLOSE_TRY_AGAIN_LATER)
 
+    def _record_metric(self, name, *, numeric=None, labels=None) -> None:
+        if self._call_metrics is None:
+            return
+        try:
+            timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            self._call_metrics.record(
+                CallMetric(
+                    call_id=UUID(self.call_id),
+                    name=name,
+                    start_ts=timestamp,
+                    end_ts=timestamp,
+                    duration_ms=0,
+                    status=CallMetricStatus.SUCCESS,
+                    numeric=numeric,
+                    labels=labels,
+                )
+            )
+        except Exception:
+            pass
+
     def _ack_output(self) -> CallWireOutput:
         message: ControlMessage = {
             "protocol": "call.v1",
@@ -631,9 +732,35 @@ class _HubEntry:
 class CallTransportHub:
     """Session registry with atomic single-connection generation bindings."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        user_reset_fence=None,
+        require_user_admission=None,
+        resume_release_timeout: float = 2.5,
+    ) -> None:
+        if resume_release_timeout < 0:
+            raise ValueError("resume_release_timeout must be non-negative")
         self._sessions: dict[str, _HubEntry] = {}
         self._lock = asyncio.Lock()
+        self._connection_released = asyncio.Condition(self._lock)
+        self._user_reset_fence = user_reset_fence
+        self._require_user_admission = require_user_admission or (
+            user_reset_fence.require_admission if user_reset_fence is not None else None
+        )
+        self._resume_release_timeout = resume_release_timeout
+        self._owned_tasks: set[asyncio.Task] = set()
+
+    def own_task(self, operation, *, name: str) -> asyncio.Task:
+        task = asyncio.create_task(operation, name=name)
+        self._owned_tasks.add(task)
+        task.add_done_callback(self._owned_task_done)
+        return task
+
+    def _owned_task_done(self, task: asyncio.Task) -> None:
+        self._owned_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
 
     def register(self, session: CallTransportSession) -> None:
         existing = self._sessions.get(session.call_id)
@@ -641,14 +768,115 @@ class CallTransportHub:
             raise ValueError("call session already registered")
         self._sessions.setdefault(session.call_id, _HubEntry(session=session))
 
-    async def unregister(self, call_id: str, *, expected_session: CallTransportSession) -> bool:
+    async def register_and_attach_start(
+        self, session: CallTransportSession, *, user_id: str, connection_id: object
+    ) -> CallTransportBinding:
+        """Register through the reset fence so reset either closes or invalidates the session."""
+        if self._user_reset_fence is None:
+            if self._require_user_admission is not None:
+                await self._require_user_admission(user_id)
+            return await self._register_start(session, user_id=user_id, connection_id=connection_id)
+        task, _generation = await self._user_reset_fence.spawn_factory(
+            user_id,
+            lambda admitted: self._register_start_fenced(
+                session,
+                user_id=user_id,
+                connection_id=connection_id,
+                generation=admitted,
+            ),
+            name="call-transport-register",
+        )
+        cancelled = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        try:
+            binding = task.result()
+        except BaseException:
+            await self.unregister(session.call_id, expected_session=session)
+            raise
+        if cancelled:
+            await self.unregister(session.call_id, expected_session=session)
+            raise asyncio.CancelledError
+        return binding
+
+    async def _register_start_fenced(
+        self,
+        session: CallTransportSession,
+        *,
+        user_id: str,
+        connection_id: object,
+        generation: int,
+    ) -> CallTransportBinding:
+        binding = await self._register_start(session, user_id=user_id, connection_id=connection_id)
+        try:
+            await self._user_reset_fence.require_generation(user_id, generation)
+        except BaseException:
+            await self.unregister(session.call_id, expected_session=session)
+            raise
+        return binding
+
+    async def _register_start(
+        self, session: CallTransportSession, *, user_id: str, connection_id: object
+    ) -> CallTransportBinding:
         async with self._lock:
+            if session.user_id != user_id:
+                raise CallTransportError("RESUME_OWNERSHIP_MISMATCH", close_code=CALL_CLOSE_POLICY_VIOLATION)
+            existing = self._sessions.get(session.call_id)
+            if existing is not None and existing.session is not session:
+                raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+            entry = self._sessions.setdefault(session.call_id, _HubEntry(session=session))
+            if entry.connection_id is not None:
+                raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+            entry.generation += 1
+            entry.connection_id = connection_id
+            return CallTransportBinding(session, entry.generation, connection_id)
+
+    def session_for(self, call_id: str) -> CallTransportSession | None:
+        entry = self._sessions.get(call_id)
+        return None if entry is None else entry.session
+
+    async def unregister(self, call_id: str, *, expected_session: CallTransportSession) -> bool:
+        async with self._connection_released:
             entry = self._sessions.get(call_id)
             if entry is None or entry.session is not expected_session:
                 return False
             self._sessions.pop(call_id)
+            self._connection_released.notify_all()
             expected_session.close()
             return True
+
+    async def close(self) -> None:
+        """Close every registered session and release bounded replay buffers."""
+        async with self._connection_released:
+            sessions = tuple(entry.session for entry in self._sessions.values())
+            self._sessions.clear()
+            self._connection_released.notify_all()
+        for session in sessions:
+            session.close()
+        tasks = tuple(self._owned_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def close_user_sessions(self, user_id: str) -> int:
+        """Remove every replay buffer owned by one user before data deletion."""
+        async with self._connection_released:
+            owned = [
+                (call_id, entry.session)
+                for call_id, entry in self._sessions.items()
+                if entry.session.user_id == user_id
+            ]
+            for call_id, _session in owned:
+                self._sessions.pop(call_id, None)
+            if owned:
+                self._connection_released.notify_all()
+        for _call_id, session in owned:
+            session.close()
+        return len(owned)
 
     async def attach_resume(self, raw: str, *, user_id: str, connection_id: object) -> CallTransportBinding:
         try:
@@ -657,17 +885,66 @@ class CallTransportHub:
             raise CallTransportError(error.code) from error
         if message["type"] != "call.resume":
             raise CallTransportError("CALL_START_UNAVAILABLE", close_code=CALL_CLOSE_TRY_AGAIN_LATER)
+        if self._require_user_admission is not None:
+            await self._require_user_admission(user_id)
+        call_id = str(message["call_id"])
+        character_id = str(message["character_id"])
+        loop = asyncio.get_running_loop()
+        release_deadline = loop.time() + self._resume_release_timeout
+        async with self._connection_released:
+            entry = self._sessions.get(call_id)
+            self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
+            observed_generation = entry.generation
+            observed_connection = entry.connection_id
+            while entry.connection_id is not None:
+                if entry.generation != observed_generation or entry.connection_id is not observed_connection:
+                    raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+                remaining = release_deadline - loop.time()
+                if remaining <= 0:
+                    raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+                try:
+                    await asyncio.wait_for(self._connection_released.wait(), timeout=remaining)
+                except (TimeoutError, asyncio.TimeoutError) as error:
+                    raise CallTransportError(
+                        "CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION
+                    ) from error
+                entry = self._sessions.get(call_id)
+                self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
+        if self._require_user_admission is not None:
+            await self._require_user_admission(user_id)
+        async with self._connection_released:
+            entry = self._sessions.get(call_id)
+            self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
+            if entry.generation != observed_generation or entry.connection_id is not None:
+                raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+            entry.generation += 1
+            entry.connection_id = connection_id
+            return CallTransportBinding(entry.session, entry.generation, connection_id)
+
+    @staticmethod
+    def _require_resume_identity(entry: _HubEntry | None, *, user_id: str, character_id: str) -> None:
+        if entry is None:
+            raise CallTransportError("CALL_NOT_FOUND", close_code=CALL_CLOSE_POLICY_VIOLATION)
+        if entry.session.user_id != user_id or entry.session.character_id != character_id:
+            raise CallTransportError("RESUME_OWNERSHIP_MISMATCH", close_code=CALL_CLOSE_POLICY_VIOLATION)
+
+    async def attach_start(
+        self, session: CallTransportSession, *, user_id: str, connection_id: object
+    ) -> CallTransportBinding:
+        """Bind the first physical connection after the caller created its session."""
+        if self._require_user_admission is not None:
+            await self._require_user_admission(user_id)
         async with self._lock:
-            entry = self._sessions.get(str(message["call_id"]))
-            if entry is None:
+            entry = self._sessions.get(session.call_id)
+            if entry is None or entry.session is not session:
                 raise CallTransportError("CALL_NOT_FOUND", close_code=CALL_CLOSE_POLICY_VIOLATION)
-            if entry.session.user_id != user_id:
+            if session.user_id != user_id:
                 raise CallTransportError("RESUME_OWNERSHIP_MISMATCH", close_code=CALL_CLOSE_POLICY_VIOLATION)
             if entry.connection_id is not None:
                 raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
             entry.generation += 1
             entry.connection_id = connection_id
-            return CallTransportBinding(entry.session, entry.generation, connection_id)
+            return CallTransportBinding(session, entry.generation, connection_id)
 
     def is_current(self, binding: CallTransportBinding) -> bool:
         entry = self._sessions.get(binding.session.call_id)
@@ -687,9 +964,16 @@ class CallTransportHub:
         binding.session.acknowledge_server(ack_seq)
 
     async def detach(self, binding: CallTransportBinding) -> bool:
-        async with self._lock:
+        async with self._connection_released:
             if not self.is_current(binding):
                 return False
             entry = self._sessions[binding.session.call_id]
             entry.connection_id = None
+            self._connection_released.notify_all()
             return True
+
+    async def detach_after_disconnect(self, binding: CallTransportBinding, disconnect_stage) -> bool:
+        """Publish Stage reconnecting state before exposing the slot to a new generation."""
+        self.require_current(binding)
+        await disconnect_stage()
+        return await self.detach(binding)

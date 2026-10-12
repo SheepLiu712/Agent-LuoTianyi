@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from uuid import UUID, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .types import CallEndReason, CallOutcome
+
+CALL_CONVERSATION_NAMESPACE = uuid5(
+    NAMESPACE_URL,
+    "https://github.com/SheepLiu712/Agent-LuoTianyi/call-conversation/v1",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +57,6 @@ class CallContent:
 
 
 def derive_call_conversation_id(
-    namespace: UUID,
     *,
     user_id: str,
     character_id: str,
@@ -62,4 +66,4 @@ def derive_call_conversation_id(
     if not user_id or not character_id:
         raise ValueError("user_id and character_id are required")
     logical_name = "\x1f".join((user_id, character_id, str(call_id)))
-    return uuid5(namespace, logical_name)
+    return uuid5(CALL_CONVERSATION_NAMESPACE, logical_name)
