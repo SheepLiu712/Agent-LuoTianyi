@@ -11,6 +11,7 @@ from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
 from src.agent.skills.contracts import ReplyDraft
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
 from src.domain.call import AckStyle, CallAnswerDecision, CallAudioRoute, CallEndReason, CallSpeechDelivery, RecallMode
 from src.utils.enum_type import ConversationSource
@@ -91,8 +92,9 @@ class CallAnswerRequestedHandler:
 
 
 class CallStartedHandler:
-    def __init__(self, replies: CallReplySkill) -> None:
+    def __init__(self, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog) -> None:
         self._replies = replies
+        self._prepared_speech = prepared_speech
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -100,6 +102,8 @@ class CallStartedHandler:
             raise TypeError("CallStartedHandler requires CallStarted")
         drafts = await _generate_reply(
             self._replies,
+            self._prepared_speech,
+            "opening",
             plans,
             request,
             handling_invocation(request, plans.context),
@@ -116,9 +120,12 @@ class CallStartedHandler:
 
 
 class CallTurnCompletedHandler:
-    def __init__(self, recall: CallRecallDecisionSkill, replies: CallReplySkill) -> None:
+    def __init__(
+        self, recall: CallRecallDecisionSkill, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog
+    ) -> None:
         self._recall = recall
         self._replies = replies
+        self._prepared_speech = prepared_speech
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -151,6 +158,8 @@ class CallTurnCompletedHandler:
             )
         drafts = await _generate_reply(
             self._replies,
+            self._prepared_speech,
+            "turn",
             plans,
             request,
             invocation,
@@ -167,9 +176,12 @@ class CallTurnCompletedHandler:
 
 
 class CallSilenceElapsedHandler:
-    def __init__(self, recall: CallRecallDecisionSkill, replies: CallReplySkill) -> None:
+    def __init__(
+        self, recall: CallRecallDecisionSkill, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog
+    ) -> None:
         self._recall = recall
         self._replies = replies
+        self._prepared_speech = prepared_speech
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -192,6 +204,8 @@ class CallSilenceElapsedHandler:
         )
         drafts = await _generate_reply(
             self._replies,
+            self._prepared_speech,
+            "silence",
             plans,
             request,
             invocation,
@@ -321,7 +335,7 @@ def _with_emitted(request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.Han
     )
 
 
-async def _generate_reply(skill, plans, request, invocation, **kwargs):
+async def _generate_reply(skill, prepared_speech, scene, plans, request, invocation, **kwargs):
     try:
         drafts = await skill.generate(invocation, **kwargs)
         if not drafts:
@@ -333,11 +347,12 @@ async def _generate_reply(skill, plans, request, invocation, **kwargs):
         )
         if request.cancellation.is_cancelled:
             return None
+        resource = prepared_speech.choose_call_apology(invocation.character_id, scene)
         apology = d.Say(
             action_id=f"{request.request_id}-apology",
             content="",
             sound_content=None,
-            prepared_audio_ref=d.MediaRef(media_id="call_apology"),
+            prepared_audio_ref=d.MediaRef(media_id=resource.name),
             tone=d.Tone(value="normal"),
             expression=None,
             delivery=d.OutputDelivery.EPHEMERAL_REACTION,

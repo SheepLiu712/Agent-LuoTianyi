@@ -38,7 +38,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private val playbackRunning = AtomicBoolean(false)
   private val generation = AtomicLong(0)
   private val sessionGeneration = AtomicLong(0)
-  private val workerOwnership = WorkerOwnership()
   @Volatile private var sessionTerminationFailed = false
   private val captureSequence = AtomicLong(0)
   private val streamGenerations = ConcurrentHashMap<StreamKey, Long>()
@@ -82,6 +81,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     AsyncFunction("stopSession") { closeSession() }
     AsyncFunction("startCapture") { startCapture() }
     AsyncFunction("stopCapture") { stopCapture() }
+    AsyncFunction("reacquireAudioFocus") { reacquireAudioFocus() }
     AsyncFunction("acknowledgeCapturedAudio") { deviceSequence: Long, eventSessionGeneration: Long ->
       if (eventSessionGeneration == sessionGeneration.get()) captureInFlight.remove(deviceSequence)
     }
@@ -104,7 +104,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun startSession(): Map<String, Any?> {
-    if (sessionTerminationFailed || !workerOwnership.canStart()) {
+    if (sessionTerminationFailed) {
       return capability(false, "session_termination_failed")
     }
     if (sessionReady) return capability(true, null)
@@ -157,6 +157,14 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     )
     if (captureMin <= 0 || playbackMin <= 0) return capability(false, "required_format_unavailable")
     return capability(false, "not_initialized")
+  }
+
+  private fun reacquireAudioFocus(): Map<String, Any?> {
+    if (!sessionReady || sessionTerminationFailed) return capability(false, "session_not_ready")
+    val manager = requireContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    abandonAudioFocus()
+    val error = requestAudioFocus(manager, sessionGeneration.get())
+    return capability(error == null, error)
   }
 
   private fun startCapture(): Map<String, Any?> {
@@ -451,7 +459,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     synchronized(playbackCommandLock) {
       playbackCommands.addLast(PlaybackCommand(keys, stoppedGeneration))
     }
-    queue.wake()
   }
 
   private fun isCurrent(chunk: PlaybackChunk): Boolean = streamGenerations[chunk.key] == chunk.generation
@@ -478,7 +485,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     }
     playbackRunning.set(false)
     queue.clear()
-    queue.wake()
     val thread = playbackThread
     thread?.join(250)
     if (thread?.isAlive == true) {
@@ -597,7 +603,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
 
   private fun rollbackSessionInitialization(): Boolean {
     playbackRunning.set(false)
-    queue.wake()
     val thread = playbackThread
     thread?.join(250)
     if (thread?.isAlive == true) {
@@ -622,7 +627,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
 
   private fun markTerminationFailed(code: String, eventSessionGeneration: Long) {
     sessionTerminationFailed = true
-    workerOwnership.markStopResult(stopped = false)
     sessionReady = false
     synchronized(playbackCommandLock) { playbackCommands.clear() }
     stopOperations.fail().forEach {

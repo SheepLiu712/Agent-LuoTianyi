@@ -16,6 +16,7 @@ export interface CallAudioNativeModule {
   stopSession(): Promise<void>;
   startCapture(): Promise<NativeCapability>;
   stopCapture(): Promise<void>;
+  reacquireAudioFocus(): Promise<NativeCapability>;
   acknowledgeCapturedAudio(deviceSequence: number, sessionGeneration: number): Promise<void>;
   enqueuePlayback(
     responseId: string,

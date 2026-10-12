@@ -89,19 +89,12 @@ class PlaybackAccountingTest {
     assertFalse(firstStop.activeStopped)
     assertEquals(listOf(queued), firstStop.stoppedKeys)
     assertTrue(duplicateStop.stoppedKeys.isEmpty())
-    assertNull(accounting.recordPlaybackHead(11))
-    assertEquals(activeFinal, accounting.recordPlaybackHead(12))
-    assertNull(accounting.recordPlaybackHead(13))
-  }
-
-  @Test
-  fun timedOutWorkerBlocksRestartAndCannotBecomeNewGeneration() {
-    val ownership = WorkerOwnership()
-    ownership.markStopResult(stopped = false)
-
-    assertFalse(ownership.canStart())
-    assertFalse(ownership.accepts(eventGeneration = 1, currentGeneration = 2))
-    assertFalse(ownership.accepts(eventGeneration = 2, currentGeneration = 2))
+    accounting.observeHead(11)
+    assertNull(accounting.takeConsumedFinal())
+    accounting.observeHead(12)
+    assertEquals(activeFinal, accounting.takeConsumedFinal())
+    accounting.observeHead(13)
+    assertNull(accounting.takeConsumedFinal())
   }
 
   @Test

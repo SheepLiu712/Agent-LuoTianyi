@@ -13,7 +13,7 @@ interface SendResult {
   duration_ms?: number;
 }
 
-interface ConnectCallbacks {
+export interface ConnectCallbacks {
   onAgentMessage: (payload: AgentMessagePayload) => void;
   onAgentStateChanged: (state: string) => void;
   onError: (errorText: string) => void;
@@ -30,10 +30,10 @@ function sanitizeBase64(input: string) {
 export class NetworkClient {
   private transport: WebSocketTransport | null = null;
 
-  connectWs(username: string, token: string, callbacks: ConnectCallbacks) {
+  connectWs(username: string, token: string, expectedCharacterId: string, callbacks: ConnectCallbacks) {
     this.disconnectWs();
     addDebugTrace('network', 'connectWs', { username });
-    this.transport = new WebSocketTransport(username, token, callbacks);
+    this.transport = new WebSocketTransport(username, token, callbacks, { expectedCharacterId });
     this.transport.start();
   }
 
@@ -43,6 +43,34 @@ export class NetworkClient {
       this.transport.stop();
       this.transport = null;
     }
+  }
+
+  async reconnectWs(
+    username: string,
+    token: string,
+    expectedCharacterId: string,
+    callbacks: ConnectCallbacks,
+    ownershipRetryBudgetMs = 10_000,
+  ): Promise<boolean> {
+    this.disconnectWs();
+    const transport = new WebSocketTransport(username, token, callbacks, {
+      expectedCharacterId,
+      ownershipRetryBudgetMs,
+    });
+    this.transport = transport;
+    transport.start();
+    const ready = await transport.waitForChatReady(ownershipRetryBudgetMs);
+    if (!ready && this.transport === transport) {
+      transport.stop();
+      this.transport = null;
+    }
+    return ready && this.transport === transport;
+  }
+
+  async prepareCallSwitch(clientRequestId: string, characterId: string): Promise<void> {
+    if (!this.transport) throw new Error('CHAT_TRANSPORT_UNAVAILABLE');
+    await this.transport.prepareCallSwitch(clientRequestId, characterId);
+    this.disconnectWs();
   }
 
   sendChat(text: string, isProactive = false, clientMsgId?: string): Promise<SendResult> {

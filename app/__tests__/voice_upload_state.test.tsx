@@ -30,7 +30,7 @@ describe('voice upload result restores capture through chat, binder and send que
   let now: jest.SpyInstance;
   const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
   const webview = { current: null };
-  function Harness() { state = useChatLogic(webview, 'user', 'token'); return null; }
+  function Harness() { state = useChatLogic(webview, 'user', 'token', 'luotianyi'); return null; }
 
   beforeEach(() => {
     jest.clearAllMocks();

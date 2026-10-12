@@ -10,6 +10,7 @@ android {
   namespace 'com.sheepliu712.callaudio'
   defaultConfig {
     minSdkVersion 24
+    versionName project.version.toString()
   }
 }
 
