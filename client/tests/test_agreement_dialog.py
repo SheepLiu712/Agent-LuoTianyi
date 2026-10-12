@@ -88,9 +88,9 @@ def _wait_until(predicate, timeout=2.0):
     assert predicate()
 
 
-def _layout_document(payload, width=420.0, base_point_size=16.0):
+def _layout_document(payload, width=420.0):
     """渲染并按给定宽度排版，返回 (document, [(对齐, 行) ...])。"""
-    document = dialog_module.render_agreement_document(payload, base_point_size=base_point_size)
+    document = dialog_module.render_agreement_document(payload)
     document.setTextWidth(width)
     document.documentLayout().documentSize()  # 强制排版
     blocks = []
@@ -275,11 +275,18 @@ def test_reflow_adds_lines_when_window_narrows(make_dialog):
     assert narrow > wide
 
 
-def test_application_font_change_rescales_text_and_reflows(make_dialog):
+def test_text_size_comes_from_protocol_number(make_dialog):
+    """协议 ``font_size`` 数值直接作为点字号：24 → 24pt、16 → 16pt。
+
+    应用字体从 9pt 调到 24pt 后字号不变；字号只由协议里的数值决定。
+    """
     payload = {
         "version": "v",
         "title": "t",
-        "blocks": [{"font_size": 16, "runs": [{"text": WRAPPING_TEXT * 3, "bold": False}]}],
+        "blocks": [
+            {"font_size": 24, "runs": [{"text": "标题"}]},
+            {"font_size": 16, "runs": [{"text": WRAPPING_TEXT * 3}]},
+        ],
     }
     dialog = make_dialog(document=payload)
     dialog.resize(420, 520)
@@ -289,9 +296,9 @@ def test_application_font_change_rescales_text_and_reflows(make_dialog):
     dialog.show()
     QApplication.processEvents()
 
-    small_document = dialog.view.document()
-    small_size = small_document.begin().begin().fragment().charFormat().font().pointSizeF()
-    small_lines = sum(layout.lineCount() for _, layout in _blocks_of(dialog))
+    document = dialog.view.document()
+    small_title = document.begin().begin().fragment().charFormat().font().pointSizeF()
+    small_body = document.begin().next().begin().fragment().charFormat().font().pointSizeF()
 
     large_font = QFont(dialog.font())
     large_font.setPointSizeF(24.0)
@@ -299,13 +306,12 @@ def test_application_font_change_rescales_text_and_reflows(make_dialog):
     for _ in range(6):
         QApplication.processEvents()
 
-    large_document = dialog.view.document()
-    large_size = large_document.begin().begin().fragment().charFormat().font().pointSizeF()
-    large_lines = sum(layout.lineCount() for _, layout in _blocks_of(dialog))
+    document = dialog.view.document()
+    large_title = document.begin().begin().fragment().charFormat().font().pointSizeF()
+    large_body = document.begin().next().begin().fragment().charFormat().font().pointSizeF()
 
-    assert small_size == pytest.approx(9.0)
-    assert large_size == pytest.approx(24.0)
-    assert large_lines > small_lines
+    assert (small_title, small_body) == (24.0, 16.0)
+    assert (large_title, large_body) == (small_title, small_body)
 
 
 def _blocks_of(dialog):

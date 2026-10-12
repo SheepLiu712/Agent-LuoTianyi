@@ -8,12 +8,12 @@
 
 渲染契约（#295 AC 与 spec「接口规范 1」）：
 
-- 段落级 ``font_size``（12–32，默认 16）映射到客户端逻辑字号；
+- 段落级 ``font_size``（12–32，默认 16）直接作为本端字号数值使用；
 - 段落级 ``align`` 仅 ``center``（居中）/``justify``（两端对齐），缺省 ``justify``；
 - ``runs`` 内 ``bold`` 局部加粗；连续普通空格与 ``\\n`` 原样保留；
 - 末行与显式换行前的行不拉伸；对齐只调间距，不缩放字形；
 - 不执行 HTML（HTML 会折叠连续空格，也会引入协议未允许的标记与交互）；
-- 随窗口／字号变化重排。
+- 随窗口／字体变化重新排版。
 
 实现要点：Qt 的 ``AlignJustify`` 会把非末行拉伸到正文宽度、末行保持自然宽度；把 ``\\n``
 切成独立文本块，正好让「显式换行前的行」成为某个块的末行，从而不被拉伸。
@@ -136,23 +136,16 @@ def split_runs_on_newline(runs: Sequence[Mapping[str, Any]]) -> list[list[tuple[
 def render_agreement_document(
     payload: Mapping[str, Any],
     font_family: str | None = None,
-    *,
-    base_point_size: float | None = None,
 ) -> QTextDocument:
     """把服务端协议正文渲染成富文本文档（供只读查阅与后续签署流程复用）。
 
-    逐段落套用逻辑点字号与对齐、逐 run 套用粗细；这里刻意不使用 HTML：HTML 会折叠连续空格，
-    也会引入协议未允许的标记与交互行为。
+    协议里的 ``font_size`` 数值直接作为本端字号使用，Qt 里就是点字号：16 渲染成 16pt、
+    24 渲染成 24pt；换算成多少像素由 Qt 按屏幕缩放决定。逐段落套用字号与对齐、逐 run
+    套用粗细；这里刻意不使用 HTML：HTML 会折叠连续空格，也会引入协议未允许的标记与交互行为。
     """
     document = QTextDocument()
     document.setDocumentMargin(0)
-    default_font = QFont(font_family) if font_family else QFont()
-    if base_point_size is not None:
-        default_font.setPointSizeF(base_point_size)
-    document.setDefaultFont(default_font)
-    logical_base_size = default_font.pointSizeF()
-    if logical_base_size <= 0:
-        logical_base_size = 9.0
+    document.setDefaultFont(QFont(font_family) if font_family else QFont())
 
     cursor = QTextCursor(document)
     blocks = payload.get("blocks") or []
@@ -180,7 +173,7 @@ def render_agreement_document(
             for text, bold in line:
                 char_format = QTextCharFormat()
                 font = QFont(document.defaultFont())
-                font.setPointSizeF(logical_base_size * size / DEFAULT_BLOCK_FONT_SIZE)
+                font.setPointSizeF(size)
                 font.setBold(bold)
                 char_format.setFont(font)
                 cursor.insertText(text, char_format)
@@ -312,20 +305,10 @@ class AgreementDialog(QDialog):
         return actions
 
     # ── 正文 ─────────────────────────────────────────────────────
-    def _effective_font_point_size(self) -> float:
-        size = self.font().pointSizeF()
-        return size if size > 0 else 9.0
-
     def _render_current_document(self) -> None:
         if self._document_payload is None:
             return
-        self.view.setDocument(
-            render_agreement_document(
-                self._document_payload,
-                self.font().family(),
-                base_point_size=self._effective_font_point_size(),
-            )
-        )
+        self.view.setDocument(render_agreement_document(self._document_payload, self.font().family()))
 
     def set_document(self, payload: Mapping[str, Any]) -> None:
         """装载一份协议正文；只读窗口不含任何签署或计时状态。"""
@@ -376,6 +359,7 @@ class AgreementDialog(QDialog):
 
     # ── 生命周期 ─────────────────────────────────────────────────
     def changeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        # 应用字体变化时重建文档，让正文用新字体重新排版；字号不变，仍取自协议里的数值
         super().changeEvent(event)
         if event.type() in {QEvent.Type.FontChange, QEvent.Type.ApplicationFontChange}:
             self._render_current_document()
