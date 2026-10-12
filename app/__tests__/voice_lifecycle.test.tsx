@@ -103,6 +103,24 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
   expect(state.captureState).toBe('Recording');
 });
 
+it('reports a failed permission request instead of swallowing it', async () => {
+  options.recorder.getPermission.mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockRejectedValueOnce(new Error('native permission request failed'));
+  await mount();
+  await act(async () => { await state.pressIn(event); });
+
+  // 请求失败必须给用户可行动提示，且不得开始录音、不得改动输入栏状态。
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(options.onNotice).toHaveBeenCalledWith('录音启动失败，请重试');
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+  // 之后再按住仍可正常走授权/录音流程。
+  options.recorder.getPermission.mockResolvedValueOnce('granted');
+  await act(async () => { await state.pressIn(event); });
+  expect(state.captureState).toBe('Recording');
+});
+
 it.each([499, 500])('applies the minimum duration boundary at %ims', async (duration) => {
   jest.useFakeTimers({ now: 1000 });
   try {
