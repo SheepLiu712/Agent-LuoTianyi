@@ -24,6 +24,7 @@ from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMess
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
 from .llm_settings_dialog import LLMSettingsDialog
+from .agreement_dialog import AgreementDialog
 
 DYNAMIC_ICON_PATH = "res/gui/dynamic.png"
 DYNAMIC_HAS_NEW_ICON_PATH = "res/gui/dynamic_has_new.png"
@@ -712,6 +713,8 @@ class ChatWidget(QWidget):
         menu = QMenu(self)
         prefs_action = menu.addAction("相处模式设置")
         llm_action = menu.addAction("LLM 模型设置")
+        menu.addSeparator()
+        agreement_action = menu.addAction("用户协议")
         chosen = menu.exec(
             self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft())
         )
@@ -719,6 +722,9 @@ class ChatWidget(QWidget):
             PreferencesDialog(self.network_client, self).exec()
         elif chosen == llm_action:
             LLMSettingsDialog(self.network_client, self).exec()
+        elif chosen == agreement_action:
+            auth_api = self.network_client.auth_api
+            AgreementDialog(self, load_document=auth_api.fetch_current_agreement).exec()
 
     def open_dynamics(self):
         if self.network_client:

@@ -1,12 +1,18 @@
 import asyncio
+import json
 import threading
+from importlib.resources import files
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 import src.server_runtime as runtime_module
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
+from src.application.user.agreement_service import init_agreements
 from src.infrastructure.persistence.database import vector_store as vector_store_module
+from src.infrastructure.persistence.database.sql_database import AgreementVersion, Base
 from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
 
 
@@ -56,62 +62,119 @@ class FakeAgentRuntime:
         pass
 
 
+class FakeObservability:
+    def __init__(self, calls):
+        self.calls = calls
+        calls.append("observability_created")
+
+    def close(self):
+        self.calls.append("observability_closed")
+
+
+class FakeDatabase:
+    def __init__(self, calls, session_factory):
+        self.calls = calls
+        self.session_factory = session_factory
+        self.event_store = object()
+        calls.append("database_created")
+
+    def open_sql_session(self):
+        return self.session_factory()
+
+    def wire_dependencies(self, **_kwargs):
+        pass
+
+    def ensure_dependencies(self):
+        pass
+
+    async def shutdown(self):
+        self.calls.append("database_stopped")
+
+
+class FailingUserInterface(runtime_module.UserInterface):
+    def __init__(self, database_manager, media_resolver, *, calls, database_ref):
+        super().__init__(database_manager, media_resolver)
+        self.calls = calls
+        self.database_ref = database_ref
+
+    def generate_rsa_keys(self):
+        assert self.database_manager is self.database_ref["value"]
+        assert self.user_conversation_helper.database_manager is self.database_manager
+        assert self.user_conversation_helper.media_resolver is self.media_resolver
+        assert isinstance(self.media_resolver, FakeMediaResolver)
+        self.calls.append("rsa_generation_failed")
+        raise RuntimeError("late initialization failure")
+
+
+def _record_global(ref, calls, name, value) -> None:
+    ref["value"] = value
+    calls.append(f"{name}_{'set' if value is not None else 'cleared'}")
+
+
+def _assert_failed_release_did_not_archive(SessionLocal, tmp_path) -> None:
+    with SessionLocal() as session:
+        assert session.query(AgreementVersion).all() == []
+
+        old_root = tmp_path / "old_release"
+        old_root.mkdir()
+        packaged_root = files("res.user_agreements")
+        manifest = json.loads(packaged_root.joinpath("manifest.json").read_text(encoding="utf-8"))
+        first_version, first_filename = next(iter(manifest["files"].items()))
+        (old_root / "manifest.json").write_text(
+            json.dumps(
+                {"current_version": first_version, "files": {first_version: first_filename}},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (old_root / first_filename).write_text(
+            packaged_root.joinpath(first_filename).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+        service = init_agreements(session, old_root)
+        assert service.get_current().version == first_version
+        assert [row.version for row in session.query(AgreementVersion).all()] == [first_version]
+
+
 @pytest.mark.asyncio
-async def test_late_initialization_failure_rolls_back_resources_and_globals(monkeypatch):
+async def test_late_initialization_failure_rolls_back_resources_and_globals(monkeypatch, tmp_path):
     calls = []
     database_ref = {"value": None}
     observability_ref = {"value": None}
+    database_path = tmp_path / "runtime.db"
+    engine = create_engine(f"sqlite:///{database_path}")
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
 
-    class FakeObservability:
-        def __init__(self, _config, **_kwargs):
-            calls.append("observability_created")
-
-        def close(self):
-            calls.append("observability_closed")
-
-    class FakeDatabase:
-        def __init__(self, _config):
-            calls.append("database_created")
-            self.event_store = object()
-
-        def wire_dependencies(self, **_kwargs):
-            pass
-
-        def ensure_dependencies(self):
-            pass
-
-        async def shutdown(self):
-            calls.append("database_stopped")
-
-    class FailingUserInterface(runtime_module.UserInterface):
-        def generate_rsa_keys(self):
-            # Exercise production constructor/validation and verify the shared injected resolver.
-            assert self.database_manager is database_ref["value"]
-            assert self.user_conversation_helper.database_manager is self.database_manager
-            assert self.user_conversation_helper.media_resolver is self.media_resolver
-            assert isinstance(self.media_resolver, FakeMediaResolver)
-            calls.append("rsa_generation_failed")
-            raise RuntimeError("late initialization failure")
-
-    def set_database(value):
-        database_ref["value"] = value
-        calls.append("database_global_set" if value is not None else "database_global_cleared")
-
-    def set_observability(value):
-        observability_ref["value"] = value
-        calls.append("observability_global_set" if value is not None else "observability_global_cleared")
-
-    monkeypatch.setattr(runtime_module, "ObservabilityService", FakeObservability)
+    monkeypatch.setattr(runtime_module, "ObservabilityService", lambda _config: FakeObservability(calls))
     monkeypatch.setattr(runtime_module, "LLMService", FakeLLM)
-    monkeypatch.setattr(runtime_module, "DatabaseManager", FakeDatabase)
+    monkeypatch.setattr(runtime_module, "DatabaseManager", lambda _config: FakeDatabase(calls, SessionLocal))
     monkeypatch.setattr(runtime_module, "create_media_resolver", lambda _config: FakeMediaResolver())
     monkeypatch.setattr(
         runtime_module, "WorldRuntime", lambda config, **kwargs: FakeWorld(config, calls=calls, **kwargs)
     )
     monkeypatch.setattr(runtime_module, "AgentRuntime", FakeAgentRuntime)
-    monkeypatch.setattr(runtime_module, "UserInterface", FailingUserInterface)
-    monkeypatch.setattr(runtime_module, "set_default_database_manager", set_database)
-    monkeypatch.setattr(runtime_module, "set_observability_service", set_observability)
+    monkeypatch.setattr(
+        runtime_module,
+        "UserInterface",
+        lambda database, resolver: FailingUserInterface(
+            database,
+            resolver,
+            calls=calls,
+            database_ref=database_ref,
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "set_default_database_manager",
+        lambda value: _record_global(database_ref, calls, "database_global", value),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "set_observability_service",
+        lambda value: _record_global(observability_ref, calls, "observability_global", value),
+    )
     monkeypatch.setattr(
         runtime_module,
         "install_observability_log_handler",
@@ -133,6 +196,9 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     assert observability_ref["value"] is None
     assert "observability_closed" in calls
     assert "observability_handler_uninstalled" in calls
+
+    _assert_failed_release_did_not_archive(SessionLocal, tmp_path)
+    engine.dispose()
 
 
 @pytest.mark.asyncio

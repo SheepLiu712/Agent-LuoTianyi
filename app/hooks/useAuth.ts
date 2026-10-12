@@ -7,6 +7,7 @@ import { encryptPassword, getPublicKey, type PublicKeyFailureReason } from '../u
 import { addDebugTrace } from '../utils/debug_trace';
 import { classifyAutoLoginStatus, runAutoLoginWithRetry } from '../utils/auto_login';
 import { voicePlaybackManager } from '../utils/voice_playback_manager';
+import { AgreementPayload, parseAgreementPayload } from '../utils/agreement';
 
 const AUTO_LOGIN_KEY = 'auto_login';
 const USERNAME_KEY = 'saved_username';
@@ -31,6 +32,70 @@ export interface AuthState {
   isLoggedIn: boolean;
   isLoading: boolean;  // 正在向服务器请求
   publicKeyLoaded: boolean;  // 公钥是否已加载
+}
+
+/** 失败响应里取一句可显示的文案。
+
+    ``detail`` 可能是字符串，也可能是对象——例如运行时未就绪的 503 返回
+    ``{detail: {ok, code, message, runtime}}``。直接插值对象会渲染成 ``[object Object]``。
+    */
+function agreementFailureMessage(detail: unknown): string {
+  if (typeof detail === 'string' && detail) {
+    return detail;
+  }
+  if (detail && typeof detail === 'object') {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === 'string' && message) {
+      return message;
+    }
+  }
+  return '用户协议加载失败，请重试';
+}
+
+interface AgreementFetchOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export async function fetchCurrentAgreement(
+  options: AgreementFetchOptions = {},
+): Promise<{ success: true; data: AgreementPayload } | { success: false; message: string }> {
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  if (options.signal?.aborted) {
+    controller.abort();
+  } else {
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  }
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? server_config.API_TIMEOUT,
+  );
+
+  try {
+    const response = await fetch(`${server_config.BASE_URL}/auth/agreement`, {
+      signal: controller.signal,
+    });
+    const result: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      addDebugTrace('auth', 'agreement fetch failed', { status: response.status });
+      const detail = result && typeof result === 'object' ? (result as { detail?: unknown }).detail : null;
+      return { success: false, message: agreementFailureMessage(detail) };
+    }
+    const data = parseAgreementPayload(result);
+    if (!data) {
+      addDebugTrace('auth', 'agreement fetch invalid payload');
+      return { success: false, message: '用户协议加载失败，请重试' };
+    }
+    addDebugTrace('auth', 'agreement fetch ok');
+    return { success: true, data };
+  } catch (e) {
+    addDebugTrace('auth', 'agreement fetch error', { error: String(e) });
+    return { success: false, message: '用户协议加载失败，请重试' };
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
+  }
 }
 
 export function useAuth() {

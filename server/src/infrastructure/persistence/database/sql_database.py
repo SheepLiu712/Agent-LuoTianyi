@@ -380,6 +380,22 @@ class DynamicReadState(Base):
     user = relationship("User", back_populates="dynamic_read_state")
 
 
+# ————————————
+# 协议表
+# ————————————
+
+
+class AgreementVersion(Base):
+    __tablename__ = "agreement_versions"
+
+    version = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    format = Column(String, nullable=False)
+    content_json = Column(Text, nullable=False)
+    content_sha256 = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
 # Database URL
 SessionLocal = None
 engine = None
