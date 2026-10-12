@@ -35,6 +35,10 @@ def _validate_archived_agreements(session, docs: dict[str, AgreementDoc]) -> dic
     for version in db_versions & doc_versions:
         row = existing[version]
         doc = docs[version]
+        if row.title != doc.title:
+            raise AgreementConfigError(f"协议 {version} 标题被覆盖")
+        if row.format != doc.format:
+            raise AgreementConfigError(f"协议 {version} 格式被覆盖")
         if row.content_sha256 != doc.sha256:
             raise AgreementConfigError(f"协议 {version} 原文被覆盖")
         if row.content_json != doc.content_json:

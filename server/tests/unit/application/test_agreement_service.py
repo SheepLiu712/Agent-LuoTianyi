@@ -88,6 +88,34 @@ def test_init_agreements_rejects_orphan_database_versions(tmp_path, session):
         init_agreements(session, tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("title", "被篡改的标题", "标题被覆盖"),
+        ("format", "agreement.richtext.v2", "格式被覆盖"),
+    ],
+)
+def test_init_agreements_rejects_modified_archive_metadata(tmp_path, session, field, value, message):
+    agreement_path = tmp_path / "agreement_v1.json"
+    raw_doc = _write_valid_doc(agreement_path)
+    _write_manifest(tmp_path)
+    canonical = json.dumps(raw_doc, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    row = AgreementVersion(
+        version="v1",
+        title="服务协议",
+        format="agreement.richtext.v1",
+        content_json=canonical,
+        content_sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        created_at="2026-10-11T00:00:00+08:00",
+    )
+    setattr(row, field, value)
+    session.add(row)
+    session.commit()
+
+    with pytest.raises(AgreementConfigError, match=message):
+        init_agreements(session, tmp_path)
+
+
 def test_init_agreements_rejects_modified_content_sha(tmp_path, session):
     agreement_path = tmp_path / "agreement_v1.json"
     raw_doc = _write_valid_doc(agreement_path)
@@ -191,7 +219,7 @@ def test_publish_agreements_rejects_conflicting_concurrent_content(tmp_path):
             competing_session.add(
                 AgreementVersion(
                     version="v1",
-                    title="被篡改的协议",
+                    title="服务协议",
                     format="agreement.richtext.v1",
                     content_json="{}",
                     content_sha256="deadbeef",
