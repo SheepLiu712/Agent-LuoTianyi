@@ -30,6 +30,7 @@ from src.domain.call import (
     CallState,
     CallTerminalFacts,
 )
+from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.models.realtime_speech import (
     AmbientAudio,
     AudioFrame,
@@ -524,6 +525,16 @@ class CallStage:
         self._plans.append(_QueuedPlan(plan, token, turn_seq, barriers))
         if self._realize_task is None or self._realize_task.done():
             self._realize_task = self._track(asyncio.create_task(self._realize(), name="call-realize"))
+            self._realize_task.add_done_callback(self._resume_queued_plans)
+
+    def _resume_queued_plans(self, completed) -> None:
+        if (
+            self._realize_task is completed
+            and self._plans
+            and self.state in {CallState.RINGING, CallState.ACTIVE, CallState.RECONNECTING}
+        ):
+            self._realize_task = self._track(asyncio.create_task(self._realize(), name="call-realize"))
+            self._realize_task.add_done_callback(self._resume_queued_plans)
 
     async def _realize(self) -> None:
         while self._plans and (
@@ -534,7 +545,13 @@ class CallStage:
                 continue
             if queued.barriers and not await self._wait_response_barriers(queued.barriers, queued.token):
                 continue
-            await self._realize_plan(queued.plan, queued.turn_seq)
+            # Maintenance must not reset an already settled reply's status.
+            turn_seq = (
+                None
+                if all(isinstance(action, d.CognitiveMaintenance) for action in queued.plan.actions)
+                else queued.turn_seq
+            )
+            await self._realize_plan(queued.plan, turn_seq)
 
     async def _realize_plan(self, plan: d.ActionPlan, turn_seq: int | None) -> None:
         answer = next((action for action in plan.actions if isinstance(action, d.AnswerCall)), None)
@@ -558,6 +575,7 @@ class CallStage:
             cancellation=execution_token,
             interaction_context=self._context,
             call_output_permit=_CallOutputPermit(self, response_ids, self._generation),
+            call_maintenance_snapshot=self._maintenance_snapshot(),
         )
         if turn_seq is not None and turn_seq in self._turns:
             self._turns[turn_seq].status = CallReplyStatus.NOT_STARTED
@@ -579,6 +597,15 @@ class CallStage:
                 self._finish_user_turn(turn_seq)
             self._refresh_silence_task()
             self._finish_pending_end_if_ready()
+
+    def _maintenance_snapshot(self) -> CallMaintenanceSnapshot:
+        turns = []
+        for seq, turn in sorted(self._turns.items()):
+            if seq in self._unfinished_turns or self._turn_has_unsettled_response(seq):
+                break
+            text = turn.formal_text if turn.status in {CallReplyStatus.COMPLETED, CallReplyStatus.INTERRUPTED} else None
+            turns.append(CallFinalTurn(seq, turn.semantic, turn.status, text))
+        return CallMaintenanceSnapshot(self._record.call_id, tuple(turns))
 
     async def _apply_answer(self, action: d.AnswerCall) -> None:
         if action.call_id != self._record.call_id or self.state is not CallState.RINGING:
@@ -687,6 +714,10 @@ class CallStage:
 
     async def _finish(self, outcome: CallOutcome, reason: CallEndReason) -> CallFinalSnapshot:
         try:
+            # Admission is already closed (ENDING/DECLINED). Drain any owned
+            # maintenance write before freezing the final progress boundary.
+            if self._realize_task is not None and self._realize_task is not asyncio.current_task():
+                await asyncio.gather(self._realize_task, return_exceptions=True)
             ended = self._now()
             duration = self._active_duration_ms(ended)
             terminal_facts = {"ended_at": ended, "active_duration_ms": duration}
@@ -699,7 +730,9 @@ class CallStage:
                 CallFinalTurn(seq, turn.semantic, turn.status, turn.formal_text)
                 for seq, turn in sorted(self._turns.items())
             )
-            self._final = CallFinalSnapshot(terminal, completed, self._record.maintenance_turn_seq)
+            persisted = await complete_owned(asyncio.to_thread(self._repository.find_by_id, self._record.call_id))
+            progress = persisted.maintenance_turn_seq if persisted is not None else self._record.maintenance_turn_seq
+            self._final = CallFinalSnapshot(terminal, completed, progress)
         except BaseException:
             await self._cleanup()
             raise
@@ -810,11 +843,16 @@ class CallStage:
             )
             task.add_done_callback(self._observe_task)
         self._plans.clear()
+        # All pending work belongs to the interrupted generation, including
+        # plans which never reached realization. Their user facts are settled.
+        self._unfinished_turns.clear()
+        self._playback.set_unfinished_user_turn_count(0)
         for task in tuple(self._handle_tasks):
             self._cancel_task(task)
         self._cancel_task(self._realize_task)
 
     async def _cleanup(self) -> BaseException | None:
+        self._plans.clear()
         current = asyncio.current_task()
         pending = tuple(task for task in self._tasks if task is not current and not task.done())
         for task in pending:

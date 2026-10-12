@@ -63,7 +63,7 @@ class CallSettlementConsumerImpl:
         if not claimed:
             raise RuntimeError("settlement input claim failed")
         record = await complete_owned(asyncio.to_thread(self._calls.find_by_id, record.call_id))
-        await self._reconcile_completed_batches(record, digest)
+        await self._reconcile_completed_batches(record)
         if self._settled(record):
             return
         try:
@@ -201,21 +201,10 @@ class CallSettlementConsumerImpl:
             await self._maintenance_cas(record, SettlementStatus.FAILED, record.maintenance_turn_seq)
             raise turn_seq
         await self._maintenance_cas(record, SettlementStatus.SUCCEEDED, turn_seq)
-        if self._batches is not None and turn_seq > record.maintenance_turn_seq:
-            batch = await complete_owned(
-                asyncio.to_thread(
-                    self._batches.load,
-                    call_id=record.call_id,
-                    user_id=record.user_id,
-                    character_id=record.character_id,
-                    previous_turn_seq=record.maintenance_turn_seq,
-                    target_turn_seq=turn_seq,
-                )
-            )
-            if batch is not None:
-                await complete_owned(asyncio.to_thread(self._batches.mark_completed, batch.maintenance_id))
+        current = await complete_owned(asyncio.to_thread(self._calls.find_by_id, record.call_id))
+        await self._reconcile_completed_batches(current)
 
-    async def _reconcile_completed_batches(self, record, digest) -> None:
+    async def _reconcile_completed_batches(self, record) -> None:
         if self._batches is None or record.maintenance_turn_seq <= 0:
             return
         batches = await complete_owned(
@@ -227,11 +216,7 @@ class CallSettlementConsumerImpl:
             )
         )
         for batch in batches:
-            if (
-                batch.status == "frozen"
-                and batch.target_turn_seq <= record.maintenance_turn_seq
-                and batch.settlement_input_digest == digest
-            ):
+            if batch.status == "frozen" and batch.target_turn_seq <= record.maintenance_turn_seq:
                 await complete_owned(asyncio.to_thread(self._batches.mark_completed, batch.maintenance_id))
 
     async def _summary_cas(self, record, new, conversation_id) -> None:

@@ -213,7 +213,7 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
 
     report = await handler.handle(request, plans)
 
-    assert report.emitted_plan_ids == ("plan-1", "plan-2")
+    assert report.emitted_plan_ids == ("plan-1", "plan-2", "plan-3")
     assert len(memory.calls) == 1
     assert recall.pool_texts(call_id) == ("旧记忆", "新记忆")
     provisional = plans.drafts[0].actions[0]
@@ -223,7 +223,10 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
     assert formal.call_delivery.display_in_chat is False
     assert formal.call_delivery.is_ephemeral is True
     assert formal.message_id is None
-    assert all(isinstance(action, d.Say) for draft in plans.drafts for action in draft.actions)
+    assert all(isinstance(action, d.Say) for draft in plans.drafts[:2] for action in draft.actions)
+    maintenance = plans.drafts[2].actions[0]
+    assert isinstance(maintenance, d.CognitiveMaintenance)
+    assert maintenance.reason is d.MaintenanceReason.COMPACTION_THRESHOLD
     assert [entry.content.text for entry in plans.context.conversation.entries] == [
         "用户说：“你还记得吗”",
         "正式回答",

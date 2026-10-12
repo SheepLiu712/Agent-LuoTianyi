@@ -171,6 +171,8 @@ class CallSessionRepository(Protocol):
         updated_at: datetime,
     ) -> bool: ...
 
+    def advance_maintenance_progress(self, call_id: UUID, *, expected_turn_seq: int, new_turn_seq: int) -> bool: ...
+
     def update_maintenance_settlement(
         self,
         call_id: UUID,

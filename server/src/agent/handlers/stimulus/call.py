@@ -197,6 +197,8 @@ class CallSilenceElapsedHandler:
             )
         if actions:
             await plans.emit(ActionPlanDraft(source_stimulus_ids=(stimulus.stimulus_id,), actions=actions))
+            if decision is SilenceDecision.SPEAK:
+                await _emit_maintenance(plans, request)
         return _with_emitted(request, plans)
 
 
@@ -236,6 +238,21 @@ async def _emit_formal(
     )
     if actions:
         await plans.emit(ActionPlanDraft(source_stimulus_ids=(request.stimulus.stimulus_id,), actions=actions))
+        await _emit_maintenance(plans, request)
+
+
+async def _emit_maintenance(plans: PlanEmitter, request: d.HandleStimulusRequest) -> None:
+    await plans.emit(
+        ActionPlanDraft(
+            source_stimulus_ids=(request.stimulus.stimulus_id,),
+            actions=(
+                d.CognitiveMaintenance(
+                    action_id=f"{request.request_id}-maintenance",
+                    reason=d.MaintenanceReason.COMPACTION_THRESHOLD,
+                ),
+            ),
+        )
+    )
 
 
 async def _append_formal_reply(

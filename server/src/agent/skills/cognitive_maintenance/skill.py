@@ -87,13 +87,23 @@ class _BoundedConversation:
 class CognitiveMaintenanceSkill:
     """Freeze model output once per predecessor, then converge projections at-least-once."""
 
-    def __init__(self, *, memories: Mapping[str, _Memory], compaction: _Compaction) -> None:
+    def __init__(self, *, memories: Mapping[str, _Memory], compaction: _Compaction, call_maintenance=None) -> None:
         if not memories:
             raise ValueError("认知维护至少需要一个角色记忆适配器")
         self._memories = dict(memories)
         self._compaction = compaction
+        self._call_maintenance = call_maintenance
 
-    async def maintain_if_compaction_needed(self, invocation: SkillInvocation, context: _Context) -> MaintenanceReport:
+    async def maintain_if_compaction_needed(
+        self, invocation: SkillInvocation, context: _Context, *, call_snapshot=None
+    ) -> MaintenanceReport | None:
+        if call_snapshot is not None:
+            if self._call_maintenance is None:
+                raise RuntimeError("call maintenance is not configured")
+            await self._call_maintenance.maintain_window(
+                invocation, context, call_snapshot, compaction=self._compaction
+            )
+            return None
         if not self._compaction.requires_compaction(context.conversation):
             return MaintenanceReport(MaintenanceStatus.SKIPPED, MaintenanceReason.COMPACTION_THRESHOLD, None, None)
         return await self.maintain(invocation, context, reason=MaintenanceReason.COMPACTION_THRESHOLD)

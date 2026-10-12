@@ -247,6 +247,26 @@ class SqlCallSessionRepository:
             values=values,
         )
 
+    def advance_maintenance_progress(self, call_id: UUID, *, expected_turn_seq: int, new_turn_seq: int) -> bool:
+        """Advance an incremental batch without declaring final settlement complete."""
+        if expected_turn_seq < 0 or new_turn_seq <= expected_turn_seq:
+            raise ValueError("maintenance progress must advance")
+        session = self._sql_session_factory()
+        try:
+            result = session.execute(
+                update(CallSession)
+                .where(
+                    CallSession.call_id == str(call_id),
+                    CallSession.maintenance_turn_seq == expected_turn_seq,
+                    CallSession.maintenance_status != SettlementStatus.SUCCEEDED.value,
+                )
+                .values(maintenance_turn_seq=new_turn_seq)
+            )
+            session.commit()
+            return result.rowcount == 1
+        finally:
+            session.close()
+
     def update_maintenance_settlement(
         self,
         call_id: UUID,

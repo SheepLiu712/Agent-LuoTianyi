@@ -689,3 +689,146 @@ async def test_cleanup_releases_ownership_even_when_provider_close_fails(call_se
     assert stage.context is None
     assert not stage.tasks
     assert stage._closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_next_turn_runs_after_cancelled_owned_maintenance_drains(call_setup):
+    from src.utils.owned_operation import complete_owned
+
+    stage, provider, transport, handler = await _create(call_setup)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = stage._realize_plan
+
+    async def blocked_first(plan, turn_seq):
+        if turn_seq == 1:
+            entered.set()
+            await complete_owned(release.wait())
+        else:
+            await original(plan, turn_seq)
+
+    stage._realize_plan = blocked_first
+    handler.gate.set()
+    try:
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="first")))
+        await asyncio.wait_for(entered.wait(), 1)
+        generation = stage._generation
+        await provider.emit(SpeechStarted())
+        await _eventually(lambda: stage._generation > generation)
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="next")))
+        await _eventually(lambda: bool(stage._plans))
+        release.set()
+        await _eventually(
+            lambda: any(
+                isinstance(item, tuple) and item[0] == "start" and item[1] == "response-2" for item in transport.items
+            )
+        )
+    finally:
+        release.set()
+        await stage.terminate(CallEndReason.USER_HANGUP)
+
+
+@pytest.mark.asyncio
+async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_setup):
+    from types import SimpleNamespace
+
+    from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
+    from src.agent.handlers.stimulus.call import CallTurnCompletedHandler
+    from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
+    from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
+    from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
+    from src.agent.skills.contracts import ReplyDraft
+    from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+    from src.domain.call import AckStyle, CallRecallDecision, RecallMode
+
+    class Memory:
+        inputs = []
+
+        async def extract_maintenance_candidates(self, **kwargs):
+            self.inputs.append(kwargs)
+            return ()
+
+        async def propose_user_profile(self, **kwargs):
+            return None
+
+        async def write_maintenance_candidates(self, **kwargs):
+            pass
+
+    class Model:
+        async def generate_response(self, **kwargs):
+            return "compressed call prefix"
+
+    class Generator:
+        async def generate(self, **kwargs):
+            return (ReplyDraft("正式回答", "正式回答", "normal", None),)
+
+    async def decide(*args, **kwargs):
+        return CallRecallDecision(RecallMode.DIRECT, (), AckStyle.NONE)
+
+    stage, provider, transport, _ = await _create(call_setup)
+    repository, record, _, _ = call_setup
+    memory = Memory()
+    call_skill = CallMaintenanceSkill({"luotianyi": memory}, calls=repository)
+    compaction = ConversationCompactionSkill(
+        {"llm_module": {}}, SimpleNamespace(register_llm_module=lambda *args: Model())
+    )
+    skill = CognitiveMaintenanceSkill(
+        memories={"luotianyi": memory}, compaction=compaction, call_maintenance=call_skill
+    )
+    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    recall.decide = decide
+    stage._agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            (
+                (
+                    d.StimulusKind.CALL_TURN_COMPLETED,
+                    CallTurnCompletedHandler(recall, CallReplySkill({"luotianyi": Generator()})),
+                ),
+                (d.StimulusKind.CALL_ENDING, _NoPlanHandler()),
+            )
+        ),
+        action_router=ActionRouter(
+            (
+                (d.ActionKind.SAY, _SayHandler()),
+                (d.ActionKind.COGNITIVE_MAINTENANCE, CognitiveMaintenanceActionHandler("luotianyi", skill)),
+            )
+        ),
+    )
+    try:
+        for seq in range(1, 33):
+            await provider.emit(TurnCompleted(CallAudioSemantic(transcript=f"user turn {seq}")))
+            await _eventually(
+                lambda: len([item for item in transport.items if isinstance(item, tuple) and item[0] == "start"]) == seq
+            )
+            await _eventually(lambda: stage._realize_task.done())
+            stream = [item for item in transport.items if isinstance(item, tuple) and item[0] == "start"][-1]
+            stage.playback_completed(stream[1], stream[2])
+        assert stage.context.conversation.read().summary.text == "compressed call prefix"
+        assert len(stage.context.conversation.read().entries) == 32
+        assert repository.find_by_id(record.call_id).maintenance_turn_seq == 16
+        assert len(memory.inputs) == 1
+        snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+        assert snapshot.maintenance_turn_seq == 16
+        assert all(turn.reply_status is CallReplyStatus.COMPLETED for turn in snapshot.completed_turns)
+    finally:
+        if stage.snapshot is None:
+            await stage.terminate(CallEndReason.USER_HANGUP)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_unrealized_turn_does_not_block_maintenance_prefix(call_setup):
+    stage, provider, _, handler = await _create(call_setup)
+    try:
+        # This turn has a completed provider semantic but is still waiting in
+        # Agent handling when the next user speech interrupts it.
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="settled user fact")))
+        await _eventually(lambda: 1 in stage._unfinished_turns)
+        generation = stage._generation
+        await provider.emit(SpeechStarted())
+        await _eventually(lambda: stage._generation > generation)
+        snapshot = stage._maintenance_snapshot()
+        assert len(snapshot.completed_turns) == 1
+        assert snapshot.completed_turns[0].user_semantic == "用户说：“settled user fact”"
+        assert snapshot.completed_turns[0].formal_agent_text is None
+    finally:
+        await stage.terminate(CallEndReason.USER_HANGUP)
