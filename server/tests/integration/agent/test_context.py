@@ -12,6 +12,7 @@ from src.agent.context import (
     ContextFactory,
     ConversationCompaction,
     ConversationEntry,
+    ConversationSnapshot,
     ConversationSummary,
     ImageContent,
     JargonExplanation,
@@ -148,6 +149,38 @@ async def test_history_round_trip_and_character_isolation(database):
     assert restored.conversation.read().entries == entries
     other = await ContextFactory(character_id="miku", database=database).create("i", user_id="u")
     assert other.conversation.read().entries == ()
+
+
+@pytest.mark.asyncio
+async def test_call_factory_uses_read_only_seed_and_ephemeral_working_copy(database):
+    contexts = factory(database)
+    chat = await contexts.create("chat", user_id="u")
+    recent = ConversationEntry(
+        "recent",
+        datetime(2026, 10, 10, 12, 0),
+        "user",
+        TextContent("通话前内容"),
+    )
+    await chat.conversation.append((recent,))
+    before = database.get_conversation_context_state("u", character_id="luotianyi")
+
+    call = await contexts.create_call(
+        "call",
+        user_id="u",
+        requested_at=datetime(2026, 10, 10, 12, 2),
+    )
+    assert call.user.read().profile == UserProfile("画像")
+    assert call.conversation.read().entries == (recent,)
+
+    local = ConversationEntry("local", datetime(2026, 10, 10, 12, 2, 1), "agent", TextContent("通话内回复"))
+    await call.conversation.append((local,))
+    assert database.get_conversation_context_state("u", character_id="luotianyi") == before
+
+    store = call.conversation._store
+    await call.close()
+    assert store.load()[0] == ConversationSnapshot()
+    with pytest.raises(RuntimeError):
+        call.conversation.read()
 
 
 @pytest.mark.asyncio

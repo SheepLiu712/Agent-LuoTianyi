@@ -88,6 +88,17 @@ async def test_call_context_only_updates_memory_and_never_calls_database():
     assert not hasattr(store, "_database")
 
 
+def test_ephemeral_store_normalizes_a_private_copy_without_mutating_seed():
+    seed = ConversationSnapshot(ConversationSummary("种子总结"), (entry(2), entry(1)))
+    store = EphemeralCallConversationStore(seed)
+
+    loaded, count = store.load()
+
+    assert seed.entries == (entry(2), entry(1))
+    assert loaded == ConversationSnapshot(ConversationSummary("种子总结"), (entry(1), entry(2)))
+    assert count == 2
+
+
 @pytest.mark.asyncio
 async def test_call_store_compacts_prefix_and_rejects_wrong_basis_without_mutating_window():
     entries = (entry(1), entry(2), entry(3))
