@@ -1,15 +1,13 @@
-import json
-import wave
 from collections import Counter
 from types import SimpleNamespace
 
 import pytest
+from support.call_apology import Recall, Replies, catalog
 
 import src.domain.agent as d
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.call import CallTurnCompletedHandler
-from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import CallAudioSemantic, CallEndReason, CallReplyStatus, CallState, RecallMode
 from src.infrastructure.models.realtime_speech import TurnCompleted
@@ -18,35 +16,6 @@ from tests.integration.stage import test_call_stage as base
 from tests.integration.stage.test_call_stage import _agent, _create, _eventually
 
 call_setup = base.call_setup
-
-
-def catalog(tmp_path, *, rate=24000, width=2, channels=1):
-    with wave.open(str(tmp_path / "apology.wav"), "wb") as audio:
-        audio.setparams((channels, width, rate, 0, "NONE", "not compressed"))
-        audio.writeframes(b"\0" * 960 * width * channels)
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(
-        json.dumps([dict(name="call_apology", audio_path="apology.wav", text="sorry", expression="normal")])
-    )
-    return PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
-
-
-class Recall:
-    async def decide(self, *args, **kwargs):
-        return SimpleNamespace(mode=RecallMode.DIRECT)
-
-    def pool_texts(self, call_id):
-        return ()
-
-
-class Replies:
-    def __init__(self, *, failing=False, texts=("answer",)):
-        self.failing, self.texts = failing, texts
-
-    async def generate(self, *args, **kwargs):
-        if self.failing:
-            raise RuntimeError("private reply should not be logged")
-        return tuple(ReplyDraft(text, text, "normal", None) for text in self.texts)
 
 
 class Speech:
@@ -65,7 +34,7 @@ class Speech:
 async def setup(call_setup, tmp_path, *, failing=False, failures=0, texts=("answer",)):
     stage, provider, transport, _ = await _create(call_setup)
     replies, speech = Replies(failing=failing, texts=texts), Speech(failures=failures)
-    stage._agent = _agent(CallTurnCompletedHandler(Recall(), replies))
+    stage._agent = _agent(CallTurnCompletedHandler(Recall(), replies, catalog(tmp_path)))
     stage._agent._action_router = ActionRouter(
         ((d.ActionKind.SAY, SayHandler("luotianyi", speech, catalog(tmp_path))),)
     )
@@ -189,7 +158,7 @@ async def test_retry_provisional_remains_formal_reply_barrier(call_setup, tmp_pa
     stage, _, replies, speech = await setup(call_setup, tmp_path, failures=1)
     stage._agent._stimulus_router = base.StimulusRouter(
         (
-            (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler(Recalling(), replies)),
+            (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler(Recalling(), replies, catalog(tmp_path))),
             (d.StimulusKind.CALL_ENDING, base._NoPlanHandler()),
         )
     )

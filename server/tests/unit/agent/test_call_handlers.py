@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 import pytest
+from support.call_apology import _Plans, _request, _stimulus
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.context import ConversationSnapshot, UserContextSnapshot
+from src.agent.context import ConversationSnapshot
 from src.agent.handlers.action.call import EndCallHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -16,6 +16,7 @@ from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.plan_identity import decode_plan, encode_plan
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
 from src.agent.skills.contracts import ReplyDraft
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain import MemoryContext, MemoryHit
 from src.domain.call import (
     AckStyle,
@@ -25,7 +26,6 @@ from src.domain.call import (
     CallFinalSnapshot,
     CallOutcome,
     CallRecallDecision,
-    CallState,
     CallTerminalFacts,
     RecallMode,
 )
@@ -40,21 +40,6 @@ class _Conversation:
 
     async def append(self, entries):
         self.entries.extend(entries)
-
-
-class _Plans:
-    def __init__(self):
-        self.accepted_ids = []
-        self.drafts = []
-        self.context = SimpleNamespace(
-            identity=SimpleNamespace(character_id="luotianyi", user_id="user", interaction_id="call"),
-            user=SimpleNamespace(read=lambda: UserContextSnapshot()),
-            conversation=_Conversation(),
-        )
-
-    async def emit(self, draft):
-        self.drafts.append(draft)
-        self.accepted_ids.append(f"plan-{len(self.drafts)}")
 
 
 class _PlanSink:
@@ -137,39 +122,6 @@ class _Generator:
         )
 
 
-def _request(stimulus):
-    return d.HandleStimulusRequest(
-        request_id="request",
-        stimulus=stimulus,
-        interaction=d.CallInteractionSnapshot(
-            interaction_id="call",
-            interaction_revision=1,
-            user_id="user",
-            pending_stimuli=(),
-            now=datetime.now(timezone.utc),
-            timezone=ZoneInfo("UTC"),
-            supported_outputs=frozenset({d.AgentOutputKind.AUDIO_CHUNK, d.AgentOutputKind.MESSAGE_END}),
-            call_id=stimulus.call_id,
-            state=CallState.ACTIVE,
-            connection_state=d.ConnectionState.CONNECTED,
-        ),
-        cancellation=d.CancellationToken(),
-    )
-
-
-def _stimulus(cls, **kwargs):
-    return cls(
-        stimulus_id="stimulus",
-        schema_version=1,
-        occurred_at=datetime.now(timezone.utc),
-        source=d.StimulusSource.STAGE,
-        target_character_ids=("luotianyi",),
-        user_id="user",
-        ephemeral=True,
-        **kwargs,
-    )
-
-
 def test_answer_call_uuid_plan_round_trips_without_string_coercion():
     call_id = uuid4()
     plan = d.ActionPlan(
@@ -199,7 +151,7 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
         return CallRecallDecision(RecallMode.RECALL, ("喜欢什么",), AckStyle.THINKING)
 
     recall.decide = decide
-    handler = CallTurnCompletedHandler(recall, CallReplySkill({"luotianyi": _Generator()}))
+    handler = CallTurnCompletedHandler(recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({}))
     call_id = uuid4()
     request = _request(
         _stimulus(
@@ -241,7 +193,7 @@ async def test_silence_end_call_places_farewell_before_end_action():
         return SilenceDecision.END_CALL
 
     recall.decide_silence = decide_silence
-    handler = CallSilenceElapsedHandler(recall, CallReplySkill({"luotianyi": _Generator()}))
+    handler = CallSilenceElapsedHandler(recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({}))
     request = _request(_stimulus(d.CallSilenceElapsed, call_id=uuid4(), silence_ms=5000))
     plans = _Plans()
 
@@ -266,7 +218,9 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
             (
                 (
                     d.StimulusKind.CALL_SILENCE_ELAPSED,
-                    CallSilenceElapsedHandler(recall, CallReplySkill({"luotianyi": _Generator()})),
+                    CallSilenceElapsedHandler(
+                        recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({})
+                    ),
                 ),
             )
         ),
@@ -391,7 +345,9 @@ async def test_provisional_ack_is_not_appended_to_ephemeral_formal_facts():
         )
     )
 
-    await CallTurnCompletedHandler(recall, CallReplySkill({"luotianyi": _Generator()})).handle(request, plans)
+    await CallTurnCompletedHandler(
+        recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({})
+    ).handle(request, plans)
 
     assert plans.drafts[0].actions[0].call_delivery.provisional is True
     assert [entry.content.text for entry in plans.context.conversation.entries] == [

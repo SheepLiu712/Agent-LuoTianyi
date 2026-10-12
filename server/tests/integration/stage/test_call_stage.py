@@ -15,6 +15,7 @@ from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.output_drafts import AudioChunkDraft, MessageEndDraft, TextFinalDraft
 from src.agent.processing.plan_emitter import ActionPlanDraft
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import (
     CallAnswerDecision,
     CallAudioSemantic,
@@ -782,7 +783,9 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
             (
                 (
                     d.StimulusKind.CALL_TURN_COMPLETED,
-                    CallTurnCompletedHandler(recall, CallReplySkill({"luotianyi": Generator()})),
+                    CallTurnCompletedHandler(
+                        recall, CallReplySkill({"luotianyi": Generator()}), PreparedSpeechCatalog({})
+                    ),
                 ),
                 (d.StimulusKind.CALL_ENDING, _NoPlanHandler()),
             )
