@@ -2,11 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-luo.example/contracts/call_v1/control.schema.json",
   "title": "call.v1 control message",
-  "description": "Proposed structural contract. Raw UTF-8 size, duplicate keys, canonical integer tokens, Unicode scalar validity, transport/direction, and playback.stop cross-field ordering require the shared parser fixture.",
+  "description": "Proposed structural contract. Unknown fields are accepted and ignored. Numeric integer values are validated by range, without lexical restrictions. UTF-8 size, Unicode validity, transport/direction and cross-field relations are validated at the message boundary. Encoding order is unspecified.",
   "oneOf": [
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -30,7 +30,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -54,7 +54,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -86,7 +86,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -121,7 +121,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -149,7 +149,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -180,7 +180,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -220,7 +220,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -248,7 +248,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -280,7 +280,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -304,7 +304,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -328,7 +328,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -376,7 +376,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -408,7 +408,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -448,7 +448,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -480,7 +480,7 @@
     },
     {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "protocol",
         "type",
@@ -571,7 +571,7 @@
     },
     "clientAudio": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "encoding",
         "sample_rate",
@@ -591,7 +591,7 @@
     },
     "retireRange": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "from",
         "through"

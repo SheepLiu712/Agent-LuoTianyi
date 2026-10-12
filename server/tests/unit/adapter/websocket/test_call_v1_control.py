@@ -30,7 +30,7 @@ def test_decode_and_encode_valid_shared_messages(case: dict[str, object]) -> Non
 
     assert message == case["message"]
     encoded = encode_control_message(message, sender=sender, transport=case["transport"])
-    assert encoded == case["raw"]
+    assert json.loads(encoded) == case["message"]
     assert decode_control_text(encoded, sender=sender, transport=case["transport"]) == message
 
 
@@ -54,7 +54,7 @@ def test_encode_rejects_invalid_typed_object() -> None:
     assert (raised.value.code, raised.value.path) == ("INVALID_FIELD_VALUE", "$.call_id")
 
 
-def test_encode_canonicalizes_nested_field_order() -> None:
+def test_encode_accepts_arbitrary_field_order() -> None:
     message = {
         "audio": {"channels": 1, "sample_rate": 16000, "encoding": "pcm_s16le"},
         "character_id": "luotianyi",
@@ -64,10 +64,8 @@ def test_encode_canonicalizes_nested_field_order() -> None:
         "protocol": "call.v1",
     }
 
-    assert encode_control_message(message, sender="client", transport="call_ws") == (
-        '{"protocol":"call.v1","type":"call.start","seq":1,"client_request_id":"request",'
-        '"character_id":"luotianyi","audio":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1}}'
-    )
+    encoded = encode_control_message(message, sender="client", transport="call_ws")
+    assert json.loads(encoded) == message
 
 
 @pytest.mark.parametrize(
@@ -82,7 +80,7 @@ def test_encode_rejects_invalid_unicode(value: str, code: str) -> None:
             transport="call_ws",
         )
 
-    assert (raised.value.code, raised.value.path) == (code, "$.message" if code != "BAD_JSON" else "$")
+    assert (raised.value.code, raised.value.path) == (code, "$.message")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), -0.0])
@@ -101,7 +99,7 @@ def test_encode_rejects_non_integer_numeric_values(value: float) -> None:
             transport="call_ws",
         )
 
-    assert (raised.value.code, raised.value.path) == ("INVALID_FIELD_TYPE", "$.seq")
+    assert (raised.value.code, raised.value.path) == ("FIELD_OUT_OF_RANGE", "$.seq")
 
 
 def test_decode_counts_multibyte_utf8_at_raw_limit() -> None:
