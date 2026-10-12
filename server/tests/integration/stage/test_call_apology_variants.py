@@ -3,14 +3,13 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from support.call_apology import Recall, Replies, _Plans, _request, _stimulus, catalog
 
 import src.domain.agent as d
 from src.agent.handlers.stimulus.call import CallSilenceElapsedHandler, CallStartedHandler, CallTurnCompletedHandler
 from src.agent.skills.cognitive.call_recall import SilenceDecision
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import CallAudioSemantic
-from tests.integration.stage.test_call_failure_policy import Recall, Replies, catalog
-from tests.unit.agent.test_call_handlers import _Plans, _request, _stimulus
 
 
 def variants(tmp_path):

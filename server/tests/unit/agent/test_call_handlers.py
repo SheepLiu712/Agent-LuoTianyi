@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 import pytest
+from support.call_apology import _Plans, _request, _stimulus
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.context import ConversationSnapshot, UserContextSnapshot
+from src.agent.context import ConversationSnapshot
 from src.agent.handlers.action.call import EndCallHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -26,7 +26,6 @@ from src.domain.call import (
     CallFinalSnapshot,
     CallOutcome,
     CallRecallDecision,
-    CallState,
     CallTerminalFacts,
     RecallMode,
 )
@@ -41,21 +40,6 @@ class _Conversation:
 
     async def append(self, entries):
         self.entries.extend(entries)
-
-
-class _Plans:
-    def __init__(self):
-        self.accepted_ids = []
-        self.drafts = []
-        self.context = SimpleNamespace(
-            identity=SimpleNamespace(character_id="luotianyi", user_id="user", interaction_id="call"),
-            user=SimpleNamespace(read=lambda: UserContextSnapshot()),
-            conversation=_Conversation(),
-        )
-
-    async def emit(self, draft):
-        self.drafts.append(draft)
-        self.accepted_ids.append(f"plan-{len(self.drafts)}")
 
 
 class _PlanSink:
@@ -136,39 +120,6 @@ class _Generator:
             ReplyDraft("正式回答", "正式回答", "normal", None),
             ReplyDraft("不应演唱", "不应演唱", "normal", None, sing=("song", "segment")),
         )
-
-
-def _request(stimulus):
-    return d.HandleStimulusRequest(
-        request_id="request",
-        stimulus=stimulus,
-        interaction=d.CallInteractionSnapshot(
-            interaction_id="call",
-            interaction_revision=1,
-            user_id="user",
-            pending_stimuli=(),
-            now=datetime.now(timezone.utc),
-            timezone=ZoneInfo("UTC"),
-            supported_outputs=frozenset({d.AgentOutputKind.AUDIO_CHUNK, d.AgentOutputKind.MESSAGE_END}),
-            call_id=stimulus.call_id,
-            state=CallState.ACTIVE,
-            connection_state=d.ConnectionState.CONNECTED,
-        ),
-        cancellation=d.CancellationToken(),
-    )
-
-
-def _stimulus(cls, **kwargs):
-    return cls(
-        stimulus_id="stimulus",
-        schema_version=1,
-        occurred_at=datetime.now(timezone.utc),
-        source=d.StimulusSource.STAGE,
-        target_character_ids=("luotianyi",),
-        user_id="user",
-        ephemeral=True,
-        **kwargs,
-    )
 
 
 def test_answer_call_uuid_plan_round_trips_without_string_coercion():
