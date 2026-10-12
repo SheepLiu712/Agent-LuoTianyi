@@ -8,6 +8,13 @@ from src.domain.call import CallContent
 from src.domain.memory_context import MemoryHit
 
 
+class ConversationMode(str, Enum):
+    """创建上下文时选择的窗口语义；不控制单次 append/compact。"""
+
+    CHAT = "chat"
+    CALL = "call"
+
+
 def _check_terms(values: tuple[str, ...]) -> None:
     if not isinstance(values, tuple) or any(not isinstance(value, str) for value in values):
         raise TypeError("词条应为字符串元组")

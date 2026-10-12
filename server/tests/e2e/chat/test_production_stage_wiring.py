@@ -8,7 +8,7 @@ from fastapi import WebSocketDisconnect
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
-from src.agent.context import RecalledMemoryContext
+from src.agent.context import ConversationMode, RecalledMemoryContext
 from src.stage import StageManager
 from src.web.websocket import WSMessage
 from src.web.websocket.service import (
@@ -33,7 +33,9 @@ class Socket:
 
 
 class ContextFactory:
-    async def create(self, interaction_id: str, *, user_id: str):
+    async def create(self, interaction_id: str, *, mode: ConversationMode, user_id: str):
+        assert mode is ConversationMode.CHAT
+
         async def close() -> None:
             return None
 

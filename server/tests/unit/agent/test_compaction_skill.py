@@ -1,12 +1,16 @@
 """共享对话压缩技能。"""
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
+from support import context_support
+from support.context_support import entry, factory
 
-from support.context_support import database, entry, factory
+from src.agent.context import ConversationMode
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+
+# Pytest registers this imported fixture; an assignment avoids shadowing an import in test arguments.
+database = context_support.database
 
 
 class LLM:
@@ -24,8 +28,9 @@ class LLM:
 
 
 def skill(llm, keep=1):
-    return ConversationCompactionSkill({"raw_conversation_context_limit": 2,
-        "not_zip_conversation_count": keep, "llm_module": {"model": "test"}}, llm)
+    return ConversationCompactionSkill(
+        {"raw_conversation_context_limit": 2, "not_zip_conversation_count": keep, "llm_module": {"model": "test"}}, llm
+    )
 
 
 @pytest.mark.asyncio
@@ -33,7 +38,7 @@ def skill(llm, keep=1):
 async def test_skill_generates_result_without_mutating_context(database, keep):
     llm = LLM()
     compactor = skill(llm, keep)
-    context = await factory(database).create("i", user_id="u")
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     await context.conversation.append((entry(1), entry(2)))
     assert await compactor.compact(context.conversation) is None
     assert llm.calls == []
@@ -55,7 +60,8 @@ async def test_model_failure_does_not_write(database, failure):
             if failure == "exception":
                 raise RuntimeError("model failed")
             return " "
-    context = await factory(database).create("i", user_id="u")
+
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     await context.conversation.append((entry(1), entry(2), entry(3)))
     before = context.conversation.read()
     with pytest.raises((ValueError, RuntimeError)):
@@ -69,10 +75,14 @@ async def test_shared_skill_keeps_concurrent_contexts_separate(database):
         async def generate_response(self, **kwargs):
             await asyncio.sleep(0)
             return kwargs["recent_conversation"]
+
     compactor = skill(Echo())
-    a = await factory(database).create("a", user_id="u")
+    a = await factory(database).create("a", mode=ConversationMode.CHAT, user_id="u")
     from src.agent.context import ContextFactory
-    b = await ContextFactory(character_id="miku", database=database).create("b", user_id="u")
+
+    b = await ContextFactory(character_id="miku", database=database).create(
+        "b", mode=ConversationMode.CHAT, user_id="u"
+    )
     await a.conversation.append((entry(1), entry(2), entry(3)))
     await b.conversation.append((entry(4), entry(5), entry(6)))
     ra, rb = await asyncio.gather(compactor.compact(a.conversation), compactor.compact(b.conversation))
@@ -85,12 +95,15 @@ async def test_shared_skill_keeps_concurrent_contexts_separate(database):
 @pytest.mark.asyncio
 async def test_runtime_registers_compaction_once_for_all_characters(runtime_dependencies):
     from src.agent_runtime.agent_runtime import AgentRuntime
+
     kwargs, _ = runtime_dependencies
     original = kwargs["llm_service"].register_llm_module
     calls = []
+
     def register(name, config):
         calls.append(name)
         return original(name, config)
+
     kwargs["llm_service"].register_llm_module = register
     kwargs["config"].setdefault("skills", {})["conversation_compaction"] = {"llm_module": {"model": "test"}}
     runtime = AgentRuntime(**kwargs)
@@ -105,12 +118,14 @@ async def test_runtime_registers_compaction_once_for_all_characters(runtime_depe
 @pytest.mark.asyncio
 async def test_append_while_skill_generates_summary_survives_application(database):
     started, proceed = asyncio.Event(), asyncio.Event()
+
     class Paused(LLM):
         async def generate_response(self, **kwargs):
             started.set()
             await proceed.wait()
             return "总结"
-    context = await factory(database).create("i", user_id="u")
+
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     await context.conversation.append((entry(1), entry(2), entry(3)))
     task = asyncio.create_task(skill(Paused()).compact(context.conversation))
     await asyncio.wait_for(started.wait(), 5)
@@ -121,7 +136,9 @@ async def test_append_while_skill_generates_summary_survives_application(databas
     assert [e.entry_id for e in context.conversation.read().entries] == ["3", "4"]
 
 
-@pytest.mark.parametrize("field", ["raw_conversation_context_limit", "not_zip_conversation_count", "forget_conversation_days"])
+@pytest.mark.parametrize(
+    "field", ["raw_conversation_context_limit", "not_zip_conversation_count", "forget_conversation_days"]
+)
 @pytest.mark.parametrize("value", [True, "60", 1.5, None, -1])
 def test_compaction_validates_own_config_before_registering(field, value):
     llm = LLM()
@@ -154,5 +171,6 @@ def test_compaction_propagates_child_configuration_error():
     class Rejecting(LLM):
         def register_llm_module(self, name, config):
             raise ValueError("llm_module.prompt_name is required")
+
     with pytest.raises(ValueError, match="llm_module.prompt_name"):
         ConversationCompactionSkill({"llm_module": {}}, Rejecting())

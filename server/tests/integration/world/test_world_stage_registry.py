@@ -4,12 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.stage import WorldStage
+from src.agent.context import ConversationMode
 from src.server_runtime import DEFAULT_WORLD_ID, ServerRuntime
+from src.stage import WorldStage
 
 
 class ContextFactory:
-    async def create(self, interaction_id: str, *, user_id: str | None):
+    async def create(self, interaction_id: str, *, mode: ConversationMode, user_id: str | None):
+        assert mode is ConversationMode.CHAT
         context = SimpleNamespace(
             identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id="luotianyi"),
             closed=False,

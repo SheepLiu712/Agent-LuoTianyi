@@ -8,6 +8,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
+from src.agent.context import ConversationMode
 from src.domain.call import CallAgentSettlementResult, CallFinalSnapshot, CallState
 from src.infrastructure.persistence.call_sessions import CallSessionRecord
 
@@ -25,8 +26,11 @@ class CallAgentSettlement:
         skip_summary: bool = False,
         settlement_input_digest: str,
     ) -> CallAgentSettlementResult:
-        context = await self._get_context_factory(record.character_id).create_call(
-            str(record.call_id), user_id=record.user_id, requested_at=record.requested_at.replace(tzinfo=None)
+        context = await self._get_context_factory(record.character_id).create(
+            str(record.call_id),
+            mode=ConversationMode.CALL,
+            user_id=record.user_id,
+            requested_at=record.requested_at.replace(tzinfo=None),
         )
         try:
             plans = _PlanSink()

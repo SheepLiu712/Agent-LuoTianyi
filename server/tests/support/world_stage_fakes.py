@@ -1,4 +1,5 @@
 """WorldStage 测试共享的领域对象和轻量 fake。"""
+
 import asyncio
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -6,59 +7,83 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import src.domain.agent as d
-from src.agent.context import RecalledMemoryContext
+from src.agent.context import ConversationMode, RecalledMemoryContext
 from src.stage import WorldStage
 
 
 def world_observation(*, stimulus_id: str | None = None, revision: int = 1) -> d.WorldObservation:
     return d.WorldObservation(
-        stimulus_id=stimulus_id or str(uuid4()), schema_version=1,
-        occurred_at=datetime.now(timezone.utc), source=d.StimulusSource.WORLD,
-        target_character_ids=("luotianyi",), user_id=None, ephemeral=False,
+        stimulus_id=stimulus_id or str(uuid4()),
+        schema_version=1,
+        occurred_at=datetime.now(timezone.utc),
+        source=d.StimulusSource.WORLD,
+        target_character_ids=("luotianyi",),
+        user_id=None,
+        ephemeral=False,
         observation_kind=d.WorldObservationKind(value="weather"),
-        fact=d.WorldFact(fact_id=str(uuid4()), summary="晴朗"), evidence_refs=(),
+        fact=d.WorldFact(fact_id=str(uuid4()), summary="晴朗"),
+        evidence_refs=(),
         world_revision=revision,
     )
 
 
 def activity_observation(*, activity_id: str = "walk", revision: int = 1) -> d.ActivityObservation:
     return d.ActivityObservation(
-        stimulus_id=str(uuid4()), schema_version=1, occurred_at=datetime.now(timezone.utc),
-        source=d.StimulusSource.WORLD, target_character_ids=("luotianyi",), user_id=None,
-        ephemeral=False, activity_id=activity_id,
+        stimulus_id=str(uuid4()),
+        schema_version=1,
+        occurred_at=datetime.now(timezone.utc),
+        source=d.StimulusSource.WORLD,
+        target_character_ids=("luotianyi",),
+        user_id=None,
+        ephemeral=False,
+        activity_id=activity_id,
         observation=d.ActivityFact(fact_id=str(uuid4()), summary="散步中"),
         activity_revision=revision,
     )
 
 
 def handling_report(
-    request: d.HandleStimulusRequest, *, plans: tuple[str, ...] = (),
+    request: d.HandleStimulusRequest,
+    *,
+    plans: tuple[str, ...] = (),
     status: d.HandlingRequestStatus = d.HandlingRequestStatus.COMPLETED,
 ) -> d.HandlingReport:
     pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
     consumed = (request.stimulus.stimulus_id,) if status is d.HandlingRequestStatus.COMPLETED else ()
     return d.HandlingReport(
-        request_id=request.request_id, trigger_stimulus_id=request.stimulus.stimulus_id,
+        request_id=request.request_id,
+        trigger_stimulus_id=request.stimulus.stimulus_id,
         basis_interaction_revision=request.interaction.interaction_revision,
-        request_status=status, considered_pending_stimulus_ids=pending,
+        request_status=status,
+        considered_pending_stimulus_ids=pending,
         consumed_pending_stimulus_ids=consumed,
         retained_pending_stimulus_ids=tuple(item for item in pending if item not in consumed),
         emitted_plan_ids=plans,
-        error_code=(d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
-                    if status is d.HandlingRequestStatus.FAILED else None),
+        error_code=(d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE if status is d.HandlingRequestStatus.FAILED else None),
         retryable=False,
     )
 
 
 def action_plan(request: d.HandleStimulusRequest, ordinal: int = 0) -> d.ActionPlan:
     return d.ActionPlan(
-        plan_id=str(uuid4()), origin_request_id=request.request_id, plan_ordinal=ordinal,
-        target_character_id="luotianyi", interaction_id=request.interaction.interaction_id,
+        plan_id=str(uuid4()),
+        origin_request_id=request.request_id,
+        plan_ordinal=ordinal,
+        target_character_id="luotianyi",
+        interaction_id=request.interaction.interaction_id,
         basis_interaction_revision=request.interaction.interaction_revision,
         source_stimulus_ids=(request.stimulus.stimulus_id,),
-        actions=(d.Say(action_id=str(uuid4()), content="你好", sound_content=None,
-                       prepared_audio_ref=None, tone=d.Tone(value="normal"), expression=None,
-                       delivery=d.OutputDelivery.CONVERSATION),),
+        actions=(
+            d.Say(
+                action_id=str(uuid4()),
+                content="你好",
+                sound_content=None,
+                prepared_audio_ref=None,
+                tone=d.Tone(value="normal"),
+                expression=None,
+                delivery=d.OutputDelivery.CONVERSATION,
+            ),
+        ),
     )
 
 
@@ -66,11 +91,12 @@ class ContextFactory:
     def __init__(self) -> None:
         self.created = []
 
-    async def create(self, interaction_id: str, *, user_id: str | None):
+    async def create(self, interaction_id: str, *, mode: ConversationMode, user_id: str | None):
+        assert mode is ConversationMode.CHAT
         context = SimpleNamespace(
-            identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id,
-                                     character_id="luotianyi"),
-            recalled_memory=RecalledMemoryContext(), closed=False,
+            identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id="luotianyi"),
+            recalled_memory=RecalledMemoryContext(),
+            closed=False,
         )
 
         async def close() -> None:
@@ -109,13 +135,19 @@ class RecordingAgent:
 
 
 async def create_stage(
-    agent: RecordingAgent | None = None, *, config=None,
+    agent: RecordingAgent | None = None,
+    *,
+    config=None,
     on_execution_finished: Callable[[d.ActionPlan, d.ExecutionReport], None] | None = None,
 ):
     factory = ContextFactory()
     actual_agent = agent or RecordingAgent()
     stage = await WorldStage.create(
-        character_id="luotianyi", world_id="default", agent=actual_agent,
-        context_factory=factory, config=config, on_execution_finished=on_execution_finished,
+        character_id="luotianyi",
+        world_id="default",
+        agent=actual_agent,
+        context_factory=factory,
+        config=config,
+        on_execution_finished=on_execution_finished,
     )
     return stage, actual_agent, factory

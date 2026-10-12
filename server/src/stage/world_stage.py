@@ -10,7 +10,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
-from src.agent.context import ContextFactory, InteractionContext
+from src.agent.context import ContextFactory, ConversationMode, InteractionContext
 from src.agent.handlers.stimulus.world_activity import WORLD_ACTIVITY_STIMULUS_KINDS
 from src.domain.stage import StageState
 from src.utils.logger import get_logger
@@ -92,7 +92,7 @@ class WorldStage:
         on_handling_settled: HandlingSettledCallback | None = None,
     ) -> WorldStage:
         """创建并接管无用户世界上下文；构造失败时关闭上下文。"""
-        context = await context_factory.create(str(uuid4()), user_id=None)
+        context = await context_factory.create(str(uuid4()), mode=ConversationMode.CHAT, user_id=None)
         try:
             return cls(
                 character_id=character_id,

@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from support.context_support import database, factory  # noqa: F401
 
-from src.agent.context import ConversationEntry
+from src.agent.context import ConversationEntry, ConversationMode
 from src.domain import ConversationItem
 from src.domain.call import CallContent, CallEndReason, CallOutcome
 
@@ -38,10 +38,10 @@ async def test_settled_call_loads_in_new_chat_and_call_seed(database, outcome): 
     )
     database.add_call_conversation("u", "luotianyi", item)
     contexts = factory(database)
-    chat = await contexts.create("next-chat", user_id="u")
+    chat = await contexts.create("next-chat", mode=ConversationMode.CHAT, user_id="u")
     assert chat.conversation.read().entries[0].content == content
     await chat.close()
-    call = await contexts.create_call("next-call", user_id="u", requested_at=now)
+    call = await contexts.create("next-call", mode=ConversationMode.CALL, user_id="u", requested_at=now)
     assert call.conversation.read().entries[0].content == content
     await call.close()
 
@@ -50,10 +50,10 @@ async def test_settled_call_loads_in_new_chat_and_call_seed(database, outcome): 
 async def test_call_content_round_trips_through_conversation_store(database):  # noqa: F811
     content = CallContent(uuid4(), CallOutcome.CONNECTED, 1000, "用户喜欢音乐", CallEndReason.USER_HANGUP)
     contexts = factory(database)
-    chat = await contexts.create("chat", user_id="u")
+    chat = await contexts.create("chat", mode=ConversationMode.CHAT, user_id="u")
     entry = ConversationEntry(str(uuid4()), datetime.now(), "user", content)
     await chat.conversation.append((entry,))
     await chat.close()
-    restored = await contexts.create("restored", user_id="u")
+    restored = await contexts.create("restored", mode=ConversationMode.CHAT, user_id="u")
     assert restored.conversation.read().entries == (entry,)
     await restored.close()

@@ -8,8 +8,8 @@ from src.infrastructure.persistence.cognitive_maintenance import (
     CognitiveMaintenanceBatchDraft,
 )
 
+from ._conversation_store import ConversationStore, DatabaseConversationStore
 from ._lifecycle import _complete, _Lifecycle
-from .conversation_store import ConversationStore, DatabaseConversationStore
 from .models import (
     ContextIdentity,
     ConversationCompaction,
@@ -29,11 +29,12 @@ class ConversationContext:
         *,
         identity: ContextIdentity,
         database: "ConversationService | None" = None,
-        store: ConversationStore | None = None,
+        _store: ConversationStore | None = None,
         snapshot: ConversationSnapshot | None = None,
     ) -> None:
         """绑定 identity 和 Store；默认使用数据库 Store。"""
         self._state = _Lifecycle()
+        store = _store
         if store is None:
             if database is None:
                 raise TypeError("database 或 store 必须提供")
@@ -69,27 +70,15 @@ class ConversationContext:
     async def read_maintenance_progress(self) -> str | None:
         """读取当前交互对应的持久化认知维护进度。"""
         async with self._state.lock:
-            store = self._require_store()
+            store = self._require_maintenance_store()
             return await _complete(asyncio.to_thread(store.read_maintenance_progress))
-
-    async def advance_maintenance_progress(self, *, expected_entry_id: str | None, new_entry_id: str) -> bool:
-        """在进度仍为 expected_entry_id 时原子推进到 new_entry_id。"""
-        async with self._state.lock:
-            store = self._require_store()
-            return await _complete(
-                asyncio.to_thread(
-                    store.advance_maintenance_progress,
-                    expected_entry_id=expected_entry_id,
-                    new_entry_id=new_entry_id,
-                )
-            )
 
     async def load_cognitive_maintenance_batch(
         self, *, previous_progress: str | None
     ) -> CognitiveMaintenanceBatch | None:
         """读取该 predecessor 的冻结维护批次，不在此锁内执行模型调用。"""
         async with self._state.lock:
-            store = self._require_store()
+            store = self._require_maintenance_store()
             return await _complete(
                 asyncio.to_thread(store.load_cognitive_maintenance_batch, previous_progress=previous_progress)
             )
@@ -99,7 +88,7 @@ class ConversationContext:
     ) -> CognitiveMaintenanceBatch:
         """在模型产出后冻结完整输入，重复尝试复用首个持久化结果。"""
         async with self._state.lock:
-            store = self._require_store()
+            store = self._require_maintenance_store()
             return await _complete(
                 asyncio.to_thread(
                     store.create_or_load_cognitive_maintenance_batch,
@@ -120,7 +109,7 @@ class ConversationContext:
         if compaction is not None and not isinstance(compaction, ConversationCompaction):
             raise TypeError("compaction 应为 ConversationCompaction 或 None")
         async with self._state.lock:
-            store = self._require_store()
+            store = self._require_maintenance_store()
             succeeded = await _complete(
                 asyncio.to_thread(
                     store.commit_cognitive_maintenance,
@@ -133,6 +122,12 @@ class ConversationContext:
             if succeeded:
                 self._snapshot, _ = await asyncio.to_thread(store.load)
             return succeeded
+
+    def _require_maintenance_store(self) -> DatabaseConversationStore:
+        self._require_store()
+        if not isinstance(self._store, DatabaseConversationStore):
+            raise NotImplementedError("临时通话上下文不提交正式聊天认知维护")
+        return self._store
 
     def _require_store(self) -> ConversationStore:
         self._state.check()
