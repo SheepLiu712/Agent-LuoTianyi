@@ -106,16 +106,12 @@ export function useVoiceInput(options: Options) {
           return;
         }
         // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
-        const notice = (message: string) => {
-          if (mounted.current && callbacks.current.active !== false) callbacks.current.onNotice(message);
-        };
+        // 迟到的结果只在“这次尝试仍是当前尝试”时才有意义：更晚的按住或已卸载都不该被它打扰。
         const request = recorder.requestPermission().then((result) => {
-          if (result === 'blocked' && mounted.current && callbacks.current.active !== false) {
-            showMicrophoneSettings(callbacks.current.onNotice);
-          }
+          if (result === 'blocked' && valid()) showMicrophoneSettings(callbacks.current.onNotice);
         }, () => {
           // 授权请求本身失败（原生拒绝/抛错）：与录音启动失败同样给出可行动提示，不能静默。
-          notice('录音启动失败，请重试');
+          if (valid()) callbacks.current.onNotice('录音启动失败，请重试');
         }).finally(() => {
           if (permissionRequest.current === request) permissionRequest.current = null;
         });

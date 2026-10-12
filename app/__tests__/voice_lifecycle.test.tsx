@@ -93,11 +93,11 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
   expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
   expect(state.captureState).toBe('VoiceReady');
-  // 迟到的授权结果不开始录音、不改状态；被永久拒绝时再给一次设置入口。
+  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不再重复弹一次设置入口。
   await act(async () => { answer(late); });
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(late === 'blocked' ? 2 : 1);
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
   // 授权之后重新按住即可录音。
   await act(async () => { await state.pressIn(event); });
   expect(state.captureState).toBe('Recording');
@@ -118,6 +118,38 @@ it('reports a failed permission request instead of swallowing it', async () => {
   // 之后再按住仍可正常走授权/录音流程。
   options.recorder.getPermission.mockResolvedValueOnce('granted');
   await act(async () => { await state.pressIn(event); });
+  expect(state.captureState).toBe('Recording');
+});
+
+it('still offers the settings entry when a late blocked result is still the current attempt', async () => {
+  let answer!: (value: string) => void;
+  options.recorder.getPermission.mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+  await mount();
+  await act(async () => { await state.pressIn(event); await state.pressOut(); });
+  await act(async () => { answer('blocked'); });
+
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+});
+
+it('ignores a permission failure that arrives after a newer attempt', async () => {
+  let rejectRequest!: (error: Error) => void;
+  options.recorder.getPermission.mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockReturnValueOnce(
+    new Promise((_resolve, rejectIt) => { rejectRequest = rejectIt; }),
+  );
+  await mount();
+  // 第一次按住：进入授权请求并立刻释放输入栏。
+  await act(async () => { await state.pressIn(event); });
+  expect(state.captureState).toBe('VoiceReady');
+  // 第二次按住：权限已可用，开始较新的录音。
+  await act(async () => { await state.pressIn(event); });
+  expect(state.captureState).toBe('Recording');
+  // 旧请求这时才失败：不得用系统提示打扰正在进行的录音，也不得改动状态。
+  await act(async () => { rejectRequest(new Error('late permission failure')); });
+  expect(options.onNotice).not.toHaveBeenCalled();
   expect(state.captureState).toBe('Recording');
 });
 
