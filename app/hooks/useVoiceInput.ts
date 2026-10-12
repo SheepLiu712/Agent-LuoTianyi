@@ -41,6 +41,8 @@ export function useVoiceInput(options: Options) {
   const cancelling = useRef<Promise<void> | null>(null);
   const pendingUploadId = useRef<string | null>(null);
   const uploadReturnState = useRef<VoiceCaptureState>('VoiceReady');
+  // 系统授权请求可能迟迟不返回（授权框未弹出或被系统吞掉）：只记录它在途，输入栏不等它。
+  const permissionRequest = useRef<Promise<void> | null>(null);
 
   const resetCapture = useCallback(() => {
     if (mounted.current) { setElapsedMs(0); setSmoothedMeter(0); }
@@ -99,8 +101,21 @@ export function useVoiceInput(options: Options) {
       if (!valid()) return;
       if (permission !== 'granted') {
         transition('PermissionPrompt');
-        const result = permission === 'denied' ? await recorder.requestPermission() : permission;
-        if (valid() && result === 'blocked') showMicrophoneSettings(callbacks.current.onNotice);
+        if (permission === 'blocked' || permissionRequest.current) {
+          showMicrophoneSettings(callbacks.current.onNotice);
+          return;
+        }
+        // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
+        // 迟到的结果只在“这次尝试仍是当前尝试”时才有意义：更晚的按住或已卸载都不该被它打扰。
+        const request = recorder.requestPermission().then((result) => {
+          if (result === 'blocked' && valid()) showMicrophoneSettings(callbacks.current.onNotice);
+        }, () => {
+          // 授权请求本身失败（原生拒绝/抛错）：与录音启动失败同样给出可行动提示，不能静默。
+          if (valid()) callbacks.current.onNotice('录音启动失败，请重试');
+        }).finally(() => {
+          if (permissionRequest.current === request) permissionRequest.current = null;
+        });
+        permissionRequest.current = request;
         return;
       }
       await callbacks.current.onStopAllAudio();
