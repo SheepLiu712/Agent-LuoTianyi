@@ -1,6 +1,7 @@
 """The authenticated WebSocket ingress acknowledges the three CLI signals."""
 
 import base64
+import json
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -156,7 +157,7 @@ async def test_oversized_image_reports_stable_media_code(tmp_path):
 @pytest.mark.parametrize(
     ("image_format", "mime_type", "code", "message"),
     [
-        ("TIFF", "image/tiff", "MEDIA_UNSUPPORTED_TYPE", "不支持的图片格式"),
+        ("PPM", "image/x-portable-pixmap", "MEDIA_UNSUPPORTED_TYPE", "不支持的图片格式"),
     ],
 )
 async def test_unsupported_image_format_is_rejected(tmp_path, negative_ack, image_format, mime_type, code, message):
@@ -180,6 +181,35 @@ async def test_unsupported_image_format_is_rejected(tmp_path, negative_ack, imag
     assert sent[0]["payload"]["message"] == message
     assert sent[0]["payload"]["retryable"] is False
     assert not list((tmp_path / "media").iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frames", [1, 2])
+async def test_tiff_is_accepted_through_ingress_and_persisted_as_jpeg(tmp_path, frames):
+    """TIFF 属于受支持的输入：单帧与多帧都规范化成一张 JPEG 落盘。"""
+    image = BytesIO()
+    if frames == 2:
+        Image.new("RGB", (2, 2), "red").save(
+            image, format="TIFF", save_all=True, append_images=[Image.new("RGB", (2, 2), "blue")]
+        )
+    else:
+        Image.new("RGB", (2, 2), "red").save(image, format="TIFF")
+    sent, stimuli = await run_ingress(
+        [
+            event(
+                "user_image",
+                {"image_base64": base64.b64encode(image.getvalue()).decode("ascii"), "mime_type": "image/tiff"},
+            )
+        ],
+        adapter_config={"media_store": {"root": str(tmp_path / "media")}},
+    )
+
+    assert len(stimuli) == 1
+    assert sent[0]["payload"]["ok"] is True
+    metadata_files = list((tmp_path / "media").rglob("metadata.json"))
+    assert len(metadata_files) == 1
+    metadata = json.loads(metadata_files[0].read_text(encoding="utf-8"))
+    assert metadata["mime_type"] == "image/jpeg"
 
 
 @pytest.mark.asyncio
