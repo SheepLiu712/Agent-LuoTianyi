@@ -173,6 +173,20 @@ describe('用户协议查阅页', () => {
     expect(pageTitleStyle.fontSize as number).toBeGreaterThan(versionStyle.fontSize as number);
   });
 
+  it('正文区展示服务端返回的协议标题', async () => {
+    fetchMock.mockResolvedValue({
+      success: true,
+      data: { ...PAYLOAD, title: '洛天依用户协议' },
+    });
+
+    const tree = await renderScreen();
+    const root = screenRoot(tree);
+    const header = buttonLabeled(tree, TEXT_BACK).parent as ReactTestInstance;
+
+    expect(textsOf(header)).toEqual([TEXT_BACK, PAGE_TITLE]);
+    expect(textsOf(root)).toContain('洛天依用户协议');
+  });
+
   it('加载中保留大标题，加载失败时只留顶栏标题', async () => {
     fetchMock.mockImplementation(() => new Promise(() => {}));
     const loadingTree = await renderScreen();

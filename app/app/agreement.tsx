@@ -108,7 +108,7 @@ export default function AgreementScreen({ onClose, theme }: Props) {
 
       <View style={styles.body}>
         {failure === '' ? (
-          <Text style={[styles.pageTitle, { color: theme.text }]}>{TEXT_TITLE}</Text>
+          <Text style={[styles.pageTitle, { color: theme.text }]}>{data?.title || TEXT_TITLE}</Text>
         ) : null}
         {loading ? (
           <View style={styles.centerBlock}>
