@@ -78,6 +78,31 @@ it.each(['blocked', 'denied'])('handles %s permission without starting, and rech
   expect(state.captureState).toBe('Recording');
 });
 
+it.each(['granted', 'blocked'])('releases the input bar while the system permission request is pending (late %s)', async (late) => {
+  let answer!: (value: string) => void;
+  options.recorder.getPermission.mockResolvedValueOnce('denied').mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+  await mount();
+  await act(async () => { await state.pressIn(event); await state.pressOut(); });
+  // 授权请求还没返回（授权框没弹出或被系统吞掉）时，输入栏不能一直停在禁用态。
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(state.captureState).toBe('VoiceReady');
+  expect(options.onRecordingEnded).toHaveBeenCalledTimes(1);
+  // 请求仍在途时再按：不叠加第二个系统请求，改为给出去系统设置的出口。
+  await act(async () => { await state.pressIn(event); });
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(state.captureState).toBe('VoiceReady');
+  // 迟到的授权结果不开始录音、不改状态；被永久拒绝时再给一次设置入口。
+  await act(async () => { answer(late); });
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(late === 'blocked' ? 2 : 1);
+  // 授权之后重新按住即可录音。
+  await act(async () => { await state.pressIn(event); });
+  expect(state.captureState).toBe('Recording');
+});
+
 it.each([499, 500])('applies the minimum duration boundary at %ims', async (duration) => {
   jest.useFakeTimers({ now: 1000 });
   try {

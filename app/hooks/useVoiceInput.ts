@@ -41,6 +41,8 @@ export function useVoiceInput(options: Options) {
   const cancelling = useRef<Promise<void> | null>(null);
   const pendingUploadId = useRef<string | null>(null);
   const uploadReturnState = useRef<VoiceCaptureState>('VoiceReady');
+  // 系统授权请求可能迟迟不返回（授权框未弹出或被系统吞掉）：只记录它在途，输入栏不等它。
+  const permissionRequest = useRef<Promise<void> | null>(null);
 
   const resetCapture = useCallback(() => {
     if (mounted.current) { setElapsedMs(0); setSmoothedMeter(0); }
@@ -99,8 +101,19 @@ export function useVoiceInput(options: Options) {
       if (!valid()) return;
       if (permission !== 'granted') {
         transition('PermissionPrompt');
-        const result = permission === 'denied' ? await recorder.requestPermission() : permission;
-        if (valid() && result === 'blocked') showMicrophoneSettings(callbacks.current.onNotice);
+        if (permission === 'blocked' || permissionRequest.current) {
+          showMicrophoneSettings(callbacks.current.onNotice);
+          return;
+        }
+        // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
+        const request = recorder.requestPermission().then((result) => {
+          if (result === 'blocked' && mounted.current && callbacks.current.active !== false) {
+            showMicrophoneSettings(callbacks.current.onNotice);
+          }
+        }, () => undefined).finally(() => {
+          if (permissionRequest.current === request) permissionRequest.current = null;
+        });
+        permissionRequest.current = request;
         return;
       }
       await callbacks.current.onStopAllAudio();
