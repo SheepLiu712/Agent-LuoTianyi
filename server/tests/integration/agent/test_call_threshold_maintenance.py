@@ -50,6 +50,7 @@ from src.infrastructure.persistence.database.sql_database import Base, User
 class Memory:
     def __init__(self):
         self.inputs = []
+        self.profile_inputs = []
         self.writes = []
         self.failures = 0
 
@@ -58,6 +59,7 @@ class Memory:
         return (d.MaintenanceCandidate(d.MaintenanceMemoryType.USER_FACT, "safe candidate"),)
 
     async def propose_user_profile(self, **kwargs):
+        self.profile_inputs.append(kwargs)
         return "safe profile"
 
     async def write_maintenance_candidates(self, **kwargs):
@@ -327,6 +329,10 @@ async def test_factory_seed_is_answer_context_only_after_compaction_and_ending(s
         assert "new call two" in setup.memory.inputs[0]["current_dialogue"]
         assert "old chat secret" not in repr(setup.memory.inputs)
         assert "mixed working summary" not in repr(setup.memory.inputs)
+        assert "new call one" in repr(setup.memory.profile_inputs)
+        assert "new call two" in repr(setup.memory.profile_inputs)
+        assert "old chat secret" not in repr(setup.memory.profile_inputs)
+        assert "mixed working summary" not in repr(setup.memory.profile_inputs)
     finally:
         await context.close()
     restored = await factory.create("restored", mode=ConversationMode.CHAT, user_id="user")
