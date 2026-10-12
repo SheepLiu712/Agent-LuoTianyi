@@ -143,17 +143,17 @@ class CallTurnCompletedHandler:
         history = render_conversation_history(plans.context.conversation.read())
         decision = await self._recall.decide(
             invocation,
-            call_id=stimulus.call_id,
+            memory_pool=plans.context.call_memory,
             audio_semantic=semantic,
             conversation_history=history,
             user_context=plans.context.user.read(),
         )
-        memory_pool = self._recall.pool_texts(stimulus.call_id)
+        memory_pool = tuple(item.content for item in plans.context.call_memory.snapshot())
         if decision.mode is RecallMode.RECALL:
             await _emit_ack(plans, request, decision.ack_style)
             memory_pool = await self._recall.recall_once(
                 invocation,
-                call_id=stimulus.call_id,
+                memory_pool=plans.context.call_memory,
                 queries=decision.memory_queries,
             )
         drafts = await _generate_reply(
@@ -191,7 +191,7 @@ class CallSilenceElapsedHandler:
         history = render_conversation_history(plans.context.conversation.read())
         decision = await self._recall.decide_silence(
             invocation,
-            call_id=stimulus.call_id,
+            memory_pool=plans.context.call_memory,
             silence_ms=stimulus.silence_ms,
             conversation_history=history,
         )
@@ -212,7 +212,7 @@ class CallSilenceElapsedHandler:
             reply_topic=topic,
             user_context=plans.context.user.read(),
             conversation_history=history,
-            memory_pool=self._recall.pool_texts(stimulus.call_id),
+            memory_pool=tuple(item.content for item in plans.context.call_memory.snapshot()),
         )
         if drafts is None:
             return _failed_report(request, plans)

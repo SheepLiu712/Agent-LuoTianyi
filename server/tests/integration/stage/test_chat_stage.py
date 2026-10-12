@@ -11,6 +11,7 @@ import pytest
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent import Agent
+from src.agent.context import ConversationMode
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.domain.stage import StageState
@@ -165,7 +166,8 @@ class StageContextFactory:
         self.character_id = character_id
         self.created = []
 
-    async def create(self, interaction_id, *, user_id):
+    async def create(self, interaction_id, *, mode: ConversationMode, user_id):
+        assert mode is ConversationMode.CHAT
         context = SimpleNamespace(
             identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id=self.character_id),
             closed=False,

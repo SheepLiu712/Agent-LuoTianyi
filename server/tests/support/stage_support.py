@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
-from src.agent.context import ConversationSnapshot, RecalledMemoryContext, UserContextSnapshot
+from src.agent.context import ConversationMode, ConversationSnapshot, RecalledMemoryContext, UserContextSnapshot
 from src.stage import ChatStage
 from src.web.websocket.service import WebSocketConnection
 
@@ -130,7 +130,8 @@ class StageContextFactory:
         self.character_id = character_id
         self.created = []
 
-    async def create(self, interaction_id, *, user_id):
+    async def create(self, interaction_id, *, mode: ConversationMode, user_id):
+        assert mode is ConversationMode.CHAT
         context = SimpleNamespace(
             identity=SimpleNamespace(
                 interaction_id=interaction_id,

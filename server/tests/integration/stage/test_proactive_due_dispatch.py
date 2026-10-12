@@ -8,6 +8,7 @@ import pytest
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
+from src.agent.context import ConversationMode
 from src.stage import DueEvent, StageManager
 from src.web.websocket.service import WebSocketConnection
 
@@ -18,7 +19,8 @@ class Socket:
 
 
 class ContextFactory:
-    async def create(self, interaction_id: str, *, user_id: str):
+    async def create(self, interaction_id: str, *, mode: ConversationMode, user_id: str):
+        assert mode is ConversationMode.CHAT
         return SimpleNamespace(
             identity=SimpleNamespace(
                 interaction_id=interaction_id,
@@ -156,13 +158,15 @@ class RecordingAgent:
             execution_id=context.execution_id,
             plan_id=plan.plan_id,
             status=d.ExecutionStatus.COMPLETED,
-            action_results=(d.ActionResult(
-                action_id=action.action_id,
-                status=d.ActionExecutionStatus.COMPLETED,
-                error_code=None,
-                irreversible_effect_committed=False,
-                effect_ref=None,
-            ),),
+            action_results=(
+                d.ActionResult(
+                    action_id=action.action_id,
+                    status=d.ActionExecutionStatus.COMPLETED,
+                    error_code=None,
+                    irreversible_effect_committed=False,
+                    effect_ref=None,
+                ),
+            ),
             output_started=False,
             error_code=None,
             retryable=False,
@@ -195,14 +199,16 @@ async def wait_until(predicate, timeout: float = 1.0) -> None:
 @pytest.mark.asyncio
 async def test_regular_login_filters_before_claim_and_merges_supported_due_events():
     # Given: a first login today has supported, unsupported, mismatched and notified candidates.
-    provider = DueEvents((
-        event("holiday"),
-        event("birthday", event_type="birthday", is_personal=True, target_user_id="user"),
-        event("unsupported", event_type="general"),
-        event("other-character", character_id="miku"),
-        event("other-user", is_personal=True, target_user_id="other"),
-        event("notified", is_notified=True),
-    ))
+    provider = DueEvents(
+        (
+            event("holiday"),
+            event("birthday", event_type="birthday", is_personal=True, target_user_id="user"),
+            event("unsupported", event_type="general"),
+            event("other-character", character_id="miku"),
+            event("other-user", is_personal=True, target_user_id="other"),
+            event("notified", is_notified=True),
+        )
+    )
     agent = RecordingAgent()
     manager, _stage = await connected_manager(provider, agent, login_reminder_wait=0.01)
 

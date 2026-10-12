@@ -14,7 +14,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
-from src.agent.context import ContextFactory, InteractionContext
+from src.agent.context import ContextFactory, ConversationMode, InteractionContext
 from src.domain.stage import (
     AgentPresentationChanged,
     AgentPresentationState,
@@ -132,7 +132,7 @@ class ChatStage:
         due_event_provider: DueEventProvider | None = None,
     ) -> ChatStage:
         """通过 context_factory 加载新上下文，返回持有它的 Stage；构造失败时关闭上下文。"""
-        context = await context_factory.create(str(uuid4()), user_id=user_id)
+        context = await context_factory.create(str(uuid4()), mode=ConversationMode.CHAT, user_id=user_id)
         try:
             return cls(
                 user_id=user_id,

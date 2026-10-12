@@ -13,10 +13,9 @@ from src.agent.context import (
     ConversationEntry,
     ConversationSnapshot,
     ConversationSummary,
-    DatabaseConversationStore,
-    EphemeralCallConversationStore,
     TextContent,
 )
+from src.agent.context._conversation_store import DatabaseConversationStore, EphemeralCallConversationStore
 
 
 def entry(number: int) -> ConversationEntry:
@@ -59,12 +58,6 @@ class Database:
     def get_cognitive_maintenance_progress(self, user_id, *, character_id):
         return self.maintenance_progress
 
-    def advance_cognitive_maintenance_progress(self, user_id, *, character_id, expected_entry_id, new_entry_id):
-        if self.maintenance_progress != expected_entry_id:
-            return False
-        self.maintenance_progress = new_entry_id
-        return True
-
 
 def test_database_store_preserves_existing_storage_calls():
     database = Database()
@@ -80,7 +73,7 @@ def test_database_store_preserves_existing_storage_calls():
 @pytest.mark.asyncio
 async def test_call_context_only_updates_memory_and_never_calls_database():
     store = EphemeralCallConversationStore()
-    context = ConversationContext(identity=ContextIdentity("luotianyi", "call", "u"), store=store)
+    context = ConversationContext(identity=ContextIdentity("luotianyi", "call", "u"), _store=store)
     entries = (entry(2), entry(1))
 
     await context.append(entries)
@@ -103,7 +96,7 @@ def test_ephemeral_store_normalizes_a_private_copy_without_mutating_seed():
 async def test_call_store_compacts_prefix_and_rejects_wrong_basis_without_mutating_window():
     entries = (entry(1), entry(2), entry(3))
     context = ConversationContext(
-        identity=ContextIdentity("luotianyi", "call", "u"), store=EphemeralCallConversationStore()
+        identity=ContextIdentity("luotianyi", "call", "u"), _store=EphemeralCallConversationStore()
     )
     await context.append(entries)
 
@@ -123,7 +116,7 @@ async def test_interaction_close_clears_ephemeral_store_even_through_external_re
     database = Database()
     store = EphemeralCallConversationStore()
     context = InteractionContext(
-        identity=ContextIdentity("luotianyi", "call", "u"), database=database, conversation_store=store
+        identity=ContextIdentity("luotianyi", "call", "u"), database=database, _conversation_store=store
     )
     await context.conversation.append((entry(1),))
 
@@ -146,28 +139,23 @@ async def test_database_context_delegates_maintenance_progress_within_its_operat
     context = ConversationContext(identity=ContextIdentity("luotianyi", "chat", "u"), database=database)
 
     assert await context.read_maintenance_progress() is None
-    assert await context.advance_maintenance_progress(expected_entry_id=None, new_entry_id="1") is True
-    assert await context.read_maintenance_progress() == "1"
-    assert await context.advance_maintenance_progress(expected_entry_id=None, new_entry_id="2") is False
 
 
 @pytest.mark.asyncio
 async def test_ephemeral_store_does_not_fake_conversation_maintenance_progress():
     context = ConversationContext(
-        identity=ContextIdentity("luotianyi", "call", "u"), store=EphemeralCallConversationStore()
+        identity=ContextIdentity("luotianyi", "call", "u"), _store=EphemeralCallConversationStore()
     )
 
     with pytest.raises(NotImplementedError):
         await context.read_maintenance_progress()
-    with pytest.raises(NotImplementedError):
-        await context.advance_maintenance_progress(expected_entry_id=None, new_entry_id="1")
 
 
 @pytest.mark.asyncio
 async def test_cancelled_maintenance_commit_waits_for_atomic_store_completion():
-    class BlockingStore(EphemeralCallConversationStore):
+    class BlockingStore(DatabaseConversationStore):
         def __init__(self):
-            super().__init__()
+            super().__init__(Database(), ContextIdentity("luotianyi", "chat", "u"))
             self.started = threading.Event()
             self.proceed = threading.Event()
             self.committed = False
@@ -179,7 +167,7 @@ async def test_cancelled_maintenance_commit_waits_for_atomic_store_completion():
             return True
 
     store = BlockingStore()
-    context = ConversationContext(identity=ContextIdentity("luotianyi", "chat", "u"), store=store)
+    context = ConversationContext(identity=ContextIdentity("luotianyi", "chat", "u"), _store=store)
     task = asyncio.create_task(
         context.commit_cognitive_maintenance(compaction=None, expected_progress=None, new_progress="1")
     )

@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from support.context_support import entry
 from support.skill_support import invocation
 
-from src.agent.context import ContextFactory, ConversationCompaction, ConversationSummary
+from src.agent.context import ContextFactory, ConversationCompaction, ConversationMode, ConversationSummary
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.domain.agent.maintenance import (
     MaintenanceCandidate,
@@ -99,7 +99,9 @@ def skill(memory):
 
 
 async def context_with(database, numbers):
-    context = await ContextFactory(character_id="luotianyi", database=database).create("interaction", user_id="u")
+    context = await ContextFactory(character_id="luotianyi", database=database).create(
+        "interaction", mode=ConversationMode.CHAT, user_id="u"
+    )
     await context.conversation.append(tuple(entry(number) for number in numbers))
     return context
 

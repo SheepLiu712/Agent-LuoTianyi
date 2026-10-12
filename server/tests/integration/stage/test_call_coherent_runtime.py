@@ -167,7 +167,8 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
             )
         )
         assert not tts.formal_started.is_set()
-        assert runtime.skills.call_recall.pool_texts(claim.record.call_id) == ("用户喜欢音乐",)
+        call_memory = stage.context.call_memory
+        assert tuple(item.content for item in call_memory.snapshot()) == ("用户喜欢音乐",)
 
         await session.receive_text(_completed(binding.call_id, 2, provisional))
         await _eventually(lambda: tts.formal_started.is_set())
@@ -263,7 +264,9 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         assert stage.context is None
         assert manager.current_call_ownership(binding.call_id) is None
         assert settled == [snapshot]
-        assert runtime.skills.call_recall.pool_texts(claim.record.call_id) == ()
+        with pytest.raises(RuntimeError):
+            call_memory.snapshot()
+        assert not call_memory._items
         assert vector.searches == [("user", "用户喜欢的音乐", 3)]
         with database.open_sql_session() as sql:
             assert sql.query(Conversation).filter_by(user_id="user").count() == 0

@@ -20,7 +20,7 @@ Agent 业务模型不携带 wire `seq` 或 `stream_id`；这些仍由 Adapter tr
 
 ## 时间边界
 
-setup deadline 使用 monotonic clock，只存在于当前 runtime claim。ledger 的 `requested_at` 为 aware Beijing；未来 CallStage 调用 CL-2 legacy `create_call` 时必须显式转换为 naive Beijing，不使用宿主时区。
+setup deadline 使用 monotonic clock，只存在于当前 runtime claim。ledger 的 `requested_at` 为 aware Beijing；CallStage 调用 `ContextFactory.create(..., mode=ConversationMode.CALL)` 时必须显式转换为 naive Beijing，不使用宿主时区。
 
 `StageManager.take_call_claim` 是未来 CallStage 的公开接管边界：校验 call/user/character/request/deadline 与当前 CALL lease，产生带 generation 的 `CallStageOwnership`。`current_call_ownership` 支持 duplicate 查询，`release_call` 只释放当前 generation 并清理 runtime deadline；consumer 不读取 manager 私有字典。
 

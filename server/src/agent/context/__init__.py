@@ -2,7 +2,6 @@
 
 from .context_factory import ContextFactory
 from .conversation_context import ConversationContext
-from .conversation_store import ConversationStore, DatabaseConversationStore, EphemeralCallConversationStore
 from .interaction_context import InteractionContext
 from .models import (
     AudioContent,
@@ -10,6 +9,7 @@ from .models import (
     ContextIdentity,
     ConversationCompaction,
     ConversationEntry,
+    ConversationMode,
     ConversationSnapshot,
     ConversationSummary,
     ImageContent,
@@ -30,15 +30,13 @@ __all__ = [
     "InteractionContext",
     "UserContext",
     "ConversationContext",
-    "ConversationStore",
-    "DatabaseConversationStore",
-    "EphemeralCallConversationStore",
     "RecalledMemoryContext",
     "ContextIdentity",
     "UserProfile",
     "UserPreferences",
     "UserContextSnapshot",
     "ConversationEntry",
+    "ConversationMode",
     "ConversationSummary",
     "ConversationSnapshot",
     "ConversationCompaction",

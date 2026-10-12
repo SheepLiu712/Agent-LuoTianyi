@@ -6,8 +6,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.agent.context import ContextFactory, ConversationEntry, ConversationSnapshot, TextContent, UserPreferences
-from src.agent.context.conversation_store import EphemeralCallConversationStore
+from src.agent.context import (
+    ContextFactory,
+    ConversationEntry,
+    ConversationMode,
+    ConversationSnapshot,
+    TextContent,
+    UserPreferences,
+)
+from src.agent.context._conversation_store import EphemeralCallConversationStore
 
 
 class Database:
@@ -73,7 +80,7 @@ def factory(database):
 async def test_create_call_passes_explicit_time_loads_profile_and_uses_ephemeral_store():
     database = Database()
     requested_at = datetime(2026, 10, 10, 12, 3)
-    context = await factory(database).create_call("call", user_id="u", requested_at=requested_at)
+    context = await factory(database).create("call", mode=ConversationMode.CALL, user_id="u", requested_at=requested_at)
 
     assert database.seed_calls == [("u", "luotianyi", requested_at)]
     assert database.chat_loads == 0
@@ -99,12 +106,14 @@ async def test_create_call_passes_explicit_time_loads_profile_and_uses_ephemeral
 )
 async def test_create_call_requires_user_and_naive_server_time(user_id, requested_at, error):
     with pytest.raises(error):
-        await factory(Database()).create_call("call", user_id=user_id, requested_at=requested_at)
+        await factory(Database()).create("call", mode=ConversationMode.CALL, user_id=user_id, requested_at=requested_at)
 
 
 @pytest.mark.asyncio
 async def test_create_call_close_clears_store_and_public_context_references():
-    context = await factory(Database()).create_call("call", user_id="u", requested_at=datetime(2026, 10, 10, 12, 3))
+    context = await factory(Database()).create(
+        "call", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10, 12, 3)
+    )
     store = context.conversation._store
     await context.close()
 
@@ -130,7 +139,9 @@ async def test_create_call_cancellation_waits_for_read_and_closes_unclaimed_cont
 
     monkeypatch.setattr(InteractionContext, "close", record_close)
     task = asyncio.create_task(
-        factory(database).create_call("call", user_id="u", requested_at=datetime(2026, 10, 10, 12, 3))
+        factory(database).create(
+            "call", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10, 12, 3)
+        )
     )
     assert await asyncio.to_thread(database.started.wait, 5)
     task.cancel()
@@ -168,8 +179,12 @@ async def test_same_user_reads_serialize_while_different_users_can_load_independ
     database = BlockingDatabase()
     contexts = factory(database)
     different = [
-        asyncio.create_task(contexts.create_call("a", user_id="u1", requested_at=datetime(2026, 10, 10))),
-        asyncio.create_task(contexts.create_call("b", user_id="u2", requested_at=datetime(2026, 10, 10))),
+        asyncio.create_task(
+            contexts.create("a", mode=ConversationMode.CALL, user_id="u1", requested_at=datetime(2026, 10, 10))
+        ),
+        asyncio.create_task(
+            contexts.create("b", mode=ConversationMode.CALL, user_id="u2", requested_at=datetime(2026, 10, 10))
+        ),
     ]
     assert await asyncio.to_thread(database.all_entered.wait, 5)
     database.release.set()
@@ -178,8 +193,12 @@ async def test_same_user_reads_serialize_while_different_users_can_load_independ
     database.release.clear()
     database.all_entered.clear()
     same = [
-        asyncio.create_task(contexts.create_call("c", user_id="u", requested_at=datetime(2026, 10, 10))),
-        asyncio.create_task(contexts.create_call("d", user_id="u", requested_at=datetime(2026, 10, 10))),
+        asyncio.create_task(
+            contexts.create("c", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
+        ),
+        asyncio.create_task(
+            contexts.create("d", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
+        ),
     ]
     await asyncio.sleep(0.05)
     assert database.active == 1
@@ -203,7 +222,9 @@ async def test_unknown_or_future_seed_state_becomes_whole_empty_snapshot():
             }
         ],
     }
-    context = await factory(database).create_call("call", user_id="u", requested_at=datetime(2026, 10, 10, 12, 3))
+    context = await factory(database).create(
+        "call", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10, 12, 3)
+    )
     assert context.conversation.read() == ConversationSnapshot()
 
 
@@ -233,7 +254,9 @@ async def test_create_call_closes_unclaimed_ephemeral_store_when_user_loading_fa
     monkeypatch.setattr(context_factory_module, "EphemeralCallConversationStore", capture_store)
 
     with pytest.raises(RuntimeError, match=failing_read):
-        await factory(FailingDatabase()).create_call("call", user_id="u", requested_at=datetime(2026, 10, 10, 12, 3))
+        await factory(FailingDatabase()).create(
+            "call", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10, 12, 3)
+        )
 
     assert len(stores) == 1
     assert stores[0].load()[0] == ConversationSnapshot()
@@ -242,6 +265,26 @@ async def test_create_call_closes_unclaimed_ephemeral_store_when_user_loading_fa
 @pytest.mark.asyncio
 async def test_chat_create_keeps_database_store_behavior():
     database = Database()
-    await factory(database).create("chat", user_id="u")
+    await factory(database).create("chat", mode=ConversationMode.CHAT, user_id="u")
     assert database.chat_loads == 1
     assert database.seed_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode,requested_at",
+    [("call", None), (None, None), (ConversationMode.CALL, None), (ConversationMode.CHAT, datetime(2026, 10, 10))],
+)
+async def test_invalid_mode_or_time_is_rejected_before_any_database_read(mode, requested_at):
+    class Unreadable:
+        def __getattr__(self, name):
+            raise AssertionError("invalid creation must not read storage")
+
+    with pytest.raises(ValueError):
+        await factory(Unreadable()).create("invalid", mode=mode, user_id="u", requested_at=requested_at)
+
+
+@pytest.mark.asyncio
+async def test_mode_is_required():
+    with pytest.raises(TypeError, match="mode"):
+        await factory(Database()).create("missing", user_id="u")

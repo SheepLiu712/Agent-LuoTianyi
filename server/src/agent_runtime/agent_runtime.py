@@ -80,10 +80,6 @@ class AgentRuntime:
         """Expose the shared singing port only to the application composition root."""
         return self.skills.singing.backend
 
-    def release_call_resources(self, call_id: UUID) -> bool:
-        """Release Agent-owned ephemeral resources without exposing SharedSkills."""
-        return self.skills.call_recall.release_call_memory(call_id)
-
     def release_call_maintenance(self, call_id: UUID) -> None:
         self.skills.call_maintenance.release(call_id)
 
@@ -141,7 +137,6 @@ class AgentRuntime:
                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
                 reply_composition_config=self.config.get("reply_composition", {}),
                 topic_extraction_config=self.config.get("agent", {}).get("topic_extractor", {}),
-                reflection_config=self.config.get("reflection", {}),
                 call_recall_model=self._shared_call_recall_model(llm_service),
                 call_summary_models=self._call_summary_models(llm_service),
                 call_maintenance_batches=getattr(database_manager, "call_maintenance_batches", None),

@@ -13,6 +13,7 @@ import pytest
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent import Agent
+from src.agent.context import ConversationMode
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
@@ -43,7 +44,8 @@ class ContextFactory:
     def __init__(self) -> None:
         self.context = None
 
-    async def create(self, interaction_id: str, *, user_id: str):
+    async def create(self, interaction_id: str, *, mode: ConversationMode, user_id: str):
+        assert mode is ConversationMode.CHAT
         conversation = Conversation()
         self.context = SimpleNamespace(
             identity=SimpleNamespace(

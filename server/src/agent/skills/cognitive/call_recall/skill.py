@@ -7,9 +7,8 @@ import json
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Protocol
-from uuid import UUID
 
-from src.agent.call import CallMemory, CallMemoryPool
+from src.agent.context.memory_pool import CallMemory, CallMemoryPool
 from src.agent.context.models import UserContextSnapshot
 from src.agent.skills.contracts import ReplyDraft, SkillInvocation
 from src.domain.call import AckStyle, CallRecallDecision, RecallMode
@@ -51,21 +50,18 @@ class CallRecallDecisionSkill:
         *,
         memories: Mapping[str, _Memory],
         model: _DecisionModel | None = None,
-        capacity: int = 10,
     ) -> None:
         if not memories:
             raise ValueError("call recall requires character memories")
         self._memories = dict(memories)
         self._model = model
-        self._capacity = capacity
-        self._pools: dict[UUID, CallMemoryPool] = {}
         self._logger = get_logger(__name__)
 
     async def decide(
         self,
         invocation: SkillInvocation,
         *,
-        call_id: UUID,
+        memory_pool: CallMemoryPool,
         audio_semantic: str,
         conversation_history: str,
         user_context: UserContextSnapshot,
@@ -78,7 +74,7 @@ class CallRecallDecisionSkill:
                 audio_semantic=audio_semantic,
                 conversation_history=conversation_history,
                 user_profile=user_context.profile.description,
-                memory_pool=self.pool_texts(call_id),
+                memory_pool=tuple(item.content for item in memory_pool.snapshot()),
             )
             return self._parse_decision(response)
         except Exception as error:
@@ -89,20 +85,19 @@ class CallRecallDecisionSkill:
         self,
         invocation: SkillInvocation,
         *,
-        call_id: UUID,
+        memory_pool: CallMemoryPool,
         queries: tuple[str, ...],
     ) -> tuple[str, ...]:
         """Execute one memory API call and update the call-local approximate LRU pool."""
         if not queries:
-            return self.pool_texts(call_id)
+            return tuple(item.content for item in memory_pool.snapshot())
         try:
             context = await self._memories[invocation.character_id].search_memory_context_for_topic(
                 invocation.require_user_id(), list(queries)
             )
         except Exception as error:
             self._logger.warning("call memory recall failed; continuing with existing pool: %s", type(error).__name__)
-            return self.pool_texts(call_id)
-        pool = self._pools.setdefault(call_id, CallMemoryPool(self._capacity))
+            return tuple(item.content for item in memory_pool.snapshot())
         for hit in tuple(getattr(context, "hits", ()) or ()):
             text = str(getattr(hit, "rendered_text", "") or "").strip()
             if not text:
@@ -112,14 +107,14 @@ class CallRecallDecisionSkill:
                 or str(getattr(hit, "vector_id", "") or "").strip()
                 or hashlib.sha256(text.encode("utf-8")).hexdigest()
             )
-            pool.remember(CallMemory(identity, text))
-        return self.pool_texts(call_id)
+            memory_pool.remember(CallMemory(identity, text))
+        return tuple(item.content for item in memory_pool.snapshot())
 
     async def decide_silence(
         self,
         invocation: SkillInvocation,
         *,
-        call_id: UUID,
+        memory_pool: CallMemoryPool,
         silence_ms: int,
         conversation_history: str,
     ) -> SilenceDecision:
@@ -131,27 +126,13 @@ class CallRecallDecisionSkill:
             response = await self._model.generate_response(
                 silence_ms=silence_ms,
                 conversation_history=conversation_history,
-                memory_pool=self.pool_texts(call_id),
+                memory_pool=tuple(item.content for item in memory_pool.snapshot()),
             )
             payload = self._json_object(response)
             return SilenceDecision(str(payload["decision"]).strip().lower())
         except Exception as error:
             self._logger.warning("call silence decision failed; waiting: %s", type(error).__name__)
             return SilenceDecision.WAIT
-
-    def pool_texts(self, call_id: UUID) -> tuple[str, ...]:
-        pool = self._pools.get(call_id)
-        return tuple(item.content for item in pool.snapshot()) if pool is not None else ()
-
-    def release_call_memory(self, call_id: UUID) -> bool:
-        """Release one call's in-memory recall pool after settlement or its deadline."""
-        if not isinstance(call_id, UUID):
-            raise TypeError("call_id must be UUID")
-        pool = self._pools.pop(call_id, None)
-        if pool is None:
-            return False
-        pool.clear()
-        return True
 
     @classmethod
     def _parse_decision(cls, response: str) -> CallRecallDecision:

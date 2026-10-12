@@ -11,8 +11,18 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import src.domain.agent as d
-from src.agent.context import ContextIdentity, ConversationContext, ConversationEntry, ConversationSnapshot, TextContent
-from src.agent.context.conversation_store import EphemeralCallConversationStore
+from src.agent.context import (
+    ContextFactory,
+    ContextIdentity,
+    ConversationCompaction,
+    ConversationContext,
+    ConversationEntry,
+    ConversationMode,
+    ConversationSnapshot,
+    ConversationSummary,
+    TextContent,
+)
+from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
@@ -31,12 +41,16 @@ from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.persistence.call_maintenance import SqlCallMaintenanceBatchRepository
 from src.infrastructure.persistence.call_sessions import CallSessionRecord, SettlementStatus
 from src.infrastructure.persistence.call_sessions.sql_repository import SqlCallSessionRepository
-from src.infrastructure.persistence.database.sql_database import Base
+from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
+from src.infrastructure.persistence.database.services.conversation_service import ConversationService
+from src.infrastructure.persistence.database.services.user_store import UserStore
+from src.infrastructure.persistence.database.sql_database import Base, User
 
 
 class Memory:
     def __init__(self):
         self.inputs = []
+        self.profile_inputs = []
         self.writes = []
         self.failures = 0
 
@@ -45,6 +59,7 @@ class Memory:
         return (d.MaintenanceCandidate(d.MaintenanceMemoryType.USER_FACT, "safe candidate"),)
 
     async def propose_user_profile(self, **kwargs):
+        self.profile_inputs.append(kwargs)
         return "safe profile"
 
     async def write_maintenance_candidates(self, **kwargs):
@@ -116,7 +131,7 @@ async def context_with_turns(seed_count=0, count=32):
     context = SimpleNamespace(
         identity=ContextIdentity("luotianyi", "call", "user"),
         conversation=ConversationContext(
-            identity=ContextIdentity("luotianyi", "call", "user"), store=EphemeralCallConversationStore(seed)
+            identity=ContextIdentity("luotianyi", "call", "user"), _store=EphemeralCallConversationStore(seed)
         ),
         user=Profile(),
     )
@@ -270,3 +285,56 @@ async def test_cancel_during_owned_compaction_does_not_poison_next_batch(setup):
     assert len(context.conversation.read().entries) == 30
     assert setup.calls.find_by_id(setup.record.call_id).maintenance_turn_seq == 33
     assert len(setup.memory.inputs) == 2
+
+
+@pytest.mark.asyncio
+async def test_factory_seed_is_answer_context_only_after_compaction_and_ending(setup):
+    sessions = sessionmaker(bind=setup.engine)
+    with sessions() as sql:
+        sql.add(User(uuid="user", username="seed-user", password="unused", description=""))
+        sql.commit()
+    cache = RedisBuffer()
+    database = ConversationService(
+        sql_session_factory=sessions, redis_buffer=cache, user_store=UserStore({}, sessions, cache)
+    )
+    factory = ContextFactory(character_id="luotianyi", database=database)
+    chat = await factory.create("chat", mode=ConversationMode.CHAT, user_id="user")
+    seeds = (entry("e1", 1, "old chat secret one"), entry("e2", 2, "old chat secret two"))
+    await chat.conversation.append(seeds)
+    await chat.close()
+    context = await factory.create(
+        "call", mode=ConversationMode.CALL, user_id="user", requested_at=datetime(2026, 1, 1, 0, 1)
+    )
+    try:
+        assert context.conversation.read().entries == seeds
+        await context.conversation.append((entry("c1", 61, "new call one"), entry("c2", 62, "new call two")))
+        await context.conversation.compact(
+            ConversationCompaction(
+                ConversationSummary(), ("e1", "e2", "c1"), ConversationSummary("private mixed working summary")
+            )
+        )
+        assert [item.entry_id for item in context.conversation.read().entries] == ["c2"]
+        turns = (
+            CallFinalTurn(1, "new call one", CallReplyStatus.NOT_STARTED, None),
+            CallFinalTurn(2, "new call two", CallReplyStatus.NOT_STARTED, None),
+        )
+        result = await setup.call_skill.maintain_ending(
+            SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
+            context,
+            final_snapshot(setup, turns),
+            settlement_input_digest="f" * 64,
+        )
+        assert result == 2
+        assert "new call one" in setup.memory.inputs[0]["current_dialogue"]
+        assert "new call two" in setup.memory.inputs[0]["current_dialogue"]
+        assert "old chat secret" not in repr(setup.memory.inputs)
+        assert "mixed working summary" not in repr(setup.memory.inputs)
+        assert "new call one" in repr(setup.memory.profile_inputs)
+        assert "new call two" in repr(setup.memory.profile_inputs)
+        assert "old chat secret" not in repr(setup.memory.profile_inputs)
+        assert "mixed working summary" not in repr(setup.memory.profile_inputs)
+    finally:
+        await context.close()
+    restored = await factory.create("restored", mode=ConversationMode.CHAT, user_id="user")
+    assert restored.conversation.read().entries == seeds
+    await restored.close()

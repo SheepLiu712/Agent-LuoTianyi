@@ -8,6 +8,7 @@ import pytest
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
+from src.agent.context import ConversationMode
 from src.stage import StageManager
 from src.web.websocket.service import WebSocketConnection
 
@@ -21,7 +22,8 @@ class ContextFactory:
     def __init__(self, character_id: str) -> None:
         self._character_id = character_id
 
-    async def create(self, interaction_id: str, *, user_id: str):
+    async def create(self, interaction_id: str, *, mode: ConversationMode, user_id: str):
+        assert mode is ConversationMode.CHAT
         return SimpleNamespace(
             identity=SimpleNamespace(
                 interaction_id=interaction_id,
@@ -76,10 +78,7 @@ async def wait_for_count(values: list, count: int) -> None:
 @pytest.mark.asyncio
 async def test_one_login_dispatches_once_to_each_character():
     # Given: one user's first login is recorded for two enabled characters, including duplicate notifications.
-    agents = {
-        character_id: RecordingAgent(character_id)
-        for character_id in ("luotianyi", "miku")
-    }
+    agents = {character_id: RecordingAgent(character_id) for character_id in ("luotianyi", "miku")}
     manager = StageManager(
         get_agent=agents.__getitem__,
         adapter=WebSocketAdapter(),

@@ -20,7 +20,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
-from src.agent.context import ContextFactory, InteractionContext
+from src.agent.context import ContextFactory, ConversationMode, InteractionContext
 from src.domain.call import (
     CallEndReason,
     CallFinalSnapshot,
@@ -275,8 +275,9 @@ class CallStage:
         try:
             requested_at = self._record.requested_at.replace(tzinfo=None)
             self._context = await self._await_setup(
-                self._context_factory.create_call(
+                self._context_factory.create(
                     self._ownership.call_id,
+                    mode=ConversationMode.CALL,
                     user_id=self._record.user_id,
                     requested_at=requested_at,
                 )
