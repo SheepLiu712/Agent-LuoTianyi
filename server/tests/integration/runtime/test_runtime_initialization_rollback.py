@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,14 @@ class FakeLLM:
 class FakeMediaResolver:
     def ensure_dependencies(self):
         pass
+
+
+class EmptyCallSessions:
+    def list_recovery_pending(self):
+        return []
+
+    def find_by_id(self, _call_id):
+        return None
 
 
 class FakeWorld:
@@ -45,6 +54,18 @@ class FakeAgentRuntime:
         self.default_character_id = "luotianyi"
         self.context_factories = {"luotianyi": object()}
         self.singing_backend = object()
+        self.vector_store = object()
+        self.skills = SimpleNamespace(
+            speaking=SimpleNamespace(supports_call_audio=lambda _character_id: False),
+            prepared_speech=SimpleNamespace(supports_call_apology=lambda _character_id: False),
+            call_summary=SimpleNamespace(supports_character=lambda _character_id: False),
+        )
+
+    def release_call_maintenance(self, _call_id):
+        pass
+
+    def release_call_resources(self, _call_id):
+        return False
 
     def get_agent(self, _character_id=None):
         return object()
@@ -57,7 +78,7 @@ class FakeAgentRuntime:
 
 
 @pytest.mark.asyncio
-async def test_late_initialization_failure_rolls_back_resources_and_globals(monkeypatch):
+async def test_late_initialization_failure_rolls_back_resources_and_globals(monkeypatch, tmp_path):
     calls = []
     database_ref = {"value": None}
     observability_ref = {"value": None}
@@ -73,6 +94,12 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         def __init__(self, _config):
             calls.append("database_created")
             self.event_store = object()
+            self.call_sessions = EmptyCallSessions()
+            self.call_maintenance_batches = object()
+            self.conversation_service = object()
+            self.memory_store = object()
+            self.user_store = object()
+            self.redis = object()
 
         def wire_dependencies(self, **_kwargs):
             pass
@@ -125,7 +152,9 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "_server_runtime", None)
 
     with pytest.raises(RuntimeError, match="late initialization failure"):
-        await runtime_module.ServerRuntime.initialize({})
+        await runtime_module.ServerRuntime.initialize(
+            {"infrastructure": {"media_resolution": {"root": str(tmp_path / "media")}}}
+        )
 
     assert calls.index("world_started") < calls.index("rsa_generation_failed")
     assert calls.index("world_stopped") < calls.index("database_stopped")
