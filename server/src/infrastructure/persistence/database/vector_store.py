@@ -272,6 +272,8 @@ class ChromaVectorStore(VectorStore):
         previous_ids: Optional[frozenset[str]] = None
         # 仅用于不报告删除计数的后端：相邻页比较挡不住 A→B→A 这类交替陈旧页面。
         seen_pages: set[frozenset[str]] = set()
+        # 仅用于不报告删除计数的后端：记录已计入的 id，避免非相邻重现的陈旧 id 被重复计数。
+        counted_ids: set[str] = set()
         while True:
             # include=[] 只取 id：删除路径不需要 document/metadata/embedding，避免整页载荷进入内存。
             results = self.collection.get(where={"user_id": user_id}, limit=_USER_RECORD_PAGE_SIZE, include=[])
@@ -286,8 +288,9 @@ class ChromaVectorStore(VectorStore):
                 raise RuntimeError(f"vector delete made no progress for user {user_id}")
             if reported is None:
                 seen_pages.add(current_ids)
-                # 不报告计数时只累计本轮新出现的 id，避免重试残留条目被重复计入。
-                deleted_count += len(current_ids - (previous_ids or frozenset()))
+                # 只累计从未计入过的 id：与上一页比较挡不住更早页面的 id 再次出现。
+                deleted_count += len(current_ids - counted_ids)
+                counted_ids.update(current_ids)
             else:
                 deleted_count += reported
             previous_ids = current_ids

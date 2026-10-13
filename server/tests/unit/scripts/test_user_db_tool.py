@@ -35,14 +35,43 @@ class _WorkingStore:
 class _Session:
     def __init__(self):
         self.closed = False
+        self.queries = []
+        self.commits = 0
+
+    def query(self, *args, **kwargs):
+        self.queries.append(args)
+        return self
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return None
+
+    def commit(self):
+        self.commits += 1
 
     def close(self):
         self.closed = True
 
 
-def _drive(monkeypatch, module, *, store, choices, capsys):
+def _real_reset_service_with_failing_vectors(**_kwargs):
+    """用真实 UserResetService：向量步骤失败应被映射成 vectors 失败步骤，而不是抛到调用方。"""
+    from src.application.user.user_reset import UserResetService
+
+    return UserResetService(
+        conversation_service=SimpleNamespace(reset_user_conversations=lambda user_id: 0),
+        vector_store=_FailingStore(),
+        redis_buffer=SimpleNamespace(clear_user=lambda user_id: None),
+        media_store=SimpleNamespace(
+            delete_owned_by=lambda owner_user_id: SimpleNamespace(deleted_count=0, failures=())
+        ),
+    )
+
+
+def _drive(monkeypatch, module, *, store, choices, capsys, session=None):
     """按给定菜单选择驱动 main()，返回执行后的状态。"""
-    session = _Session()
+    session = session if session is not None else _Session()
     answers = iter(choices)
     monkeypatch.setattr(module, "_init_databases", lambda: None)
     monkeypatch.setattr(module, "get_sql_session", lambda: session)
@@ -50,6 +79,12 @@ def _drive(monkeypatch, module, *, store, choices, capsys):
     monkeypatch.setattr(module, "get_vector_store", lambda: store)
     monkeypatch.setattr(module, "load_config", lambda *args, **kwargs: {})
     monkeypatch.setattr(module, "PermanentMediaStore", lambda *args, **kwargs: SimpleNamespace())
+    # 真实数据库未初始化：只提供 _reset_user 构造服务时需要的占位组合根。
+    monkeypatch.setattr(
+        module,
+        "database_service",
+        SimpleNamespace(get_database_manager=lambda: SimpleNamespace(conversation_service=SimpleNamespace())),
+    )
     monkeypatch.setattr(
         module, "_authenticate", lambda *args, **kwargs: SimpleNamespace(username="probe", uuid="user-1")
     )
@@ -101,3 +136,28 @@ def test_main_exits_zero_after_a_successful_delete(monkeypatch, capsys):
     assert "已删除 3 条向量数据库记录。" in captured.out
     assert "已退出。" in captured.out
     assert session.closed is True
+
+
+def test_main_exits_nonzero_when_full_reset_fails_and_skips_profile_update(monkeypatch, capsys):
+    module = load_tool()
+    session = _Session()
+    monkeypatch.setattr(module, "UserResetService", _real_reset_service_with_failing_vectors)
+
+    with pytest.raises(SystemExit) as caught:
+        _drive(
+            monkeypatch,
+            module,
+            store=_WorkingStore(),
+            choices=["probe", "secret", "6", "YES", "0"],
+            capsys=capsys,
+            session=session,
+        )
+
+    assert caught.value.code == 1
+    assert session.closed is True
+    # 完全重置失败时不得继续改画像：既不查询也不提交。
+    assert session.queries == []
+    assert session.commits == 0
+    captured = capsys.readouterr()
+    assert "完全重置失败" in captured.out
+    assert "vectors" in captured.out

@@ -190,6 +190,31 @@ def test_delete_user_records_detects_alternating_stale_pages_without_a_reported_
         store.delete_user_records("user-1")
 
 
+def test_delete_user_records_counts_each_id_once_without_a_reported_count():
+    """旧后端不报告条数时，非相邻页重现的 id 也不能被重复计入。"""
+
+    class _Reappearing:
+        MAX_GET_CALLS = 8
+
+        def __init__(self):
+            self.pages = [["a", "b"], ["b", "c"], ["a", "c"], []]
+            self.calls = 0
+
+        def get(self, *, where, limit, include=None):
+            self.calls += 1
+            if self.calls > self.MAX_GET_CALLS:
+                raise AssertionError("pagination did not terminate")
+            return {"ids": list(self.pages[min(self.calls - 1, len(self.pages) - 1)])}
+
+        def delete(self, *, ids):
+            return None
+
+    store = _store(_Reappearing())
+
+    # 唯一出现过的 id 是 a、b、c：更早页面的 id 再次出现不构成新的删除。
+    assert store.delete_user_records("user-1") == 3
+
+
 def test_delete_user_records_contract_against_real_chroma():
     """用真实 chromadb 校验 get(where, limit, include)/delete(ids) 契约与多页删除（单页上限 1000）。"""
     import chromadb
