@@ -101,10 +101,12 @@ export function useVoiceInput(options: Options) {
       if (!valid()) return;
       if (permission !== 'granted') {
         transition('PermissionPrompt');
-        if (permission === 'blocked' || permissionRequest.current) {
+        if (permissionRequest.current) {
           showMicrophoneSettings(callbacks.current.onNotice);
           return;
         }
+        // 单次授权回收后，Expo 可能把状态报告成 blocked；一次状态检查不足以证明不能再次询问。
+        // 必须先实际发起一次请求，再根据真实请求结果决定是否引导去系统设置。
         // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
         // 迟到的结果只在“这次尝试仍是当前尝试”时才有意义：更晚的按住或已卸载都不该被它打扰。
         const request = recorder.requestPermission().then((result) => {

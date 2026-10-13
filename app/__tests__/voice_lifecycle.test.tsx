@@ -64,11 +64,11 @@ it.each(['native', 'background', 'navigation', 'unmount'])('cancels active recor
   expect(options.recorder.cancel).toHaveBeenCalledTimes(1);
   expect(options.onRecordingCommitted).not.toHaveBeenCalled();
 });
-it.each(['blocked', 'denied'])('handles %s permission without starting, and rechecks on next press', async (permission) => {
+it.each(['blocked', 'denied'])('requests again for initially %s permission without starting, and rechecks on next press', async (permission) => {
   options.recorder.getPermission.mockResolvedValueOnce(permission);
   await mount(); await act(async () => { await state.pressIn(event); });
-  if (permission === 'blocked') expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
-  else expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(options.onRecordingStarted).not.toHaveBeenCalled();
   expect(options.onStopAllAudio).not.toHaveBeenCalled();
