@@ -1038,3 +1038,57 @@ async def test_old_claim_generation_and_reset_owner_are_rejected_while_other_use
         )
     await stage_manager.stop_user_interactions("other")
     await stage_manager.close()
+
+
+@pytest.mark.asyncio
+async def test_post_start_generation_wait_does_not_hold_manager_registry_lock(monkeypatch):
+    from src.stage.call_stage import CallStage
+
+    class BlockingFence(UserResetFence):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def require_generation(self, user_id, generation):
+            self.calls += 1
+            if self.calls == 3:
+                self.entered.set()
+                await self.release.wait()
+            await super().require_generation(user_id, generation)
+
+    async def start_without_resources(self):
+        self._started = True
+
+    async def abort_without_resources(self):
+        self._closed.set()
+
+    fence = BlockingFence()
+    stage_manager, _, _ = manager(user_reset_fence=fence)
+    claim = await stage_manager.start_call(
+        user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="lock-race"
+    )
+    monkeypatch.setattr(CallStage, "start", start_without_resources)
+    monkeypatch.setattr(CallStage, "abort_failed_start", abort_without_resources)
+    creation = asyncio.create_task(
+        stage_manager.create_call_stage(
+            claim,
+            user_id="owner",
+            character_id="luotianyi",
+            client_request_id="lock-race",
+            speech_factory=None,
+            transport=None,
+        )
+    )
+    await asyncio.wait_for(fence.entered.wait(), 1)
+    closing = asyncio.create_task(stage_manager.close())
+    for _ in range(100):
+        if stage_manager._closed:
+            break
+        await asyncio.sleep(0)
+    assert stage_manager._closed
+    fence.release.set()
+    await asyncio.gather(creation, return_exceptions=True)
+    await closing
+    assert stage_manager._call_stages == {}

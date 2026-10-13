@@ -85,6 +85,8 @@ class CallSettlementSink(Protocol):
 class CallStateChanged:
     call_id: str
     state: CallState
+    client_request_id: str = ""
+    connected_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +174,7 @@ class CallStage:
         transport: CallTransportSink,
         release_ownership: Callable[[CallStageOwnership], bool] | None = None,
         settlement_sink: CallSettlementSink | None = None,
+        termination_owner: Callable[["CallStage", CallEndReason], asyncio.Task] | None = None,
         call_metrics: Any | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] | None = None,
@@ -186,6 +189,7 @@ class CallStage:
         self._speech_factory, self._transport = speech_factory, transport
         self._release_ownership = release_ownership
         self._settlement_sink = settlement_sink
+        self._termination_owner = termination_owner
         self._call_metrics = call_metrics
         self._monotonic = monotonic
         self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
@@ -224,6 +228,9 @@ class CallStage:
         self._unfinished_turns: set[int] = set()
         self._request_turn: dict[str, int | None] = {}
         self._started = False
+        self._initialization: asyncio.Task[None] | None = None
+        self._termination: asyncio.Task[CallFinalSnapshot | None] | None = None
+        self._termination_reason: CallEndReason | None = None
         self._closed = asyncio.Event()
         self._final: CallFinalSnapshot | None = None
         self._active_response_id: str | None = None
@@ -267,10 +274,20 @@ class CallStage:
     def tasks(self) -> tuple[asyncio.Task[Any], ...]:
         return tuple(task for task in self._tasks if not task.done())
 
+    @property
+    def termination_requested(self) -> bool:
+        return self._termination_reason is not None
+
     async def start(self) -> None:
         """Create the ephemeral context and provider before publishing RINGING."""
         if self._started:
             return
+        if self._initialization is None:
+            self._initialization = asyncio.create_task(self._start(), name=f"call-initialize-{self._ownership.call_id}")
+            self._initialization.add_done_callback(self._observe_task)
+        await asyncio.shield(self._initialization)
+
+    async def _start(self) -> None:
         self._require_setup_time()
         try:
             requested_at = self._record.requested_at.replace(tzinfo=None)
@@ -280,15 +297,20 @@ class CallStage:
                     mode=ConversationMode.CALL,
                     user_id=self._record.user_id,
                     requested_at=requested_at,
-                )
+                ),
+                cleanup=lambda context: context.close(),
             )
-            self._provider = await self._await_setup(self._speech_factory.create(self._record.call_id))
+            self._provider = await self._await_setup(
+                self._speech_factory.create(self._record.call_id), cleanup=lambda provider: provider.close()
+            )
             await self._await_setup(self._provider.start(RealtimeSpeechConfig()))
             await self._transition(CallState.RINGING)
             self._started = True
             self._pcm_task = self._track(asyncio.create_task(self._drain_pcm(), name="call-pcm"))
             self._events_task = self._track(asyncio.create_task(self._consume_events(), name="call-speech-events"))
             await self._submit_stimulus(self._answer_requested())
+        except asyncio.CancelledError:
+            raise
         except BaseException:
             if self.state not in {CallState.ENDED, CallState.FAILED}:
                 await self._fail_setup(
@@ -384,6 +406,7 @@ class CallStage:
             self._recovery_task = self._track(asyncio.create_task(self._recover_deadline(), name="call-recovery"))
 
     async def resume(self) -> bool:
+        timed_out = False
         async with self._lifecycle_lock:
             if self.state is not CallState.RECONNECTING:
                 return False
@@ -395,28 +418,50 @@ class CallStage:
                     numeric={"reconnect_count": self._reconnect_count},
                     labels={"result": CallMetricResult.TIMEOUT.value, "error_code": "RECONNECT_TIMEOUT"},
                 )
-                await self._terminate_locked(CallEndReason.RECOVERY_TIMEOUT)
-                return False
-            self._cancel_task(self._recovery_task)
-            await self._transition_or_close(CallState.ACTIVE)
-            self._first_disconnect_monotonic = None
-            self._recovery_deadline = None
-            # Product policy: a successful resume always starts a fresh full silence period.
-            if self._playback.silence_started_at is None:
-                try:
-                    self._playback.restore_silence_after_reconnect(started_at=self._monotonic())
-                except ValueError:
-                    pass
-            self._refresh_silence_task()
-            self._record_metric(
-                CallMetricName.RECONNECT,
-                duration_ms=0,
-                numeric={"reconnect_count": self._reconnect_count},
-                labels={"result": CallMetricResult.SUCCEEDED.value},
-            )
-            return True
+                timed_out = True
+            else:
+                self._cancel_task(self._recovery_task)
+                await self._transition_or_close(CallState.ACTIVE)
+                self._first_disconnect_monotonic = None
+                self._recovery_deadline = None
+                # Product policy: a successful resume always starts a fresh full silence period.
+                if self._playback.silence_started_at is None:
+                    try:
+                        self._playback.restore_silence_after_reconnect(started_at=self._monotonic())
+                    except ValueError:
+                        pass
+                self._refresh_silence_task()
+                self._record_metric(
+                    CallMetricName.RECONNECT,
+                    duration_ms=0,
+                    numeric={"reconnect_count": self._reconnect_count},
+                    labels={"result": CallMetricResult.SUCCEEDED.value},
+                )
+                return True
+        if timed_out:
+            await self.terminate(CallEndReason.RECOVERY_TIMEOUT)
+        return False
 
     async def terminate(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> CallFinalSnapshot | None:
+        """Stop realtime work once; caller cancellation does not cancel owned termination."""
+        if self._termination_reason is None:
+            self._termination_reason = reason
+        if self._termination_owner is not None:
+            task = self._termination_owner(self, self._termination_reason)
+        else:
+            if self._termination is None:
+                self._termination = asyncio.create_task(
+                    self._terminate_owned(self._termination_reason), name=f"call-terminate-{self._ownership.call_id}"
+                )
+                self._termination.add_done_callback(self._observe_task)
+            task = self._termination
+        return await asyncio.shield(task)
+
+    async def _terminate_owned(self, reason: CallEndReason) -> CallFinalSnapshot | None:
+        initialization = self._initialization
+        if initialization is not None and initialization is not asyncio.current_task() and not initialization.done():
+            initialization.cancel()
+            await asyncio.gather(initialization, return_exceptions=True)
         async with self._lifecycle_lock:
             return await self._terminate_locked(reason)
 
@@ -447,6 +492,18 @@ class CallStage:
     async def close(self) -> CallFinalSnapshot | None:
         """Idempotently release a call whose owner is going away."""
         return await self.terminate(CallEndReason.SYSTEM_FAILURE)
+
+    async def abort_failed_start(self) -> None:
+        """Idempotently clean a stage that was never delivered to its caller."""
+        initialization = self._initialization
+        if initialization is not None and initialization is not asyncio.current_task() and not initialization.done():
+            initialization.cancel()
+            await asyncio.gather(initialization, return_exceptions=True)
+        if self._closed.is_set():
+            return
+        cleanup_error = await self._cleanup()
+        if cleanup_error is not None:
+            raise cleanup_error
 
     async def _consume_events(self) -> None:
         assert self._provider is not None
@@ -742,13 +799,15 @@ class CallStage:
         if deadline is None:
             return
         await asyncio.sleep(max(0.0, deadline - self._monotonic()))
+        should_terminate = False
         async with self._lifecycle_lock:
-            if (
+            should_terminate = (
                 self.state is CallState.RECONNECTING
                 and self._recovery_deadline == deadline
                 and self._monotonic() >= deadline
-            ):
-                await self._terminate_locked(CallEndReason.RECOVERY_TIMEOUT)
+            )
+        if should_terminate:
+            await self.terminate(CallEndReason.RECOVERY_TIMEOUT)
 
     def _refresh_silence_task(self) -> None:
         self._cancel_task(self._silence_task)
@@ -808,7 +867,14 @@ class CallStage:
         )
         if publish:
             try:
-                await self._transport.send_state(CallStateChanged(self._ownership.call_id, state))
+                await self._transport.send_state(
+                    CallStateChanged(
+                        self._ownership.call_id,
+                        state,
+                        self._ownership.client_request_id,
+                        updated.connected_at,
+                    )
+                )
             except BaseException:
                 if snapshot.has_connected and self._final is None:
                     self._request_transport_abort()
@@ -1058,16 +1124,29 @@ class CallStage:
         if self._setup_expired():
             raise TimeoutError("call setup deadline elapsed")
 
-    async def _await_setup(self, awaitable: Awaitable[Any]) -> Any:
+    async def _await_setup(
+        self,
+        awaitable: Awaitable[Any],
+        *,
+        cleanup: Callable[[Any], Awaitable[None]] | None = None,
+    ) -> Any:
         remaining = self._ownership.setup_deadline - self._monotonic()
         if remaining <= 0:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
             raise TimeoutError("call setup deadline elapsed")
+        task = asyncio.create_task(awaitable)
         try:
-            return await asyncio.wait_for(awaitable, timeout=remaining)
-        except asyncio.TimeoutError:
-            raise TimeoutError("call setup deadline elapsed") from None
+            return await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+        except (asyncio.CancelledError, asyncio.TimeoutError) as error:
+            task.cancel()
+            result = await asyncio.gather(task, return_exceptions=True)
+            value = result[0]
+            if cleanup is not None and not isinstance(value, BaseException):
+                await cleanup(value)
+            if isinstance(error, asyncio.TimeoutError):
+                raise TimeoutError("call setup deadline elapsed") from None
+            raise
 
     def _setup_expired(self) -> bool:
         return self._monotonic() >= self._ownership.setup_deadline

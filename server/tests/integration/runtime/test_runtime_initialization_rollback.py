@@ -165,6 +165,53 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
 
 
 @pytest.mark.asyncio
+async def test_initialization_rollback_waits_for_stage_manager_before_agent_and_database():
+    calls = []
+    stage_release = asyncio.Event()
+
+    class Runtime:
+        async def close_world_stages(self):
+            calls.append("world_stages")
+
+        stage_manager = SimpleNamespace(
+            close=lambda: _record_wait(calls, "stage_manager_started", "stage_manager_stopped", stage_release)
+        )
+        call_transport_hub = SimpleNamespace(close=lambda: _record(calls, "transport"))
+
+    world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
+    agent = SimpleNamespace(shutdown=lambda: _record(calls, "agent"))
+    database = SimpleNamespace(shutdown=lambda: _record(calls, "database"))
+    rollback = asyncio.create_task(
+        runtime_module.ServerRuntime._rollback_failed_initialization(
+            runtime=Runtime(),
+            world=world,
+            database_manager=database,
+            agent_runtime=agent,
+            observability=None,
+            owns_observability=False,
+        )
+    )
+    for _ in range(100):
+        if "stage_manager_started" in calls:
+            break
+        await asyncio.sleep(0)
+    assert "agent" not in calls and "database" not in calls
+    stage_release.set()
+    await rollback
+    assert calls.index("stage_manager_stopped") < calls.index("agent") < calls.index("database")
+
+
+async def _record(calls, value):
+    calls.append(value)
+
+
+async def _record_wait(calls, started, stopped, release):
+    calls.append(started)
+    await release.wait()
+    calls.append(stopped)
+
+
+@pytest.mark.asyncio
 async def test_agent_runtime_shutdown_closes_owned_vector_store_once(monkeypatch):
     class FakeVectorStore:
         def __init__(self):

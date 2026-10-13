@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from typing import Any
 
 from src.utils.logger import get_logger
@@ -14,41 +15,94 @@ class InteractionFinalizing(RuntimeError):
         super().__init__("INTERACTION_FINALIZING")
 
 
+@dataclass(slots=True)
+class _InteractionTasks:
+    owner: tuple[str, str]
+    termination: asyncio.Task | None = None
+    finalization: asyncio.Task | None = None
+
+
 class FinalizationTasks:
     def __init__(self) -> None:
-        self._tasks: dict[str, tuple[tuple[str, str], asyncio.Task]] = {}
+        self._tasks: dict[str, _InteractionTasks] = {}
 
     def require_idle(self, key: tuple[str, str]) -> None:
-        if any(owner == key and not task.done() for owner, task in self._tasks.values()):
+        if any(entry.owner == key and self._is_busy(entry) for entry in self._tasks.values()):
             raise InteractionFinalizing()
 
     def has_user(self, user_id: str) -> bool:
-        return any(owner[0] == user_id and not task.done() for owner, task in self._tasks.values())
+        return any(entry.owner[0] == user_id and self._is_busy(entry) for entry in self._tasks.values())
+
+    def start_termination(
+        self, identity: str, owner: tuple[str, str], operation: Callable[[], Coroutine[Any, Any, Any]]
+    ) -> asyncio.Task:
+        entry = self._entry(identity, owner)
+        if entry.termination is not None:
+            return entry.termination
+        task = asyncio.create_task(operation(), name=f"stage-terminate-{identity}")
+        entry.termination = task
+        task.add_done_callback(lambda done: self._completed(identity, "termination", done))
+        return task
 
     def start(
         self, identity: str, owner: tuple[str, str], operation: Callable[[], Coroutine[Any, Any, Any]]
     ) -> asyncio.Task:
-        existing = self._tasks.get(identity)
-        if existing is not None:
-            return existing[1]
+        entry = self._entry(identity, owner)
+        if entry.finalization is not None:
+            return entry.finalization
         task = asyncio.create_task(operation(), name=f"stage-finalize-{identity}")
-        self._tasks[identity] = (owner, task)
-        task.add_done_callback(lambda done: self._discard(identity, done))
+        entry.finalization = task
+        task.add_done_callback(lambda done: self._completed(identity, "finalization", done))
         return task
 
-    def _discard(self, identity: str, task: asyncio.Task) -> None:
-        if self._tasks.get(identity, (None, None))[1] is task:
-            self._tasks.pop(identity)
+    def _entry(self, identity: str, owner: tuple[str, str]) -> _InteractionTasks:
+        entry = self._tasks.get(identity)
+        if entry is None:
+            entry = _InteractionTasks(owner)
+            self._tasks[identity] = entry
+        elif entry.owner != owner:
+            raise RuntimeError("interaction task owner changed")
+        return entry
+
+    def _completed(self, identity: str, phase: str, task: asyncio.Task) -> None:
+        entry = self._tasks.get(identity)
+        if entry is None or getattr(entry, phase) is not task:
+            return
         if not task.cancelled():
             error = task.exception()
             if error is not None:
                 get_logger(__name__).error(
-                    "Stage finalization failed interaction=%s type=%s", identity, type(error).__name__
+                    "Stage %s failed interaction=%s type=%s", phase, identity, type(error).__name__
                 )
+        if phase == "termination":
+            # A finalization registered by termination keeps this entry busy.
+            # If none was registered, retain the completed task so repeated
+            # termination callers observe the same result or exception.
+            if entry.finalization is not None:
+                entry.termination = None
+        else:
+            entry.finalization = None
+            if entry.termination is None or entry.termination.done():
+                self._tasks.pop(identity, None)
+
+    @staticmethod
+    def _is_busy(entry: _InteractionTasks) -> bool:
+        return any(task is not None and not task.done() for task in (entry.termination, entry.finalization))
 
     async def close(self) -> None:
         while self._tasks:
-            await asyncio.gather(*(task for _, task in tuple(self._tasks.values())), return_exceptions=True)
+            tasks = tuple(
+                task
+                for entry in self._tasks.values()
+                for task in (entry.termination, entry.finalization)
+                if task is not None
+            )
+            if not tasks:
+                return
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for identity, entry in tuple(self._tasks.items()):
+                if entry.finalization is None and entry.termination is not None and entry.termination.done():
+                    self._tasks.pop(identity, None)
 
 
 class CallFinalizationSink:

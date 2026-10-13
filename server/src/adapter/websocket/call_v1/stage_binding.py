@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 
 import src.domain.agent as d
 from src.domain.call import CallEndReason, CallFinalSnapshot, CallState
@@ -108,12 +107,13 @@ class CallStageBinding(CallBusinessAcceptanceSink):
             "type": "call.state",
             "seq": session.next_server_seq,
             "call_id": self.call_id,
-            "client_request_id": self._require_stage()._ownership.client_request_id,
+            "client_request_id": item.client_request_id,
             "state": item.state.value,
         }
         if item.state is CallState.ACTIVE:
-            connected = self._require_stage()._record.connected_at
-            assert isinstance(connected, datetime)
+            connected = item.connected_at
+            if connected is None:
+                raise ValueError("ACTIVE state requires connected_at")
             message = {
                 "protocol": "call.v1",
                 "type": "call.active",

@@ -27,8 +27,6 @@ from src.stage.call_stage import CallReplyFailed, CallStateChanged
 
 class _Stage:
     snapshot = None
-    _ownership = SimpleNamespace(client_request_id="request")
-    _record = SimpleNamespace(connected_at=None)
 
     def __init__(self):
         self.pcm = []
@@ -214,6 +212,31 @@ async def test_binding_does_not_encode_internal_or_terminal_states_as_call_state
 
     assert delivered == []
     assert session.next_server_seq == 1
+
+
+@pytest.mark.asyncio
+async def test_binding_encodes_state_from_public_event_facts_without_stage_internals():
+    delivered = []
+
+    async def deliver(output):
+        delivered.append(output)
+
+    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = CallTransportSession(
+        call_id=binding.call_id,
+        user_id="user",
+        character_id="luotianyi",
+        sink=binding,
+    )
+    binding.bind(stage=_Stage(), session=session)
+    connected_at = datetime.now(timezone.utc)
+
+    await binding.send_state(CallStateChanged(binding.call_id, CallState.RINGING, "request"))
+    await binding.send_state(CallStateChanged(binding.call_id, CallState.ACTIVE, "request", connected_at))
+
+    ringing, active = [json.loads(item.text) for item in delivered]
+    assert ringing["client_request_id"] == "request"
+    assert active["connected_at_ms"] == int(connected_at.timestamp() * 1000)
 
 
 @pytest.mark.asyncio
