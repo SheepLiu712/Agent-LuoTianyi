@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import time
 from typing import TYPE_CHECKING
@@ -9,9 +10,11 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.application.user.account import PasswordDecryptionError, decrypt_password, generate_keys, get_public_key_pem
+from src.application.user.registration_service import RegistrationError
 from src.application.user.user_conversation_helper import UserConversationHelper
 from src.domain.agent import MediaRef
 from src.infrastructure.media import MediaResolutionError, MediaResolver
+from src.web.http.errors import agreement_error_response
 from src.web.http.rate_limits import enforce_rate_limit
 from src.web.http.types import (
     AutoLoginRequest,
@@ -137,15 +140,20 @@ class UserInterface:
         if request is not None:
             enforce_rate_limit(request, "auth_register", req.username)
         decrypted_password = self.decrypt_user_password(req.password)
-        success, msg = await self._run_auth_work(
-            server_runtime.database_manager.credential_service.register_user,
-            req.username,
-            decrypted_password,
-            req.invite_code,
-        )
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-        return {"message": "注册成功", "user_id": req.username}
+        try:
+            return await self._run_auth_work(
+                functools.partial(
+                    server_runtime.registration_service.register,
+                    username=req.username,
+                    password=decrypted_password,
+                    invite_code=req.invite_code,
+                    registration_request_id=req.registration_request_id,
+                    agreement_version=req.agreement_version,
+                    accepted=req.accepted,
+                )
+            )
+        except RegistrationError as error:
+            return agreement_error_response(error.status_code, error.detail, code=error.code, **error.extra)
 
     async def reset_account(
         self,
