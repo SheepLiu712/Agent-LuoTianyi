@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -6,10 +7,12 @@ import pytest
 from support.call_apology import Recall, Replies, _Plans, _request, _stimulus, catalog
 
 import src.domain.agent as d
+from src.agent.handlers.stimulus import call as call_handlers
 from src.agent.handlers.stimulus.call import CallSilenceElapsedHandler, CallStartedHandler, CallTurnCompletedHandler
 from src.agent.skills.cognitive.call_recall import SilenceDecision
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import CallAudioSemantic
+from src.utils.logger import get_logger
 
 
 def variants(tmp_path):
@@ -76,6 +79,56 @@ async def test_failed_handler_randomly_selects_only_its_scene(tmp_path, monkeypa
         assert action.content == ""
         assert not any(entry.source == "agent" for entry in plans.context.conversation.entries)
     assert len(set(chosen)) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scene", ["opening", "turn", "silence"])
+async def test_reply_failure_logs_only_stable_metadata(tmp_path, monkeypatch, scene):
+    class CapturingHandler(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+
+        def emit(self, record):
+            record.getMessage()
+            self.records.append(record)
+
+    resources = variants(tmp_path)
+    replies, recall = Replies(failing=True), Recall()
+
+    async def speak(*args, **kwargs):
+        return SilenceDecision.SPEAK
+
+    recall.decide_silence = speak
+    now, call_id = datetime.now(timezone.utc), uuid4()
+    handlers = {
+        "opening": (
+            CallStartedHandler(replies, resources),
+            _stimulus(d.CallStarted, call_id=call_id, connected_at=now),
+        ),
+        "turn": (
+            CallTurnCompletedHandler(recall, replies, resources),
+            _stimulus(
+                d.CallTurnCompleted, call_id=call_id, turn_seq=1, audio_content=CallAudioSemantic(transcript="hello")
+            ),
+        ),
+        "silence": (
+            CallSilenceElapsedHandler(recall, replies, resources),
+            _stimulus(d.CallSilenceElapsed, call_id=call_id, silence_ms=5000),
+        ),
+    }
+    logger = get_logger(call_handlers.__name__)
+    capture = CapturingHandler()
+    monkeypatch.setattr(logger, "handlers", [capture])
+
+    handler, stimulus = handlers[scene]
+    report = await handler.handle(_request(stimulus), _Plans())
+
+    assert report.request_status is d.HandlingRequestStatus.FAILED
+    assert len(capture.records) == 1
+    record = capture.records[0]
+    assert record.getMessage() == "Call reply generation failed request_id=request error_type=RuntimeError"
+    assert "private reply should not be logged" not in record.getMessage()
 
 
 @pytest.mark.parametrize("missing", ["opening", "turn", "silence"])
