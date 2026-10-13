@@ -1,4 +1,4 @@
-"""Bounded background handoff for immutable post-call settlement snapshots."""
+"""Bounded execution of one call settlement; StageManager owns its task."""
 
 from __future__ import annotations
 
@@ -11,94 +11,28 @@ from src.utils.logger import get_logger
 
 
 class CallSettlementConsumer(Protocol):
-    async def settle(self, snapshot: CallFinalSnapshot) -> None:
-        """Persist real summary/maintenance results or raise without claiming success."""
+    async def settle(self, snapshot: CallFinalSnapshot) -> None: ...
 
 
 class CallResourceReleasePort(Protocol):
     def release_call_maintenance(self, call_id: UUID) -> None: ...
 
 
-class CallSettlementCoordinator:
-    """Accept immutable snapshots quickly and bound all cleanup to fifteen seconds."""
-
+class CallSettlement:
     def __init__(
-        self,
-        *,
-        consumer: CallSettlementConsumer,
-        resources: CallResourceReleasePort,
-        timeout_seconds: float = 15.0,
-        user_reset_fence=None,
-        call_owner=None,
+        self, *, consumer: CallSettlementConsumer, resources: CallResourceReleasePort, timeout_seconds: float = 15.0
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self._consumer = consumer
         self._resources = resources
         self._timeout = timeout_seconds
-        self._user_reset_fence = user_reset_fence
-        self._call_owner = call_owner
-        self._tasks: dict[UUID, asyncio.Task[None]] = {}
-        self._task_users: dict[UUID, str] = {}
 
     @property
     def is_ready(self) -> bool:
-        consumer_ready = getattr(self._consumer, "is_ready", False)
-        return bool(
-            consumer_ready
-            and self._resources is not None
-            and self._user_reset_fence is not None
-            and self._call_owner is not None
-        )
+        return bool(getattr(self._consumer, "is_ready", False) and self._resources is not None)
 
-    async def emit(self, snapshot: CallFinalSnapshot) -> None:
-        call_id = snapshot.terminal.call_id
-        user_id = self._resolve_user_id(call_id)
-        if self._user_reset_fence is not None:
-            try:
-                await self._user_reset_fence.require_admission(user_id)
-            except Exception:
-                self._resources.release_call_maintenance(call_id)
-                raise
-        task = self._tasks.get(call_id)
-        if task is not None and not task.done():
-            return
-        task = asyncio.create_task(self._run(snapshot), name=f"call-settlement-{call_id}")
-        self._tasks[call_id] = task
-        if user_id is not None:
-            self._task_users[call_id] = user_id
-        if self._user_reset_fence is not None and user_id is not None:
-            try:
-                await self._user_reset_fence.track(user_id, task)
-            except Exception:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-                self._tasks.pop(call_id, None)
-                self._task_users.pop(call_id, None)
-                self._resources.release_call_maintenance(call_id)
-                raise
-        task.add_done_callback(lambda done, key=call_id: self._discard(key, done))
-
-    def _resolve_user_id(self, call_id: UUID) -> str | None:
-        if self._call_owner is None:
-            if self._user_reset_fence is not None:
-                raise RuntimeError("call owner resolver is required with reset fencing")
-            return None
-        record = self._call_owner(call_id)
-        if record is None or not isinstance(record.user_id, str) or not record.user_id:
-            raise RuntimeError("call owner is unavailable")
-        return record.user_id
-
-    async def close(self) -> None:
-        if self._tasks:
-            await asyncio.gather(*tuple(self._tasks.values()), return_exceptions=True)
-
-    async def wait_user(self, user_id: str) -> None:
-        tasks = tuple(task for call_id, task in self._tasks.items() if self._task_users.get(call_id) == user_id)
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _run(self, snapshot: CallFinalSnapshot) -> None:
+    async def settle(self, snapshot: CallFinalSnapshot) -> None:
         call_id = snapshot.terminal.call_id
         operation = asyncio.create_task(self._consumer.settle(snapshot), name=f"call-settlement-consumer-{call_id}")
         try:
@@ -114,8 +48,3 @@ class CallSettlementCoordinator:
                 operation.cancel()
                 await asyncio.gather(operation, return_exceptions=True)
             self._resources.release_call_maintenance(call_id)
-
-    def _discard(self, call_id: UUID, task: asyncio.Task[None]) -> None:
-        if self._tasks.get(call_id) is task:
-            self._tasks.pop(call_id, None)
-            self._task_users.pop(call_id, None)

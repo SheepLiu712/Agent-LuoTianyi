@@ -10,7 +10,7 @@ from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.application.host_context import ServerHostContext
-from src.application.user import UserResetFence, UserResetInteractionCoordinator, UserResetService
+from src.application.user import UserResetFence, UserResetService
 from src.domain.stage import StageState
 from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
 from src.infrastructure.models.realtime_speech import AliyunRealtimeSpeechSessionFactory
@@ -20,7 +20,7 @@ from src.infrastructure.persistence.call_maintenance_projection import CallMaint
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
-from src.stage.call_settlement import CallSettlementConsumerImpl, CallSettlementCoordinator, StaleCallRecoveryService
+from src.stage.call_settlement import StaleCallRecoveryService
 from src.utils.logger import (
     get_logger,
     install_observability_log_handler,
@@ -83,7 +83,6 @@ class ServerRuntime:
     call_metrics: CallMetrics | None = None
     user_reset_fence: UserResetFence | None = None
     realtime_speech_factory: AliyunRealtimeSpeechSessionFactory | None = None
-    call_settlement_coordinator: CallSettlementCoordinator | None = None
     stale_call_recovery: StaleCallRecoveryService | None = None
     user_reset_service: UserResetService | None = None
     call_capability: CallCapabilityStatus = field(
@@ -204,15 +203,6 @@ class ServerRuntime:
             event_store = database_manager.event_store
             if event_store is None:
                 raise RuntimeError("EventStore is required for due-event dispatch")
-            runtime.stage_manager = StageManager(
-                get_agent=agent_runtime.get_agent,
-                adapter=runtime.chat_adapter,
-                get_context_factory=agent_runtime.context_factories.__getitem__,
-                due_event_provider=EventStoreDueEventProvider(event_store),
-                call_sessions=database_manager.call_sessions,
-                user_reset_fence=reset_fence,
-                config=config.get("stage_manager", {}),
-            )
 
             if (
                 database_manager.call_sessions is None
@@ -227,35 +217,25 @@ class ServerRuntime:
                 vector_store=agent_runtime.vector_store,
                 user_store=database_manager.user_store,
             )
-            from src.stage.call_settlement import CallAgentSettlement
-
-            settlement_consumer = CallSettlementConsumerImpl(
-                agent_settlement=CallAgentSettlement(
-                    get_agent=agent_runtime.get_agent,
-                    get_context_factory=agent_runtime.context_factories.__getitem__,
-                ),
+            runtime.stage_manager = StageManager(
+                get_agent=agent_runtime.get_agent,
+                adapter=runtime.chat_adapter,
+                get_context_factory=agent_runtime.context_factories.__getitem__,
+                due_event_provider=EventStoreDueEventProvider(event_store),
                 call_sessions=database_manager.call_sessions,
                 conversation_service=database_manager.conversation_service,
-                release_call_maintenance=agent_runtime.release_call_maintenance,
                 call_maintenance_batches=database_manager.call_maintenance_batches,
+                call_resources=agent_runtime,
                 call_metrics=call_metrics,
-            )
-            runtime.call_settlement_coordinator = CallSettlementCoordinator(
-                consumer=settlement_consumer,
-                resources=agent_runtime,
                 user_reset_fence=reset_fence,
-                call_owner=database_manager.call_sessions.find_by_id,
+                config=config.get("stage_manager", {}),
             )
+
             media_store = PermanentMediaStore(media_config) if media_config.get("root") else None
             if media_store is None:
                 raise RuntimeError("Configured permanent media storage is required for user data reset")
             runtime.user_reset_service = UserResetService(
-                interactions=UserResetInteractionCoordinator(
-                    fence=reset_fence,
-                    stage_manager=runtime.stage_manager,
-                    call_settlements=runtime.call_settlement_coordinator,
-                    call_transports=runtime.call_transport_hub,
-                ),
+                interactions=runtime.stage_manager,
                 conversation_service=database_manager.conversation_service,
                 memory_store=database_manager.memory_store,
                 user_store=database_manager.user_store,
@@ -312,7 +292,7 @@ class ServerRuntime:
             call_tts_ready=speaking.supports_call_audio(character_id)
             and self.agent_runtime.skills.prepared_speech.supports_call_apology(character_id),
             summary_ready=summary.supports_character(character_id),
-            settlement_ready=bool(self.call_settlement_coordinator and self.call_settlement_coordinator.is_ready),
+            settlement_ready=bool(self.stage_manager and self.stage_manager.call_settlement_ready),
             stage_binding_ready=isinstance(self.stage_manager, StageManager)
             and isinstance(self.call_transport_hub, CallTransportHub)
             and callable(getattr(CallStageBinding, "bind_stage", None)),
@@ -383,14 +363,6 @@ class ServerRuntime:
                     else None
                 ),
             ),
-            (
-                "call settlement coordinator",
-                (
-                    runtime.call_settlement_coordinator.close
-                    if runtime is not None and runtime.call_settlement_coordinator is not None
-                    else None
-                ),
-            ),
             ("world runtime", world.stop_background_services if world is not None else None),
             (
                 "agent runtime",
@@ -443,10 +415,6 @@ class ServerRuntime:
                 ("world stages", self.close_world_stages),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
                 ("call transport hub", self.call_transport_hub.close if self.call_transport_hub is not None else None),
-                (
-                    "call settlement coordinator",
-                    self.call_settlement_coordinator.close if self.call_settlement_coordinator is not None else None,
-                ),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
                 ("database manager", self.database_manager.shutdown),
                 ("global references", self._shutdown_clear_global_references),

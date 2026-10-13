@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -42,20 +43,13 @@ from src.web.http.user_interface import UserInterface
 class _Fence:
     def __init__(self):
         self.blocked = set()
-        self.active_writes = 1
-        self.drained = asyncio.Event()
+        self.busy = False
 
     async def begin_user_data_reset(self, user_id):
+        if self.busy:
+            raise RuntimeError("USER_INTERACTION_BUSY")
         self.blocked.add(user_id)
         return object()
-
-    async def stop_user_interactions(self, user_id):
-        assert user_id in self.blocked
-        return 2
-
-    async def wait_user_settlements(self, user_id):
-        assert user_id in self.blocked
-        await self.drained.wait()
 
     async def end_user_data_reset(self, user_id, token):
         self.blocked.discard(user_id)
@@ -168,7 +162,7 @@ def _fixture(tmp_path):
     return engine, sessions, redis, users, conversations, memories, calls, batches
 
 
-def test_reset_fences_inflight_work_deletes_owner_graph_and_is_retryable(tmp_path):
+def test_reset_rejects_busy_user_then_deletes_owner_graph_and_is_retryable(tmp_path):
     engine, sessions, redis, users, conversations, memories, calls, batches = _fixture(tmp_path)
     fence = _Fence()
     vectors = _Vectors()
@@ -185,16 +179,14 @@ def test_reset_fences_inflight_work_deletes_owner_graph_and_is_retryable(tmp_pat
     )
 
     async def scenario():
-        task = asyncio.create_task(service.reset("owner"))
-        for _ in range(10):
-            if "owner" in fence.blocked:
-                break
-            await asyncio.sleep(0)
-        assert "owner" in fence.blocked
+        fence.busy = True
+        with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
+            await service.reset("owner")
+        assert "owner" not in fence.blocked
         with sessions() as session:
             assert session.query(Conversation).filter_by(user_id="owner").count() == 1
-        fence.drained.set()
-        return await task
+        fence.busy = False
+        return await service.reset("owner")
 
     first = asyncio.run(scenario())
     assert first.success
@@ -220,7 +212,6 @@ def test_reset_fences_inflight_work_deletes_owner_graph_and_is_retryable(tmp_pat
 def test_reset_reports_partial_failure_and_retry_converges(tmp_path):
     engine, _, redis, users, conversations, memories, calls, batches = _fixture(tmp_path)
     fence = _Fence()
-    fence.drained.set()
     vectors = _Vectors()
     vectors.fail = True
     service = UserResetService(
@@ -266,7 +257,6 @@ def test_authenticated_http_reset_preserves_credentials_and_isolates_other_owner
     assert other_token is not None
 
     fence = _Fence()
-    fence.drained.set()
     reset_service = UserResetService(
         interactions=fence,
         conversation_service=conversations,
@@ -314,6 +304,17 @@ def test_authenticated_http_reset_preserves_credentials_and_isolates_other_owner
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert mismatched.status_code == 401
+        fence.busy = True
+        busy = client.post(
+            "/user/data/reset",
+            json={"username": "owner"},
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert busy.status_code == 409
+        assert busy.json()["detail"] == {"code": "USER_INTERACTION_BUSY", "retryable": True}
+        with sessions() as session:
+            assert session.query(Conversation).filter_by(user_id="owner").count() == 1
+        fence.busy = False
         response = client.post(
             "/user/data/reset",
             json={"username": "owner"},

@@ -16,6 +16,8 @@ def test_call_transport_defaults_to_disabled(config):
 def ready_runtime():
     speaking = SimpleNamespace(supports_call_audio=lambda character_id: character_id == "luotianyi")
     summary = SimpleNamespace(supports_character=lambda character_id: character_id == "luotianyi")
+    manager = StageManager.__new__(StageManager)
+    manager._call_settlement = SimpleNamespace(is_ready=True)
     return SimpleNamespace(
         _call_transport_requested=True,
         _host_context=ServerHostContext._single_worker_launcher(),
@@ -28,8 +30,7 @@ def ready_runtime():
                 prepared_speech=SimpleNamespace(supports_call_apology=lambda _character: True),
             ),
         ),
-        call_settlement_coordinator=SimpleNamespace(is_ready=True),
-        stage_manager=StageManager.__new__(StageManager),
+        stage_manager=manager,
         call_transport_hub=CallTransportHub(),
         stale_call_recovery=SimpleNamespace(),
     )
@@ -61,7 +62,7 @@ def test_call_capability_requires_every_structural_readiness_fact():
                 runtime.agent_runtime.skills.call_summary, "supports_character", lambda _character: False
             ),
         ),
-        ("settlement_ready", lambda runtime: setattr(runtime.call_settlement_coordinator, "is_ready", False)),
+        ("settlement_ready", lambda runtime: setattr(runtime.stage_manager._call_settlement, "is_ready", False)),
         ("stage_binding_ready", lambda runtime: setattr(runtime, "stage_manager", None)),
         ("recovery_ready", lambda runtime: setattr(runtime, "stale_call_recovery", None)),
     ],

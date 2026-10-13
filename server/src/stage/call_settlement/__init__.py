@@ -3,7 +3,7 @@
 from .agent import CallAgentSettlement
 from .consumer import CallSettlementConsumerImpl
 from .recovery import CallRecoveryReport, StaleCallRecoveryService
-from .settlement import CallResourceReleasePort, CallSettlementConsumer, CallSettlementCoordinator
+from .settlement import CallResourceReleasePort, CallSettlement, CallSettlementConsumer
 
 __all__ = [
     "CallAgentSettlement",
@@ -11,6 +11,6 @@ __all__ = [
     "CallResourceReleasePort",
     "CallSettlementConsumer",
     "CallSettlementConsumerImpl",
-    "CallSettlementCoordinator",
+    "CallSettlement",
     "StaleCallRecoveryService",
 ]

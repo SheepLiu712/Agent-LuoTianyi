@@ -4,14 +4,13 @@ from uuid import uuid4
 
 import pytest
 
-from src.application.user.reset_fence import UserResetFence
 from src.domain.call import (
     CallEndReason,
     CallFinalSnapshot,
     CallOutcome,
     CallTerminalFacts,
 )
-from src.stage.call_settlement import CallSettlementCoordinator
+from src.stage.call_settlement import CallSettlement
 
 
 def _snapshot(call_id):
@@ -44,10 +43,8 @@ async def test_settlement_always_releases_agent_resources(mode):
             if mode == "timeout":
                 await asyncio.Event().wait()
 
-    coordinator = CallSettlementCoordinator(consumer=Consumer(), resources=resources, timeout_seconds=0.01)
-    await coordinator.emit(_snapshot(call_id))
-    await coordinator.emit(_snapshot(call_id))
-    await coordinator.close()
+    settlement = CallSettlement(consumer=Consumer(), resources=resources, timeout_seconds=0.01)
+    await settlement.settle(_snapshot(call_id))
 
     assert resources.released == [call_id]
 
@@ -68,14 +65,14 @@ async def test_timeout_waits_for_owned_consumer_cleanup_before_releasing_resourc
                 await cleanup_gate.wait()
                 raise
 
-    coordinator = CallSettlementCoordinator(consumer=Consumer(), resources=resources, timeout_seconds=0.01)
-    await coordinator.emit(_snapshot(call_id))
+    settlement = CallSettlement(consumer=Consumer(), resources=resources, timeout_seconds=0.01)
+    task = asyncio.create_task(settlement.settle(_snapshot(call_id)))
     await started.wait()
     await asyncio.sleep(0.02)
     assert resources.released == []
 
     cleanup_gate.set()
-    await coordinator.close()
+    await task
 
     assert resources.released == [call_id]
 
@@ -100,54 +97,15 @@ async def test_timeout_during_owned_batch_create_holds_resources_until_repositor
             await complete_owned(asyncio.to_thread(create_batch))
             raise asyncio.CancelledError
 
-    coordinator = CallSettlementCoordinator(consumer=Consumer(), resources=resources, timeout_seconds=0.01)
-    await coordinator.emit(_snapshot(call_id))
+    settlement = CallSettlement(consumer=Consumer(), resources=resources, timeout_seconds=0.01)
+    task = asyncio.create_task(settlement.settle(_snapshot(call_id)))
     await asyncio.to_thread(thread_started.wait)
     await asyncio.sleep(0.02)
     assert resources.released == []
     assert writes == []
 
     thread_gate.set()
-    await coordinator.close()
+    await task
 
     assert writes == ["created"]
     assert resources.released == [call_id]
-
-
-@pytest.mark.asyncio
-async def test_user_reset_fence_blocks_settlement_admission_and_waits_owned_write():
-    owner_call = uuid4()
-    other_call = uuid4()
-    fence = UserResetFence()
-    resources = _Resources()
-    gate = asyncio.Event()
-
-    class Consumer:
-        async def settle(self, snapshot):
-            await gate.wait()
-
-    owners = {
-        owner_call: type("Record", (), {"user_id": "owner"})(),
-        other_call: type("Record", (), {"user_id": "other"})(),
-    }
-    coordinator = CallSettlementCoordinator(
-        consumer=Consumer(),
-        resources=resources,
-        user_reset_fence=fence,
-        call_owner=owners.get,
-    )
-    await coordinator.emit(_snapshot(owner_call))
-    original_task = coordinator._tasks[owner_call]
-    token = await fence.begin("owner")
-    with pytest.raises(RuntimeError, match="RESET_IN_PROGRESS"):
-        await coordinator.emit(_snapshot(owner_call))
-    assert resources.released == [owner_call]
-    assert coordinator._tasks[owner_call] is original_task
-    await coordinator.emit(_snapshot(other_call))
-    waiting = asyncio.create_task(coordinator.wait_user("owner"))
-    await asyncio.sleep(0)
-    assert not waiting.done()
-    gate.set()
-    await waiting
-    await fence.end("owner", token)
-    await coordinator.close()

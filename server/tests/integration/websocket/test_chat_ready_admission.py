@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import WebSocketDisconnect
 
+from src.stage import InteractionFinalizing
 from src.stage.interaction_lease import InteractionLease, InteractionLeaseRegistry, InteractionSource
 from src.stage.stage_manager import InteractionOwnedByCallAdmission, StageManager
 from src.web.websocket import endpoint
@@ -26,13 +27,16 @@ class Socket:
 
 
 class BoundManager:
-    def __init__(self, *, owned_by_call=False):
+    def __init__(self, *, owned_by_call=False, finalizing=False):
+        self.finalizing = finalizing
         self.owned_by_call = owned_by_call
         self.connected = []
         self.disconnected = []
 
     async def connect(self, connection, character_id):
         self.connected.append((connection, character_id))
+        if self.finalizing:
+            raise InteractionFinalizing()
         if self.owned_by_call:
             raise InteractionOwnedByCallAdmission(InteractionSource.CALL)
         return SimpleNamespace(interaction_id="chat-interaction")
@@ -83,9 +87,10 @@ async def test_chat_ready_is_sent_only_after_stage_binding(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_owned_chat_admission_sends_retryable_error_without_chat_ready(monkeypatch):
+@pytest.mark.parametrize("finalizing", [False, True])
+async def test_busy_chat_admission_sends_retryable_error_without_chat_ready(monkeypatch, finalizing):
     socket = Socket()
-    manager = BoundManager(owned_by_call=True)
+    manager = BoundManager(owned_by_call=True, finalizing=finalizing)
     monkeypatch.setattr(
         endpoint,
         "get_admin_shell",
@@ -97,8 +102,8 @@ async def test_call_owned_chat_admission_sends_retryable_error_without_chat_read
 
     assert [event["type"] for event in socket.sent] == ["system_ready", "error"]
     assert socket.sent[-1]["payload"] == {
-        "code": "INTERACTION_OWNED_BY_CALL",
-        "message": "chat interaction is temporarily owned by a call",
+        "code": "INTERACTION_FINALIZING" if finalizing else "INTERACTION_OWNED_BY_CALL",
+        "message": "interaction is temporarily unavailable",
         "retryable": True,
     }
     assert socket.close_codes == [1013]

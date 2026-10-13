@@ -868,7 +868,7 @@ class CallStage:
             ending_error = error
         finally:
             self._ending_delivery = False
-        cleanup_error = await self._cleanup()
+        cleanup_error = await self._cleanup(release_ownership=False)
         if self._settlement_sink is not None:
             try:
                 await self._settlement_sink.emit(self._final)
@@ -880,6 +880,8 @@ class CallStage:
                     labels={"result": CallMetricResult.FAILED.value, "error_code": "SETTLEMENT_ADMISSION_FAILED"},
                 )
                 ending_error = ending_error or error
+        # The manager has registered finalization before relinquishing the live call.
+        self._release_call_ownership()
         await self._send_terminal_best_effort(self._final)
         ending_error = ending_error or cleanup_error
         if ending_error is not None:
@@ -969,7 +971,7 @@ class CallStage:
             self._cancel_task(task)
         self._cancel_task(self._realize_task)
 
-    async def _cleanup(self) -> BaseException | None:
+    async def _cleanup(self, *, release_ownership: bool = True) -> BaseException | None:
         self._plans.clear()
         current = asyncio.current_task()
         pending = tuple(task for task in self._tasks if task is not current and not task.done())
@@ -990,13 +992,17 @@ class CallStage:
         self._turns.clear()
         self._unfinished_turns.clear()
         self._responses.clear()
-        if self._release_ownership is not None and not self._ownership_released:
+        if release_ownership:
             try:
-                self._ownership_released = self._release_ownership(self._ownership)
+                self._release_call_ownership()
             except BaseException as error:
                 cleanup_error = cleanup_error or error
         self._closed.set()
         return cleanup_error
+
+    def _release_call_ownership(self) -> None:
+        if self._release_ownership is not None and not self._ownership_released:
+            self._ownership_released = self._release_ownership(self._ownership)
 
     async def _close_resources(self) -> BaseException | None:
         cleanup_error: BaseException | None = None

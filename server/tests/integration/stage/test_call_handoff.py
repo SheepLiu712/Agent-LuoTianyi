@@ -17,7 +17,6 @@ from src.infrastructure.persistence.call_sessions import SqlCallSessionRepositor
 from src.infrastructure.persistence.database.sql_database import Base
 from src.stage import StageManager
 from src.stage.interaction_lease import InteractionLeaseRegistry, InteractionSource
-from src.stage.stage_manager import InteractionOwnedByCallAdmission
 from src.web.websocket.service import WebSocketConnection
 
 from .test_chat_stage import RecordingAgent, Socket, StageContextFactory
@@ -692,16 +691,16 @@ async def test_setup_timeout_waits_for_owned_termination_before_releasing_transi
     assert lease.source is InteractionSource.CALL_TRANSITION
     assert not start.done()
     assert stage.context.closed is False
-    with pytest.raises(ValueError, match="already owned"):
+    with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
         await stage_manager.start_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
             client_request_id="request-direct",
         )
-    with pytest.raises(InteractionOwnedByCallAdmission) as error:
+    with pytest.raises(RuntimeError) as error:
         await stage_manager.connect(WebSocketConnection(Socket(), "user", "replacement"), "luotianyi")
-    assert str(error.value) == "INTERACTION_OWNED_BY_CALL"
+    assert str(error.value) == "INTERACTION_FINALIZING"
 
     await asyncio.sleep(0.25)
     release.set()

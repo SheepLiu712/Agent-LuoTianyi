@@ -32,6 +32,19 @@ class UserResetFence:
             self._user_generations[user_id] = token.generation
             return token
 
+    async def begin_if_idle(self, user_id: str) -> UserResetToken:
+        async with self._lock:
+            if user_id in self._resetting:
+                raise RuntimeError("USER_DATA_RESET_IN_PROGRESS")
+            current = asyncio.current_task()
+            if any(task is not current and not task.done() for task in self._operations.get(user_id, ())):
+                raise RuntimeError("USER_INTERACTION_BUSY")
+            self._generation += 1
+            token = UserResetToken(user_id, self._generation)
+            self._resetting[user_id] = token
+            self._user_generations[user_id] = token.generation
+            return token
+
     async def end(self, user_id: str, token: UserResetToken) -> None:
         async with self._lock:
             if self._resetting.get(user_id) != token:

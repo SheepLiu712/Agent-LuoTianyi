@@ -188,8 +188,8 @@ class UserInterface:
         try:
             report = await reset_service.reset(user_id)
         except RuntimeError as error:
-            if str(error) == "USER_DATA_RESET_IN_PROGRESS":
-                raise HTTPException(status_code=409, detail="用户数据重置正在进行") from error
+            if str(error) in {"USER_DATA_RESET_IN_PROGRESS", "USER_INTERACTION_BUSY"}:
+                raise HTTPException(status_code=409, detail={"code": str(error), "retryable": True}) from error
             raise HTTPException(status_code=500, detail={"code": "USER_DATA_RESET_FAILED"}) from error
         payload = {
             "ok": report.success,

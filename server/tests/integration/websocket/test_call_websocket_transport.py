@@ -147,9 +147,8 @@ def test_call_endpoint_rejects_call_start_without_consuming_business_state(monke
 
 def test_call_endpoint_rejects_non_ready_character_before_claim(monkeypatch):
     configured_runtime, _, sink = enabled_test_runtime()
-    configured_runtime.stage_manager = object()
+    configured_runtime.stage_manager = SimpleNamespace(call_settlement_ready=True)
     configured_runtime.realtime_speech_factory = object()
-    configured_runtime.call_settlement_coordinator = object()
 
     with TestClient(app_for(monkeypatch, configured_runtime)) as client:
         with client.websocket_connect("/call_ws") as websocket:
@@ -633,3 +632,39 @@ async def test_send_failure_wakes_idle_receive_and_releases_stage_for_resume(mon
         await hub.detach(replacement)
     finally:
         await hub.close()
+
+
+def test_call_start_during_finalization_returns_retryable_error(monkeypatch):
+    configured, _, _ = enabled_test_runtime()
+
+    class BusyManager:
+        call_settlement_ready = True
+
+        async def infer_call_source_interaction(self, **kwargs):
+            return None
+
+        async def start_call(self, **kwargs):
+            from src.stage import InteractionFinalizing
+
+            raise InteractionFinalizing()
+
+    configured.stage_manager = BusyManager()
+    configured.realtime_speech_factory = object()
+    with TestClient(app_for(monkeypatch, configured)) as client:
+        with client.websocket_connect("/call_ws") as websocket:
+            auth(websocket)
+            websocket.send_text(
+                json.dumps(
+                    {
+                        "protocol": "call.v1",
+                        "type": "call.start",
+                        "seq": 1,
+                        "character_id": "luotianyi",
+                        "client_request_id": "busy-call",
+                        "audio": {"encoding": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+                    }
+                )
+            )
+            error = json.loads(websocket.receive_text())
+            assert error["code"] == "INTERACTION_FINALIZING"
+            assert error["retryable"] is True

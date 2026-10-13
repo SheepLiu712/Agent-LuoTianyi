@@ -131,7 +131,7 @@ async def _authenticate_and_attach(
     if message["type"] != "call.start" or int(message["seq"]) != 1:
         raise CallTransportError("CALL_START_REQUIRED", close_code=1002)
     stage_manager = getattr(runtime, "stage_manager", None)
-    if stage_manager is None or runtime.realtime_speech_factory is None or runtime.call_settlement_coordinator is None:
+    if stage_manager is None or runtime.realtime_speech_factory is None or not stage_manager.call_settlement_ready:
         raise CallTransportError("CALL_INGRESS_UNAVAILABLE", close_code=1013)
     user_id, character_id = connection.user_uuid or "", str(message["character_id"])
     supports_character = getattr(runtime, "supports_call_character", None)
@@ -221,7 +221,6 @@ async def _authenticate_and_attach(
             client_request_id=request_id,
             speech_factory=runtime.realtime_speech_factory,
             transport=bridge,
-            settlement_sink=runtime.call_settlement_coordinator,
             call_metrics=runtime.call_metrics,
         )
     except BaseException as original_error:
@@ -422,7 +421,7 @@ def _call_start_error(*, request_id: str, request_seq: int, code: str, call_id: 
         "type": "error",
         "code": code,
         "message": "call start was not accepted",
-        "retryable": code in {"CALL_START_TIMEOUT", "CALL_START_UNAVAILABLE"},
+        "retryable": code in {"CALL_START_TIMEOUT", "CALL_START_UNAVAILABLE", "INTERACTION_FINALIZING"},
         "request_type": "call.start",
         "request_seq": request_seq,
         "client_request_id": request_id,
@@ -437,6 +436,8 @@ def _call_start_error(*, request_id: str, request_seq: int, code: str, call_id: 
 
 
 def _call_start_error_code(error: Exception) -> str:
+    if str(error) == "INTERACTION_FINALIZING":
+        return "INTERACTION_FINALIZING"
     if isinstance(error, CallStartFailed):
         return "CALL_START_FAILED"
     if isinstance(error, TimeoutError):

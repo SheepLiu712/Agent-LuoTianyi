@@ -8,12 +8,6 @@ class _Interactions:
     async def begin_user_data_reset(self, user_id):
         return object()
 
-    async def stop_user_interactions(self, user_id):
-        return 1
-
-    async def wait_user_settlements(self, user_id):
-        return None
-
     async def end_user_data_reset(self, user_id, token):
         return None
 

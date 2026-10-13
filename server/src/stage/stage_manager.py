@@ -1,4 +1,4 @@
-"""管理聊天 Stage 的创建、重连保留和离线回收。"""
+"""管理聊天、通话的接入、占用及收尾任务。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ from src.infrastructure.persistence.call_sessions import (
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
+from ._finalization import CallFinalizationSink, FinalizationTasks, InteractionFinalizing
+from .call_settlement import CallAgentSettlement, CallResourceReleasePort, CallSettlement, CallSettlementConsumerImpl
 from .chat_stage import ChatStage
 from .interaction_lease import (
     CallTransitionIntent,
@@ -37,6 +39,9 @@ if TYPE_CHECKING:
     from src.adapter.websocket import WebSocketAdapter
     from src.agent.facade import Agent
     from src.infrastructure.models.realtime_speech import RealtimeSpeechSessionFactory
+    from src.infrastructure.observability.call_metrics import CallMetrics
+    from src.infrastructure.persistence.call_maintenance import SqlCallMaintenanceBatchRepository
+    from src.infrastructure.persistence.database.services.conversation_service import ConversationService
     from src.stage.call_stage import CallStage, CallTransportSink
     from src.web.websocket.service import WebSocketConnection
 
@@ -108,7 +113,7 @@ class InteractionOwnedByCallAdmission(RuntimeError):
 
 
 class StageManager:
-    """按用户与角色管理 Stage，持有共享 adapter 及离线回收任务。"""
+    """按用户与角色管理 Stage，统一持有 Chat / Call 收尾与重置接入占用。"""
 
     def __init__(
         self,
@@ -119,6 +124,10 @@ class StageManager:
         due_event_provider: DueEventProvider | None = None,
         lease_registry: InteractionLeaseRegistry | None = None,
         call_sessions: CallSessionRepository | None = None,
+        conversation_service: ConversationService | None = None,
+        call_maintenance_batches: SqlCallMaintenanceBatchRepository | None = None,
+        call_resources: CallResourceReleasePort | None = None,
+        call_metrics: CallMetrics | None = None,
         user_reset_fence: Any | None = None,
         wall_clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
@@ -144,7 +153,25 @@ class StageManager:
         self._stages: dict[tuple[str, str], ChatStage] = {}
         self._connections: dict[ChatStage, WebSocketConnection] = {}
         self._expiry: dict[ChatStage, asyncio.Task[None]] = {}
-        self._retiring: set[asyncio.Task[None]] = set()
+        self._finalizations = FinalizationTasks()
+        self._call_settlement = (
+            CallSettlement(
+                consumer=CallSettlementConsumerImpl(
+                    agent_settlement=CallAgentSettlement(
+                        get_agent=get_agent,
+                        get_context_factory=get_context_factory,
+                    ),
+                    call_sessions=call_sessions,
+                    conversation_service=conversation_service,
+                    release_call_maintenance=call_resources.release_call_maintenance,
+                    call_maintenance_batches=call_maintenance_batches,
+                    call_metrics=call_metrics,
+                ),
+                resources=call_resources,
+            )
+            if call_resources is not None
+            else None
+        )
         self._lock = asyncio.Lock()
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
@@ -160,6 +187,48 @@ class StageManager:
         self._call_stage_creation_users: dict[asyncio.Task[Any], str] = {}
         self._call_ownership_generation = 0
         self._intent_expiry: dict[tuple[str, str], asyncio.Task[None]] = {}
+
+    @property
+    def call_settlement_ready(self) -> bool:
+        return bool(self._call_settlement and self._call_settlement.is_ready)
+
+    def _start_call_finalization(self, ownership, snapshot) -> None:
+        self._finalizations.start(
+            ownership.call_id,
+            (ownership.user_id, ownership.character_id),
+            lambda: self._finalize_call(ownership, snapshot),
+        )
+
+    async def _finalize_call(self, ownership, snapshot) -> None:
+        try:
+            if self._call_settlement is None:
+                raise RuntimeError("call settlement is not configured")
+            await self._call_settlement.settle(snapshot)
+        finally:
+            self._release_call_stage_ownership(ownership)
+
+    async def begin_user_data_reset(self, user_id: str) -> object:
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("STAGE_MANAGER_CLOSED")
+            if self._user_has_interactions(user_id):
+                raise RuntimeError("USER_INTERACTION_BUSY")
+            if self._user_reset_fence is None:
+                raise RuntimeError("user reset fence is not configured")
+            return await self._user_reset_fence.begin_if_idle(user_id)
+
+    async def end_user_data_reset(self, user_id: str, token: object) -> None:
+        await self._user_reset_fence.end(user_id, token)
+
+    def _user_has_interactions(self, user_id: str) -> bool:
+        return (
+            self._finalizations.has_user(user_id)
+            or any(owner == user_id for owner, _ in self._stages)
+            or any(owner.user_id == user_id for owner in self._call_ownerships.values())
+            or any(claim.record.user_id == user_id for claim in self._call_claims.values())
+            or any(owner[0] == user_id for owner in self._call_start_operations.values())
+            or any(owner == user_id and not task.done() for task, owner in self._call_stage_creation_users.items())
+        )
 
     def record_login(
         self,
@@ -275,12 +344,22 @@ class StageManager:
             return stage
 
     def _require_chat_admission(self, key: tuple[str, str]) -> None:
+        self._require_finalization_idle(key)
         current_lease = self._lease_registry.current(*key)
         if current_lease is not None and current_lease.source in {
             InteractionSource.CALL,
             InteractionSource.CALL_TRANSITION,
         }:
             raise InteractionOwnedByCallAdmission(current_lease.source)
+
+    def _require_finalization_idle(self, key: tuple[str, str]) -> None:
+        self._finalizations.require_idle(key)
+        for call_id, ownership in self._call_ownerships.items():
+            if (ownership.user_id, ownership.character_id) != key:
+                continue
+            stage = self._call_stages.get(call_id)
+            if stage is not None and stage.state in {CallState.ENDING, CallState.ENDED, CallState.DECLINED}:
+                raise InteractionFinalizing()
 
     async def prepare_call_transition(
         self,
@@ -293,6 +372,7 @@ class StageManager:
         async with self._lock:
             if self._user_reset_fence is not None:
                 await self._user_reset_fence.require_admission(connection.user_uuid)
+            self._require_finalization_idle((connection.user_uuid, character_id))
             stage = self._bound_stage(connection, character_id)
             lease = InteractionLease(stage.user_id, stage.character_id, stage.interaction_id, InteractionSource.CHAT)
             intent = self._lease_registry.prepare_call_transition(lease=lease, client_request_id=client_request_id)
@@ -317,6 +397,9 @@ class StageManager:
     ) -> CallStartClaim:
         """Persist PREPARING, retire chat, close its context, then transfer ownership to CALL."""
         async with self._lock:
+            if self._closed:
+                raise RuntimeError("STAGE_MANAGER_CLOSED")
+            self._require_finalization_idle((user_id, character_id))
             task = self._call_starts.get(client_request_id)
             operation_identity = (user_id, character_id, source_interaction_id)
             current_operation = self._call_start_operations.get(client_request_id)
@@ -455,11 +538,17 @@ class StageManager:
         if self._user_reset_fence is not None:
             await self._user_reset_fence.require_generation(user_id, generation)
 
+    async def _terminate_chat_for_call(self, stage):
+        task = self._finalizations.start(
+            stage.interaction_id,
+            (stage.user_id, stage.character_id),
+            lambda: stage.terminate(InteractionEndingReason.SWITCH_TO_CALL),
+        )
+        return await asyncio.shield(task)
+
     async def _terminate_for_call(self, stage: ChatStage, deadline: float) -> None:
         remaining = self._remaining_setup_time(deadline)
-        termination = asyncio.create_task(
-            stage.terminate(InteractionEndingReason.SWITCH_TO_CALL), name="chat-call-terminate"
-        )
+        termination = asyncio.create_task(self._terminate_chat_for_call(stage), name="chat-call-terminate")
         try:
             result = await asyncio.wait_for(asyncio.shield(termination), timeout=remaining)
         except asyncio.TimeoutError:
@@ -499,7 +588,7 @@ class StageManager:
         original_error: BaseException,
     ) -> None:
         if stage is not None and stage.state is not StageState.TERMINATED:
-            await complete_owned(stage.terminate(InteractionEndingReason.SWITCH_TO_CALL))
+            await complete_owned(self._terminate_chat_for_call(stage))
         self._release_transition(ownership)
         try:
             await self._mark_call_failed(record, original_error)
@@ -655,7 +744,11 @@ class StageManager:
                     self._intent_expiry.pop(key, None)
             self._lease_registry.clear_user_transitions(user_id)
         chat_results = await asyncio.gather(
-            *(self._retire(stage, InteractionEndingReason.SHUTDOWN) for stage in chat_stages), return_exceptions=True
+            *(
+                asyncio.shield(self._start_chat_finalization(stage, InteractionEndingReason.SHUTDOWN))
+                for stage in chat_stages
+            ),
+            return_exceptions=True,
         )
         call_results = await asyncio.gather(*(stage.close() for stage in call_stages), return_exceptions=True)
         errors = [result for result in (*chat_results, *call_results) if isinstance(result, BaseException)]
@@ -672,8 +765,7 @@ class StageManager:
         client_request_id: str,
         speech_factory: RealtimeSpeechSessionFactory,
         transport: CallTransportSink,
-        settlement_sink: Any | None = None,
-        call_metrics: Any | None = None,
+        call_metrics: CallMetrics | None = None,
         config: dict[str, object] | None = None,
     ) -> CallStage:
         """Consume a validated claim, then create and register exactly one CallStage."""
@@ -685,7 +777,6 @@ class StageManager:
             client_request_id=client_request_id,
             speech_factory=speech_factory,
             transport=transport,
-            settlement_sink=settlement_sink,
             call_metrics=call_metrics,
             config=config,
         )
@@ -707,7 +798,6 @@ class StageManager:
         client_request_id: str,
         speech_factory: RealtimeSpeechSessionFactory,
         transport: CallTransportSink,
-        settlement_sink: Any | None,
         call_metrics: Any | None,
         config: dict[str, object] | None,
     ) -> CallStage:
@@ -734,7 +824,7 @@ class StageManager:
                 speech_factory=speech_factory,
                 transport=transport,
                 release_ownership=self._release_call_stage_ownership,
-                settlement_sink=settlement_sink,
+                settlement_sink=CallFinalizationSink(self, ownership),
                 call_metrics=call_metrics,
                 monotonic=self._monotonic,
                 wall_clock=self._wall_clock,
@@ -987,13 +1077,12 @@ class StageManager:
         if creations:
             await asyncio.gather(*creations, return_exceptions=True)
         for stage in stages:
-            await self._retire(stage, InteractionEndingReason.SHUTDOWN)
+            await asyncio.shield(self._start_chat_finalization(stage, InteractionEndingReason.SHUTDOWN))
         call_stages = tuple(self._call_stages.values())
         if call_stages:
             await asyncio.gather(*(stage.close() for stage in call_stages), return_exceptions=True)
         self._call_stages.clear()
-        if self._retiring:
-            await asyncio.gather(*tuple(self._retiring), return_exceptions=True)
+        await self._finalizations.close()
         self._lease_registry.close()
         self._call_setup_deadlines.clear()
         self._call_claims.clear()
@@ -1014,13 +1103,12 @@ class StageManager:
             key = (stage.user_id, stage.character_id)
             if self._stages.get(key) is stage:
                 del self._stages[key]
-            self._lease_registry.release(
-                InteractionLease(stage.user_id, stage.character_id, stage.interaction_id, InteractionSource.CHAT)
-            )
-            # 从可复用集合移除后才开始结束处理；重连可创建新的交互。
-            task = asyncio.create_task(self._retire(stage, InteractionEndingReason.USER_LEFT), name="stage-retire")
-            self._retiring.add(task)
-            task.add_done_callback(self._retiring.discard)
+            self._start_chat_finalization(stage, InteractionEndingReason.USER_LEFT)
+
+    def _start_chat_finalization(self, stage, reason):
+        return self._finalizations.start(
+            stage.interaction_id, (stage.user_id, stage.character_id), lambda: self._retire(stage, reason)
+        )
 
     async def _retire(self, stage: ChatStage, reason: InteractionEndingReason) -> None:
         try:
@@ -1029,6 +1117,10 @@ class StageManager:
                 get_logger(__name__).error(
                     "Stage retirement failed interaction=%s error=%s", stage.interaction_id, result.error
                 )
+        except Exception as error:
+            get_logger(__name__).error(
+                "Stage retirement raised interaction=%s type=%s", stage.interaction_id, type(error).__name__
+            )
         finally:
             await self._adapter.disconnect(stage)
             self._connections.pop(stage, None)

@@ -385,7 +385,7 @@ async def test_manager_reconnect_old_disconnect_and_offline_expiry():
 
 
 @pytest.mark.asyncio
-async def test_reconnect_during_ending_creates_new_interaction():
+async def test_reconnect_during_ending_is_rejected_until_finalization_finishes():
     ending_started, gate = asyncio.Event(), asyncio.Event()
 
     async def handle(request, sink):
@@ -408,9 +408,12 @@ async def test_reconnect_during_ending_creates_new_interaction():
     stage = await manager.connect(old, "luotianyi")
     await manager.disconnect(old)
     await asyncio.wait_for(ending_started.wait(), 1)
+    with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
+        await manager.connect(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
+    gate.set()
+    await manager._finalizations.close()
     new = await manager.connect(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
     assert new is not stage and new.interaction_id != stage.interaction_id
-    gate.set()
     await manager.close()
     assert stage.state is new.state is StageState.TERMINATED
 

@@ -33,7 +33,8 @@ from src.infrastructure.models.realtime_speech import (
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage import CallStage, StageManager
-from src.stage.call_settlement import CallSettlementCoordinator
+from src.stage._finalization import CallFinalizationSink
+from src.stage.call_settlement import CallSettlement
 
 
 async def _eventually(predicate, timeout=2.0):
@@ -108,7 +109,8 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         async def settle(self, snapshot):
             settled.append(snapshot)
 
-    settlement = CallSettlementCoordinator(consumer=SettlementConsumer(), resources=runtime)
+    settlement = CallSettlement(consumer=SettlementConsumer(), resources=runtime)
+    manager._call_settlement = settlement
     claim = await manager.start_call(
         user_id="user",
         character_id="luotianyi",
@@ -137,7 +139,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         speech_factory=provider_factory,
         transport=binding,
         release_ownership=manager.release_call,
-        settlement_sink=settlement,
+        settlement_sink=CallFinalizationSink(manager, ownership),
     )
     binding.bind(stage=stage, session=session)
 
@@ -264,7 +266,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         assert stage.state is CallState.ACTIVE
         await session.receive_text(_completed(binding.call_id, 4, farewell))
         snapshot = await asyncio.wait_for(stage.wait_closed(), 2)
-        await settlement.close()
+        await manager._finalizations.close()
 
         assert snapshot.terminal.end_reason is CallEndReason.AGENT_HANGUP
         assert stage.state is CallState.ENDED
@@ -281,7 +283,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     finally:
         if stage.snapshot is None:
             await stage._cleanup()
-        await settlement.close()
+        await manager._finalizations.close()
         await manager.close()
         await runtime.shutdown()
         await database.shutdown()

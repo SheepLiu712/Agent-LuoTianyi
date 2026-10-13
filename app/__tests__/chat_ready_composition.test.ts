@@ -110,31 +110,34 @@ describe('chat readiness production composition', () => {
     client.disconnectWs();
   });
 
-  it('retries a bounded CALL ownership rejection and sends on the second bound socket', async () => {
-    const client = new NetworkClient();
-    const reconnecting = client.reconnectWs('alice', 'token', 'luotianyi', callbacks, 10_000);
-    const first = FakeWebSocket.instances[0];
-    first.open();
-    first.message({ type: 'auth_ok', payload: {} });
-    first.message({
-      type: 'error',
-      payload: { code: 'INTERACTION_OWNED_BY_CALL', message: 'owned', retryable: true },
-    });
-    first.serverClose();
+  it.each(['INTERACTION_OWNED_BY_CALL', 'INTERACTION_FINALIZING'])(
+    'retries bounded %s rejection and sends on the second bound socket',
+    async (code) => {
+      const client = new NetworkClient();
+      const reconnecting = client.reconnectWs('alice', 'token', 'luotianyi', callbacks, 10_000);
+      const first = FakeWebSocket.instances[0];
+      first.open();
+      first.message({ type: 'auth_ok', payload: {} });
+      first.message({
+        type: 'error',
+        payload: { code, message: 'owned', retryable: true },
+      });
+      first.serverClose();
 
-    await jest.advanceTimersByTimeAsync(2_000);
-    const second = FakeWebSocket.instances[1];
-    bindChat(second, 'chat-2');
-    await jest.advanceTimersByTimeAsync(80);
-    await expect(reconnecting).resolves.toBe(true);
+      await jest.advanceTimersByTimeAsync(2_000);
+      const second = FakeWebSocket.instances[1];
+      bindChat(second, 'chat-2');
+      await jest.advanceTimersByTimeAsync(80);
+      await expect(reconnecting).resolves.toBe(true);
 
-    const sent = client.sendChat('after call', false, 'message-2');
-    await jest.advanceTimersByTimeAsync(80);
-    expect(second.sent).toContainEqual(expect.objectContaining({ type: 'user_text', client_msg_id: 'message-2' }));
-    second.message({ type: 'server_ack', reply_to: 'message-2', payload: { ok: true } });
-    await expect(sent).resolves.toMatchObject({ ok: true });
-    client.disconnectWs();
-  });
+      const sent = client.sendChat('after call', false, 'message-2');
+      await jest.advanceTimersByTimeAsync(80);
+      expect(second.sent).toContainEqual(expect.objectContaining({ type: 'user_text', client_msg_id: 'message-2' }));
+      second.message({ type: 'server_ack', reply_to: 'message-2', payload: { ok: true } });
+      await expect(sent).resolves.toMatchObject({ ok: true });
+      client.disconnectWs();
+    },
+  );
 
   it('ignores every late callback from a rejected socket after its replacement exists', async () => {
     const client = new NetworkClient();

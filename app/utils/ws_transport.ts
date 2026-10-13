@@ -722,10 +722,13 @@ export class WebSocketTransport {
       }
 
       if (eventType === WSEventType.SERVER_ERROR) {
-        if (payload.code === 'INTERACTION_OWNED_BY_CALL' && payload.retryable === true) {
+        if (
+          (payload.code === 'INTERACTION_OWNED_BY_CALL' || payload.code === 'INTERACTION_FINALIZING') &&
+          payload.retryable === true
+        ) {
           this.ownershipRejected = true;
           this.isChatReady = false;
-          addDebugTrace('ws', 'chat ownership retained by call');
+          addDebugTrace('ws', 'chat admission temporarily unavailable');
           return;
         }
         const requestId = String(payload.client_request_id || '');

@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from src.adapter.websocket import ChatEventAcceptance, EventRejection, VoiceUploadError
 from src.adapter.websocket.call_v1 import ControlProtocolError, decode_control_text, encode_control_message
 from src.application.admin import get_admin_shell
+from src.stage import InteractionFinalizing
 from src.stage.stage_manager import InteractionOwnedByCallAdmission
 from src.utils.logger import get_logger
 from src.web.http import runtime_not_ready_detail
@@ -62,8 +63,8 @@ async def chat_ws(websocket: WebSocket) -> None:
             interaction_id=stage.interaction_id,
         )
         await _receive_events(server_runtime, connection)
-    except InteractionOwnedByCallAdmission:
-        await _reject_call_owned_chat_admission(websocket_service, connection)
+    except (InteractionFinalizing, InteractionOwnedByCallAdmission) as error:
+        await _reject_call_owned_chat_admission(websocket_service, connection, code=str(error))
     except WebSocketDisconnect:
         server_runtime.client_llm_executor.clear_user(connection.user_uuid, connection)
         logger.info("WebSocket client disconnected from /chat_ws")
@@ -76,15 +77,15 @@ async def chat_ws(websocket: WebSocket) -> None:
 
 
 async def _reject_call_owned_chat_admission(
-    websocket_service: WebSocketService, connection: WebSocketConnection
+    websocket_service: WebSocketService, connection: WebSocketConnection, *, code: str = "INTERACTION_OWNED_BY_CALL"
 ) -> None:
     """Return a typed retryable admission error without fabricating chat readiness."""
     try:
         await websocket_service.send_error_event(
             connection.websocket,
             {
-                "code": "INTERACTION_OWNED_BY_CALL",
-                "message": "chat interaction is temporarily owned by a call",
+                "code": code,
+                "message": "interaction is temporarily unavailable",
                 "retryable": True,
             },
         )

@@ -36,8 +36,8 @@ from src.infrastructure.persistence.database.sql_database import (
 )
 from src.stage.call_settlement import (
     CallAgentSettlement,
+    CallSettlement,
     CallSettlementConsumerImpl,
-    CallSettlementCoordinator,
 )
 
 
@@ -452,10 +452,9 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
         release_call_maintenance=runtime.release_call_maintenance,
         call_maintenance_batches=database.call_maintenance_batches,
     )
-    coordinator = CallSettlementCoordinator(consumer=consumer, resources=Resources(), timeout_seconds=1)
+    settlement = CallSettlement(consumer=consumer, resources=Resources(), timeout_seconds=1)
     try:
-        await coordinator.emit(snapshot)
-        await coordinator.close()
+        await settlement.settle(snapshot)
 
         persisted = database.call_sessions.find_by_id(call_id)
         assert persisted.maintenance_status is not SettlementStatus.SUCCEEDED

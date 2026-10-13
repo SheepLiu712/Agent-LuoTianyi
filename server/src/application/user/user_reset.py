@@ -12,10 +12,6 @@ from src.utils.owned_operation import complete_owned
 class UserResetFencePort(Protocol):
     async def begin_user_data_reset(self, user_id: str) -> object: ...
 
-    async def stop_user_interactions(self, user_id: str) -> int: ...
-
-    async def wait_user_settlements(self, user_id: str) -> None: ...
-
     async def end_user_data_reset(self, user_id: str, token: object) -> None: ...
 
 
@@ -42,7 +38,7 @@ class UserResetReport:
 
 
 class UserResetService:
-    """Fence writes, drain interactions, then retry-safely delete user-owned data."""
+    """Reject busy users, fence admission, then retry-safely delete user-owned data."""
 
     def __init__(
         self,
@@ -73,10 +69,7 @@ class UserResetService:
     async def _reset_owned(self, user_id: str) -> UserResetReport:
         token = await self._interactions.begin_user_data_reset(user_id)
         try:
-            lifecycle = await self._quiesce(user_id)
-            if not lifecycle.success:
-                return UserResetReport(user_id, (lifecycle,))
-            steps = [lifecycle]
+            steps = [UserResetStep("interactions", True)]
             steps.extend(
                 [
                     await self._count("vectors", self._delete_vectors, user_id),
@@ -94,14 +87,6 @@ class UserResetService:
             return UserResetReport(user_id, tuple(steps))
         finally:
             await self._interactions.end_user_data_reset(user_id, token)
-
-    async def _quiesce(self, user_id: str) -> UserResetStep:
-        try:
-            stopped = await self._interactions.stop_user_interactions(user_id)
-            await self._interactions.wait_user_settlements(user_id)
-            return UserResetStep("interactions", True, stopped)
-        except Exception as error:
-            return UserResetStep("interactions", False, error=type(error).__name__)
 
     def _delete_vectors(self, user_id: str) -> int:
         operation = getattr(self._vector_store, "delete_user_records_strict", None)
