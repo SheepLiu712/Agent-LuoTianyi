@@ -311,12 +311,25 @@ class AgreementSignDialog(QDialog):
         if request_id != self._load_request_id:
             return
         self._load_in_flight = False
-        if isinstance(result, Exception) or not isinstance(result, Mapping):
-            self.gate.mark_load_failed()
-            self._set_error(str(result) if result else "")
-            self._refresh_actions()
+        if isinstance(result, Exception):
+            self._fail_load(str(result))
             return
-        self.set_document(result)
+        if isinstance(result, Mapping):
+            self.set_document(result)
+            return
+        # 与只读窗口同一个加载契约：loader 返回 (ok, detail, payload)。
+        ok, detail, payload = result if isinstance(result, tuple) and len(result) == 3 else (False, "", None)
+        if not ok or not isinstance(payload, Mapping):
+            self._fail_load(str(detail) if detail else "")
+            return
+        self.set_document(payload)
+
+    def _fail_load(self, detail: str) -> None:
+        """加载失败：显示契约文案并给出重试入口，细节只留在 last_error 里。"""
+        self.gate.mark_load_failed()
+        self.last_error = detail
+        self._set_error(self.gate.load_failed_text)
+        self._refresh_actions()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         self._timer.stop()
