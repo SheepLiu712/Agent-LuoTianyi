@@ -111,6 +111,7 @@ class RegistrationService:
                 password=password,
                 invite_code=invite_code,
                 registration_request_id=registration_request_id,
+                agreement_version=agreement_version,
             )
             if replayed is not None:
                 return replayed
@@ -164,7 +165,14 @@ class RegistrationService:
             raise InvalidAgreementInputError("必须明确提交同意")
 
     def _replay(
-        self, db, *, username: str, password: str, invite_code: str, registration_request_id: str
+        self,
+        db,
+        *,
+        username: str,
+        password: str,
+        invite_code: str,
+        registration_request_id: str,
+        agreement_version: str,
     ) -> Optional[dict]:
         """已成功的请求 ID：核验原操作后返回原成功响应，否则报冲突或无法核验。"""
         request = (
@@ -179,6 +187,8 @@ class RegistrationService:
         if user is None:
             raise RegistrationRequestUnverifiableError()
         if user.username != username:
+            raise RegistrationRequestConflictError()
+        if request.agreement_version != agreement_version:
             raise RegistrationRequestConflictError()
 
         owned_invite = (

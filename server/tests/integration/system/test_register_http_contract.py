@@ -123,6 +123,26 @@ def test_client_supplied_timestamp_is_rejected_by_request_model(register_http):
     assert counts(register_http.manager)["users"] == 0
 
 
+@pytest.mark.parametrize("accepted", [1, "true", "yes", "false"])
+def test_http_rejects_non_boolean_consent_values(register_http, accepted):
+    register_http.build()
+
+    response = register_http.client.post(
+        "/auth/register",
+        json={
+            "username": "newbie",
+            "password": "cipher",
+            "invite_code": INVITE,
+            "registration_request_id": "req-strict",
+            "agreement_version": V1,
+            "accepted": accepted,
+        },
+    )
+
+    assert response.status_code == 422
+    assert counts(register_http.manager) == {"users": 0, "signatures": 0, "requests": 0, "invite_used": False}
+
+
 def test_successful_registration_writes_everything_atomically(register_http):
     register_http.build()
 
@@ -181,6 +201,24 @@ def test_same_request_id_with_different_username_conflicts(register_http):
     assert response.status_code == 409
     assert response.json()["code"] == "REGISTRATION_REQUEST_CONFLICT"
     assert counts(register_http.manager)["users"] == 1
+
+
+def test_same_request_id_with_different_agreement_version_conflicts(register_http):
+    register_http.build()
+    base = {
+        "username": "newbie",
+        "password": "cipher",
+        "invite_code": INVITE,
+        "registration_request_id": "req-version-conflict",
+        "accepted": True,
+    }
+    first = register_http.client.post("/auth/register", json={**base, "agreement_version": V1})
+    second = register_http.client.post("/auth/register", json={**base, "agreement_version": V2})
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["code"] == "REGISTRATION_REQUEST_CONFLICT"
+    assert counts(register_http.manager) == {"users": 1, "signatures": 1, "requests": 1, "invite_used": True}
 
 
 def test_new_version_rejects_unfinished_request_without_writes(register_http):
