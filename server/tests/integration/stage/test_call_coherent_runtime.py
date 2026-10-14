@@ -106,10 +106,11 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     settled = []
 
     class SettlementConsumer:
-        async def settle(self, snapshot):
+        async def settle(self, snapshot, *, context=None):
             settled.append(snapshot)
+            await context.close()
 
-    settlement = CallSettlement(consumer=SettlementConsumer(), resources=runtime)
+    settlement = CallSettlement(consumer=SettlementConsumer())
     manager._call_settlement = settlement
     claim = await manager.start_call(
         user_id="user",

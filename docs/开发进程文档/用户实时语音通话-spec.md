@@ -397,8 +397,8 @@ async def maintain(
 **输出**：调用 `maintain_if_compaction_needed`；未达到当前条目数阈值时不更新长期记忆或用户画像。当前阈值沿用超过 60 条、压缩后保留 30 条，按 Token 判断列为未来计划。
 
 **状态**：达到压缩阈值。  
-**输入**：上下文中待压缩前缀以及持久化认知维护进度。  
-**输出**：被覆盖前缀全部参与工作摘要，但仅把进度之后的新记录用于提取向量记忆和更新用户画像。聊天上下文通过 `DatabaseConversationStore` 持久化压缩；通话上下文通过 `EphemeralCallConversationStore` 只应用内存压缩。长期记忆和画像全部写入成功后，CognitiveMaintenanceSkill 才分别把聊天认知维护进度推进至该批最后一条被覆盖 Conversation 记录，或把呼叫账本的 `maintenance_turn_seq` 推进至该批最后一个已维护轮次；通话路径不得持久化逐轮内容或通话工作摘要。
+**输入**：上下文中待压缩前缀以及该交互 Context 持有的认知维护进度。
+**输出**：被覆盖前缀全部参与工作摘要，但仅把进度之后的新记录用于提取向量记忆和更新用户画像。聊天上下文通过 `DatabaseConversationStore` 持久化压缩及进度；通话上下文通过 `EphemeralCallConversationStore` 只应用内存压缩，并在长期记忆、画像及冻结批次全部成功后推进 Context 内的维护进度。阈值维护不推进呼叫账本；正常最终 settlement 成功后才把 Context 的最终进度写入账本 `maintenance_turn_seq`，供崩溃恢复与幂等修复使用。通话路径不得持久化逐轮内容或通话工作摘要。
 
 **状态**：Stage 即将销毁。  
 **输入**：`InteractionEnding` 刺激。  
@@ -414,7 +414,7 @@ async def maintain(
 **输入**：维护批次。  
 **输出**：不推进持久化维护进度；ChatStage 在后续生命周期重试。CallStage 重试一次，仍失败则记录失败；15 秒期限触发取消，实际工作与写入收敛后清除临时转录和记忆池，再解除收尾占用。
 
-向量候选使用 `(maintenance_id, candidate_index)` 幂等；画像使用完整值幂等写入。只有数据库成功后，才通过 InteractionContext 的正式接口更新当前用户画像。通话概要生成与认知维护基于同一不可变终态快照并行执行，彼此成功与否互不阻塞；本次通话概要不参与本次维护，但作为 Conversation 条目参与以后全局聊天上下文的维护。
+向量候选使用 `(maintenance_id, candidate_index)` 幂等；画像使用完整值幂等写入。只有数据库成功后，才通过 InteractionContext 的正式接口更新当前用户画像。正常通话复用原 InteractionContext，先完成最终认知维护，再以维护后本次会话的工作摘要和未压缩内容生成最终概要；该概要作为 CallContent.summary 持久化，并在全部 owned 写入停止后关闭原 Context。维护失败沿用既有降级策略，不阻止通话记录清理；本次通话概要不参与本次维护，但作为 Conversation 条目参与以后全局聊天上下文的维护。进程恢复没有原 Context 时继续使用 AC-14 的账本恢复路径。
 
 现有显式“请记住这些事”能力保持原行为；本功能不新增一句话级别的“请记住”识别，也不把它并入通话快速决策。
 

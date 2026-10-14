@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -25,13 +24,16 @@ class CallAgentSettlement:
         *,
         skip_summary: bool = False,
         settlement_input_digest: str,
+        context,
     ) -> CallAgentSettlementResult:
-        context = await self._get_context_factory(record.character_id).create(
-            str(record.call_id),
-            mode=ConversationMode.CALL,
-            user_id=record.user_id,
-            requested_at=record.requested_at.replace(tzinfo=None),
-        )
+        owns_context = context is None
+        if context is None:
+            context = await self._get_context_factory(record.character_id).create(
+                str(record.call_id),
+                mode=ConversationMode.CALL,
+                user_id=record.user_id,
+                requested_at=record.requested_at.replace(tzinfo=None),
+            )
         try:
             plans = _PlanSink()
             request = _request(record, snapshot, settlement_input_digest)
@@ -39,22 +41,26 @@ class CallAgentSettlement:
             if report.request_status is not d.HandlingRequestStatus.COMPLETED or len(plans.plans) != 1:
                 raise RuntimeError("Agent did not produce one call settlement plan")
             summary_action, maintenance_action = plans.plans[0].actions
-            summary_task = (
-                asyncio.sleep(0, result=None)
-                if skip_summary
-                else self._realize_one(record, summary_action, plans.plans[0], context)
-            )
-            summary, maintenance = await asyncio.gather(
-                summary_task,
-                self._realize_maintenance_with_retry(record, maintenance_action, plans.plans[0], context),
-                return_exceptions=True,
-            )
+            try:
+                maintenance = await self._realize_maintenance_with_retry(
+                    record, maintenance_action, plans.plans[0], context
+                )
+            except Exception as error:
+                maintenance = error
+            if skip_summary:
+                summary = None
+            else:
+                try:
+                    summary = await self._realize_one(record, summary_action, plans.plans[0], context)
+                except Exception as error:
+                    summary = error
             return CallAgentSettlementResult(
                 summary="" if skip_summary else _effect_or_error(summary, d.EffectKind.CALL_SUMMARY),
                 maintenance_turn_seq=_turn_or_error(maintenance),
             )
         finally:
-            await context.close()
+            if owns_context:
+                await context.close()
 
     async def _realize_maintenance_with_retry(self, record, action, plan, context):
         try:

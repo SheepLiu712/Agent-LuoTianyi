@@ -2,7 +2,6 @@
 
 import asyncio
 import threading
-from types import SimpleNamespace
 
 import pytest
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
@@ -108,7 +107,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     class Consumer:
         is_ready = True
 
-        async def settle(self, snapshot):
+        async def settle(self, snapshot, *, context=None):
             entered.set()
             try:
                 await release.wait()
@@ -127,7 +126,6 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         call_sessions=repository,
         conversation_service=object(),
         call_maintenance_batches=object(),
-        call_resources=SimpleNamespace(release_call_maintenance=cleaned.append),
         user_reset_fence=UserResetFence(),
         wall_clock=clock.now,
         monotonic=clock.tick,
@@ -181,7 +179,6 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
             closing = asyncio.create_task(stages.close())
             await asyncio.sleep(0)
             assert not closing.done()
-        assert cleaned == []
     finally:
         release.set()
         await stages._finalizations.close()
@@ -192,7 +189,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
             user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="after-finalization"
         )
     await stages.close()
-    assert cleaned == [claim.record.call_id]
+    assert cleaned == []
     assert not stages._finalizations.has_user("user")
 
 
@@ -206,12 +203,15 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
         call_sessions=repository,
         conversation_service=object(),
         call_maintenance_batches=object(),
-        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
         user_reset_fence=UserResetFence(),
         wall_clock=clock.now,
         monotonic=clock.tick,
     )
-    stages._call_settlement._consumer.settle = lambda _snapshot: asyncio.sleep(0)
+
+    async def settle(_snapshot, *, context=None):
+        await context.close()
+
+    stages._call_settlement._consumer.settle = settle
     claim = await stages.start_call(
         user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="terminate-owned"
     )
@@ -237,7 +237,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
 
     settlement_calls = 0
 
-    async def settle(_snapshot):
+    async def settle(_snapshot, *, context=None):
         nonlocal settlement_calls
         settlement_calls += 1
         settlement_entered.set()
@@ -297,7 +297,6 @@ async def test_terminate_during_context_initialization_prevents_late_resources(c
         call_sessions=repository,
         conversation_service=object(),
         call_maintenance_batches=object(),
-        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
         user_reset_fence=UserResetFence(),
         wall_clock=clock.now,
         monotonic=clock.tick,
@@ -409,7 +408,6 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
         call_sessions=repository,
         conversation_service=object(),
         call_maintenance_batches=object(),
-        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
         user_reset_fence=UserResetFence(),
         wall_clock=clock.now,
         monotonic=clock.tick,
@@ -436,6 +434,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
     snapshot = await ending
     assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
     assert await creation is transport.stage
+    await stages._finalizations.close()
     assert len(contexts) == 1 and contexts[0].was_closed
     assert len(providers) == 1 and providers[0].closed
     assert stages.current_call_stage(str(claim.record.call_id)) is None
@@ -450,7 +449,7 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
     class Consumer:
         is_ready = True
 
-        async def settle(self, _snapshot):
+        async def settle(self, _snapshot, *, context=None):
             from src.utils.owned_operation import complete_owned
 
             def write():
@@ -468,7 +467,6 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
         call_sessions=repository,
         conversation_service=object(),
         call_maintenance_batches=object(),
-        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
         user_reset_fence=UserResetFence(),
         wall_clock=clock.now,
         monotonic=clock.tick,
@@ -515,4 +513,75 @@ async def test_reset_and_chat_admission_cannot_both_succeed(reset_first):
     else:
         assert str(chat) == "USER_DATA_RESET_IN_PROGRESS"
         await stages.end_user_data_reset("user", reset)
+    await stages.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_owned(call_setup, cancel_count):
+    repository, _, _, clock = call_setup
+    close_entered, close_release = threading.Event(), threading.Event()
+    contexts = []
+    context_factory = _RecordingContextFactory(contexts)
+
+    class Consumer:
+        is_ready = True
+
+        async def settle(self, _snapshot, *, context=None):
+            pass
+
+    stages = StageManager(
+        get_agent=lambda _: _agent(_TurnHandler()),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _: context_factory,
+        call_sessions=repository,
+        conversation_service=object(),
+        call_maintenance_batches=object(),
+        user_reset_fence=UserResetFence(),
+        wall_clock=clock.now,
+        monotonic=clock.tick,
+    )
+    stages._call_settlement._consumer = Consumer()
+    claim = await stages.start_call(
+        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="close-owned"
+    )
+    stage = await stages.create_call_stage(
+        claim,
+        user_id="user",
+        character_id="luotianyi",
+        client_request_id="close-owned",
+        transport=_Transport(),
+        speech_factory=FakeRealtimeSpeechSessionFactory(),
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=claim.record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    context = contexts[0]
+    original_close = context.close
+
+    async def blocked_close():
+        close_entered.set()
+        await asyncio.to_thread(close_release.wait, 5)
+        await original_close()
+
+    context.close = blocked_close
+    ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    assert await asyncio.to_thread(close_entered.wait, 2)
+    finalization = stages._finalizations._tasks[str(claim.record.call_id)].finalization
+    for _ in range(cancel_count):
+        finalization.cancel()
+        await asyncio.sleep(0)
+
+    assert finalization.done() is False
+    assert context.was_closed is False
+    with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
+        await stages.begin_user_data_reset("user")
+    close_release.set()
+    result = await asyncio.gather(finalization, return_exceptions=True)
+    await ending
+
+    assert isinstance(result[0], asyncio.CancelledError)
+    assert context.was_closed is True
+    token = await stages.begin_user_data_reset("user")
+    await stages.end_user_data_reset("user", token)
     await stages.close()

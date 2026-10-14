@@ -89,6 +89,14 @@ class SummaryModel:
         return "private working summary"
 
 
+class SummaryService:
+    def __init__(self, model):
+        self.model = model
+
+    def register_llm_module(self, _name, _config):
+        return self.model
+
+
 @pytest.fixture
 def setup(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'call.sqlite'}", connect_args={"check_same_thread": False})
@@ -186,8 +194,9 @@ async def test_threshold_compacts_ephemeral_only_and_ending_maintains_tail(setup
     # Without a seed use 32 turns => 34 covered entries / 17 complete turns.
     context, turns = await context_with_turns(seed_count)
     await threshold(setup, context, turns)
-    assert len(context.conversation.read().entries) == 30
-    assert setup.calls.find_by_id(setup.record.call_id).maintenance_turn_seq == expected_progress
+    assert len(context.conversation.read().entries) == seed_count + 30
+    assert context.conversation.read_call_maintenance_progress() == expected_progress
+    assert setup.calls.find_by_id(setup.record.call_id).maintenance_turn_seq == 0
     assert setup.calls.find_by_id(setup.record.call_id).maintenance_status is SettlementStatus.PENDING
     assert "old chat secret" not in repr(setup.memory.inputs)
     assert "private reply 2\n" not in setup.memory.inputs[0]["current_dialogue"]
@@ -219,9 +228,9 @@ async def test_failed_threshold_is_frozen_and_recovered_before_new_ending_tail(s
     assert len(setup.memory.inputs) == 1
     assert len(setup.memory.writes) == 2
     assert len(context.conversation.read().entries) == 64
-    assert setup.calls.find_by_id(setup.record.call_id).maintenance_turn_seq == 0
-    # Even loss of local state must not replace the frozen prefix with a larger batch.
-    setup.call_skill.release(setup.record.call_id)
+    assert context.conversation.read_call_maintenance_progress() == 0
+    # A new stateless Skill instance must recover the frozen prefix from persistence.
+    setup.call_skill = CallMaintenanceSkill({"luotianyi": setup.memory}, setup.batches, calls=setup.calls)
     turns += (CallFinalTurn(33, "new user tail", CallReplyStatus.NOT_STARTED, None),)
     result = await setup.call_skill.maintain_ending(
         SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
@@ -234,7 +243,7 @@ async def test_failed_threshold_is_frozen_and_recovered_before_new_ending_tail(s
     assert setup.memory.writes[0] == setup.memory.writes[2]
     assert "new user tail" in setup.memory.inputs[1]["current_dialogue"]
     assert "private user 17\n" not in setup.memory.inputs[1]["current_dialogue"]
-    assert setup.calls.find_by_id(setup.record.call_id).maintenance_turn_seq == 17
+    assert context.conversation.read_call_maintenance_progress() == 33
 
 
 @pytest.mark.asyncio
@@ -246,6 +255,81 @@ async def test_no_maintenance_below_threshold_or_over_unsettled_prefix(setup):
     await threshold(setup, context, turns[:2])
     assert not setup.memory.inputs
     assert len(context.conversation.read().entries) == 64
+
+
+@pytest.mark.asyncio
+async def test_partial_turn_compaction_keeps_both_halves_and_finally_maintains_tail(setup):
+    context, turns = await context_with_turns(count=3)
+    model = SummaryModel()
+    compaction = ConversationCompactionSkill(
+        {
+            "raw_conversation_context_limit": 5,
+            "not_zip_conversation_count": 3,
+            "forget_conversation_days": 10,
+            "llm_module": {},
+        },
+        SummaryService(model),
+    )
+    invocation = SkillInvocation("luotianyi", "user", "call", d.CancellationToken())
+    maintenance = CallMaintenanceSnapshot(setup.record.call_id, turns)
+
+    await setup.call_skill.maintain_window(invocation, context, maintenance, compaction=compaction)
+
+    remaining = tuple(entry.entry_id for entry in context.conversation.read_working().entries)
+    assert context.conversation.read_call_maintenance_progress() == 1
+    assert remaining == (
+        "call-turn-2-user",
+        "call-turn-2-agent-0",
+        "call-turn-3-user",
+        "call-turn-3-agent-0",
+    )
+    assert len(model.inputs) == 1
+    assert "private user 1" in model.inputs[0]["recent_conversation"]
+    assert "private reply 1" in model.inputs[0]["recent_conversation"]
+    assert "private user 2" not in model.inputs[0]["recent_conversation"]
+
+    result = await setup.call_skill.maintain_ending(
+        invocation,
+        context,
+        final_snapshot(setup, turns),
+        settlement_input_digest="f" * 64,
+    )
+    assert result == 3
+    assert "private user 2" in setup.memory.inputs[-1]["current_dialogue"]
+    assert "private user 3" in setup.memory.inputs[-1]["current_dialogue"]
+
+
+@pytest.mark.asyncio
+async def test_real_compaction_failure_keeps_progress_and_every_unmaintained_entry(setup):
+    class FailingSummaryModel:
+        async def generate_response(self, **_kwargs):
+            raise RuntimeError("summary unavailable")
+
+    context, turns = await context_with_turns(count=3)
+    compaction = ConversationCompactionSkill(
+        {
+            "raw_conversation_context_limit": 5,
+            "not_zip_conversation_count": 3,
+            "forget_conversation_days": 10,
+            "llm_module": {},
+        },
+        SummaryService(FailingSummaryModel()),
+    )
+    invocation = SkillInvocation("luotianyi", "user", "call", d.CancellationToken())
+    before = context.conversation.read_working()
+
+    with pytest.raises(RuntimeError, match="summary unavailable"):
+        await setup.call_skill.maintain_window(
+            invocation,
+            context,
+            CallMaintenanceSnapshot(setup.record.call_id, turns),
+            compaction=compaction,
+        )
+
+    after = context.conversation.read_working()
+    assert context.conversation.read_call_maintenance_progress() == 0
+    assert after == before
+    assert setup.memory.inputs == []
 
 
 @pytest.mark.asyncio
@@ -272,7 +356,7 @@ async def test_cancel_during_owned_compaction_does_not_poison_next_batch(setup):
         await task
     store.compact = original
     assert len(context.conversation.read().entries) == 30
-    assert setup.record.call_id not in setup.call_skill._pending
+    assert context.conversation.read_call_maintenance_progress() == 17
     for seq in range(33, 49):
         await context.conversation.append(
             (
@@ -283,7 +367,7 @@ async def test_cancel_during_owned_compaction_does_not_poison_next_batch(setup):
         turns += (CallFinalTurn(seq, f"private user {seq}", CallReplyStatus.COMPLETED, f"private reply {seq}"),)
     await threshold(setup, context, turns)
     assert len(context.conversation.read().entries) == 30
-    assert setup.calls.find_by_id(setup.record.call_id).maintenance_turn_seq == 33
+    assert context.conversation.read_call_maintenance_progress() == 33
     assert len(setup.memory.inputs) == 2
 
 
@@ -307,13 +391,12 @@ async def test_factory_seed_is_answer_context_only_after_compaction_and_ending(s
     )
     try:
         assert context.conversation.read().entries == seeds
+        assert context.conversation.read_working().entries == ()
         await context.conversation.append((entry("c1", 61, "new call one"), entry("c2", 62, "new call two")))
         await context.conversation.compact(
-            ConversationCompaction(
-                ConversationSummary(), ("e1", "e2", "c1"), ConversationSummary("private mixed working summary")
-            )
+            ConversationCompaction(ConversationSummary(), ("c1",), ConversationSummary("private call working summary"))
         )
-        assert [item.entry_id for item in context.conversation.read().entries] == ["c2"]
+        assert [item.entry_id for item in context.conversation.read_working().entries] == ["c2"]
         turns = (
             CallFinalTurn(1, "new call one", CallReplyStatus.NOT_STARTED, None),
             CallFinalTurn(2, "new call two", CallReplyStatus.NOT_STARTED, None),

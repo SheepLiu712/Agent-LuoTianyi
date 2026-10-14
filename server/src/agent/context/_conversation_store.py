@@ -102,10 +102,19 @@ class EphemeralCallConversationStore:
     def __init__(self, seed: ConversationSnapshot | None = None) -> None:
         source = deepcopy(seed or ConversationSnapshot())
         entries = tuple(sorted(source.entries, key=lambda entry: (entry.timestamp, entry.entry_id)))
-        self._snapshot = ConversationSnapshot(source.summary, entries)
+        self._base_snapshot = ConversationSnapshot(source.summary, entries)
+        self._snapshot = ConversationSnapshot()
 
     def load(self) -> tuple[ConversationSnapshot, int]:
-        return self._snapshot, len(self._snapshot.entries)
+        combined = ConversationSnapshot(
+            self._snapshot.summary if self._snapshot.summary.text else self._base_snapshot.summary,
+            (*self._base_snapshot.entries, *self._snapshot.entries),
+        )
+        return combined, len(combined.entries)
+
+    def load_working(self) -> ConversationSnapshot:
+        """Return only content produced by this call, excluding read-only seed."""
+        return self._snapshot
 
     def append(self, entries: tuple[ConversationEntry, ...]) -> None:
         if not entries:
@@ -115,13 +124,18 @@ class EphemeralCallConversationStore:
         self._snapshot = ConversationSnapshot(self._snapshot.summary, ordered_entries)
 
     def compact(self, compaction: ConversationCompaction) -> None:
-        snapshot, count = self.load()
+        snapshot, count = self._snapshot, len(self._snapshot.entries)
         keep = _validate_compaction(snapshot, count, compaction)
         self._snapshot = ConversationSnapshot(compaction.summary, snapshot.entries[-keep:] if keep else ())
+
+    def update_working_summary(self, summary) -> None:
+        """Replace only the call working summary while retaining every raw tail entry."""
+        self._snapshot = ConversationSnapshot(summary, self._snapshot.entries)
 
     def close(self) -> None:
         """清除可能包含逐轮转录或工作摘要的呼叫内存。"""
         self._snapshot = ConversationSnapshot()
+        self._base_snapshot = ConversationSnapshot()
 
 
 def _validate_compaction(snapshot: ConversationSnapshot, count: int, compaction: ConversationCompaction) -> int:

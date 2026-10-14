@@ -22,7 +22,7 @@ from .conversation_projection import validate_call_conversation_winner
 
 
 class CallAgentSettlementPort:
-    async def settle(self, record, snapshot): ...
+    async def settle(self, record, snapshot, *, context): ...
 
 
 class CallSettlementConsumerImpl:
@@ -32,14 +32,12 @@ class CallSettlementConsumerImpl:
         agent_settlement: CallAgentSettlementPort,
         call_sessions: CallSessionRepository,
         conversation_service: object,
-        release_call_maintenance=None,
         call_maintenance_batches=None,
         call_metrics=None,
     ) -> None:
         self._agent_settlement = agent_settlement
         self._calls = call_sessions
         self._conversations = conversation_service
-        self._release_call_maintenance = release_call_maintenance
         self._batches = call_maintenance_batches
         self._call_metrics = call_metrics
 
@@ -50,10 +48,9 @@ class CallSettlementConsumerImpl:
             and self._calls is not None
             and self._conversations is not None
             and self._batches is not None
-            and self._release_call_maintenance is not None
         )
 
-    async def settle(self, snapshot: CallFinalSnapshot) -> None:
+    async def settle(self, snapshot: CallFinalSnapshot, *, context=None) -> None:
         record = await complete_owned(asyncio.to_thread(self._calls.find_by_id, snapshot.terminal.call_id))
         self._validate_record(record, snapshot)
         digest = call_settlement_input_digest(snapshot)
@@ -66,11 +63,7 @@ class CallSettlementConsumerImpl:
         await self._reconcile_completed_batches(record)
         if self._settled(record):
             return
-        try:
-            await self._settle_record(record, snapshot, digest)
-        finally:
-            if self._release_call_maintenance is not None:
-                self._release_call_maintenance(record.call_id)
+        await self._settle_record(record, snapshot, digest, context)
 
     def _record_metric(self, call_id, name, result, *, status=CallMetricStatus.SUCCESS) -> None:
         if self._call_metrics is None:
@@ -88,7 +81,7 @@ class CallSettlementConsumerImpl:
             )
         )
 
-    async def _settle_record(self, record, snapshot, digest) -> None:
+    async def _settle_record(self, record, snapshot, digest, context) -> None:
         winner = await self._load_summary_winner(record)
         if record.outcome is not CallOutcome.CONNECTED:
             if record.summary_status is not SettlementStatus.SUCCEEDED:
@@ -97,7 +90,11 @@ class CallSettlementConsumerImpl:
                 await self._maintenance_cas(record, SettlementStatus.SUCCEEDED, record.maintenance_turn_seq)
             return
         result = await self._agent_settlement.settle(
-            record, snapshot, skip_summary=winner is not None, settlement_input_digest=digest
+            record,
+            snapshot,
+            skip_summary=winner is not None,
+            settlement_input_digest=digest,
+            context=context,
         )
         lanes = []
         if record.summary_status is not SettlementStatus.SUCCEEDED:

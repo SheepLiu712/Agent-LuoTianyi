@@ -191,7 +191,6 @@ class ServerRuntime:
                 call_sessions=database_manager.call_sessions,
                 conversation_service=database_manager.conversation_service,
                 call_maintenance_batches=database_manager.call_maintenance_batches,
-                call_resources=agent_runtime,
                 call_metrics=call_metrics,
                 realtime_speech_factory=speech_factory,
                 recovery_projection_verifier=projection_verifier,

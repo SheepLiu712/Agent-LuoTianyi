@@ -110,5 +110,5 @@ class CallFinalizationSink:
         self._manager = manager
         self._ownership = ownership
 
-    async def emit(self, snapshot) -> None:
-        self._manager._start_call_finalization(self._ownership, snapshot)
+    async def emit(self, snapshot, context) -> None:
+        self._manager._start_call_finalization(self._ownership, snapshot, context)
