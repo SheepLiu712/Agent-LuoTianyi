@@ -88,19 +88,48 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
   expect(state.captureState).toBe('VoiceReady');
   expect(options.onRecordingEnded).toHaveBeenCalledTimes(1);
-  // 请求仍在途时再按：不叠加第二个系统请求，改为给出去系统设置的出口。
+  // 请求仍在途时再按：系统框还在屏幕上，不叠加第二个请求，也不再弹 App 自己的提示。
   await act(async () => { await state.pressIn(event); });
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不再重复弹一次设置入口。
+  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不弹设置入口。
   await act(async () => { answer(late); });
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
   // 授权之后重新按住即可录音。
   await act(async () => { await state.pressIn(event); });
   expect(state.captureState).toBe('Recording');
+});
+
+it('returns to the input bar without the settings prompt when the permission dialog is cancelled', async () => {
+  options.recorder.getPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockResolvedValueOnce('cancelled');
+  await mount();
+  await act(async () => { await state.pressIn(event); });
+
+  // 用户取消本次系统询问（含返回键）：不识别为永久拒绝，不引导去系统设置。
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+  // 重新按住仍可再次发起请求并正常录音。
+  options.recorder.getPermission.mockResolvedValueOnce('granted');
+  await act(async () => { await state.pressIn(event); });
+  expect(state.captureState).toBe('Recording');
+});
+
+it('offers the settings entry when the request confirms the system cannot ask again', async () => {
+  options.recorder.getPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockResolvedValueOnce('blocked');
+  await mount();
+  await act(async () => { await state.pressIn(event); });
+
+  // 仅当请求快速返回（系统没有弹框）时，才确认为永久拒绝并给出去设置入口。
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
 });
 
 it('reports a failed permission request instead of swallowing it', async () => {

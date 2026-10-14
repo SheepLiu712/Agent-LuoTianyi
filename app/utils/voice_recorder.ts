@@ -3,9 +3,18 @@ import { randomUUID } from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 
 export type VoicePermission = 'granted' | 'denied' | 'blocked';
+/**
+ * 一次权限请求的结果。`cancelled` 与 `blocked` 必须分开：
+ * 系统权限框被返回键取消、以及用户只是本次没允许，都不等于"永久拒绝"。
+ */
+export type VoicePermissionRequest = 'granted' | 'cancelled' | 'blocked';
+
+/** 系统权限框需要用户操作，不可能在极短时间内返回；低于该时长视为系统根本没有弹框。 */
+export const PERMISSION_DIALOG_MIN_MS = 300;
+
 export interface VoiceRecorderApi {
   getPermission(): Promise<VoicePermission>;
-  requestPermission(): Promise<VoicePermission>;
+  requestPermission(): Promise<VoicePermissionRequest>;
   start(options: { onMetering: (db: number) => void; onInterrupted?: () => void }): Promise<{ recordingId: string; localUri: string }>;
   stop(): Promise<{ localUri: string; durationMs: number } | null>;
   cancel(): Promise<void>;
@@ -25,12 +34,24 @@ export class VoiceRecorder implements VoiceRecorderApi {
   private pendingStart: Promise<{ recordingId: string; localUri: string }> | null = null;
   private hasStarted = false;
 
+  constructor(private readonly now: () => number = Date.now) {}
+
   async getPermission() {
     return normalizePermission(await Audio.getPermissionsAsync());
   }
 
-  async requestPermission() {
-    return normalizePermission(await Audio.requestPermissionsAsync());
+  /**
+   * 请求麦克风权限，并区分"本次取消"与"确认无法再询问"。
+   *
+   * Android 上一次性授权被回收、以及系统框被返回键取消，都会得到
+   * `granted=false / canAskAgain=false`，仅看字段无法区分，因此用返回时机判断：
+   * 真正弹过框必须等用户操作，快速返回说明系统没有弹框（已被明确拒绝且不再询问）。
+   */
+  async requestPermission(): Promise<VoicePermissionRequest> {
+    const startedAt = this.now();
+    const response = await Audio.requestPermissionsAsync();
+    if (response.granted) return 'granted';
+    return this.now() - startedAt < PERMISSION_DIALOG_MIN_MS ? 'blocked' : 'cancelled';
   }
 
   async start(options: { onMetering: (db: number) => void; onInterrupted?: () => void }) {

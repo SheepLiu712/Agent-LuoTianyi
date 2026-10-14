@@ -50,6 +50,31 @@ describe('VoiceRecorder', () => {
     await expect(recorder.requestPermission()).resolves.toBe('blocked');
   });
 
+  it('separates a cancelled permission dialog from a confirmed permanent denial', async () => {
+    let clock = 1_000;
+    const recorder = new VoiceRecorder(() => clock);
+
+    // 系统框真的弹过（等待用户操作远超过阈值）：本次只是取消，不得当成永久拒绝。
+    mockAudio.requestPermissionsAsync.mockImplementationOnce(async () => {
+      clock += 4_000;
+      return { granted: false, canAskAgain: false, status: 'denied' };
+    });
+    await expect(recorder.requestPermission()).resolves.toBe('cancelled');
+
+    // 快速返回说明系统根本没有弹框：确认无法再次询问。
+    mockAudio.requestPermissionsAsync.mockImplementationOnce(
+      async () => ({ granted: false, canAskAgain: false }),
+    );
+    await expect(recorder.requestPermission()).resolves.toBe('blocked');
+
+    // 授权成功仍为 granted。
+    mockAudio.requestPermissionsAsync.mockImplementationOnce(async () => {
+      clock += 2_000;
+      return { granted: true };
+    });
+    await expect(recorder.requestPermission()).resolves.toBe('granted');
+  });
+
   it('starts, stops, and returns the URI and duration', async () => {
     const recorder = new VoiceRecorder();
     const result = await recorder.start({ onMetering: jest.fn() });
