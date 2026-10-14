@@ -29,7 +29,7 @@ async def call_ws(websocket: WebSocket) -> None:
         return
     runtime: "ServerRuntime | None" = get_admin_shell().runtime_supervisor.runtime
     adapter = None if runtime is None else getattr(runtime, "call_adapter", None)
-    if runtime is None or not runtime.call_capability.available or adapter is None:
+    if runtime is None or adapter is None or not adapter.capability_status.available:
         await websocket.close(code=1013, reason="call transport unavailable")
         return
     await _serve_call(websocket, runtime, adapter)

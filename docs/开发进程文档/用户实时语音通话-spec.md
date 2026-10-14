@@ -6,6 +6,8 @@
 > 2026-10-13 契约补充：身份准备、首 ACK、接通前断线与恢复，以及实时停止、全部业务收尾完成和等待者取消的接口契约已确认，须由后续实现及测试兑现，不表示现有代码已验收。
 
 > 2026-10-13 CR-2 候选实现：隔离分支已用独立 `CallWebSocketAdapter` 封装 Session、Hub、Binding、输出队列及接入/恢复事务；`call_ws` 只负责鉴权、物理帧收发和稳定关闭。该实现仍等待独立审查，ADR-0001 继续为 Proposed，不表示生产协议已经获得批准。
+>
+> 2026-10-14 CR-3 候选实现：`StageManager.initialize()` 在通话接入前执行旧账本恢复并共享 owned 初始化任务；AgentRuntime、StageManager 与 CallWebSocketAdapter 分别公开角色、业务恢复/结算和传输能力事实，组合根不再遍历 Skill 或解释恢复报告。该实现仍等待独立审查，不表示非作者 spec 审批、合入或发布完成。
 > UI 草图：[实时语音通话 UI 草图](assets/用户实时语音通话-ui.svg)
 
 ## 用户故事
