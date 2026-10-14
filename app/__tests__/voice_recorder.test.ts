@@ -47,41 +47,7 @@ describe('VoiceRecorder', () => {
     await expect(recorder.getPermission()).resolves.toBe('blocked');
 
     mockAudio.requestPermissionsAsync.mockResolvedValueOnce({ granted: false, canAskAgain: false });
-    await expect(recorder.requestPermission()).resolves.toBe('not_granted');
-  });
-
-  it.each([
-    { granted: false, canAskAgain: false, status: 'denied' },
-    { granted: false, canAskAgain: true, status: 'denied' },
-    { granted: false, status: 'undetermined' },
-  ])('reports only lack of authorization for %j', async (response) => {
-    const recorder = new VoiceRecorder();
-    mockAudio.requestPermissionsAsync.mockResolvedValueOnce(response);
-
-    await expect(recorder.requestPermission()).resolves.toBe('not_granted');
-    expect(mockAudio.requestPermissionsAsync).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([0, 299, 300, 4000])('does not infer permanent denial from a %ims callback delay', async (delay) => {
-    jest.useFakeTimers({ now: 1000 });
-    try {
-      mockAudio.requestPermissionsAsync.mockImplementationOnce(() => new Promise((resolve) => {
-        setTimeout(() => resolve({ granted: false, canAskAgain: false }), delay);
-      }));
-      const recorder = new VoiceRecorder();
-      const pending = recorder.requestPermission();
-
-      await jest.advanceTimersByTimeAsync(delay);
-
-      await expect(pending).resolves.toBe('not_granted');
-    } finally { jest.useRealTimers(); }
-  });
-
-  it('still reports granted when the request authorizes recording', async () => {
-    const recorder = new VoiceRecorder();
-    mockAudio.requestPermissionsAsync.mockResolvedValueOnce({ granted: true, canAskAgain: false });
-
-    await expect(recorder.requestPermission()).resolves.toBe('granted');
+    await expect(recorder.requestPermission()).resolves.toBe('blocked');
   });
 
   it('starts, stops, and returns the URI and duration', async () => {

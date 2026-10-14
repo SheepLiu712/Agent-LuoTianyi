@@ -3,17 +3,9 @@ import { randomUUID } from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 
 export type VoicePermission = 'granted' | 'denied' | 'blocked';
-/**
- * 一次权限请求的结果。
- *
- * Expo SDK 54 在目标 Android 状态下无法可靠区分"系统框被取消"与"永久拒绝"；
- * 因此只表示是否获得授权，不推断用户意图或系统框是否出现。
- */
-export type VoicePermissionRequest = 'granted' | 'not_granted';
-
 export interface VoiceRecorderApi {
   getPermission(): Promise<VoicePermission>;
-  requestPermission(): Promise<VoicePermissionRequest>;
+  requestPermission(): Promise<VoicePermission>;
   start(options: { onMetering: (db: number) => void; onInterrupted?: () => void }): Promise<{ recordingId: string; localUri: string }>;
   stop(): Promise<{ localUri: string; durationMs: number } | null>;
   cancel(): Promise<void>;
@@ -37,15 +29,8 @@ export class VoiceRecorder implements VoiceRecorderApi {
     return normalizePermission(await Audio.getPermissionsAsync());
   }
 
-  /**
-   * 请求麦克风权限。
-   *
-   * Expo 返回的非授权字段在不同 Android/OEM 状态下无法可靠区分"取消"与"永久拒绝"；
-   * 因此仅报告 not_granted，交互层恢复输入栏并给出重试与手动设置指引。
-   */
-  async requestPermission(): Promise<VoicePermissionRequest> {
-    const response = await Audio.requestPermissionsAsync();
-    return response.granted ? 'granted' : 'not_granted';
+  async requestPermission() {
+    return normalizePermission(await Audio.requestPermissionsAsync());
   }
 
   async start(options: { onMetering: (db: number) => void; onInterrupted?: () => void }) {

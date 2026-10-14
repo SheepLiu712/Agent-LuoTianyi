@@ -66,20 +66,12 @@ export function useVoiceInput(options: Options) {
   const toggleMode = useCallback(() => {
     if (starting.current || cancelling.current) return;
     if (state.current === 'TextMode') { setMode('voice'); transition('VoiceReady'); }
-    else if (state.current === 'VoiceReady') {
-      if (permissionRequest.current) generation.current += 1;
-      setMode('text');
-      transition('TextMode');
-    }
+    else if (state.current === 'VoiceReady') { setMode('text'); transition('TextMode'); }
   }, [transition]);
 
   const cancel = useCallback((reason: string): Promise<void> => {
     if (cancelling.current) return cancelling.current;
-    if (finishing.current) return Promise.resolve();
-    if (!starting.current && !id.current) {
-      if (permissionRequest.current) generation.current += 1;
-      return Promise.resolve();
-    }
+    if (finishing.current || (!starting.current && !id.current)) return Promise.resolve();
     generation.current += 1;
     const current = id.current;
     id.current = null;
@@ -110,18 +102,15 @@ export function useVoiceInput(options: Options) {
       if (permission !== 'granted') {
         transition('PermissionPrompt');
         if (permissionRequest.current) {
-          // 保留 #309 的逃生出口：系统框未弹出或请求长期 pending 时，再按可打开设置入口。
           showMicrophoneSettings(callbacks.current.onNotice);
           return;
         }
-        // 一次状态检查不足以证明"永久拒绝"，且 Expo 无法可靠区分取消与永久拒绝。
-        // 先实际请求一次；非授权结果只回到可操作输入栏，并给出可重试提示。
+        // 单次授权回收后，Expo 可能把状态报告成 blocked；一次状态检查不足以证明不能再次询问。
+        // 必须先实际发起一次请求，再根据真实请求结果决定是否引导去系统设置。
         // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
         // 迟到的结果只在“这次尝试仍是当前尝试”时才有意义：更晚的按住或已卸载都不该被它打扰。
         const request = recorder.requestPermission().then((result) => {
-          if (result === 'not_granted' && valid()) {
-            callbacks.current.onNotice('未获得麦克风权限，可重试；如果系统不再询问，请到系统设置开启麦克风。');
-          }
+          if (result === 'blocked' && valid()) showMicrophoneSettings(callbacks.current.onNotice);
         }, () => {
           // 授权请求本身失败（原生拒绝/抛错）：与录音启动失败同样给出可行动提示，不能静默。
           if (valid()) callbacks.current.onNotice('录音启动失败，请重试');

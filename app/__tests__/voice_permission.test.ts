@@ -5,6 +5,17 @@ jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() }, Linking: { openSettings: jest.fn() },
 }));
 
+beforeEach(() => { jest.clearAllMocks(); });
+
+it('reports a failed authorization instead of claiming the permission is closed', () => {
+  showMicrophoneSettings(jest.fn());
+  const [title, message] = (Alert.alert as jest.Mock).mock.calls[0];
+  expect(title).toBe('麦克风授权失败');
+  expect(title).not.toContain('已关闭');
+  expect(message).toContain('重试');
+  expect(message).not.toContain('已关闭');
+});
+
 it('offers cancel and opens app settings only on explicit selection', async () => {
   const notice = jest.fn();
   (Linking.openSettings as jest.Mock).mockResolvedValue(undefined);
