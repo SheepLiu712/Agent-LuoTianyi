@@ -102,18 +102,18 @@ export function useVoiceInput(options: Options) {
       if (permission !== 'granted') {
         transition('PermissionPrompt');
         if (permissionRequest.current) {
-          // 系统权限框已经在屏幕上等用户选择：不再叠加第二个请求，也不再弹 App 自己的提示
-          // （那会把"还在等用户选择"误报成永久拒绝）。
+          // 保留 #309 的逃生出口：系统框未弹出或请求长期 pending 时，再按可打开设置入口。
+          showMicrophoneSettings(callbacks.current.onNotice);
           return;
         }
-        // 一次状态检查不足以证明"永久拒绝"：单次授权回收、系统框被返回取消都会报 granted=false。
-        // 因此先实际请求一次，再由请求结果区分 granted / cancelled / blocked。
+        // 一次状态检查不足以证明"永久拒绝"，且 Expo 无法可靠区分取消与永久拒绝。
+        // 先实际请求一次；非授权结果只回到可操作输入栏，并给出可重试提示。
         // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
         // 迟到的结果只在“这次尝试仍是当前尝试”时才有意义：更晚的按住或已卸载都不该被它打扰。
         const request = recorder.requestPermission().then((result) => {
-          // 只有请求快速返回、说明系统根本没弹框时，才确认是永久拒绝并给出去设置入口；
-          // 用户取消本次询问（cancelled）只回到可操作的输入栏，不引导去系统设置。
-          if (result === 'blocked' && valid()) showMicrophoneSettings(callbacks.current.onNotice);
+          if (result === 'not_granted' && valid()) {
+            callbacks.current.onNotice('未获得麦克风权限，可重试；如果系统不再询问，请到系统设置开启麦克风。');
+          }
         }, () => {
           // 授权请求本身失败（原生拒绝/抛错）：与录音启动失败同样给出可行动提示，不能静默。
           if (valid()) callbacks.current.onNotice('录音启动失败，请重试');

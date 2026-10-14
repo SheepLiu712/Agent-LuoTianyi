@@ -78,7 +78,7 @@ it.each(['blocked', 'denied'])('requests again for initially %s permission witho
   expect(state.captureState).toBe('Recording');
 });
 
-it.each(['granted', 'blocked'])('releases the input bar while the system permission request is pending (late %s)', async (late) => {
+it.each(['granted', 'not_granted'])('releases the input bar while the system permission request is pending (late %s)', async (late) => {
   let answer!: (value: string) => void;
   options.recorder.getPermission.mockResolvedValueOnce('denied').mockResolvedValueOnce('denied');
   options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
@@ -88,16 +88,16 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
   expect(state.captureState).toBe('VoiceReady');
   expect(options.onRecordingEnded).toHaveBeenCalledTimes(1);
-  // 请求仍在途时再按：系统框还在屏幕上，不叠加第二个请求，也不再弹 App 自己的提示。
+  // 请求仍在途时再按：保留 #309 的设置逃生出口，不叠加第二个系统请求。
   await act(async () => { await state.pressIn(event); });
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
-  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
   expect(state.captureState).toBe('VoiceReady');
-  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不弹设置入口。
+  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不重复弹设置入口。
   await act(async () => { answer(late); });
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
   // 授权之后重新按住即可录音。
   await act(async () => { await state.pressIn(event); });
   expect(state.captureState).toBe('Recording');
@@ -105,7 +105,7 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
 
 it('returns to the input bar without the settings prompt when the permission dialog is cancelled', async () => {
   options.recorder.getPermission.mockResolvedValueOnce('blocked');
-  options.recorder.requestPermission.mockResolvedValueOnce('cancelled');
+  options.recorder.requestPermission.mockResolvedValueOnce('not_granted');
   await mount();
   await act(async () => { await state.pressIn(event); });
 
@@ -114,20 +114,29 @@ it('returns to the input bar without the settings prompt when the permission dia
   expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  // 重新按住仍可再次发起请求并正常录音。
+  // 本次请求已结束：再次按住应重新请求，而不是被误认为仍在途。
+  options.recorder.getPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockResolvedValueOnce('granted');
+  await act(async () => { await state.pressIn(event); });
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(2);
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+  // 请求成功也不自动录音，用户仍需重新按住。
   options.recorder.getPermission.mockResolvedValueOnce('granted');
   await act(async () => { await state.pressIn(event); });
   expect(state.captureState).toBe('Recording');
 });
 
-it('offers the settings entry when the request confirms the system cannot ask again', async () => {
+it('does not elevate an ambiguous non-authorized request into a settings prompt', async () => {
   options.recorder.getPermission.mockResolvedValueOnce('blocked');
-  options.recorder.requestPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockResolvedValueOnce('not_granted');
   await mount();
   await act(async () => { await state.pressIn(event); });
 
-  // 仅当请求快速返回（系统没有弹框）时，才确认为永久拒绝并给出去设置入口。
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  // Expo 无法可靠表达取消/永久拒绝时，采用保守可重试策略。
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  expect(options.onNotice).toHaveBeenCalledWith('未获得麦克风权限，可重试；如果系统不再询问，请到系统设置开启麦克风。');
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
 });
@@ -150,15 +159,16 @@ it('reports a failed permission request instead of swallowing it', async () => {
   expect(state.captureState).toBe('Recording');
 });
 
-it('still offers the settings entry when a late blocked result is still the current attempt', async () => {
+it('does not show a settings prompt for an ambiguous late denial', async () => {
   let answer!: (value: string) => void;
   options.recorder.getPermission.mockResolvedValueOnce('denied');
   options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
   await mount();
   await act(async () => { await state.pressIn(event); await state.pressOut(); });
-  await act(async () => { answer('blocked'); });
+  await act(async () => { answer('not_granted'); });
 
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  expect(options.onNotice).toHaveBeenCalledWith('未获得麦克风权限，可重试；如果系统不再询问，请到系统设置开启麦克风。');
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
 });
@@ -180,6 +190,27 @@ it('ignores a permission failure that arrives after a newer attempt', async () =
   await act(async () => { rejectRequest(new Error('late permission failure')); });
   expect(options.onNotice).not.toHaveBeenCalled();
   expect(state.captureState).toBe('Recording');
+});
+
+it.each(['recording', 'navigation', 'unmount'])('ignores a late non-authorized result after %s', async (next) => {
+  let answer!: (value: string) => void;
+  options.recorder.getPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+  await mount();
+  await act(async () => { await state.pressIn(event); });
+  expect(state.captureState).toBe('VoiceReady');
+
+  if (next === 'recording') {
+    await act(async () => { await state.pressIn(event); });
+    expect(state.captureState).toBe('Recording');
+  } else {
+    await endCapture(next);
+  }
+  await act(async () => { answer('not_granted'); });
+
+  expect(options.onNotice).not.toHaveBeenCalled();
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  if (next === 'recording') expect(state.captureState).toBe('Recording');
 });
 
 it.each([499, 500])('applies the minimum duration boundary at %ims', async (duration) => {

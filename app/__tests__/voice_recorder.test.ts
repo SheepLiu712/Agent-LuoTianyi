@@ -47,31 +47,40 @@ describe('VoiceRecorder', () => {
     await expect(recorder.getPermission()).resolves.toBe('blocked');
 
     mockAudio.requestPermissionsAsync.mockResolvedValueOnce({ granted: false, canAskAgain: false });
-    await expect(recorder.requestPermission()).resolves.toBe('blocked');
+    await expect(recorder.requestPermission()).resolves.toBe('not_granted');
   });
 
-  it('separates a cancelled permission dialog from a confirmed permanent denial', async () => {
-    let clock = 1_000;
-    const recorder = new VoiceRecorder(() => clock);
+  it.each([
+    { granted: false, canAskAgain: false, status: 'denied' },
+    { granted: false, canAskAgain: true, status: 'denied' },
+    { granted: false, status: 'undetermined' },
+  ])('reports only lack of authorization for %j', async (response) => {
+    const recorder = new VoiceRecorder();
+    mockAudio.requestPermissionsAsync.mockResolvedValueOnce(response);
 
-    // 系统框真的弹过（等待用户操作远超过阈值）：本次只是取消，不得当成永久拒绝。
-    mockAudio.requestPermissionsAsync.mockImplementationOnce(async () => {
-      clock += 4_000;
-      return { granted: false, canAskAgain: false, status: 'denied' };
-    });
-    await expect(recorder.requestPermission()).resolves.toBe('cancelled');
+    await expect(recorder.requestPermission()).resolves.toBe('not_granted');
+    expect(mockAudio.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
 
-    // 快速返回说明系统根本没有弹框：确认无法再次询问。
-    mockAudio.requestPermissionsAsync.mockImplementationOnce(
-      async () => ({ granted: false, canAskAgain: false }),
-    );
-    await expect(recorder.requestPermission()).resolves.toBe('blocked');
+  it.each([0, 299, 300, 4000])('does not infer permanent denial from a %ims callback delay', async (delay) => {
+    jest.useFakeTimers({ now: 1000 });
+    try {
+      mockAudio.requestPermissionsAsync.mockImplementationOnce(() => new Promise((resolve) => {
+        setTimeout(() => resolve({ granted: false, canAskAgain: false }), delay);
+      }));
+      const recorder = new VoiceRecorder();
+      const pending = recorder.requestPermission();
 
-    // 授权成功仍为 granted。
-    mockAudio.requestPermissionsAsync.mockImplementationOnce(async () => {
-      clock += 2_000;
-      return { granted: true };
-    });
+      await jest.advanceTimersByTimeAsync(delay);
+
+      await expect(pending).resolves.toBe('not_granted');
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('still reports granted when the request authorizes recording', async () => {
+    const recorder = new VoiceRecorder();
+    mockAudio.requestPermissionsAsync.mockResolvedValueOnce({ granted: true, canAskAgain: false });
+
     await expect(recorder.requestPermission()).resolves.toBe('granted');
   });
 

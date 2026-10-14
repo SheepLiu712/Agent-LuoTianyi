@@ -4,13 +4,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 export type VoicePermission = 'granted' | 'denied' | 'blocked';
 /**
- * 一次权限请求的结果。`cancelled` 与 `blocked` 必须分开：
- * 系统权限框被返回键取消、以及用户只是本次没允许，都不等于"永久拒绝"。
+ * 一次权限请求的结果。
+ *
+ * Expo SDK 54 在目标 Android 状态下无法可靠区分"系统框被取消"与"永久拒绝"；
+ * 因此只表示是否获得授权，不推断用户意图或系统框是否出现。
  */
-export type VoicePermissionRequest = 'granted' | 'cancelled' | 'blocked';
-
-/** 系统权限框需要用户操作，不可能在极短时间内返回；低于该时长视为系统根本没有弹框。 */
-export const PERMISSION_DIALOG_MIN_MS = 300;
+export type VoicePermissionRequest = 'granted' | 'not_granted';
 
 export interface VoiceRecorderApi {
   getPermission(): Promise<VoicePermission>;
@@ -34,24 +33,19 @@ export class VoiceRecorder implements VoiceRecorderApi {
   private pendingStart: Promise<{ recordingId: string; localUri: string }> | null = null;
   private hasStarted = false;
 
-  constructor(private readonly now: () => number = Date.now) {}
-
   async getPermission() {
     return normalizePermission(await Audio.getPermissionsAsync());
   }
 
   /**
-   * 请求麦克风权限，并区分"本次取消"与"确认无法再询问"。
+   * 请求麦克风权限。
    *
-   * Android 上一次性授权被回收、以及系统框被返回键取消，都会得到
-   * `granted=false / canAskAgain=false`，仅看字段无法区分，因此用返回时机判断：
-   * 真正弹过框必须等用户操作，快速返回说明系统没有弹框（已被明确拒绝且不再询问）。
+   * Expo 返回的非授权字段在不同 Android/OEM 状态下无法可靠区分"取消"与"永久拒绝"；
+   * 因此仅报告 not_granted，交互层恢复输入栏并给出重试与手动设置指引。
    */
   async requestPermission(): Promise<VoicePermissionRequest> {
-    const startedAt = this.now();
     const response = await Audio.requestPermissionsAsync();
-    if (response.granted) return 'granted';
-    return this.now() - startedAt < PERMISSION_DIALOG_MIN_MS ? 'blocked' : 'cancelled';
+    return response.granted ? 'granted' : 'not_granted';
   }
 
   async start(options: { onMetering: (db: number) => void; onInterrupted?: () => void }) {
