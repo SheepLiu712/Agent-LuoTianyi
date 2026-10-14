@@ -36,8 +36,11 @@ async def assert_finalizing(manager, user="user"):
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
         await manager.connect(WebSocketConnection(Socket(), user, user), "luotianyi")
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
-        await manager.start_call(
-            user_id=user, character_id="luotianyi", source_interaction_id=None, client_request_id="new-call"
+        await manager._claim_call(
+            user_id=user,
+            character_id="luotianyi",
+            source_interaction_id=None,
+            client_request_id="new-call",
         )
     with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
         await manager.begin_user_data_reset(user)
@@ -88,8 +91,11 @@ async def test_reset_admission_blocks_chat_and_call_until_end():
     with pytest.raises(RuntimeError, match="USER_DATA_RESET_IN_PROGRESS"):
         await connected(stages)
     with pytest.raises(RuntimeError, match="USER_DATA_RESET_IN_PROGRESS"):
-        await stages.start_call(
-            user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="reset-race"
+        await stages._claim_call(
+            user_id="user",
+            character_id="luotianyi",
+            source_interaction_id=None,
+            client_request_id="reset-race",
         )
     await stages.end_user_data_reset("user", token)
     await connected(stages)
@@ -132,12 +138,15 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     )
     assert stages.call_settlement_ready
     stages._call_settlement._timeout = 0.01 if mode == "timeout" else 5
-    claim = await stages.start_call(
-        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="finalization-call"
+    claim = await stages._claim_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="finalization-call",
     )
     with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
         await stages.begin_user_data_reset("user")
-    stage = await stages.create_call_stage(
+    stage = await stages._create_call_stage(
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -146,7 +155,11 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
     await stage.apply_answer(
-        d.AnswerCall(action_id="answer", call_id=claim.record.call_id, decision=CallAnswerDecision.ACCEPT)
+        d.AnswerCall(
+            action_id="answer",
+            call_id=claim.record.call_id,
+            decision=CallAnswerDecision.ACCEPT,
+        )
     )
     await _eventually(lambda: stage.state is CallState.ACTIVE)
     with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
@@ -185,8 +198,11 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     if not shutdown:
         token = await stages.begin_user_data_reset("user")
         await stages.end_user_data_reset("user", token)
-        await stages.start_call(
-            user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="after-finalization"
+        await stages._claim_call(
+            user_id="user",
+            character_id="luotianyi",
+            source_interaction_id=None,
+            client_request_id="after-finalization",
         )
     await stages.close()
     assert cleaned == []
@@ -194,7 +210,9 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
 
 
 @pytest.mark.asyncio
-async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_first_reason(call_setup):
+async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_first_reason(
+    call_setup,
+):
     repository, _, _, clock = call_setup
     stages = StageManager(
         get_agent=lambda _: _agent(_TurnHandler()),
@@ -212,10 +230,13 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
         await context.close()
 
     stages._call_settlement._consumer.settle = settle
-    claim = await stages.start_call(
-        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="terminate-owned"
+    claim = await stages._claim_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="terminate-owned",
     )
-    stage = await stages.create_call_stage(
+    stage = await stages._create_call_stage(
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -268,7 +289,9 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
 
 
 @pytest.mark.asyncio
-async def test_terminate_during_context_initialization_prevents_late_resources(call_setup):
+async def test_terminate_during_context_initialization_prevents_late_resources(
+    call_setup,
+):
     repository, _, _, clock = call_setup
     create_entered, create_release = asyncio.Event(), asyncio.Event()
     created_contexts = []
@@ -301,11 +324,14 @@ async def test_terminate_during_context_initialization_prevents_late_resources(c
         wall_clock=clock.now,
         monotonic=clock.tick,
     )
-    claim = await stages.start_call(
-        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="terminate-start"
+    claim = await stages._claim_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="terminate-start",
     )
     creation = asyncio.create_task(
-        stages.create_call_stage(
+        stages._create_call_stage(
             claim,
             user_id="user",
             character_id="luotianyi",
@@ -315,7 +341,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(c
         )
     )
     await asyncio.wait_for(create_entered.wait(), 1)
-    ownership = stages.current_call_ownership(str(claim.record.call_id))
+    ownership = stages._current_call_ownership(str(claim.record.call_id))
     assert ownership is not None
     stage = transport.stage
     snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
@@ -325,7 +351,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(c
     await asyncio.sleep(0)
     assert created_contexts == []
     assert speech_factory.sessions == {}
-    assert stages.current_call_stage(str(claim.record.call_id)) is None
+    assert stages._call_stages.get(str(claim.record.call_id)) is None
     await stages.close()
 
 
@@ -413,11 +439,14 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
         monotonic=clock.tick,
     )
     stages._call_settlement._consumer.settle = lambda _snapshot: asyncio.sleep(0)
-    claim = await stages.start_call(
-        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id=blocked_phase
+    claim = await stages._claim_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id=blocked_phase,
     )
     creation = asyncio.create_task(
-        stages.create_call_stage(
+        stages._create_call_stage(
             claim,
             user_id="user",
             character_id="luotianyi",
@@ -437,14 +466,18 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
     await stages._finalizations.close()
     assert len(contexts) == 1 and contexts[0].was_closed
     assert len(providers) == 1 and providers[0].closed
-    assert stages.current_call_stage(str(claim.record.call_id)) is None
+    assert stages._call_stages.get(str(claim.record.call_id)) is None
     await stages.close()
 
 
 @pytest.mark.asyncio
 async def test_finalization_timeout_waits_for_real_thread_write_before_releasing_admission(call_setup, monkeypatch):
     repository, _, _, clock = call_setup
-    thread_started, thread_release, thread_finished = threading.Event(), threading.Event(), threading.Event()
+    thread_started, thread_release, thread_finished = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
 
     class Consumer:
         is_ready = True
@@ -472,10 +505,13 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
         monotonic=clock.tick,
     )
     stages._call_settlement._timeout = 0.01
-    claim = await stages.start_call(
-        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="thread-write"
+    claim = await stages._claim_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="thread-write",
     )
-    stage = await stages.create_call_stage(
+    stage = await stages._create_call_stage(
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -542,10 +578,13 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         monotonic=clock.tick,
     )
     stages._call_settlement._consumer = Consumer()
-    claim = await stages.start_call(
-        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="close-owned"
+    claim = await stages._claim_call(
+        user_id="user",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="close-owned",
     )
-    stage = await stages.create_call_stage(
+    stage = await stages._create_call_stage(
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -554,7 +593,11 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
     await stage.apply_answer(
-        d.AnswerCall(action_id="answer", call_id=claim.record.call_id, decision=CallAnswerDecision.ACCEPT)
+        d.AnswerCall(
+            action_id="answer",
+            call_id=claim.record.call_id,
+            decision=CallAnswerDecision.ACCEPT,
+        )
     )
     context = contexts[0]
     original_close = context.close
