@@ -85,7 +85,7 @@ class CallSettlementSink(Protocol):
 class CallStateChanged:
     call_id: str
     state: CallState
-    client_request_id: str = ""
+    client_request_id: str
     connected_at: datetime | None = None
 
 
@@ -179,6 +179,7 @@ class CallStage:
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] | None = None,
         config: dict[str, object] | None = None,
+        connection_available: bool = True,
     ) -> None:
         if str(record.call_id) != ownership.call_id:
             raise ValueError("call ownership does not match record")
@@ -251,6 +252,8 @@ class CallStage:
         self._aborting_transport = False
         self._first_audio_started_at: float | None = None
         self._reconnect_count = 0
+        self._connection_available = connection_available
+        self._pending_answer: d.AnswerCall | None = None
 
     @classmethod
     async def create(cls, **kwargs: object) -> "CallStage":
@@ -405,6 +408,16 @@ class CallStage:
             self._cancel_task(self._silence_task)
             self._recovery_task = self._track(asyncio.create_task(self._recover_deadline(), name="call-recovery"))
 
+    async def set_connection_available(self, available: bool) -> None:
+        self._connection_available = available
+        if not available and self.state is CallState.ACTIVE:
+            await self.disconnect()
+            return
+        if available and self.state is CallState.RINGING and self._pending_answer is not None:
+            answer = self._pending_answer
+            self._pending_answer = None
+            await self._apply_answer(answer)
+
     async def resume(self) -> bool:
         timed_out = False
         async with self._lifecycle_lock:
@@ -441,6 +454,13 @@ class CallStage:
         if timed_out:
             await self.terminate(CallEndReason.RECOVERY_TIMEOUT)
         return False
+
+    def can_resume(self) -> bool:
+        return (
+            self.state is CallState.RECONNECTING
+            and self._recovery_deadline is not None
+            and self._monotonic() < self._recovery_deadline
+        )
 
     async def terminate(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> CallFinalSnapshot | None:
         """Stop realtime work once; caller cancellation does not cancel owned termination."""
@@ -774,6 +794,9 @@ class CallStage:
             return
         if action.decision.value == "decline":
             await self.terminate(CallEndReason.DECLINED)
+            return
+        if not self._connection_available:
+            self._pending_answer = action
             return
         connected_at = self._now()
         await self._transition_or_close(CallState.ACTIVE, ledger_facts={"connected_at": connected_at})

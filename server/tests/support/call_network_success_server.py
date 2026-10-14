@@ -51,7 +51,9 @@ class _AddressPublishingLifecycle(ServerLifecycle):
             if session.query(InviteCode).filter_by(code="invite").one_or_none() is None:
                 session.add(InviteCode(code="invite", is_used=False))
                 session.commit()
-        self._address_path.write_text(json.dumps({"url": self._url}), encoding="utf-8")
+        temporary = self._address_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"url": self._url}), encoding="utf-8")
+        temporary.replace(self._address_path)
         return status
 
 

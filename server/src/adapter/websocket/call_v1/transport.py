@@ -359,7 +359,15 @@ class CallTransportSession:
         cursor = int(message["last_contiguous_server_seq"])
         if cursor > self.last_server_seq:
             raise CallTransportError("INVALID_RESUME_CURSOR")
-        self.acknowledge_server(cursor)
+        outputs = self.preview_resume(cursor)
+        self.commit_resume(cursor)
+        return outputs
+
+    def preview_resume(self, cursor: int) -> list[CallWireOutput]:
+        """Validate and plan resume output without advancing ACK state."""
+        self._require_open()
+        if cursor < self._server_ack_cursor or cursor > self.last_server_seq:
+            raise CallTransportError("INVALID_RESUME_CURSOR")
         resumed: ControlMessage = {
             "protocol": "call.v1",
             "type": "call.resumed",
@@ -370,6 +378,9 @@ class CallTransportSession:
         }
         output = CallWireOutput(text=encode_control_message(resumed, sender="server", transport="call_ws"))
         return [output, *self.replay_after(cursor)]
+
+    def commit_resume(self, cursor: int) -> None:
+        self.acknowledge_server(cursor)
 
     def send_control(self, message: ControlMessage) -> CallWireOutput:
         self._require_open()
@@ -722,11 +733,20 @@ class CallTransportBinding:
     connection_id: object
 
 
+@dataclass(frozen=True, slots=True)
+class CallResumeReservation:
+    session: CallTransportSession
+    generation: int
+    connection_id: object
+    token: object
+
+
 @dataclass(slots=True)
 class _HubEntry:
     session: CallTransportSession
     generation: int = 0
     connection_id: object | None = None
+    resume_token: object | None = None
 
 
 class CallTransportHub:
@@ -879,6 +899,10 @@ class CallTransportHub:
         return len(owned)
 
     async def attach_resume(self, raw: str, *, user_id: str, connection_id: object) -> CallTransportBinding:
+        reservation = await self.reserve_resume(raw, user_id=user_id, connection_id=connection_id)
+        return await self.commit_resume(reservation)
+
+    async def reserve_resume(self, raw: str, *, user_id: str, connection_id: object) -> CallResumeReservation:
         try:
             message = decode_control_text(raw, sender="client", transport="call_ws")
         except ControlProtocolError as error:
@@ -910,16 +934,39 @@ class CallTransportHub:
                     ) from error
                 entry = self._sessions.get(call_id)
                 self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
-        if self._require_user_admission is not None:
-            await self._require_user_admission(user_id)
-        async with self._connection_released:
-            entry = self._sessions.get(call_id)
-            self._require_resume_identity(entry, user_id=user_id, character_id=character_id)
-            if entry.generation != observed_generation or entry.connection_id is not None:
+            if entry.resume_token is not None:
                 raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+            token = object()
+            entry.resume_token = token
+            return CallResumeReservation(entry.session, observed_generation, connection_id, token)
+
+    async def commit_resume(self, reservation: CallResumeReservation) -> CallTransportBinding:
+        if self._require_user_admission is not None:
+            await self._require_user_admission(reservation.session.user_id)
+        async with self._connection_released:
+            entry = self._sessions.get(reservation.session.call_id)
+            if (
+                entry is None
+                or entry.session is not reservation.session
+                or entry.generation != reservation.generation
+                or entry.connection_id is not None
+                or entry.resume_token is not reservation.token
+            ):
+                raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=CALL_CLOSE_POLICY_VIOLATION)
+            entry.resume_token = None
             entry.generation += 1
-            entry.connection_id = connection_id
-            return CallTransportBinding(entry.session, entry.generation, connection_id)
+            entry.connection_id = reservation.connection_id
+            return CallTransportBinding(entry.session, entry.generation, reservation.connection_id)
+
+    async def release_resume(self, reservation: CallResumeReservation) -> None:
+        async with self._connection_released:
+            entry = self._sessions.get(reservation.session.call_id)
+            if entry is not None and entry.session is reservation.session and entry.resume_token is reservation.token:
+                entry.resume_token = None
+                self._connection_released.notify_all()
+
+    async def rollback_resume(self, binding: CallTransportBinding) -> None:
+        await self.detach(binding)
 
     @staticmethod
     def _require_resume_identity(entry: _HubEntry | None, *, user_id: str, character_id: str) -> None:

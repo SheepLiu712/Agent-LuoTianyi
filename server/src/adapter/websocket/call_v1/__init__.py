@@ -1,5 +1,6 @@
 """Pure candidate ``call.v1`` WebSocket wire codecs."""
 
+from .adapter import CallConnection, CallWebSocketAdapter
 from .audio_codec import AudioFrameCodec, AudioFrameCodecError, BinaryAudioFrameCodec, WireAudioFrame
 from .control import (
     ControlMessage,
@@ -33,6 +34,8 @@ __all__ = [
     "AudioFrameCodecError",
     "BinaryAudioFrameCodec",
     "WireAudioFrame",
+    "CallConnection",
+    "CallWebSocketAdapter",
     "ControlMessage",
     "ControlProtocolError",
     "ControlSender",

@@ -133,17 +133,34 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
     expect(callHistory.content).toMatch(/^\[语音通话\] /);
     expect(callHistory.content).not.toContain('用户与角色讨论');
 
-    const reset = await fetch(`${server.url}/user/data/reset`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'alice' }),
-    });
+    chat.disconnectWs();
+    let resetAttempts = 0;
+    const reset = await waitUntil(
+      async () => {
+        const response = await fetch(`${server.url}/user/data/reset`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'alice' }),
+        });
+        resetAttempts += 1;
+        if (!response.ok && response.status !== 409) {
+          throw new Error(`unexpected reset failure ${response.status}: ${await response.text()}`);
+        }
+        if (response.status === 409) {
+          const detail = (await response.clone().json() as any).detail;
+          expect(detail.code).toBe('USER_INTERACTION_BUSY');
+        }
+        return response;
+      },
+      (response) => response.ok,
+      70_000,
+    );
     expect(reset.ok).toBe(true);
+    expect(resetAttempts).toBeGreaterThan(1);
     expect(await waitUntil(
       async () => await json(`${server.url}/test/reset_counts`),
       (value: any) => value.call_sessions === 0 && value.conversations === 0,
     )).toMatchObject({ call_sessions: 0, conversations: 0, memories: 0 });
     expect((await login(server.url, 'alice', 'offline-password')).token).toBeTruthy();
-    chat.disconnectWs();
     await resolver.close();
   } finally {
     server_config.BASE_URL = previousBaseUrl;
