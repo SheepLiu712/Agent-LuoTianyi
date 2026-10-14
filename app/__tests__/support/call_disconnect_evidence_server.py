@@ -10,7 +10,7 @@ from pathlib import Path
 from support.call_network_success_server import main
 
 import server_main
-from src.server_runtime import CallTransportHub
+from src.adapter.websocket.call_v1.transport import CallTransportHub
 
 EVIDENCE = Path(sys.argv[1]).resolve() / "disconnect-evidence.jsonl"
 

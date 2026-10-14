@@ -6,14 +6,16 @@ import pytest
 from src.adapter.websocket.call_v1 import (
     CALL_CLOSE_TRY_AGAIN_LATER,
     BinaryAudioFrameCodec,
+    CallTransportError,
+    WireAudioFrame,
+)
+from src.adapter.websocket.call_v1.transport import (
     CallAcceptanceReceipt,
     CallTransportBackpressure,
     CallTransportConfig,
-    CallTransportError,
     CallTransportHub,
     CallTransportSession,
     InboundCallFrame,
-    WireAudioFrame,
 )
 
 CALL_ID = "606ec5e6-a330-4e6c-b07a-8432a5716c8f"
@@ -44,7 +46,13 @@ def session(sink: AcceptanceSink | None = None, **config) -> CallTransportSessio
 
 def hangup(seq: int, reason: str = "user_hangup") -> str:
     return json.dumps(
-        {"protocol": "call.v1", "type": "call.hangup", "seq": seq, "call_id": CALL_ID, "reason": reason},
+        {
+            "protocol": "call.v1",
+            "type": "call.hangup",
+            "seq": seq,
+            "call_id": CALL_ID,
+            "reason": reason,
+        },
         separators=(",", ":"),
     )
 
@@ -90,7 +98,10 @@ def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields() -> No
     with pytest.raises(CallTransportError, match="REPLAY_NOT_AVAILABLE"):
         transport.replay_missing(2)
 
-    assert [metric.name.value for metric in captured] == ["buffer", "playback_ack_retry"]
+    assert [metric.name.value for metric in captured] == [
+        "buffer",
+        "playback_ack_retry",
+    ]
     assert captured[0].numeric == {"buffered_bytes": captured[0].numeric["buffered_bytes"]}
     assert captured[1].numeric == {"ack_retry_count": 1}
     assert all("response_id" not in (metric.labels or {}) for metric in captured)
@@ -409,7 +420,11 @@ async def test_wrong_resume_identity_is_rejected_without_waiting_for_release() -
     with pytest.raises(CallTransportError) as wrong_user:
         await hub.attach_resume(resume_raw(), user_id="other-user", connection_id=object())
     with pytest.raises(CallTransportError) as wrong_character:
-        await hub.attach_resume(resume_raw(character_id="other-character"), user_id="user-1", connection_id=object())
+        await hub.attach_resume(
+            resume_raw(character_id="other-character"),
+            user_id="user-1",
+            connection_id=object(),
+        )
 
     assert wrong_user.value.code == "RESUME_OWNERSHIP_MISMATCH"
     assert wrong_character.value.code == "RESUME_OWNERSHIP_MISMATCH"
@@ -418,7 +433,9 @@ async def test_wrong_resume_identity_is_rejected_without_waiting_for_release() -
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("release", ["unregister", "reset", "shutdown"])
-async def test_resume_waiter_is_woken_when_session_can_no_longer_bind(release: str) -> None:
+async def test_resume_waiter_is_woken_when_session_can_no_longer_bind(
+    release: str,
+) -> None:
     hub = CallTransportHub(resume_release_timeout=10.0)
     transport = session()
     hub.register(transport)
@@ -540,7 +557,10 @@ async def test_mixed_control_and_audio_share_one_client_sequence() -> None:
     assert message((await transport.receive_text(hangup(1)))[0])["ack_seq"] == 1
     assert message((await transport.receive_binary(audio(2)))[0])["ack_seq"] == 2
 
-    assert [(frame.kind, frame.seq) for frame in sink.frames] == [("control", 1), ("audio", 2)]
+    assert [(frame.kind, frame.seq) for frame in sink.frames] == [
+        ("control", 1),
+        ("audio", 2),
+    ]
 
 
 @pytest.mark.asyncio

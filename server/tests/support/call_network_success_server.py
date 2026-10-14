@@ -1,5 +1,7 @@
 """Offline loopback host for the successful call.v1 E2E acceptance flow."""
 
+# ruff: noqa: C901 - one bounded process host registers the complete test surface
+
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +9,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import time
 import wave
 from datetime import datetime, timedelta, timezone
@@ -96,7 +99,14 @@ def _runtime_config(root: Path) -> Path:
     config["infrastructure"]["media_resolution"]["root"] = str(root / "media")
     resources = root / "resources"
     resources.mkdir(exist_ok=True)
-    for name in ("knowledge.db", "song_names.txt", "song_lyrics.txt", "lyrics.json", "tts.yaml", "interface.json"):
+    for name in (
+        "knowledge.db",
+        "song_names.txt",
+        "song_lyrics.txt",
+        "lyrics.json",
+        "tts.yaml",
+        "interface.json",
+    ):
         path = resources / name
         if not path.exists():
             path.write_text("{}" if name.endswith(".json") else "", encoding="utf-8")
@@ -131,7 +141,12 @@ def _runtime_config(root: Path) -> Path:
     manifest.write_text(
         json.dumps(
             [
-                {"name": f"call_apology_{scene}_1", "audio_path": apology.name, "text": "Sorry", "expression": "normal"}
+                {
+                    "name": f"call_apology_{scene}_1",
+                    "audio_path": apology.name,
+                    "text": "Sorry",
+                    "expression": "normal",
+                }
                 for scene in ("opening", "turn", "silence")
             ]
         ),
@@ -186,15 +201,51 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
         address_path=root / "address.json",
         url=url,
     )
+    settlement_write_entered = threading.Event()
+    settlement_write_release = threading.Event()
+    settlement_write_release.set()
+    settlement_write_armed = threading.Event()
 
     @server_main.app.get("/test/evidence")
     async def evidence():
         runtime = lifecycle.admin_shell.runtime_supervisor.runtime if lifecycle.admin_shell is not None else None
         provider = _DeterministicSpeechFactory.instance
         return {
-            "call_transport_available": runtime.call_transport_available if runtime is not None else False,
+            "call_transport_available": (runtime.call_transport_available if runtime is not None else False),
             "provider_audio": provider.evidence() if provider is not None else [],
         }
+
+    @server_main.app.post("/test/settlement_write/block_next")
+    async def block_next_settlement_write():
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        conversations = runtime.database_manager.conversation_service
+        original = conversations.add_call_conversation
+
+        def blocked_add_call_conversation(*args, **kwargs):
+            if settlement_write_armed.is_set():
+                settlement_write_armed.clear()
+                settlement_write_entered.set()
+                if not settlement_write_release.wait(timeout=30):
+                    raise TimeoutError("test settlement write release timed out")
+            return original(*args, **kwargs)
+
+        conversations.add_call_conversation = blocked_add_call_conversation
+        settlement_write_entered.clear()
+        settlement_write_release.clear()
+        settlement_write_armed.set()
+        return {"ok": True}
+
+    @server_main.app.get("/test/settlement_write/status")
+    async def settlement_write_status():
+        return {
+            "entered": settlement_write_entered.is_set(),
+            "armed": settlement_write_armed.is_set(),
+        }
+
+    @server_main.app.post("/test/settlement_write/release")
+    async def release_settlement_write():
+        settlement_write_release.set()
+        return {"ok": True}
 
     @server_main.app.get("/test/reset_counts")
     async def reset_counts():
@@ -264,11 +315,19 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
         )
         runtime.database_manager.call_sessions.create_if_absent(preparing)
         runtime.database_manager.call_sessions.create_if_absent(active)
-        return {"preparing_call_id": str(preparing.call_id), "active_call_id": str(active.call_id)}
+        return {
+            "preparing_call_id": str(preparing.call_id),
+            "active_call_id": str(active.call_id),
+        }
 
     @server_main.app.post("/test/seed_recovery_conflict")
     async def seed_recovery_conflict():
-        from src.domain.call import CallEndReason, CallOutcome, CallState, derive_call_conversation_id
+        from src.domain.call import (
+            CallEndReason,
+            CallOutcome,
+            CallState,
+            derive_call_conversation_id,
+        )
         from src.domain.conversation_type import ConversationItem
         from src.infrastructure.persistence.call_sessions import CallSessionRecord
         from src.infrastructure.persistence.database.sql_database import User
@@ -318,10 +377,19 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
 
     @server_main.app.post("/test/seed_partial_settlement")
     async def seed_partial_settlement():
-        from src.domain.call import CallContent, CallEndReason, CallOutcome, CallState, derive_call_conversation_id
+        from src.domain.call import (
+            CallContent,
+            CallEndReason,
+            CallOutcome,
+            CallState,
+            derive_call_conversation_id,
+        )
         from src.domain.conversation_type import ConversationItem
         from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
-        from src.infrastructure.persistence.call_sessions import CallSessionRecord, SettlementStatus
+        from src.infrastructure.persistence.call_sessions import (
+            CallSessionRecord,
+            SettlementStatus,
+        )
         from src.infrastructure.persistence.database.sql_database import User
 
         runtime = lifecycle.admin_shell.runtime_supervisor.runtime
@@ -461,7 +529,10 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
 
     @server_main.app.post("/test/provider/{call_id}/interrupt")
     async def interrupt(call_id: str):
-        from src.infrastructure.models.realtime_speech import SpeechStarted, SpeechStopped
+        from src.infrastructure.models.realtime_speech import (
+            SpeechStarted,
+            SpeechStopped,
+        )
 
         provider = _provider(call_id)
         await provider.emit(SpeechStarted())

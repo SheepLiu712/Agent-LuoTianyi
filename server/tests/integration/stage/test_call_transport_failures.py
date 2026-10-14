@@ -12,7 +12,10 @@ from src.infrastructure.models.realtime_speech import SpeechStarted, TurnComplet
 
 async def assert_terminal(stage, repository, record, ownership, provider, transport, settlement, released):
     assert stage._transport_abort_task is not None
-    await asyncio.shield(stage._transport_abort_task)
+    try:
+        await asyncio.shield(stage._transport_abort_task)
+    except asyncio.CancelledError:
+        pass
     await asyncio.sleep(0)
     snapshot = stage.snapshot
     assert snapshot.terminal.outcome is CallOutcome.CONNECTED
@@ -26,7 +29,7 @@ async def assert_terminal(stage, repository, record, ownership, provider, transp
     assert stage._closed.is_set()
     assert not stage.tasks
     assert stage._transport_abort_task.done()
-    assert stage._transport_abort_task.exception() is None
+    assert stage._transport_abort_task.cancelled()
 
 
 @pytest.mark.asyncio
@@ -92,8 +95,12 @@ async def test_two_concurrent_stop_failures_collapse_to_one_abort(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(tmp_path):
-    from src.adapter.websocket.call_v1 import CallStageBinding, CallTransportSession, WireAudioFrame
+async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(
+    tmp_path,
+):
+    from src.adapter.websocket.call_v1 import WireAudioFrame
+    from src.adapter.websocket.call_v1.stage_binding import CallStageBinding
+    from src.adapter.websocket.call_v1.transport import CallTransportSession
 
     stage, repository, record, _, provider, _, settlement, _ = await create_active_stage(tmp_path)
     stopped = asyncio.Event()
@@ -110,13 +117,25 @@ async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(t
                 prefilled = True
                 for _ in range(90):
                     session.send_audio(
-                        WireAudioFrame(1, 2, 0, message["stream_id"], session.next_server_seq, b"\0" * 16000)
+                        WireAudioFrame(
+                            1,
+                            2,
+                            0,
+                            message["stream_id"],
+                            session.next_server_seq,
+                            b"\0" * 16000,
+                        )
                     )
             if message["type"] == "playback.stop":
                 stopped.set()
 
     bridge = CallStageBinding(call_id=str(record.call_id), deliver=deliver)
-    session = CallTransportSession(call_id=str(record.call_id), user_id="user", character_id="luotianyi", sink=bridge)
+    session = CallTransportSession(
+        call_id=str(record.call_id),
+        user_id="user",
+        character_id="luotianyi",
+        sink=bridge,
+    )
     bridge.bind(stage=stage, session=session)
     stage._transport = bridge
     try:

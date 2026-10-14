@@ -61,12 +61,6 @@ class FakeAgentRuntime:
         self.call_tts_character_ids = ()
         self.call_summary_character_ids = ()
 
-    def release_call_maintenance(self, _call_id):
-        pass
-
-    def release_call_resources(self, _call_id):
-        return False
-
     def get_agent(self, _character_id=None):
         return object()
 
@@ -133,7 +127,9 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "DatabaseManager", FakeDatabase)
     monkeypatch.setattr(runtime_module, "create_media_resolver", lambda _config: FakeMediaResolver())
     monkeypatch.setattr(
-        runtime_module, "WorldRuntime", lambda config, **kwargs: FakeWorld(config, calls=calls, **kwargs)
+        runtime_module,
+        "WorldRuntime",
+        lambda config, **kwargs: FakeWorld(config, calls=calls, **kwargs),
     )
     monkeypatch.setattr(runtime_module, "AgentRuntime", FakeAgentRuntime)
     monkeypatch.setattr(runtime_module, "UserInterface", FailingUserInterface)
@@ -203,7 +199,9 @@ async def test_initialization_rollback_waits_for_stage_manager_before_agent_and_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_count", [1, 2])
-async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_dependencies(cancel_count):
+async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_dependencies(
+    cancel_count,
+):
     calls = []
     entered = asyncio.Event()
     release = threading.Event()
@@ -272,7 +270,9 @@ async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_de
 
 
 @pytest.mark.asyncio
-async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_failures(caplog):
+async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_failures(
+    caplog,
+):
     calls = []
     entered = asyncio.Event()
     release = threading.Event()

@@ -12,7 +12,8 @@ from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.call_v1 import CallTransportBackpressure, CallTransportError, CallWebSocketAdapter
+from src.adapter.websocket.call_v1 import CallTransportError, CallWebSocketAdapter
+from src.adapter.websocket.call_v1.transport import CallTransportBackpressure
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
@@ -23,6 +24,8 @@ from src.stage.call_stage import CallStateChanged
 from src.utils.logger import get_logger
 from tests.integration.stage.test_call_stage import _ContextDatabase
 from tests.integration.stage.test_chat_stage import RecordingAgent
+
+# ruff: noqa: C901 - deterministic concurrency probes intentionally inline local fakes
 
 
 def start_message(request_id="request-1"):
@@ -100,6 +103,55 @@ class BlockingSpeechFactory:
 
 
 @pytest.mark.asyncio
+async def test_unavailable_character_is_rejected_before_business_claim():
+    speech = BlockingSpeechFactory()
+    stages, repository = manager(speech_factory=speech)
+    adapter = CallWebSocketAdapter(
+        manager=stages,
+        user_reset_fence=stages._user_reset_fence,
+        enabled=True,
+        supports_character=lambda character_id: character_id == "luotianyi",
+    )
+    raw = start_message().replace('"luotianyi"', '"other"')
+
+    with pytest.raises(CallTransportError) as rejected:
+        await adapter.open(raw=raw, user_id="user", connection_id=object())
+
+    assert rejected.value.code == "CALL_CHARACTER_UNAVAILABLE"
+    assert rejected.value.request_id == "request-1"
+    assert repository.find_by_request("request-1") is None
+    assert stages._call_claims == {}
+    await adapter.close()
+    await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_call_start_during_finalization_returns_retryable_public_error(
+    monkeypatch,
+):
+    speech = BlockingSpeechFactory()
+    stages, repository = manager(speech_factory=speech)
+    adapter = call_adapter(stages)
+
+    async def reject_finalizing(*_args, **_kwargs):
+        from src.stage import InteractionFinalizing
+
+        raise InteractionFinalizing()
+
+    monkeypatch.setattr(stages, "open_call", reject_finalizing)
+    with pytest.raises(CallTransportError) as rejected:
+        await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+
+    assert rejected.value.code == "INTERACTION_FINALIZING"
+    assert rejected.value.retryable is True
+    assert rejected.value.request_id == "request-1"
+    assert repository.find_by_request("request-1") is None
+    assert adapter._hub._sessions == {}
+    await adapter.close()
+    await stages.close()
+
+
+@pytest.mark.asyncio
 async def test_open_orders_preparing_before_ack_and_repeated_start_keeps_identity_and_deadline():
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
@@ -110,7 +162,12 @@ async def test_open_orders_preparing_before_ack_and_repeated_start_keeps_identit
     call_id = preparing["call_id"]
     deadline = stages._call_setup_deadlines["request-1"]
     assert preparing["type"] == "call.state" and preparing["state"] == "preparing"
-    assert ack == {"protocol": "call.v1", "type": "ack", "call_id": call_id, "ack_seq": 1}
+    assert ack == {
+        "protocol": "call.v1",
+        "type": "ack",
+        "call_id": call_id,
+        "ack_seq": 1,
+    }
     await adapter.disconnect(first)
 
     second = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
@@ -346,7 +403,9 @@ async def test_failed_business_resume_keeps_cursor_and_allows_later_resume(monke
 
 
 @pytest.mark.asyncio
-async def test_resume_buffers_stage_output_without_blocking_and_flushes_after_resumed(monkeypatch):
+async def test_resume_buffers_stage_output_without_blocking_and_flushes_after_resumed(
+    monkeypatch,
+):
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
@@ -364,7 +423,8 @@ async def test_resume_buffers_stage_output_without_blocking_and_flushes_after_re
 
     monkeypatch.setattr(stages, "commit_call_resume", emitting_commit)
     resumed = await asyncio.wait_for(
-        adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()), 1
+        adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()),
+        1,
     )
     first = json.loads((await adapter.next_output(resumed)).text)
     second = json.loads((await adapter.next_output(resumed)).text)
@@ -380,7 +440,7 @@ async def test_stage_none_resume_precheck_is_read_only():
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    original_create = stages.create_call_stage
+    original_create = stages._create_call_stage
     create_entered, create_release = asyncio.Event(), asyncio.Event()
 
     async def delayed_create(*args, **kwargs):
@@ -388,7 +448,7 @@ async def test_stage_none_resume_precheck_is_read_only():
         await create_release.wait()
         return await original_create(*args, **kwargs)
 
-    stages.create_call_stage = delayed_create
+    stages._create_call_stage = delayed_create
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)
@@ -453,7 +513,9 @@ async def test_real_stage_resume_pending_overflow_terminates_after_business_comm
     await asyncio.wait_for(wait_for_ringing(), 2)
     await control._stage.apply_answer(
         d.AnswerCall(
-            action_id="test-answer", call_id=control._stage._record.call_id, decision=CallAnswerDecision.ACCEPT
+            action_id="test-answer",
+            call_id=control._stage._record.call_id,
+            decision=CallAnswerDecision.ACCEPT,
         )
     )
     assert control._stage.state is CallState.ACTIVE
@@ -503,7 +565,9 @@ async def test_resume_commit_failure_after_active_uses_sqlite_stage_termination(
     await asyncio.wait_for(wait_for_ringing(), 2)
     await control._stage.apply_answer(
         d.AnswerCall(
-            action_id="test-answer", call_id=control._stage._record.call_id, decision=CallAnswerDecision.ACCEPT
+            action_id="test-answer",
+            call_id=control._stage._record.call_id,
+            decision=CallAnswerDecision.ACCEPT,
         )
     )
     assert control._stage.state is CallState.ACTIVE
@@ -629,7 +693,9 @@ async def test_cancelled_resume_after_business_commit_terminates_and_releases_ow
     await asyncio.wait_for(wait_for_ringing(), 2)
     await control._stage.apply_answer(
         d.AnswerCall(
-            action_id="test-answer", call_id=control._stage._record.call_id, decision=CallAnswerDecision.ACCEPT
+            action_id="test-answer",
+            call_id=control._stage._record.call_id,
+            decision=CallAnswerDecision.ACCEPT,
         )
     )
     await adapter.disconnect(connection)
@@ -668,7 +734,9 @@ async def test_cancelled_resume_after_business_commit_terminates_and_releases_ow
 
 
 @pytest.mark.asyncio
-async def test_second_cancel_preserves_resume_error_and_logs_owned_termination_failure(monkeypatch):  # noqa: C901
+async def test_second_cancel_preserves_resume_error_and_logs_owned_termination_failure(
+    monkeypatch,
+):  # noqa: C901
     class Session:
         call_id = "call"
 

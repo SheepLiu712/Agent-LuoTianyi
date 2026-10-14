@@ -269,23 +269,7 @@ class CallWebSocketAdapter:
                 user_id=user_id,
                 character_id=character_id,
                 client_request_id=request_id,
-                source_interaction_id=await self._manager.infer_call_source_interaction(
-                    user_id=user_id, character_id=character_id
-                ),
             )
-            existing = await self._manager.find_call_by_request(
-                request.client_request_id, user_id=user_id, character_id=character_id
-            )
-            if existing is not None:
-                try:
-                    return await self._attach_existing_start(existing, raw, user_id, connection_id)
-                except CallTransportError as error:
-                    raise self._start_error(
-                        error.code,
-                        request_id,
-                        request_seq,
-                        close_code=error.close_code,
-                    ) from error
             transport = _PreparedTransport(self, user_id=user_id, connection_id=connection_id)
             control = await self._manager.open_call(request, transport)
             if transport.binding is None:
