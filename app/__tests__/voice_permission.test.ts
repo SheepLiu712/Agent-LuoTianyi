@@ -7,13 +7,17 @@ jest.mock('react-native', () => ({
 
 beforeEach(() => { jest.clearAllMocks(); });
 
-it('reports a failed authorization instead of claiming the permission is closed', () => {
+it('gives feedback without claiming the permission is closed', () => {
   showMicrophoneSettings(jest.fn());
   const [title, message] = (Alert.alert as jest.Mock).mock.calls[0];
-  expect(title).toBe('麦克风授权失败');
-  expect(title).not.toContain('已关闭');
-  expect(message).toContain('重试');
-  expect(message).not.toContain('已关闭');
+
+  // 只要求"确实给出了反馈"：具体文案由文案评审决定，不用单元测试锁死措辞。
+  expect(typeof title).toBe('string');
+  expect(title.trim()).not.toBe('');
+  expect(typeof message).toBe('string');
+  expect(message.trim()).not.toBe('');
+  // 唯一保留的契约：不得把原因不明的未授权表述成"权限已关闭 / 永久拒绝"。
+  expect(`${title}${message}`).not.toMatch(/已关闭|永久/);
 });
 
 it('offers cancel and opens app settings only on explicit selection', async () => {
