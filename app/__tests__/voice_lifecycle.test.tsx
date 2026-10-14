@@ -103,13 +103,13 @@ it.each(['granted', 'not_granted'])('releases the input bar while the system per
   expect(state.captureState).toBe('Recording');
 });
 
-it('returns to the input bar without the settings prompt when the permission dialog is cancelled', async () => {
+it('returns to the input bar without a settings prompt for an ambiguous non-authorized result', async () => {
   options.recorder.getPermission.mockResolvedValueOnce('blocked');
   options.recorder.requestPermission.mockResolvedValueOnce('not_granted');
   await mount();
   await act(async () => { await state.pressIn(event); });
 
-  // 用户取消本次系统询问（含返回键）：不识别为永久拒绝，不引导去系统设置。
+  // Expo 无法区分本次取消、拒绝或其他未授权原因：不识别为永久拒绝，不引导去系统设置。
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
   expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(options.recorder.start).not.toHaveBeenCalled();
@@ -171,6 +171,35 @@ it('does not show a settings prompt for an ambiguous late denial', async () => {
   expect(options.onNotice).toHaveBeenCalledWith('未获得麦克风权限，可重试；如果系统不再询问，请到系统设置开启麦克风。');
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
+});
+
+it('invalidates pending permission when switching back to text mode', async () => {
+  let answer!: (value: string) => void;
+  options.recorder.getPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+  await mount();
+  await act(async () => { await state.pressIn(event); });
+  await act(async () => { state.toggleMode(); });
+  expect(state.mode).toBe('text');
+
+  await act(async () => { answer('not_granted'); });
+
+  expect(options.onNotice).not.toHaveBeenCalled();
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+});
+
+it('invalidates pending permission when the app goes to background', async () => {
+  let answer!: (value: string) => void;
+  options.recorder.getPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+  await mount();
+  await act(async () => { await state.pressIn(event); });
+  await endCapture('background');
+
+  await act(async () => { answer('not_granted'); });
+
+  expect(options.onNotice).not.toHaveBeenCalled();
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
 });
 
 it('ignores a permission failure that arrives after a newer attempt', async () => {

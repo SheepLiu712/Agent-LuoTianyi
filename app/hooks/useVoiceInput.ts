@@ -66,12 +66,20 @@ export function useVoiceInput(options: Options) {
   const toggleMode = useCallback(() => {
     if (starting.current || cancelling.current) return;
     if (state.current === 'TextMode') { setMode('voice'); transition('VoiceReady'); }
-    else if (state.current === 'VoiceReady') { setMode('text'); transition('TextMode'); }
+    else if (state.current === 'VoiceReady') {
+      if (permissionRequest.current) generation.current += 1;
+      setMode('text');
+      transition('TextMode');
+    }
   }, [transition]);
 
   const cancel = useCallback((reason: string): Promise<void> => {
     if (cancelling.current) return cancelling.current;
-    if (finishing.current || (!starting.current && !id.current)) return Promise.resolve();
+    if (finishing.current) return Promise.resolve();
+    if (!starting.current && !id.current) {
+      if (permissionRequest.current) generation.current += 1;
+      return Promise.resolve();
+    }
     generation.current += 1;
     const current = id.current;
     id.current = null;
