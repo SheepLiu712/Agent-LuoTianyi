@@ -10,6 +10,29 @@ from pathlib import Path
 import requests
 from sqlalchemy import create_engine, text
 
+_SERVER_MODULE = "support.call_network_success_server"
+_SERVER_BOOTSTRAP = """
+import os
+import runpy
+import sys
+import time
+
+started = time.monotonic()
+os.environ["CALL_TEST_START_MONOTONIC"] = repr(started)
+print(
+    "CALL_TEST_PHASE python-entered"
+    f" elapsed=0.000 pid={os.getpid()}"
+    f" executable={sys.executable} prefix={sys.prefix} base_prefix={sys.base_prefix}",
+    flush=True,
+)
+sys.argv = ["support.call_network_success_server", sys.argv[1]]
+runpy.run_module("support.call_network_success_server", run_name="__main__")
+"""
+
+
+def _server_command(root: Path) -> list[str]:
+    return [sys.executable, "-u", "-c", _SERVER_BOOTSTRAP, str(root)]
+
 
 def _start_server(root: Path):
     repo = Path(__file__).resolve().parents[4]
@@ -17,11 +40,12 @@ def _start_server(root: Path):
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(repo / "server"), str(repo / "server/tests"), env.get("PYTHONPATH", "")])
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env.pop(key, None)
     log = log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
-        [sys.executable, "-m", "support.call_network_success_server", str(root)],
+        _server_command(root),
         cwd=root,
         env=env,
         stdout=log,
@@ -66,11 +90,12 @@ def _start_server_expect_failure(root: Path) -> str:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(repo / "server"), str(repo / "server/tests"), env.get("PYTHONPATH", "")])
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env.pop(key, None)
     with log_path.open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
-            [sys.executable, "-m", "support.call_network_success_server", str(root)],
+            _server_command(root),
             cwd=root,
             env=env,
             stdout=log,
@@ -204,3 +229,51 @@ def test_production_startup_fails_closed_on_recovery_conflict_without_late_write
     assert first == second
     assert first == ("ended", "pending", "pending")
     assert conversation_count == 1
+
+
+def test_process_restart_repairs_partial_summary_and_maintenance_exactly_once(tmp_path):
+    root = tmp_path / "partial-settlement-restart"
+    root.mkdir()
+    process, http, url, log, log_path = _start_server(root)
+    try:
+        registered = http.post(
+            url + "/auth/register",
+            json={
+                "username": "alice",
+                "password": _encrypted_password(http, url, "offline-password"),
+                "invite_code": "invite",
+            },
+            timeout=10,
+        )
+        assert registered.ok, registered.text
+        seeded = http.post(url + "/test/seed_partial_settlement", timeout=10).json()
+    finally:
+        _stop_server(process, http, url, log, log_path)
+
+    expected = None
+    for _restart in range(2):
+        process, http, url, log, log_path = _start_server(root)
+        try:
+            evidence = http.get(url + "/test/recovery_counts", timeout=5).json()
+            by_id = {item["call_id"]: item for item in evidence["calls"]}
+            summary = by_id[seeded["summary_call_id"]]
+            maintenance = by_id[seeded["maintenance_call_id"]]
+            assert summary["summary_status"] == "succeeded"
+            assert summary["conversation_id"] == seeded["summary_conversation_id"]
+            assert maintenance["maintenance_status"] == "succeeded"
+            assert maintenance["maintenance_turn_seq"] == 1
+            assert evidence["call_conversations"] == 1
+            assert evidence["maintenance_batches"] == 1
+            current = (
+                summary["conversation_id"],
+                maintenance["maintenance_turn_seq"],
+                evidence["call_conversations"],
+                evidence["maintenance_batches"],
+                evidence["profile"],
+            )
+            if expected is None:
+                expected = current
+            else:
+                assert current == expected
+        finally:
+            _stop_server(process, http, url, log, log_path)

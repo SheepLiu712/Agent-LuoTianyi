@@ -171,6 +171,50 @@ def test_recovery_repairs_existing_terminal_projection_without_model_input(tmp_p
     engine.dispose()
 
 
+def test_normal_failed_summary_is_stable_and_never_reentered(tmp_path):
+    now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    engine, sessions, repository, conversations = _fixture(tmp_path / "normal-failed.sqlite")
+    ended = _record(
+        CallState.ENDED,
+        now,
+        outcome=CallOutcome.CONNECTED,
+        end_reason=CallEndReason.USER_HANGUP,
+        ended_at=now,
+        active_duration_ms=3_000,
+        summary_status=SettlementStatus.FAILED,
+        maintenance_status=SettlementStatus.SUCCEEDED,
+        settlement_input_digest="d" * 64,
+    )
+    repository.create_if_absent(ended)
+    before = repository.find_by_id(ended.call_id)
+
+    class ForbiddenBatches:
+        def list_for_call(self, **kwargs):
+            raise AssertionError("stable normal failure must not inspect maintenance projection")
+
+    class ForbiddenVerifier:
+        def verify_completed_batch(self, batch):
+            raise AssertionError("stable normal failure must not verify projection")
+
+    service = StaleCallRecoveryService(
+        call_sessions=repository,
+        conversation_service=conversations,
+        call_maintenance_batches=ForbiddenBatches(),
+        projection_verifier=ForbiddenVerifier(),
+        wall_clock=lambda: now + timedelta(minutes=1),
+    )
+
+    first = asyncio.run(service.reconcile())
+    second = asyncio.run(service.reconcile())
+
+    after = repository.find_by_id(ended.call_id)
+    assert first.scanned == second.scanned == 0
+    assert after == before
+    with sessions() as session:
+        assert session.query(Conversation).count() == 0
+    engine.dispose()
+
+
 def test_recovery_digest_is_stable_and_conflict_preserves_existing_winner(tmp_path):
     now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
     engine, sessions, repository, conversations = _fixture(tmp_path / "digest-conflict.sqlite")

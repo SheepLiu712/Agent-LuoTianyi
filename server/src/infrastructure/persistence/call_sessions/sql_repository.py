@@ -377,9 +377,12 @@ class SqlCallSessionRepository:
                         and_(
                             CallSession.state == CallState.ENDED.value,
                             CallSession.outcome == CallOutcome.CONNECTED.value,
-                            CallSession.end_reason == CallEndReason.SYSTEM_FAILURE.value,
                             or_(
-                                CallSession.summary_status != SettlementStatus.SUCCEEDED.value,
+                                and_(
+                                    CallSession.end_reason == CallEndReason.SYSTEM_FAILURE.value,
+                                    CallSession.summary_status != SettlementStatus.SUCCEEDED.value,
+                                ),
+                                CallSession.summary_status == SettlementStatus.PENDING.value,
                                 CallSession.maintenance_status == SettlementStatus.PENDING.value,
                             ),
                         ),

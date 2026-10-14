@@ -7,20 +7,40 @@ import json
 import os
 import socket
 import sys
+import time
 import wave
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import HTTPException
+_START_MONOTONIC = float(os.environ.get("CALL_TEST_START_MONOTONIC", time.monotonic()))
 
-import server_main
-import src.agent.skills.expression.speaking.backend as speaking_backend
-import src.agent_runtime.agent_runtime as agent_runtime_module
-import src.server_runtime as server_runtime_module
-from src.application.server_lifecycle import ServerLifecycle
-from support.call_coherent_runtime import DeterministicCallTTSModule, DeterministicLLMService, DeterministicVectorStore
-from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+
+def _startup_phase(name: str) -> None:
+    print(
+        f"CALL_TEST_PHASE {name} elapsed={time.monotonic() - _START_MONOTONIC:.3f}"
+        f" pid={os.getpid()} source={Path(__file__).resolve()}",
+        flush=True,
+    )
+
+
+_startup_phase("module-entered")
+
+from fastapi import HTTPException  # noqa: E402
+
+import server_main  # noqa: E402
+import src.agent.skills.expression.speaking.backend as speaking_backend  # noqa: E402
+import src.agent_runtime.agent_runtime as agent_runtime_module  # noqa: E402
+import src.server_runtime as server_runtime_module  # noqa: E402
+from src.application.server_lifecycle import ServerLifecycle  # noqa: E402
+from support.call_coherent_runtime import (  # noqa: E402
+    DeterministicCallTTSModule,
+    DeterministicLLMService,
+    DeterministicVectorStore,
+)
+from support.realtime_speech import FakeRealtimeSpeechSessionFactory  # noqa: E402
+
+_startup_phase("imports-complete")
 
 
 class _DeterministicSpeechFactory:
@@ -44,6 +64,7 @@ class _AddressPublishingLifecycle(ServerLifecycle):
         status = await super().start(**kwargs)
         if not status["running"]:
             raise RuntimeError(f"production runtime did not become ready: {status}")
+        _startup_phase("runtime-initialized")
         from src.infrastructure.persistence.database import InviteCode
 
         runtime = self.admin_shell.runtime_supervisor.runtime  # type: ignore[union-attr]
@@ -54,6 +75,7 @@ class _AddressPublishingLifecycle(ServerLifecycle):
         temporary = self._address_path.with_suffix(".tmp")
         temporary.write_text(json.dumps({"url": self._url}), encoding="utf-8")
         temporary.replace(self._address_path)
+        _startup_phase("address-published")
         return status
 
 
@@ -152,6 +174,7 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
     os.environ["QWEN_API_KEY"] = "offline-qwen-key"
     _install_external_seams()
     config_path = _runtime_config(root)
+    _startup_phase("config-built")
 
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -293,6 +316,105 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
         )
         return {"call_id": str(call_id)}
 
+    @server_main.app.post("/test/seed_partial_settlement")
+    async def seed_partial_settlement():
+        from src.domain.call import CallContent, CallEndReason, CallOutcome, CallState, derive_call_conversation_id
+        from src.domain.conversation_type import ConversationItem
+        from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
+        from src.infrastructure.persistence.call_sessions import CallSessionRecord, SettlementStatus
+        from src.infrastructure.persistence.database.sql_database import User
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            user_id = user.uuid
+            user.description = "stable recovered profile"
+            session.commit()
+        now = datetime.now(timezone.utc)
+
+        def record(call_id, request_id, digest):
+            return CallSessionRecord(
+                call_id=call_id,
+                client_request_id=request_id,
+                user_id=user_id,
+                character_id="luotianyi",
+                state=CallState.ENDED,
+                requested_at=now - timedelta(minutes=4),
+                created_at=now - timedelta(minutes=4),
+                updated_at=now - timedelta(minutes=3),
+                connected_at=now - timedelta(seconds=90),
+                ended_at=now - timedelta(seconds=45),
+                outcome=CallOutcome.CONNECTED,
+                end_reason=CallEndReason.USER_HANGUP,
+                active_duration_ms=20_000,
+                settlement_input_digest=digest,
+            )
+
+        summary_call_id = uuid4()
+        summary_digest = "a" * 64
+        summary_record = record(summary_call_id, f"partial-summary-{uuid4()}", summary_digest)
+        runtime.database_manager.call_sessions.create_if_absent(summary_record)
+        conversation_id = derive_call_conversation_id(
+            user_id=user_id, character_id="luotianyi", call_id=summary_call_id
+        )
+        summary = "已写入但账本尚未确认的正常概要"
+        content = CallContent(
+            call_id=summary_call_id,
+            outcome=CallOutcome.CONNECTED,
+            active_duration_ms=20_000,
+            summary=summary,
+            end_reason=CallEndReason.USER_HANGUP,
+        )
+        runtime.database_manager.conversation_service.add_call_conversation(
+            user_id,
+            "luotianyi",
+            ConversationItem(
+                uuid=str(conversation_id),
+                timestamp=summary_record.requested_at.replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds"),
+                source="user",
+                type="call",
+                content=content.render_for_agent(),
+                data={
+                    "call_id": str(summary_call_id),
+                    "outcome": CallOutcome.CONNECTED.value,
+                    "active_duration_ms": 20_000,
+                    "summary": summary,
+                    "end_reason": CallEndReason.USER_HANGUP.value,
+                },
+            ),
+        )
+
+        maintenance_call_id = uuid4()
+        maintenance_digest = "b" * 64
+        maintenance_record = record(
+            maintenance_call_id, f"partial-maintenance-{uuid4()}", maintenance_digest
+        ).with_update(
+            summary_status=SettlementStatus.SUCCEEDED,
+            conversation_id=derive_call_conversation_id(
+                user_id=user_id, character_id="luotianyi", call_id=maintenance_call_id
+            ),
+        )
+        runtime.database_manager.call_sessions.create_if_absent(maintenance_record)
+        batch = CallMaintenanceBatch(
+            maintenance_id=f"partial-maintenance-{maintenance_call_id}",
+            call_id=maintenance_call_id,
+            user_id=user_id,
+            character_id="luotianyi",
+            previous_turn_seq=0,
+            target_turn_seq=1,
+            settlement_input_digest=maintenance_digest,
+            candidates=(),
+            proposed_profile="stable recovered profile",
+            status="completed",
+        )
+        runtime.database_manager.call_maintenance_batches.create_or_load(batch)
+        runtime.database_manager.call_maintenance_batches.mark_completed(batch.maintenance_id)
+        return {
+            "summary_call_id": str(summary_call_id),
+            "summary_conversation_id": str(conversation_id),
+            "maintenance_call_id": str(maintenance_call_id),
+        }
+
     @server_main.app.get("/test/recovery_counts")
     async def recovery_counts():
         from src.infrastructure.persistence.database.sql_database import (
@@ -314,11 +436,13 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
                         "summary_status": row.summary_status,
                         "maintenance_status": row.maintenance_status,
                         "conversation_id": row.conversation_id,
+                        "maintenance_turn_seq": row.maintenance_turn_seq,
                     }
                     for row in calls
                 ],
                 "call_conversations": session.query(Conversation).filter_by(user_id=user.uuid, type="call").count(),
                 "maintenance_batches": session.query(CallMaintenanceBatch).filter_by(user_id=user.uuid).count(),
+                "profile": user.description,
             }
 
     @server_main.app.post("/test/stop")
