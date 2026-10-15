@@ -2,11 +2,14 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { AppState, GestureResponderEvent } from 'react-native';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { showMicrophoneSettings } from '../utils/voice_permission';
+import { showMicrophonePendingSettings, showMicrophoneSettings } from '../utils/voice_permission';
 jest.mock('react-native', () => ({ AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {} }));
-jest.mock('../utils/voice_permission', () => ({ showMicrophoneSettings: jest.fn() }));
+jest.mock('../utils/voice_permission', () => ({
+  showMicrophoneSettings: jest.fn(),
+  showMicrophonePendingSettings: jest.fn(),
+}));
 const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
 let tree: ReactTestRenderer;
 let state: ReturnType<typeof useVoiceInput>;
@@ -88,17 +91,18 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
   expect(state.captureState).toBe('VoiceReady');
   expect(options.onRecordingEnded).toHaveBeenCalledTimes(1);
-  // 请求仍在途时再按：不叠加第二个系统请求，改为给出去系统设置的出口。
+  // 请求仍在途时再按：不叠加第二个系统请求，走 pending 专用提示（标题与正文都说明“处理中”）。
   await act(async () => { await state.pressIn(event); });
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
-  expect((showMicrophoneSettings as jest.Mock).mock.calls[0][1]).toContain('处理中');
+  expect(showMicrophonePendingSettings).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
   // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不再重复弹一次设置入口。
   await act(async () => { answer(late); });
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(showMicrophonePendingSettings).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
   // 授权之后重新按住即可录音。
   await act(async () => { await state.pressIn(event); });
   expect(state.captureState).toBe('Recording');

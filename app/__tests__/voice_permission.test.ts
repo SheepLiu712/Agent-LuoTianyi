@@ -1,5 +1,5 @@
 import { Alert, Linking } from 'react-native';
-import { showMicrophoneSettings } from '../utils/voice_permission';
+import { showMicrophonePendingSettings, showMicrophoneSettings } from '../utils/voice_permission';
 
 jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() }, Linking: { openSettings: jest.fn() },
@@ -17,6 +17,20 @@ it('gives feedback without claiming the permission is closed', () => {
   expect(typeof message).toBe('string');
   expect(message.trim()).not.toBe('');
   // 唯一保留的契约：不得把原因不明的未授权表述成"权限已关闭 / 永久拒绝"。
+  expect(`${title}${message}`).not.toMatch(/已关闭|永久/);
+  // 已经返回的未授权结果不是 pending：不应出现"处理中"。
+  expect(`${title}${message}`).not.toContain('处理中');
+});
+
+it('renders the pending notice with a title that matches its body', () => {
+  showMicrophonePendingSettings(jest.fn());
+  const [title, message] = (Alert.alert as jest.Mock).mock.calls[0];
+
+  // 请求尚未返回时不能出现"失败"结论：标题与正文必须一致地只说明"处理中"。
+  expect(title).toContain('处理中');
+  expect(title).not.toContain('失败');
+  expect(message).toContain('处理中');
+  expect(message).not.toContain('失败');
   expect(`${title}${message}`).not.toMatch(/已关闭|永久/);
 });
 

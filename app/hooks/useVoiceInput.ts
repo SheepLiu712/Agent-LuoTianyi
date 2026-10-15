@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { SendStatus, VoiceCaptureState } from '../types/chat';
 import { MAX_VOICE_DURATION_MS, MIN_VOICE_DURATION_MS, voiceStateForMove } from '../utils/voice_gesture';
 import { VoiceRecorderApi, voiceRecorder } from '../utils/voice_recorder';
-import { showMicrophoneSettings } from '../utils/voice_permission';
+import { showMicrophonePendingSettings, showMicrophoneSettings } from '../utils/voice_permission';
 
 interface Options {
   onRecordingStarted: (id: string) => void;
@@ -102,10 +102,8 @@ export function useVoiceInput(options: Options) {
       if (permission !== 'granted') {
         transition('PermissionPrompt');
         if (permissionRequest.current) {
-          showMicrophoneSettings(
-            callbacks.current.onNotice,
-            '权限请求仍在处理中。请稍候重试，或在系统设置中查看麦克风权限。',
-          );
+          // 请求尚未返回：走 pending 专用入口，标题与正文都只说明“处理中”，不复用“授权失败”。
+          showMicrophonePendingSettings(callbacks.current.onNotice);
           return;
         }
         // 单次授权回收后，Expo 可能把状态报告成 blocked；一次状态检查不足以证明不能再次询问。
