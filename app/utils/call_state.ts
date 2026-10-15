@@ -96,7 +96,7 @@ export function reduceCallState(state: CallState, event: CallEvent): CallTransit
 
     case 'switch_failed':
       if (state.phase !== 'SWITCH_PREPARING') return transition(state);
-      return transition({ ...state, phase: 'FAILED', endReason: 'failed' }, [{ type: 'return_to_chat' }]);
+      return transition({ ...state, phase: 'FAILED', endReason: 'failed', ...(event.errorCode ? { failureCode: event.errorCode } : {}) }, [{ type: 'return_to_chat' }]);
 
     case 'transport_authenticated':
       if (state.phase !== 'CONNECTING' || !state.clientRequestId) return transition(state);
@@ -160,12 +160,14 @@ export function reduceCallState(state: CallState, event: CallEvent): CallTransit
       return finish(state, 'DECLINED', 'declined', 0);
 
     case 'call_ended':
-      if (state.phase === 'CONNECTING' || state.phase === 'PREPARING' || state.phase === 'RINGING' || state.phase === 'SWITCH_PREPARING') {
-        return finish(state, 'FAILED', 'failed', event.nowMs);
+      if (state.phase === 'REQUESTING_PERMISSION' || state.phase === 'CONNECTING' || state.phase === 'PREPARING' || state.phase === 'RINGING' || state.phase === 'SWITCH_PREPARING') {
+        const finished = finish(state, 'FAILED', 'failed', event.nowMs);
+        return transition({ ...finished.state, ...(event.errorCode ? { failureCode: event.errorCode } : {}) }, finished.effects);
       }
       if (state.phase === 'ENDING') return transition({ ...state, phase: 'ENDED', endReason: state.endReason ?? 'remote_ended', endedActiveDurationMs: state.endedActiveDurationMs ?? activeDurationAt(state, event.nowMs) });
       if (state.phase !== 'ACTIVE' && state.phase !== 'RECONNECTING') return transition(state);
-      return finish(state, 'ENDED', 'remote_ended', event.nowMs);
+      const ended = finish(state, 'ENDED', 'remote_ended', event.nowMs);
+      return transition({ ...ended.state, ...(event.errorCode ? { failureCode: event.errorCode } : {}) }, ended.effects);
   }
   return transition(state);
 }

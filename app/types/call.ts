@@ -41,6 +41,8 @@ export interface CallState {
   activeDurationAtDisconnectMs?: number;
   endedActiveDurationMs?: number;
   endReason?: CallEndReason;
+  /** Safe internal failure identifier; never rendered directly. */
+  failureCode?: string;
 }
 
 export type CallEffect =
@@ -62,7 +64,7 @@ export type CallEvent =
   | { type: 'permission_denied' }
   | { type: 'permission_permanently_denied' }
   | { type: 'switch_ready' }
-  | { type: 'switch_failed' }
+  | { type: 'switch_failed'; errorCode?: string }
   | { type: 'transport_authenticated' }
   | { type: 'transport_auth_failed' }
   | { type: 'server_state'; state: 'PREPARING' | 'RINGING'; callId?: string }
@@ -76,7 +78,7 @@ export type CallEvent =
   | { type: 'transport_resumed'; nowMs: number }
   | { type: 'recovery_timeout' }
   | { type: 'declined' }
-  | { type: 'call_ended'; nowMs: number }
+  | { type: 'call_ended'; nowMs: number; errorCode?: string }
   | { type: 'return_to_chat' }
   | { type: 'reset_to_idle' };
 
