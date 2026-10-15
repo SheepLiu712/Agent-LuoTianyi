@@ -104,6 +104,21 @@ describe('AndroidCallAudio adapter', () => {
     expect(completed).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards only current-generation playback progress and rejects stale progress', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const progress = jest.fn();
+    const stream = { callId: 'call', responseId: 'response', streamId: 1 };
+    await audio.initialize();
+    audio.subscribePlaybackProgress(progress);
+    await audio.enqueue({ stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true });
+
+    native.emit('onPlaybackProgress', { responseId: 'response', streamId: 1, generation: 0, sessionGeneration: 1, rms: 0.4 });
+    native.emit('onPlaybackProgress', { responseId: 'response', streamId: 1, generation: 1, sessionGeneration: 1, rms: 4 });
+    expect(progress).toHaveBeenCalledTimes(1);
+    expect(progress.mock.calls[0][0].rms).toBe(1);
+  });
+
   it('commits a native completion that arrives before enqueue resolves exactly once', async () => {
     const native = new FakeNativeCallAudio();
     const audio = new AndroidCallAudio({}, native, 'android');

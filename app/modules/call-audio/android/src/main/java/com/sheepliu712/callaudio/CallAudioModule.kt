@@ -71,6 +71,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       "onCapturedAudio",
       "onPlaybackCompleted",
       "onPlaybackStopped",
+      "onPlaybackProgress",
       "onAudioFailure",
       "onLifecycle",
       "onRouteChanged",
@@ -378,6 +379,8 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private fun playbackLoop(track: AudioTrack, eventSessionGeneration: Long) {
     val accounting = PlaybackLoopAccounting(track.playbackHeadPosition.toLong() and 0xffffffffL)
     val commandProcessor = PlaybackCommandProcessor(playbackState, accounting)
+    val visualIdleGate = PlaybackVisualIdleGate()
+    var lastProgressNanos = 0L
     while (playbackRunning.get() || hasPlaybackCommands()) {
       val command = synchronized(playbackCommandLock) {
         if (playbackCommands.isEmpty()) null else playbackCommands.removeFirst()
@@ -418,7 +421,8 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
             break
           }
           offset += written
-          accounting.recordSubmitted(written / 2L)
+          accounting.recordSubmitted(written / 2L, pcmRms(chunk.payload))
+          visualIdleGate.onSubmitted()
         }
         if (offset == chunk.payload.size && chunk.isFinal && isCurrent(chunk)) {
           accounting.markFinal(chunk)
@@ -426,11 +430,26 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       }
 
       val currentHead = track.playbackHeadPosition.toLong() and 0xffffffffL
+      val previousPlayedFrames = accounting.playedFrames
       accounting.observeHead(currentHead)
+      val nowNanos = System.nanoTime()
+      if (accounting.playedFrames > previousPlayedFrames && active != null && streamGenerations.containsKey(active) &&
+        nowNanos - lastProgressNanos >= 33_000_000L
+      ) {
+        emitPlaybackProgress(active, accounting.rmsAtPlayedFrames(), eventSessionGeneration)
+        lastProgressNanos = nowNanos
+      }
+      if (active != null && streamGenerations.containsKey(active) && visualIdleGate.shouldEmitIdle(
+          queue.hasFor(active), accounting.playedFrames, accounting.submittedFrames, accounting.finalTarget != null,
+        )
+      ) {
+        emitPlaybackProgress(active, 0.0, eventSessionGeneration)
+      }
       accounting.finalTarget?.first?.let { finalChunk ->
         if (!isCurrent(finalChunk)) accounting.discardStaleFinal()
         else accounting.takeConsumedFinal()?.let { consumedFinal ->
           completion(consumedFinal, eventSessionGeneration)
+          visualIdleGate.reset()
           playbackState.complete(finalChunk.key)
           accounting.complete(track.playbackHeadPosition.toLong() and 0xffffffffL)
         }
@@ -443,6 +462,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       replyFailureTonePending.set(false)
       return
     }
+    emitPlaybackProgress(chunk.key, 0.0, eventSessionGeneration)
     sendEvent(
       "onPlaybackCompleted",
       mapOf(
@@ -452,6 +472,35 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
         "sessionGeneration" to eventSessionGeneration,
       ),
     )
+  }
+
+  private fun emitPlaybackProgress(key: StreamKey, rms: Double, eventSessionGeneration: Long) {
+    if (isReplyFailureTone(key)) return
+    sendEvent(
+      "onPlaybackProgress",
+      mapOf(
+        "responseId" to key.responseId,
+        "streamId" to key.streamId,
+        "generation" to (streamGenerations[key] ?: return),
+        "sessionGeneration" to eventSessionGeneration,
+        "rms" to rms,
+      ),
+    )
+  }
+
+  private fun pcmRms(payload: ByteArray): Double {
+    if (payload.size < 2) return 0.0
+    var sumSquares = 0.0
+    var samples = 0
+    var offset = 0
+    while (offset + 1 < payload.size) {
+      val sample = ((payload[offset + 1].toInt() shl 8) or (payload[offset].toInt() and 0xff)).toShort().toInt()
+      val normalized = sample / 32768.0
+      sumSquares += normalized * normalized
+      samples += 1
+      offset += 2
+    }
+    return if (samples == 0) 0.0 else kotlin.math.sqrt(sumSquares / samples)
   }
 
   private fun stopPlayback(responseId: String?, streamId: Int?, promise: Promise) {
@@ -497,6 +546,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       replyFailureTonePending.set(false)
       return
     }
+    emitPlaybackProgress(key, 0.0, eventSessionGeneration)
     sendEvent(
       "onPlaybackStopped",
       mapOf(

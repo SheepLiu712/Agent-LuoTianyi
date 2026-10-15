@@ -18,6 +18,7 @@ import type {
   CapturedAudioFrame,
   PlaybackConsumptionReceipt,
 } from '../call_audio_contracts';
+import type { PlaybackProgress } from './playback_progress';
 import type { CallAudioCapability } from '../../types/call';
 import { PlaybackGenerationLedger } from './playback_ledger';
 import { CaptureRecoveryBuffer } from './recovery_buffer';
@@ -81,6 +82,7 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
   private readonly finalEnqueueReservations = new Map<string, FinalEnqueueReservation>();
   private readonly subscriptions: { remove(): void }[] = [];
   private consumptionListener: (receipt: PlaybackConsumptionReceipt) => void = () => {};
+  private progressListener: (progress: PlaybackProgress) => void = () => {};
   private captureListener: ((frame: CapturedAudioFrame) => void) | undefined;
   private capturePaused = false;
   private sessionGeneration: number | undefined;
@@ -236,8 +238,16 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
     };
   }
 
+  subscribePlaybackProgress(listener: (progress: PlaybackProgress) => void): () => void {
+    this.progressListener = listener;
+    return () => {
+      if (this.progressListener === listener) this.progressListener = () => {};
+    };
+  }
+
   async close(): Promise<void> {
     this.subscriptions.splice(0).forEach((subscription) => subscription.remove());
+    this.progressListener = () => {};
     this.captureListener = undefined;
     this.recoveryBuffer.clear();
     this.streams.clear();
@@ -281,6 +291,16 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
         if (!this.isCurrentSession(event.sessionGeneration)) return;
         const stream = this.streams.get(this.key(event.responseId, event.streamId));
         if (stream) this.ledger.tombstone(stream, event.generation);
+      }),
+      this.native.addListener('onPlaybackProgress', (event) => {
+        if (!this.isCurrentSession(event.sessionGeneration)) return;
+        const stream = this.streams.get(this.key(event.responseId, event.streamId));
+        if (!stream || !sameStream(stream, event.responseId, event.streamId)) return;
+        if (!this.ledger.acceptsProgress(stream, event.generation)) return;
+        this.progressListener({
+          stream,
+          rms: Number.isFinite(event.rms) ? Math.max(0, Math.min(1, event.rms)) : 0,
+        });
       }),
       this.native.addListener('onAudioFailure', (event) => {
         if (this.isCurrentSession(event.sessionGeneration)) this.events.onFailure?.(event);

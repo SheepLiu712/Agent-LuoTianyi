@@ -41,6 +41,7 @@ import { CallScreen } from '../components/call/CallScreen';
 import { requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
 import { ExpoCallRingtone } from '../utils/call_session/ringtone';
 import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
+import { createCallMouthBridge } from '../utils/call_audio/playback_progress';
 
 const THINKING_BUBBLE_FRAMES = [
   require('../assets/images/thinking_bubble1.png'),
@@ -69,6 +70,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [hasDynamicsUnread, setHasDynamicsUnread] = useState(false);
   const [dynamicsUnreadCount, setDynamicsUnreadCount] = useState(0);
   const webviewRef = useRef<WebView>(null);
+  const callMouthBridge = useMemo(() => createCallMouthBridge((code) => webviewRef.current?.injectJavaScript(code)), []);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
   const callHangupRef = useRef<() => void>(() => {});
@@ -123,6 +125,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     switchPort: { prepare: (clientRequestId, characterId) => callSwitchRef.current.prepare(clientRequestId, characterId) },
     onAuthRequired: () => onLogoutRef.current?.(),
     onError: (error) => addDebugTrace('call', 'capability probe failed', { error: String(error) }),
+    mouthBridge: callMouthBridge,
   });
 
   const call = useCallSession({
