@@ -36,7 +36,7 @@ from .agreement_dialog import (
     TEXT_RETRY,
     render_agreement_document,
 )
-from .signing_gate import STATUS_LOAD_FAILED, SigningGate
+from .signing_gate import STATUS_LOAD_FAILED, STATUS_SUBMITTING, SigningGate
 
 COLOR_DISABLED = "#D1D5DB"
 TEXT_REJECT = "不同意，返回注册"
@@ -89,6 +89,8 @@ class AgreementSignDialog(QDialog):
         self._load_request_id = 0
         self._load_in_flight = False
         self._document_payload: Optional[Mapping[str, Any]] = None
+        self.submit_token = ""
+        self._allow_close = False
         self.gate = SigningGate()
         self.version: str = ""
         self.last_error: str = ""
@@ -219,6 +221,9 @@ class AgreementSignDialog(QDialog):
         self.retry_btn.setVisible(False)
         self.gate.begin_loading()
         self.gate.mark_loaded()
+        # 异步正文可能在窗口已经显示且仍处于前台时返回；加载重置门禁后要从此刻继续累计。
+        if self.isVisible() and self.isActiveWindow() and not self.isMinimized():
+            self.gate.resume(self._clock())
         self._sync_scroll_state()
         self._refresh_actions()
 
@@ -245,9 +250,11 @@ class AgreementSignDialog(QDialog):
         """提交结果：成功关闭窗口；失败恢复可操作状态并保留本窗口的阅读状态。"""
         if success:
             self._timer.stop()
+            self._allow_close = True
             self.accept()
             return
         self.gate.end_submit()
+        self._allow_close = False
         self.last_error = message
         self._set_error(message or "提交失败，请重试")
         self._refresh_actions()
@@ -331,7 +338,16 @@ class AgreementSignDialog(QDialog):
         self._set_error(self.gate.load_failed_text)
         self._refresh_actions()
 
+    def reject(self) -> None:  # noqa: N802 - Qt 命名
+        # 提交期间禁止 Esc/代码调用 reject；否则后台结果可能串到后续注册窗口。
+        if self.gate.status == STATUS_SUBMITTING and not self._allow_close:
+            return
+        super().reject()
+
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        if self.gate.status == STATUS_SUBMITTING and not self._allow_close:
+            event.ignore()
+            return
         self._timer.stop()
         super().closeEvent(event)
 

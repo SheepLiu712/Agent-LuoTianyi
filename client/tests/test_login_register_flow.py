@@ -35,6 +35,7 @@ class FakeSignDialog(QDialog):
         self.reject_text = None
         self.reloads = 0
         self.submissions: list[tuple] = []
+        self.submit_token = "fake-token"
         FakeSignDialog.last_instance = self
 
     def set_reject_text(self, text: str) -> None:
@@ -162,6 +163,7 @@ def test_submit_sends_request_id_version_and_acceptance(dialog):
     dialog.widget.do_register()
 
     sign = FakeSignDialog.last_instance
+    dialog.widget._sign_dialog = sign
     dialog.widget._start_registration_submit("terms-2026-10-v1")
     # 线程池任务同步执行：直接调用提交函数更便于断言参数
     outcome = dialog.widget._register_with_agreement(dialog.widget._submit_context, "terms-2026-10-v1")
@@ -178,14 +180,45 @@ def test_submit_sends_request_id_version_and_acceptance(dialog):
     assert registration_resume.load_pending() is not None  # 提交前先落盘请求 ID，供响应丢失后重试
 
 
+def test_resume_submission_reuses_original_agreement_version(dialog):
+    registration_resume.save_pending("req-old", "newbie", "terms-v1")
+    sign = FakeSignDialog()
+    dialog.widget._sign_dialog = sign
+    dialog.widget._submit_context = {
+        "username": "newbie",
+        "password": "pw",
+        "invite": "INVITE",
+        "request_id": "req-old",
+        "resume_agreement_version": "terms-v1",
+    }
+
+    dialog.widget._start_registration_submit("terms-v2")
+
+    assert registration_resume.load_pending()["agreement_version"] == "terms-v1"
+
+
+def test_late_result_from_old_dialog_does_not_complete_new_dialog(dialog):
+    new = FakeSignDialog()
+    new.submit_token = "new-token"
+    dialog.widget._sign_dialog = new
+    dialog.widget._active_register_token = "new-token"
+
+    dialog.widget._on_register_finished("old-token", RegisterOutcome(True, "old success"))
+
+    assert new.submissions == []
+    assert new.result() != QDialog.DialogCode.Accepted
+
+
 def test_version_change_prompts_reread_and_reloads(dialog):
     dialog.widget.fill_register_form()
     dialog.widget.do_register()
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
 
     dialog.widget._on_register_finished(
-        RegisterOutcome(False, "用户协议已更新，请重新阅读", code="AGREEMENT_CHANGED", agreement_version="v2")
+        sign.submit_token,
+        RegisterOutcome(False, "用户协议已更新，请重新阅读", code="AGREEMENT_CHANGED", agreement_version="v2"),
     )
 
     assert sign.submissions == [(False, "用户协议已更新，请重新阅读")]
@@ -197,9 +230,11 @@ def test_conflict_shows_error_without_reload(dialog):
     dialog.widget.do_register()
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
 
     dialog.widget._on_register_finished(
-        RegisterOutcome(False, "该注册请求与先前提交的内容不一致，请勿盲目重试", code="REGISTRATION_REQUEST_CONFLICT")
+        sign.submit_token,
+        RegisterOutcome(False, "该注册请求与先前提交的内容不一致，请勿盲目重试", code="REGISTRATION_REQUEST_CONFLICT"),
     )
 
     assert sign.submissions == [(False, "该注册请求与先前提交的内容不一致，请勿盲目重试")]
@@ -211,8 +246,9 @@ def test_network_failure_keeps_window_open(dialog):
     dialog.widget.do_register()
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
 
-    dialog.widget._on_register_finished(RegisterOutcome(False, "网络超时"))
+    dialog.widget._on_register_finished(sign.submit_token, RegisterOutcome(False, "网络超时"))
 
     assert sign.submissions == [(False, "网络超时")]
 

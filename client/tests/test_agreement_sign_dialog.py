@@ -125,6 +125,20 @@ def test_confirm_emits_submit_request_with_version_and_shows_progress(dialog, cl
     assert dialog.reject_btn.isEnabled() is False
 
 
+def test_submit_cannot_be_closed_by_reject_or_close_event(dialog, clock):
+    dialog.begin_submit()
+    dialog.reject()
+    assert dialog.isVisible() is True
+    assert dialog.result() == 0
+
+    from PySide6.QtGui import QCloseEvent
+
+    event = QCloseEvent()
+    dialog.closeEvent(event)
+    assert event.isAccepted() is False
+    assert dialog.isVisible() is True
+
+
 def test_failed_submit_keeps_window_open_and_reading_state(dialog, clock):
     clock.advance(5.0)
     dialog._on_tick()
@@ -179,6 +193,23 @@ def test_new_version_resets_timer_and_bottom(dialog, clock):
     assert dialog.confirm_btn.isEnabled() is False
     assert dialog.confirm_btn.text() == TEXT_CONFIRM_WAITING.format(seconds=5)
     assert dialog.version == "terms-2026-10-v2"
+
+
+def test_async_loaded_document_resumes_timer_when_window_stays_active(app, clock):
+    widget = AgreementSignDialog(load_document=lambda: (True, "", SHORT_DOC), clock=clock)
+    widget.show()
+    app.processEvents()
+    widget._load_signals.finished.emit(widget._load_request_id, (True, "", SHORT_DOC))
+    app.processEvents()
+
+    clock.advance(5.0)
+    widget._on_tick()
+
+    assert widget.gate.elapsed_seconds == 5.0
+    assert widget.gate.reached_bottom is True
+    assert widget.confirm_btn.isEnabled() is True
+    widget.close()
+    widget.deleteLater()
 
 
 def test_load_failure_disables_confirm_and_offers_retry(app, clock):

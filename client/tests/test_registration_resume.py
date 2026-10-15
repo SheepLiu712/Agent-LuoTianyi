@@ -23,14 +23,20 @@ def test_request_id_changes_when_username_changes(monkeypatch, tmp_path):
     assert registration_resume.request_id_for("someone-else") != first
 
 
-def test_pending_record_only_keeps_request_id_and_username(monkeypatch, tmp_path):
+def test_pending_record_keeps_request_id_username_and_version_without_secrets(monkeypatch, tmp_path):
     monkeypatch.setattr(registration_resume.storage, "temp_path", lambda name: str(tmp_path / name))
 
-    registration_resume.save_pending("req-1", "newbie")
+    registration_resume.save_pending("req-1", "newbie", "terms-v1")
 
     on_disk = json.loads((tmp_path / registration_resume.FILENAME).read_text(encoding="utf-8"))
-    assert on_disk == {"registration_request_id": "req-1", "username": "newbie"}
+    assert on_disk == {
+        "registration_request_id": "req-1",
+        "username": "newbie",
+        "agreement_version": "terms-v1",
+    }
+    assert registration_resume.load_pending()["agreement_version"] == "terms-v1"
     assert "password" not in json.dumps(on_disk)
+    assert "invite" not in json.dumps(on_disk)
 
 
 def test_clear_pending_removes_the_record(monkeypatch, tmp_path):

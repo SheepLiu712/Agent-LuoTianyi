@@ -1,6 +1,8 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+import uuid
+
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit,
                                QPushButton, QMessageBox, QTabWidget, QWidget, QCheckBox)
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from .agreement_sign_dialog import AgreementSignDialog
 from .binder import AgentBinder
@@ -12,14 +14,15 @@ from ..utils.http_client import HttpClientFactory
 
 
 class _RegisterSignals(QObject):
-    finished = Signal(object)
+    finished = Signal(str, object)
 
 
 class _RegisterTask(QRunnable):
     """在后台线程提交注册，避免阻塞界面（"正在提交…" 期间界面仍可响应）。"""
 
-    def __init__(self, submit, signals: _RegisterSignals):
+    def __init__(self, token: str, submit, signals: _RegisterSignals):
         super().__init__()
+        self._token = token
         self._submit = submit
         self._signals = signals
 
@@ -28,7 +31,7 @@ class _RegisterTask(QRunnable):
             outcome = self._submit()
         except Exception as error:  # noqa: BLE001 - 统一转成可显示的结果
             outcome = RegisterOutcome(False, str(error))
-        self._signals.finished.emit(outcome)
+        self._signals.finished.emit(self._token, outcome)
 
 
 class LoginDialog(QDialog):
@@ -44,6 +47,7 @@ class LoginDialog(QDialog):
         self._register_signals.finished.connect(self._on_register_finished)
         self._sign_dialog: AgreementSignDialog | None = None
         self._submit_context: dict | None = None
+        self._active_register_token: str | None = None
 
         self.setWindowTitle("ChatWithLuoTianyi - 登录/注册")
         self.setFixedSize(420, 380)
@@ -220,14 +224,21 @@ class LoginDialog(QDialog):
             return
 
         # 本地校验通过后才打开协议窗口：此时不建账号、不占用邀请码。
+        pending = registration_resume.load_pending()
         request_id = registration_resume.request_id_for(username)
+        resume_version = ""
+        if pending and pending.get("username") == username and pending.get("registration_request_id") == request_id:
+            resume_version = pending.get("agreement_version", "")
         self._submit_context = {
             "username": username,
             "password": password,
             "invite": invite,
             "request_id": request_id,
+            "resume_agreement_version": resume_version,
         }
         dialog = AgreementSignDialog(self, load_document=self._load_agreement)
+        dialog.submit_token = uuid.uuid4().hex
+        self._active_register_token = None
         dialog.set_reject_text("不同意，返回注册")
         dialog.submit_requested.connect(self._start_registration_submit)
         self._sign_dialog = dialog
@@ -252,15 +263,22 @@ class LoginDialog(QDialog):
 
     def _start_registration_submit(self, agreement_version: str) -> None:
         context = self._submit_context or {}
-        if not context:
+        dialog = self._sign_dialog
+        if not context or dialog is None:
             return
-        registration_resume.save_pending(context["request_id"], context["username"])
+        # 未决请求恢复必须重放原协议版本；没有原版本时才使用当前窗口版本。
+        submit_version = context.get("resume_agreement_version") or agreement_version
+        registration_resume.save_pending(context["request_id"], context["username"], submit_version)
+        flow_token = dialog.submit_token
+        self._active_register_token = flow_token
         self._thread_pool.start(
             _RegisterTask(
-                lambda: self._register_with_agreement(context, agreement_version),
+                flow_token,
+                lambda: self._register_with_agreement(context, submit_version),
                 self._register_signals,
             )
         )
+        dialog.submit_token = flow_token
 
     def _register_with_agreement(self, context: dict, agreement_version: str) -> RegisterOutcome:
         submit = getattr(self.binder, "on_register_with_agreement", None)
@@ -277,9 +295,9 @@ class LoginDialog(QDialog):
             return RegisterOutcome(False, "当前客户端未接线协议注册")
         return outcome
 
-    def _on_register_finished(self, outcome) -> None:
+    def _on_register_finished(self, token: str, outcome) -> None:
         dialog = self._sign_dialog
-        if dialog is None:
+        if dialog is None or token != self._active_register_token or getattr(dialog, "submit_token", "") != token:
             return
         if not isinstance(outcome, RegisterOutcome):
             outcome = RegisterOutcome(bool(outcome and outcome[0]), str(outcome[1]) if outcome else "")
