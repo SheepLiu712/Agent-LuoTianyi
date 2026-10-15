@@ -158,6 +158,9 @@ class _Turn:
     status: CallReplyStatus = CallReplyStatus.NOT_STARTED
     formal_text: str | None = None
     started_at: float = 0.0
+    started_at_timestamp: str = ""
+    first_audio_recorded: bool = False
+    first_audio_disqualified: bool = False
 
 
 class CallStage:
@@ -252,7 +255,6 @@ class CallStage:
         self._lifecycle_lock = asyncio.Lock()
         self._transport_abort_task: asyncio.Task[Any] | None = None
         self._aborting_transport = False
-        self._first_audio_started_at: float | None = None
         self._reconnect_count = 0
         self._connection_available = connection_available
         self._pending_answer: d.AnswerCall | None = None
@@ -402,6 +404,12 @@ class CallStage:
                 return
             disconnected_at = self._now()
             disconnected_monotonic = self._monotonic()
+            # A turn whose reply crosses a transport disconnect cannot prove a
+            # continuous first-audio delivery path. Do not turn its later
+            # buffered or replayed output into a successful latency sample.
+            for turn in self._turns.values():
+                if not turn.first_audio_recorded:
+                    turn.first_audio_disqualified = True
             await self._transition_or_close(CallState.RECONNECTING, ledger_facts={"disconnected_at": disconnected_at})
             if self._first_disconnect_monotonic is None:
                 self._first_disconnect_monotonic = disconnected_monotonic
@@ -572,7 +580,11 @@ class CallStage:
         if self.state is not CallState.ACTIVE:
             return
         sequence = len(self._turns) + 1
-        self._turns[sequence] = _Turn(event.semantic.render(), started_at=self._monotonic())
+        self._turns[sequence] = _Turn(
+            event.semantic.render(),
+            started_at=self._monotonic(),
+            started_at_timestamp=self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds"),
+        )
         self._unfinished_turns.add(sequence)
         self._playback.set_unfinished_user_turn_count(len(self._unfinished_turns))
         stimulus = d.CallTurnCompleted(
@@ -1198,17 +1210,26 @@ class CallStage:
         value = self._wall_clock()
         return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
-    def _record_metric(self, name, *, duration_ms, status=CallMetricStatus.SUCCESS, numeric=None, labels=None) -> None:
+    def _record_metric(
+        self,
+        name,
+        *,
+        duration_ms,
+        status=CallMetricStatus.SUCCESS,
+        numeric=None,
+        labels=None,
+        start_ts: str | None = None,
+    ) -> None:
         if self._call_metrics is None:
             return
-        timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
+        end_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
         try:
             self._call_metrics.record(
                 CallMetric(
                     call_id=self._record.call_id,
                     name=name,
-                    start_ts=timestamp,
-                    end_ts=timestamp,
+                    start_ts=start_ts or end_timestamp,
+                    end_ts=end_timestamp,
                     duration_ms=duration_ms,
                     status=status,
                     numeric=numeric,
@@ -1481,13 +1502,6 @@ class _OutputSink:
         now = self._stage._monotonic()
         if response.audio_started_at is None:
             response.audio_started_at = now
-            if self._stage._first_audio_started_at is None:
-                self._stage._first_audio_started_at = now
-                self._stage._record_metric(
-                    CallMetricName.FIRST_AUDIO,
-                    duration_ms=0,
-                    labels={"result": CallMetricResult.SUCCEEDED.value},
-                )
         if response.stream_id is None:
             response.stream_id = self._stage._next_stream_id
             self._stage._next_stream_id += 1
@@ -1504,6 +1518,7 @@ class _OutputSink:
         finally:
             self._stage._pending_send -= 1
             self._stage._playback.set_pending_send_count(self._stage._pending_send)
+        self._record_first_audio(response, output)
         if output.final:
             self._stage.playback_final(response_id, response.stream_id)
             self._stage._record_metric(
@@ -1511,3 +1526,18 @@ class _OutputSink:
                 duration_ms=max(0, (self._stage._monotonic() - response.audio_started_at) * 1000),
                 labels={"result": CallMetricResult.SUCCEEDED.value},
             )
+
+    def _record_first_audio(self, response: _Response, output: d.AudioChunkOutput) -> None:
+        """Record the first nonempty PCM chunk successfully accepted by transport per user turn."""
+        if not output.data or response.turn_seq is None:
+            return
+        turn = self._stage._turns.get(response.turn_seq)
+        if turn is None or turn.first_audio_recorded or turn.first_audio_disqualified:
+            return
+        turn.first_audio_recorded = True
+        self._stage._record_metric(
+            CallMetricName.FIRST_AUDIO,
+            duration_ms=max(0, (self._stage._monotonic() - turn.started_at) * 1000),
+            labels={"result": CallMetricResult.SUCCEEDED.value},
+            start_ts=turn.started_at_timestamp,
+        )
