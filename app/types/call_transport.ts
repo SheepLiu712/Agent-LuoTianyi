@@ -92,6 +92,9 @@ export interface CallTransportSnapshot {
   status: CallTransportStatus;
   callId?: string;
   clientRequestId?: string;
+  /** Server wall-clock epoch from the accepted call.active message. */
+  connectedAtServerMs?: number;
+  /** Local monotonic equivalent derived once when call.active is received. */
   connectedAtMonotonicMs?: number;
   activeDurationMs: number;
   recoveryDeadlineMonotonicMs?: number;

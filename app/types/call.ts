@@ -33,7 +33,9 @@ export interface CallState {
   requiresChatSwitch: boolean;
   clientRequestId?: string;
   callId?: string;
-  /** Timestamp of the first ACTIVE transition for the displayed call clock. */
+  /** Server wall-clock epoch reported by call.active, retained for traceability. */
+  connectedAtServerMs?: number;
+  /** Local monotonic timestamp of the first ACTIVE transition. */
   activeStartedAtMs?: number;
   /** Active duration at the first unsuccessful reconnect boundary. */
   activeDurationAtDisconnectMs?: number;
@@ -64,7 +66,7 @@ export type CallEvent =
   | { type: 'transport_authenticated' }
   | { type: 'transport_auth_failed' }
   | { type: 'server_state'; state: 'PREPARING' | 'RINGING'; callId?: string }
-  | { type: 'call_active'; callId: string; connectedAtMs: number }
+  | { type: 'call_active'; callId: string; connectedAtMs: number; connectedAtServerMs?: number }
   | { type: 'user_hangup'; nowMs: number }
   | { type: 'back_requested' }
   | { type: 'back_confirmed'; nowMs: number }

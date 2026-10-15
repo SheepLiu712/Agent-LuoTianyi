@@ -14,6 +14,7 @@ import { CallSession } from './call_session';
 import { CallTransportSession } from '../call_transport/call_transport';
 import { createPlatformCallSocketFactory } from '../call_transport/websocket_adapter';
 import { AndroidCallAudio, isAndroidCallAudioModuleAvailable } from '../call_audio/native_call_audio';
+import { callMonotonicNowMs } from '../call_clock';
 
 export type CallCapabilityReason =
   | 'available'
@@ -78,7 +79,7 @@ const CAPABILITY_REASONS = new Set<CallCapabilityReason>([
 ]);
 
 const clock = {
-  monotonicMs: () => globalThis.performance?.now?.() ?? Date.now(),
+  monotonicMs: callMonotonicNowMs,
   wallClockMs: () => Date.now(),
   setTimeout: (callback: () => void, delayMs: number) => setTimeout(callback, delayMs),
   clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),

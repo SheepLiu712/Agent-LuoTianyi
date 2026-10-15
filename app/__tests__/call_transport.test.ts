@@ -108,7 +108,9 @@ async function establish() {
   socket.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
   await flush();
   socket.message(serverControl({ protocol: 'call.v1', type: 'call.state', seq: 1, call_id: CALL_ID, client_request_id: 'request-1', state: 'preparing' }));
-  socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 10 }));
+  // The server timestamp is a UTC epoch. It intentionally differs from local
+  // receipt time by 100 ms, rather than pretending it is a local monotonic value.
+  socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 1_000 }));
   await flush();
   return { sockets, native, clock, session, socket };
 }
@@ -121,6 +123,64 @@ describe('reliable call transport', () => {
     outbox.acknowledge(1);
     expect(() => outbox.replayMissing(1)).toThrow('REPLAY_NOT_AVAILABLE');
     expect(() => outbox.acknowledge(2)).toThrow('INVALID_ACK_CURSOR');
+  });
+
+  test('preserves the server epoch anchor when ACTIVE is delayed and derives elapsed time on the local monotonic clock', async () => {
+    const { clock, session } = await establish();
+
+    // The fixture delivers ACTIVE at monotonic 100 although the server connected
+    // at epoch 1,000. The server's wall-clock epoch is intentionally not a
+    // monotonic timestamp, so it must not be subtracted from `clock.now`.
+    expect(session.state.connectedAtServerMs).toBe(1_000);
+    expect(session.state.activeDurationMs).toBe(100);
+
+    clock.advance(500);
+    expect(session.state.activeDurationMs).toBe(600);
+  });
+
+  test('keeps its initial server anchor and local duration across duplicate ACTIVE and resume', async () => {
+    const { clock, native, session, socket, sockets } = await establish();
+    clock.advance(400);
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 3, call_id: CALL_ID, connected_at_ms: 1_000 }));
+    await flush();
+    expect(session.state).toMatchObject({ connectedAtServerMs: 1_000, activeDurationMs: 500 });
+    expect(native.frames).toHaveLength(1);
+
+    socket.emit('close', { code: 1006 });
+    clock.advance(500);
+    const recovery = sockets.sockets[1];
+    recovery.message(JSON.stringify({ type: 'system_ready', payload: {} }));
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 3,
+    }));
+    await flush();
+
+    expect(session.state).toMatchObject({ status: 'connected', connectedAtServerMs: 1_000, activeDurationMs: 1_000 });
+  });
+
+  test('clamps a future server epoch at zero and remains monotonic after a local wall-clock jump', async () => {
+    const sockets = new FakeSockets();
+    const native = fakeNative();
+    const clock = new FakeClock();
+    clock.wallClockMs = () => 1_000;
+    const session = new CallTransportSession({
+      url: 'ws://example/call_ws', credentials: { username: 'u', token: 't' }, characterId: 'luotianyi',
+      sockets, nativeAudio: native, clock, serverAvailable: true, nativeAvailable: true,
+    });
+    await session.start({ clientRequestId: 'request-1', characterId: 'luotianyi' });
+    const socket = sockets.sockets[0];
+    socket.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.state', seq: 1, call_id: CALL_ID, client_request_id: 'request-1', state: 'preparing' }));
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 2_000 }));
+    await flush();
+    expect(session.state.activeDurationMs).toBe(0);
+
+    clock.wallClockMs = () => 50;
+    clock.advance(400);
+    expect(session.state.activeDurationMs).toBe(400);
   });
 
   test('does not NACK future frames while contiguous frames await native acceptance', () => {
@@ -504,7 +564,7 @@ describe('reliable call transport', () => {
     await flush();
     expect(session.state.status).toBe('connected');
     clock.advance(500);
-    expect(session.state.activeDurationMs).toBe(1_500);
+    expect(session.state.activeDurationMs).toBe(1_600);
     socket.message(serverControl({ protocol: 'call.v1', type: 'call.ended', seq: 3, call_id: CALL_ID, outcome: 'connected', end_reason: 'system_failure', active_duration_ms: 1 }));
     await flush();
     expect(session.state.status).toBe('connected');
@@ -515,7 +575,7 @@ describe('reliable call transport', () => {
     clock.advance(1_000);
     socket.emit('close', { code: 1006 });
     clock.advance(3_000);
-    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'RECOVERY_TIMEOUT', activeDurationMs: 1_000 });
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'RECOVERY_TIMEOUT', activeDurationMs: 1_100 });
   });
 
   test('network recovery preserves audio and buffers captured PCM until the resumed handshake', async () => {
@@ -603,7 +663,7 @@ describe('reliable call transport', () => {
   test('repeats a cumulative ACK for an identical duplicate after ACK loss', async () => {
     const { socket, session } = await establish();
     const before = socket.sent.length;
-    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 10 }));
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 1_000 }));
     await flush();
     expect(socket.sent).toHaveLength(before + 1);
     expect(JSON.parse(socket.sent.at(-1) as string)).toMatchObject({ type: 'ack', ack_seq: 2 });
