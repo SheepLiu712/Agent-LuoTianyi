@@ -71,9 +71,11 @@ function fakeNative(): CallNativeAudioPort & {
   unsubscribeCount: number;
   stopCaptureCount: number;
   stopPlaybackCount: number;
+  replyFailureToneCount: number;
 } {
   return {
     frames: [], enqueued: [], pauseCount: 0, unsubscribeCount: 0, stopCaptureCount: 0, stopPlaybackCount: 0,
+    replyFailureToneCount: 0,
     async getCapability() { return 'available'; },
     async startCapture(_format, onFrame) { this.frames.push(onFrame); },
     async stopCapture() { this.stopCaptureCount += 1; },
@@ -82,6 +84,7 @@ function fakeNative(): CallNativeAudioPort & {
     async enqueue(chunk) { this.enqueued.push(chunk.payload); },
     async stop() { this.stopPlaybackCount += 1; },
     async tombstone() {},
+    async playReplyFailureTone() { this.replyFailureToneCount += 1; },
     subscribeConsumption(listener) { this.listener = listener; return () => { this.listener = undefined; this.unsubscribeCount += 1; }; },
   };
 }
@@ -384,6 +387,82 @@ describe('reliable call transport', () => {
     expect(close).toHaveBeenCalledWith(4001, 'call transport failed');
     expect(new TextEncoder().encode(close.mock.calls[0][1] || '').byteLength).toBeLessThanOrEqual(123);
     expect(established.sockets.sockets).toHaveLength(1);
+  });
+
+  test('keeps an active call usable after CALL_TTS_FAILED and accepts the next response', async () => {
+    const { session, socket, native } = await establish();
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_TTS_FAILED',
+      message: 'call reply audio could not be generated', retryable: false, call_id: CALL_ID,
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(socket.readyState).toBe(1);
+    expect(native.stopCaptureCount).toBe(0);
+    expect(native.replyFailureToneCount).toBe(1);
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'next-response', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]),
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(native.enqueued).toEqual([new Uint8Array([1, 0])]);
+    const controls = socket.sent.filter((wire): wire is string => typeof wire === 'string').map((wire) => JSON.parse(wire));
+    expect(controls.some((message) => message.type === 'playback.completed')).toBe(false);
+  });
+
+  test('keeps unrelated protocol errors fatal', async () => {
+    const { session, socket, native } = await establish();
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_SETUP_FAILED',
+      message: 'system_failure', retryable: false, call_id: CALL_ID,
+    }));
+    await flush();
+
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'CALL_SETUP_FAILED' });
+    expect(native.replyFailureToneCount).toBe(0);
+  });
+
+  test('does not terminate the call when the local reply failure tone cannot play', async () => {
+    const { session, socket, native } = await establish();
+    native.playReplyFailureTone = async () => { throw new Error('local_tone_failed'); };
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_TTS_FAILED',
+      message: 'call reply audio could not be generated', retryable: false, call_id: CALL_ID,
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(socket.readyState).toBe(1);
+    expect(native.stopCaptureCount).toBe(0);
+  });
+
+  test('coalesces duplicate CALL_TTS_FAILED notifications while the same local cue is playing', async () => {
+    const { session, socket, native } = await establish();
+    let finishTone!: () => void;
+    native.playReplyFailureTone = jest.fn(async () => new Promise<void>((resolve) => { finishTone = resolve; }));
+    const failure = serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_TTS_FAILED',
+      message: 'call reply audio could not be generated', retryable: false, call_id: CALL_ID,
+    });
+
+    socket.message(failure);
+    socket.message(failure);
+    await flush();
+
+    expect(native.playReplyFailureTone).toHaveBeenCalledTimes(1);
+    expect(session.state.status).toBe('connected');
+    finishTone();
+    await flush();
   });
 
   test('a stop placeholder accepts its delayed matching registration without reviving playback', async () => {

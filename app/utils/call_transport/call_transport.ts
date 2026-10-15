@@ -88,6 +88,7 @@ export class CallTransportSession {
   private readonly unsubscribeConsumption: () => void;
   private terminalPromise: Promise<void> | null = null;
   private pendingEnded: CallEnded | null = null;
+  private replyFailureTone: Promise<void> | null = null;
 
   constructor(private readonly options: CallTransportOptions) {
     this.outbox = new ReliableCallOutbox(96_000, options.controlOutboxEntries ?? 64);
@@ -542,8 +543,27 @@ export class CallTransportSession {
     this.pendingEnded = message;
   }
 
-  private handleProtocolError(message: CallProtocolError): never {
+  private handleProtocolError(message: CallProtocolError): void {
+    if (
+      message.code === 'CALL_TTS_FAILED' &&
+      this.snapshot.status === 'connected' &&
+      message.call_id !== undefined
+    ) {
+      this.validateCallIdentity({ call_id: message.call_id });
+      this.playReplyFailureTone();
+      return;
+    }
     throw new Error(message.code || 'SERVER_PROTOCOL_ERROR');
+  }
+
+  private playReplyFailureTone(): void {
+    if (this.replyFailureTone || this.closed) return;
+    const playing = this.options.nativeAudio.playReplyFailureTone()
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.replyFailureTone === playing) this.replyFailureTone = null;
+      });
+    this.replyFailureTone = playing;
   }
 
   private sendSequencedControl(factory: (seq: number) => ControlMessage): void {

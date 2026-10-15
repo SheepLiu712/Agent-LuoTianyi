@@ -177,6 +177,7 @@ export class ProductionCallResolver {
       tombstone: (stream) => nativeAudio.tombstone(stream),
       pauseCapture: () => nativeAudio.pauseCapture(),
       resumeCapture: () => nativeAudio.resumeCapture(),
+      playReplyFailureTone: () => nativeAudio.playReplyFailureTone(),
       subscribeConsumption: (listener) => nativeAudio.subscribeConsumption(listener),
     };
     const transport = new CallTransportSession({

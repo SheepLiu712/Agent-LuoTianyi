@@ -185,6 +185,10 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
     await native.tombstone(stream.responseId, stream.streamId);
   }
 
+  async playReplyFailureTone(): Promise<void> {
+    await this.requireNative().playReplyFailureTone();
+  }
+
   setConsumptionListener(listener: (receipt: PlaybackConsumptionReceipt) => void): void {
     this.consumptionListener = listener;
   }
