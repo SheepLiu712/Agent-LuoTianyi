@@ -7,25 +7,39 @@ export interface MicrophoneNotice {
 }
 
 /**
- * 未获得授权。
+ * 请求已返回、但原因不明的未授权结果。
  *
- * Expo 在 Android 上无法可靠区分"本次取消""普通拒绝"和"永久拒绝"，所以只陈述"这次授权失败"，
- * 不声称权限已关闭或用户已永久拒绝；用户可以重试，也可以去系统设置。
+ * Expo 在 Android 上无法可靠区分"本次取消""普通拒绝"和"永久拒绝"，所以只陈述"这次没拿到权限"，
+ * 用非模态提示让用户可重试，也告知设置入口；不自动弹出设置对话框，避免把可重试结果升级成永久拒绝。
  */
-export const MICROPHONE_FAILURE_NOTICE: MicrophoneNotice = {
-  title: '麦克风授权失败',
-  message: '未能获得麦克风权限。你可以重新按住说话重试；也可以在系统设置中允许使用麦克风。',
+export const MICROPHONE_AMBIGUOUS_MESSAGE =
+  '未获得麦克风权限，可重新按住说话重试；如果系统不再询问，可在系统设置中开启麦克风。';
+
+/** 请求仍在途：只说明状态，不预告结果。 */
+export const MICROPHONE_PENDING_MESSAGE = '权限请求仍在处理中，请稍候重试。';
+
+/** 请求长时间没有返回：此时才提供设置出口。 */
+export const MICROPHONE_STUCK_NOTICE: MicrophoneNotice = {
+  title: '麦克风权限请求未返回',
+  message: '系统权限请求长时间没有返回。可以重试，也可以到系统设置检查麦克风权限。',
 };
 
-/** 请求仍在途：结果尚未返回，不能提前断言授权失败，只说明状态并给出出口。 */
-export const MICROPHONE_PENDING_NOTICE: MicrophoneNotice = {
-  title: '麦克风权限请求处理中',
-  message: '权限请求仍在处理中。请稍候重试；也可以在系统设置中查看麦克风权限。',
-};
+/**
+ * 在途多久算"卡住"。
+ *
+ * 这里量的是**请求在途时长**，不是"系统框是否出现过"，也不用于推断用户意图（取消 / 拒绝 / 永久拒绝）。
+ * 正常系统框由用户操作，返回时间远大于该值；只有请求异常挂起时才会触发设置出口。
+ */
+export const PERMISSION_STUCK_AFTER_MS = 8000;
 
+/**
+ * 弹出带设置入口的提示。
+ *
+ * 只应在"请求长时间未返回"这类需要用户去系统设置排查时调用；已返回的模糊未授权结果走非模态文案。
+ */
 export function showMicrophoneSettings(
   onError: (message: string) => void,
-  notice: MicrophoneNotice = MICROPHONE_FAILURE_NOTICE,
+  notice: MicrophoneNotice = MICROPHONE_STUCK_NOTICE,
 ) {
   Alert.alert(notice.title, notice.message, [
     { text: '取消', style: 'cancel' },
@@ -33,13 +47,4 @@ export function showMicrophoneSettings(
       void Linking.openSettings().catch(() => onError('无法打开系统设置，请手动为本应用开启麦克风权限'));
     } },
   ]);
-}
-
-/**
- * 请求仍在途时的提示。
- *
- * 单独成一个入口，避免调用方只替换正文却留着"授权失败"的标题，造成同一弹窗自相矛盾。
- */
-export function showMicrophonePendingSettings(onError: (message: string) => void) {
-  showMicrophoneSettings(onError, MICROPHONE_PENDING_NOTICE);
 }

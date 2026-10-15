@@ -2,13 +2,15 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { AppState, GestureResponderEvent } from 'react-native';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { showMicrophonePendingSettings, showMicrophoneSettings } from '../utils/voice_permission';
+import { MICROPHONE_AMBIGUOUS_MESSAGE, MICROPHONE_PENDING_MESSAGE, PERMISSION_STUCK_AFTER_MS, showMicrophoneSettings } from '../utils/voice_permission';
 jest.mock('react-native', () => ({ AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {} }));
 jest.mock('../utils/voice_permission', () => ({
   showMicrophoneSettings: jest.fn(),
-  showMicrophonePendingSettings: jest.fn(),
+  MICROPHONE_AMBIGUOUS_MESSAGE: '未获得麦克风权限，可重新按住说话重试；如果系统不再询问，可在系统设置中开启麦克风。',
+  MICROPHONE_PENDING_MESSAGE: '权限请求仍在处理中，请稍候重试。',
+  PERMISSION_STUCK_AFTER_MS: 8000,
 }));
 const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
 let tree: ReactTestRenderer;
@@ -91,17 +93,17 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
   expect(state.captureState).toBe('VoiceReady');
   expect(options.onRecordingEnded).toHaveBeenCalledTimes(1);
-  // 请求仍在途时再按：不叠加第二个系统请求，走 pending 专用提示（标题与正文都说明“处理中”）。
+  // 请求仍在途时再按：不叠加第二个系统请求，只给非模态“处理中”提示，不弹设置对话框。
   await act(async () => { await state.pressIn(event); });
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
-  expect(showMicrophonePendingSettings).toHaveBeenCalledTimes(1);
+  expect(options.onNotice).toHaveBeenCalledWith(MICROPHONE_PENDING_MESSAGE);
   expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不再重复弹一次设置入口。
+  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不追加提示。
   await act(async () => { answer(late); });
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
-  expect(showMicrophonePendingSettings).toHaveBeenCalledTimes(1);
+  expect(options.onNotice).toHaveBeenCalledTimes(1);
   expect(showMicrophoneSettings).not.toHaveBeenCalled();
   // 授权之后重新按住即可录音。
   await act(async () => { await state.pressIn(event); });
@@ -126,7 +128,7 @@ it('reports a failed permission request instead of swallowing it', async () => {
   expect(state.captureState).toBe('Recording');
 });
 
-it('still offers the settings entry when a late blocked result is still the current attempt', async () => {
+it('does not auto-open the settings dialog when a blocked result comes back', async () => {
   let answer!: (value: string) => void;
   options.recorder.getPermission.mockResolvedValueOnce('denied');
   options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
@@ -134,9 +136,56 @@ it('still offers the settings entry when a late blocked result is still the curr
   await act(async () => { await state.pressIn(event); await state.pressOut(); });
   await act(async () => { answer('blocked'); });
 
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  // 已返回但原因不明：只给非模态提示，不擅自升级成“永久拒绝/去设置”。
+  expect(options.onNotice).toHaveBeenCalledWith(MICROPHONE_AMBIGUOUS_MESSAGE);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
+});
+
+it('offers the settings entry only after the pending request stays outstanding', async () => {
+  let answer!: (value: string) => void;
+  const nowSpy = jest.spyOn(Date, 'now');
+  nowSpy.mockReturnValue(1_000_000);
+  options.recorder.getPermission
+    .mockResolvedValueOnce('denied')
+    .mockResolvedValueOnce('denied')
+    .mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+  try {
+    await mount();
+    await act(async () => { await state.pressIn(event); await state.pressOut(); });
+
+    // 还没到阈值：只提示“处理中”，不弹设置对话框。
+    nowSpy.mockReturnValue(1_000_000 + PERMISSION_STUCK_AFTER_MS - 1);
+    await act(async () => { await state.pressIn(event); });
+    expect(showMicrophoneSettings).not.toHaveBeenCalled();
+    expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+
+    // 超过阈值：给出设置出口，且始终不叠加第二个系统请求。
+    nowSpy.mockReturnValue(1_000_000 + PERMISSION_STUCK_AFTER_MS);
+    await act(async () => { await state.pressIn(event); });
+    expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+    expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  } finally {
+    nowSpy.mockRestore();
+    await act(async () => { answer('granted'); });
+  }
+});
+
+it('does not post a late permission notice after switching back to text mode', async () => {
+  let answer!: (value: string) => void;
+  options.recorder.getPermission.mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+  await mount();
+  await act(async () => { await state.pressIn(event); });
+  await act(async () => { state.toggleMode(); });
+  expect(state.mode).toBe('text');
+
+  await act(async () => { answer('blocked'); });
+
+  expect(options.onNotice).not.toHaveBeenCalled();
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
 });
 
 it('ignores a permission failure that arrives after a newer attempt', async () => {

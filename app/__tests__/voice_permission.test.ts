@@ -1,5 +1,9 @@
 import { Alert, Linking } from 'react-native';
-import { showMicrophonePendingSettings, showMicrophoneSettings } from '../utils/voice_permission';
+import {
+  MICROPHONE_AMBIGUOUS_MESSAGE,
+  MICROPHONE_PENDING_MESSAGE,
+  showMicrophoneSettings,
+} from '../utils/voice_permission';
 
 jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() }, Linking: { openSettings: jest.fn() },
@@ -18,20 +22,27 @@ it('gives feedback without claiming the permission is closed', () => {
   expect(message.trim()).not.toBe('');
   // 唯一保留的契约：不得把原因不明的未授权表述成"权限已关闭 / 永久拒绝"。
   expect(`${title}${message}`).not.toMatch(/已关闭|永久/);
-  // 已经返回的未授权结果不是 pending：不应出现"处理中"。
-  expect(`${title}${message}`).not.toContain('处理中');
 });
 
-it('renders the pending notice with a title that matches its body', () => {
-  showMicrophonePendingSettings(jest.fn());
+it('renders the settings dialog with a title that matches its body', () => {
+  showMicrophoneSettings(jest.fn());
   const [title, message] = (Alert.alert as jest.Mock).mock.calls[0];
 
-  // 请求尚未返回时不能出现"失败"结论：标题与正文必须一致地只说明"处理中"。
-  expect(title).toContain('处理中');
+  // 这个弹窗只在"请求长时间没有返回"时出现：标题与正文都必须说明这一点，不能预告授权失败。
+  expect(title).toContain('未返回');
+  expect(message).toContain('没有返回');
   expect(title).not.toContain('失败');
-  expect(message).toContain('处理中');
-  expect(message).not.toContain('失败');
   expect(`${title}${message}`).not.toMatch(/已关闭|永久/);
+});
+
+it('keeps the non-modal messages free of permanent-denial wording', () => {
+  // 已返回的模糊未授权 → 强调可重试；在途 → 只说明处理中。
+  expect(MICROPHONE_AMBIGUOUS_MESSAGE).toContain('重试');
+  expect(MICROPHONE_PENDING_MESSAGE).toContain('处理中');
+  for (const text of [MICROPHONE_AMBIGUOUS_MESSAGE, MICROPHONE_PENDING_MESSAGE]) {
+    expect(text).not.toMatch(/已关闭|永久/);
+    expect(text).not.toContain('授权失败');
+  }
 });
 
 it('offers cancel and opens app settings only on explicit selection', async () => {
