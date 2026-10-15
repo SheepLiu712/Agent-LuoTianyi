@@ -313,6 +313,144 @@ def test_existing_normal_digest_repairs_legal_winner_without_creating_fallback(t
     engine.dispose()
 
 
+def test_claimed_normal_empty_projection_recovers_failed_summary_once(tmp_path):
+    now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    engine, sessions, repository, conversations = _fixture(tmp_path / "normal-empty.sqlite")
+    ended = _record(
+        CallState.ENDED,
+        now,
+        outcome=CallOutcome.CONNECTED,
+        end_reason=CallEndReason.USER_HANGUP,
+        ended_at=now,
+        active_duration_ms=3_000,
+        settlement_input_digest="e" * 64,
+    )
+    repository.create_if_absent(ended)
+    service = StaleCallRecoveryService(
+        call_sessions=repository,
+        conversation_service=conversations,
+        call_maintenance_batches=_Batches(),
+        projection_verifier=_Verifier(),
+        wall_clock=lambda: now,
+    )
+
+    first = asyncio.run(service.reconcile())
+    second = asyncio.run(service.reconcile())
+
+    current = repository.find_by_id(ended.call_id)
+    assert first == first.__class__(scanned=1, recovered=1, skipped=0, conflicted=0, failed=0)
+    assert second.scanned == 0
+    assert current.summary_status is SettlementStatus.SUCCEEDED
+    assert current.maintenance_status is SettlementStatus.FAILED
+    with sessions() as session:
+        rows = session.query(Conversation).filter_by(user_id="owner", type="call").all()
+        assert len(rows) == 1
+        assert "本次通话未能形成可用概要" in rows[0].content
+    engine.dispose()
+
+
+def test_unclaimed_normal_pending_repairs_existing_winner_without_fallback(tmp_path):
+    now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    engine, sessions, repository, conversations = _fixture(tmp_path / "unclaimed-winner.sqlite")
+    ended = _record(
+        CallState.ENDED,
+        now,
+        outcome=CallOutcome.CONNECTED,
+        end_reason=CallEndReason.USER_HANGUP,
+        ended_at=now,
+        active_duration_ms=3_000,
+        summary_status=SettlementStatus.PENDING,
+        maintenance_status=SettlementStatus.SUCCEEDED,
+    )
+    repository.create_if_absent(ended)
+    conversation_id = derive_call_conversation_id(
+        user_id=ended.user_id, character_id=ended.character_id, call_id=ended.call_id
+    )
+    summary = "已经持久化的正常概要"
+    content = CallContent(
+        call_id=ended.call_id,
+        outcome=ended.outcome,
+        active_duration_ms=ended.active_duration_ms,
+        summary=summary,
+        end_reason=ended.end_reason,
+    )
+    conversations.add_call_conversation(
+        ended.user_id,
+        ended.character_id,
+        ConversationItem(
+            uuid=str(conversation_id),
+            timestamp=ended.requested_at.replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds"),
+            source="user",
+            type="call",
+            content=content.render_for_agent(),
+            data={
+                "call_id": str(ended.call_id),
+                "outcome": ended.outcome.value,
+                "active_duration_ms": ended.active_duration_ms,
+                "summary": summary,
+                "end_reason": ended.end_reason.value,
+            },
+        ),
+    )
+    service = StaleCallRecoveryService(
+        call_sessions=repository,
+        conversation_service=conversations,
+        call_maintenance_batches=_Batches(),
+        projection_verifier=_Verifier(),
+        wall_clock=lambda: now,
+    )
+
+    first = asyncio.run(service.reconcile())
+    second = asyncio.run(service.reconcile())
+
+    current = repository.find_by_id(ended.call_id)
+    assert first.recovered == 1
+    assert second.scanned == 0
+    assert current.settlement_input_digest is None
+    assert current.summary_status is SettlementStatus.SUCCEEDED
+    assert current.maintenance_status is SettlementStatus.SUCCEEDED
+    with sessions() as session:
+        rows = session.query(Conversation).filter_by(user_id="owner", type="call").all()
+        assert len(rows) == 1
+    winner = conversations.get_call_conversation(
+        str(conversation_id), user_id=ended.user_id, character_id=ended.character_id
+    )
+    assert winner.data["summary"] == summary
+    engine.dispose()
+
+
+def test_unclaimed_normal_pending_without_winner_is_safely_skipped(tmp_path):
+    now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
+    engine, sessions, repository, conversations = _fixture(tmp_path / "unclaimed-empty.sqlite")
+    ended = _record(
+        CallState.ENDED,
+        now,
+        outcome=CallOutcome.CONNECTED,
+        end_reason=CallEndReason.USER_HANGUP,
+        ended_at=now,
+        active_duration_ms=3_000,
+        summary_status=SettlementStatus.PENDING,
+        maintenance_status=SettlementStatus.SUCCEEDED,
+    )
+    repository.create_if_absent(ended)
+    before = repository.find_by_id(ended.call_id)
+    service = StaleCallRecoveryService(
+        call_sessions=repository,
+        conversation_service=conversations,
+        call_maintenance_batches=_Batches(),
+        projection_verifier=_Verifier(),
+        wall_clock=lambda: now,
+    )
+
+    first = asyncio.run(service.reconcile())
+
+    assert first == first.__class__(scanned=1, recovered=0, skipped=1, conflicted=0, failed=0)
+    assert repository.find_by_id(ended.call_id) == before
+    with sessions() as session:
+        assert session.query(Conversation).count() == 0
+    engine.dispose()
+
+
 def test_recovery_cancellation_waits_for_owned_sql_write_and_converges_on_retry(tmp_path):
     now = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
     engine, sessions, repository, conversations = _fixture(tmp_path / "cancel-owned.sqlite")

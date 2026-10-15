@@ -10,7 +10,14 @@ from hashlib import sha256
 from typing import Protocol
 from uuid import UUID
 
-from src.domain.call import CallContent, CallEndReason, CallOutcome, CallState, derive_call_conversation_id
+from src.domain.call import (
+    FAILED_CALL_SUMMARY,
+    CallContent,
+    CallEndReason,
+    CallOutcome,
+    CallState,
+    derive_call_conversation_id,
+)
 from src.domain.conversation_type import ConversationItem
 from src.infrastructure.persistence.call_sessions import (
     BEIJING_TIMEZONE,
@@ -124,6 +131,9 @@ class StaleCallRecoveryService:
                 return "recovered"
             repaired = await self._repair_normal_settlement(record, record.settlement_input_digest)
             return "recovered" if repaired else "skipped"
+        if record.end_reason is not CallEndReason.SYSTEM_FAILURE:
+            repaired = await self._repair_unclaimed_normal_settlement(record)
+            return "recovered" if repaired else "skipped"
         try:
             claimed = await self._owned(self._calls.claim_settlement_input, record.call_id, digest=recovery_digest)
         except ValueError as error:
@@ -142,6 +152,19 @@ class StaleCallRecoveryService:
             return "recovered" if repaired else "conflicted"
         await self._repair_recovery_projection(current, recovery_digest)
         return "recovered"
+
+    async def _repair_unclaimed_normal_settlement(self, record) -> bool:
+        repaired = False
+        conversation_id = derive_call_conversation_id(
+            user_id=record.user_id,
+            character_id=record.character_id,
+            call_id=record.call_id,
+        )
+        winner = await self._load_winner(record, conversation_id)
+        if winner is not None and record.summary_status is not SettlementStatus.SUCCEEDED:
+            await self._repair_summary_status(record, conversation_id)
+            repaired = True
+        return repaired
 
     async def _repair_recovery_projection(self, record, digest: str) -> None:
         conversation_id = derive_call_conversation_id(
@@ -163,6 +186,10 @@ class StaleCallRecoveryService:
             call_id=record.call_id,
         )
         winner = await self._load_winner(record, conversation_id)
+        recover_normal_failure = record.end_reason is not CallEndReason.SYSTEM_FAILURE
+        if winner is None and recover_normal_failure and record.summary_status is not SettlementStatus.SUCCEEDED:
+            await self._persist_normal_fallback(record, conversation_id)
+            winner = FAILED_CALL_SUMMARY
         if winner is not None and record.summary_status is not SettlementStatus.SUCCEEDED:
             await self._repair_summary_status(record, conversation_id)
             repaired = True
@@ -171,7 +198,39 @@ class StaleCallRecoveryService:
         if completed is not None and current.maintenance_status is not SettlementStatus.SUCCEEDED:
             await self._set_maintenance_status(current, SettlementStatus.SUCCEEDED, completed.target_turn_seq)
             repaired = True
+        elif completed is None and recover_normal_failure and current.maintenance_status is SettlementStatus.PENDING:
+            await self._set_maintenance_status(current, SettlementStatus.FAILED, current.maintenance_turn_seq)
+            repaired = True
         return repaired
+
+    async def _persist_normal_fallback(self, record, conversation_id) -> None:
+        content = CallContent(
+            call_id=record.call_id,
+            outcome=record.outcome,
+            active_duration_ms=record.active_duration_ms,
+            summary=FAILED_CALL_SUMMARY,
+            end_reason=record.end_reason,
+        )
+        item = ConversationItem(
+            uuid=str(conversation_id),
+            timestamp=record.requested_at.replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds"),
+            source="user",
+            type="call",
+            content=content.render_for_agent(),
+            data={
+                "call_id": str(record.call_id),
+                "outcome": record.outcome.value,
+                "active_duration_ms": record.active_duration_ms,
+                "summary": FAILED_CALL_SUMMARY,
+                "end_reason": record.end_reason.value,
+            },
+        )
+        try:
+            await self._owned(self._conversations.add_call_conversation, record.user_id, record.character_id, item)
+        except Exception:
+            winner = await self._load_winner(record, conversation_id)
+            if winner is None:
+                raise
 
     async def _load_winner(self, record, conversation_id) -> str | None:
         item = await self._owned(
