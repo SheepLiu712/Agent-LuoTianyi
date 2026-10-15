@@ -12,7 +12,12 @@ from src.agent.context.memory_pool import CallMemoryPool
 from src.agent.handlers.action.call import EndCallHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
-from src.agent.handlers.stimulus.call import CallEndingHandler, CallSilenceElapsedHandler, CallTurnCompletedHandler
+from src.agent.handlers.stimulus.call import (
+    CallEndingHandler,
+    CallSilenceElapsedHandler,
+    CallTimeLimitWarningHandler,
+    CallTurnCompletedHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.plan_identity import decode_plan, encode_plan
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
@@ -141,6 +146,22 @@ def test_answer_call_uuid_plan_round_trips_without_string_coercion():
     assert decoded == plan
     assert decoded.actions[0].call_id is not None
     assert isinstance(decoded.actions[0].call_id, type(call_id))
+
+
+@pytest.mark.asyncio
+async def test_time_limit_warning_uses_fixed_agent_plan_without_generation():
+    handler = CallTimeLimitWarningHandler()
+    request = _request(_stimulus(d.CallTimeLimitWarning, call_id=uuid4(), remaining_ms=30_000))
+    plans = _Plans()
+
+    report = await handler.handle(request, plans)
+
+    assert report.emitted_plan_ids == ("plan-1",)
+    action = plans.drafts[0].actions[0]
+    assert isinstance(action, d.Say)
+    assert action.content == "通话时间快到了，我们很快就要结束啦。"
+    assert action.call_delivery.display_in_chat is False
+    assert action.call_delivery.provisional is False
 
 
 @pytest.mark.asyncio

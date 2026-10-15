@@ -202,12 +202,22 @@ class CallStage:
         self._pcm_capacity = int(settings.get("pcm_queue_capacity", 64))
         self._receipt_capacity = int(settings.get("receipt_capacity", 4096))
         self._terminal_delivery_timeout = float(settings.get("terminal_delivery_timeout", 1.0))
+        self._time_limit_seconds = float(settings.get("time_limit_seconds", 30 * 60))
+        self._time_limit_warning_seconds = float(settings.get("time_limit_warning_seconds", 30))
         if self._pcm_capacity <= 0:
             raise ValueError("pcm_queue_capacity must be positive")
         if self._receipt_capacity <= 0:
             raise ValueError("receipt_capacity must be positive")
         if not math.isfinite(self._terminal_delivery_timeout) or self._terminal_delivery_timeout <= 0:
             raise ValueError("terminal_delivery_timeout must be positive and finite")
+        if not math.isfinite(self._time_limit_seconds) or self._time_limit_seconds <= 0:
+            raise ValueError("time_limit_seconds must be positive and finite")
+        if (
+            not math.isfinite(self._time_limit_warning_seconds)
+            or self._time_limit_warning_seconds < 0
+            or self._time_limit_warning_seconds >= self._time_limit_seconds
+        ):
+            raise ValueError("time_limit_warning_seconds must be nonnegative and less than time_limit_seconds")
         self._lifecycle = CallLifecycle()
         self._context: InteractionContext | None = None
         self._provider: RealtimeSpeechSession | None = None
@@ -227,6 +237,9 @@ class CallStage:
         self._realize_task: asyncio.Task[Any] | None = None
         self._recovery_task: asyncio.Task[Any] | None = None
         self._silence_task: asyncio.Task[Any] | None = None
+        self._time_limit_task: asyncio.Task[Any] | None = None
+        self._time_limit_changed = asyncio.Event()
+        self._time_limit_warning_sent = False
         self._playback = CallPlaybackCoordinator(monotonic=monotonic)
         self._revision = 0
         self._turns: dict[int, _Turn] = {}
@@ -417,6 +430,7 @@ class CallStage:
                 if not turn.first_audio_recorded:
                     turn.first_audio_disqualified = True
             await self._transition_or_close(CallState.RECONNECTING, ledger_facts={"disconnected_at": disconnected_at})
+            self._time_limit_changed.set()
             if self._first_disconnect_monotonic is None:
                 self._first_disconnect_monotonic = disconnected_monotonic
             self._reconnect_count += 1
@@ -453,6 +467,7 @@ class CallStage:
             else:
                 self._cancel_task(self._recovery_task)
                 await self._transition_or_close(CallState.ACTIVE)
+                self._time_limit_changed.set()
                 self._provider_input_allowed.set()
                 self._first_disconnect_monotonic = None
                 self._recovery_deadline = None
@@ -486,6 +501,7 @@ class CallStage:
         """Stop realtime work once; caller cancellation does not cancel owned termination."""
         if self._termination_reason is None:
             self._termination_reason = reason
+            self._time_limit_changed.set()
         if self._termination_owner is not None:
             task = self._termination_owner(self, self._termination_reason)
         else:
@@ -877,6 +893,7 @@ class CallStage:
         await self._transition_or_close(CallState.ACTIVE, ledger_facts={"connected_at": connected_at})
         self._provider_input_allowed.set()
         self._connected_monotonic = self._monotonic()
+        self._time_limit_task = self._track(asyncio.create_task(self._run_time_limit(), name="call-time-limit"))
         if not self._started:
             return
         await self._submit_stimulus(
@@ -921,6 +938,51 @@ class CallStage:
             await self._submit_stimulus(
                 d.CallSilenceElapsed(**self._stimulus_fields(), call_id=self._record.call_id, silence_ms=5000)
             )
+
+    async def _run_time_limit(self) -> None:
+        assert self._connected_monotonic is not None
+        warning_at = self._connected_monotonic + self._time_limit_seconds - self._time_limit_warning_seconds
+        deadline = self._connected_monotonic + self._time_limit_seconds
+        if self._time_limit_warning_seconds > 0:
+            await self._wait_until_monotonic(warning_at)
+            if not await self._await_time_limit_active(deadline):
+                return
+            if self._monotonic() >= deadline:
+                await self.terminate(CallEndReason.TIME_LIMIT)
+                return
+            self._time_limit_warning_sent = True
+            self._spawn_handle(
+                self._submit_stimulus(
+                    d.CallTimeLimitWarning(
+                        **self._stimulus_fields(),
+                        call_id=self._record.call_id,
+                        remaining_ms=int(self._time_limit_warning_seconds * 1000),
+                    )
+                ),
+                name="call-time-limit-warning",
+            )
+        await self._wait_until_monotonic(deadline)
+        if await self._await_time_limit_active(deadline) and self._termination_reason is None:
+            await self.terminate(CallEndReason.TIME_LIMIT)
+
+    async def _await_time_limit_active(self, deadline: float) -> bool:
+        while self._termination_reason is None:
+            if self.state is CallState.ACTIVE:
+                return True
+            if self.state is not CallState.RECONNECTING:
+                return False
+            self._time_limit_changed.clear()
+            await self._time_limit_changed.wait()
+        return False
+
+    async def _wait_until_monotonic(self, deadline: float) -> None:
+        while self._monotonic() < deadline:
+            self._time_limit_changed.clear()
+            remaining = deadline - self._monotonic()
+            try:
+                await asyncio.wait_for(self._time_limit_changed.wait(), timeout=remaining)
+            except TimeoutError:
+                pass
 
     async def _transition(
         self,

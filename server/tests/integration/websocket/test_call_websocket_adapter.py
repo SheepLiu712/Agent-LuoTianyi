@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -22,6 +22,7 @@ from src.infrastructure.persistence.call_sessions import SqlCallSessionRepositor
 from src.infrastructure.persistence.database.sql_database import Base
 from src.stage import StageManager
 from src.stage.call_stage import CallStateChanged
+from src.stage.stage_manager import CallControl, CallIdentity, CallOpenRequest
 from src.utils.logger import get_logger
 from tests.integration.stage.test_call_stage import _ContextDatabase
 from tests.integration.stage.test_chat_stage import RecordingAgent
@@ -56,18 +57,322 @@ def resume_message(call_id):
     )
 
 
-def manager(*, speech_factory, repository=None, wall_clock=None):
+def manager(
+    *, speech_factory, repository=None, wall_clock=None, monotonic=None, config=None, agent=None, context_factory=None
+):
     repository = repository or InMemoryCallSessionRepository()
     stages = StageManager(
-        get_agent=lambda _character: RecordingAgent(),
+        get_agent=lambda _character: agent or RecordingAgent(),
         adapter=WebSocketAdapter(),
-        get_context_factory=lambda _character: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        get_context_factory=lambda _character: context_factory
+        or ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
         call_sessions=repository,
         realtime_speech_factory=speech_factory,
         user_reset_fence=UserResetFence(),
         wall_clock=wall_clock or (lambda: datetime.now(timezone.utc)),
+        **({} if monotonic is None else {"monotonic": monotonic}),
+        config=config,
     )
     return stages, repository
+
+
+@pytest.mark.asyncio
+async def test_public_open_emits_warning_at_five_seconds_and_time_limits_at_seven_seconds():
+    class Clock:
+        value = 100.0
+
+        def __call__(self):
+            return self.value
+
+        def advance(self, seconds):
+            self.value += seconds
+
+    class CallAgent(RecordingAgent):
+        async def handle_stimulus(self, request, sink, *, context=None):
+            self.requests.put_nowait(request)
+            actions = ()
+            if isinstance(request.stimulus, d.CallAnswerRequested):
+                actions = (
+                    d.AnswerCall(
+                        action_id="answer",
+                        call_id=request.stimulus.call_id,
+                        decision=CallAnswerDecision.ACCEPT,
+                    ),
+                )
+            elif isinstance(request.stimulus, d.CallTimeLimitWarning):
+                actions = (
+                    d.Say(
+                        action_id="warning",
+                        content="通话时间快到了，我们很快就要结束啦。",
+                        sound_content=None,
+                        prepared_audio_ref=None,
+                        tone=d.Tone(value="normal"),
+                        expression=None,
+                        delivery=d.OutputDelivery.EPHEMERAL_REACTION,
+                        call_delivery=d.CallSpeechDelivery(
+                            audio_route=d.CallAudioRoute.CALL,
+                            display_in_chat=False,
+                            is_ephemeral=True,
+                            response_id="warning-response",
+                        ),
+                    ),
+                )
+            plan_ids = ()
+            if actions:
+                plan = d.ActionPlan(
+                    plan_id=f"plan-{request.stimulus.kind.value}",
+                    origin_request_id=request.request_id,
+                    plan_ordinal=0,
+                    target_character_id="luotianyi",
+                    interaction_id=request.interaction.interaction_id,
+                    basis_interaction_revision=request.interaction.interaction_revision,
+                    source_stimulus_ids=(request.stimulus.stimulus_id,),
+                    actions=actions,
+                )
+                await sink.emit(plan)
+                plan_ids = (plan.plan_id,)
+            return d.HandlingReport(
+                request_id=request.request_id,
+                trigger_stimulus_id=request.stimulus.stimulus_id,
+                basis_interaction_revision=request.interaction.interaction_revision,
+                request_status=d.HandlingRequestStatus.COMPLETED,
+                considered_pending_stimulus_ids=(),
+                consumed_pending_stimulus_ids=(),
+                retained_pending_stimulus_ids=(),
+                emitted_plan_ids=plan_ids,
+                error_code=None,
+                retryable=False,
+            )
+
+        async def realize_action_plan(self, value, context, sink):
+            self.executions.put_nowait((value, context, sink))
+            results = tuple(
+                d.ActionResult(
+                    action_id=action.action_id,
+                    status=d.ActionExecutionStatus.COMPLETED,
+                    error_code=None,
+                    irreversible_effect_committed=False,
+                    effect_ref=None,
+                )
+                for action in value.actions
+            )
+            return d.ExecutionReport(
+                execution_id=context.execution_id,
+                plan_id=value.plan_id,
+                status=d.ExecutionStatus.COMPLETED,
+                action_results=results,
+                output_started=False,
+                error_code=None,
+                retryable=False,
+            )
+
+    clock = Clock()
+    agent = CallAgent()
+    speech = FakeRealtimeSpeechSessionFactory()
+    stages, repository = manager(
+        speech_factory=speech,
+        monotonic=clock,
+        agent=agent,
+        config={"call_stage": {"time_limit_seconds": 7, "time_limit_warning_seconds": 2}},
+    )
+    adapter = call_adapter(stages)
+    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    await adapter.next_output(connection)
+    control = stages.current_call_control(call_id)
+    await asyncio.wait_for(control._stage_available.wait(), 1)
+    while control._stage.state is not CallState.ACTIVE:
+        await asyncio.sleep(0)
+
+    clock.advance(4.9)
+    control._stage._time_limit_changed.set()
+    await asyncio.sleep(0)
+    observed = []
+    while not agent.requests.empty():
+        observed.append(agent.requests.get_nowait().stimulus)
+    assert not any(isinstance(item, d.CallTimeLimitWarning) for item in observed)
+
+    clock.advance(0.1)
+    control._stage._time_limit_changed.set()
+    warning_request = await asyncio.wait_for(agent.requests.get(), 1)
+    assert isinstance(warning_request.stimulus, d.CallTimeLimitWarning)
+    assert warning_request.stimulus.remaining_ms == 2000
+    warning_plan = None
+    while warning_plan is None:
+        candidate, _, _ = await asyncio.wait_for(agent.executions.get(), 1)
+        if candidate.actions and isinstance(candidate.actions[0], d.Say):
+            warning_plan = candidate
+    assert isinstance(warning_plan.actions[0], d.Say)
+    assert warning_plan.actions[0].content == "通话时间快到了，我们很快就要结束啦。"
+    await asyncio.sleep(0)
+    assert agent.requests.empty()
+
+    clock.advance(2.0)
+    control._stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(control.wait_realtime_stopped(), 2)
+    terminal = None
+    while terminal is None:
+        output = await asyncio.wait_for(adapter.next_output(connection), 2)
+        if output.text is not None and json.loads(output.text)["type"] == "call.ended":
+            terminal = json.loads(output.text)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert terminal["end_reason"] == CallEndReason.TIME_LIMIT.value
+    assert repository.find_by_id(UUID(call_id)).end_reason is CallEndReason.TIME_LIMIT
+
+    await adapter.close()
+    await stages.close()
+    assert not control._stage.tasks
+    assert stages._lease_registry.current("user", "luotianyi") is None
+    assert stages._call_ownerships == {}
+
+
+@pytest.mark.asyncio
+async def test_invalid_public_call_stage_config_fails_open_and_releases_claim():
+    class ContextFactoryProbe:
+        created = []
+
+        async def create(self, *args, **kwargs):
+            context = await ContextFactory(character_id="luotianyi", database=_ContextDatabase()).create(
+                *args, **kwargs
+            )
+            self.created.append(context)
+            return context
+
+    contexts = ContextFactoryProbe()
+    speech = FakeRealtimeSpeechSessionFactory()
+    stages, repository = manager(
+        speech_factory=speech,
+        context_factory=contexts,
+        config={"call_stage": {"time_limit_seconds": 10, "time_limit_warning_seconds": 10}},
+    )
+    adapter = call_adapter(stages)
+    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    first = json.loads((await adapter.next_output(connection)).text)
+    call_id = first["call_id"]
+    await adapter.next_output(connection)
+    control = stages.current_call_control(call_id)
+
+    await asyncio.wait_for(control.wait_realtime_stopped(), 2)
+
+    record = repository.find_by_id(UUID(call_id))
+    assert record.state is CallState.FAILED
+    assert stages._lease_registry.current("user", "luotianyi") is None
+    assert stages._call_ownerships == {}
+    assert stages._call_stages == {}
+    assert speech.sessions == {}
+    assert contexts.created == [] or all(context._closed for context in contexts.created)
+    assert stages._call_claims == {}
+    assert (
+        stages.current_call_control(call_id),
+        "request-1" in stages._call_controls_by_request,
+    ) == (None, False)
+    await adapter.close()
+    await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_start_after_invalid_config_returns_durable_failed_identity_without_new_resources():
+    class ContextFactoryProbe:
+        calls = 0
+
+        async def create(self, *args, **kwargs):
+            self.calls += 1
+            return await ContextFactory(character_id="luotianyi", database=_ContextDatabase()).create(*args, **kwargs)
+
+    contexts = ContextFactoryProbe()
+    speech = FakeRealtimeSpeechSessionFactory()
+    stages, repository = manager(
+        speech_factory=speech,
+        context_factory=contexts,
+        config={"call_stage": {"time_limit_seconds": 10, "time_limit_warning_seconds": 10}},
+    )
+    adapter = call_adapter(stages)
+    first_connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    first = json.loads((await adapter.next_output(first_connection)).text)
+    call_id = first["call_id"]
+    await adapter.next_output(first_connection)
+    control = stages.current_call_control(call_id)
+    await asyncio.wait_for(control.wait_realtime_stopped(), 2)
+    before_claims = dict(stages._call_claims)
+
+    with pytest.raises(CallTransportError) as failed:
+        await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+
+    assert "CALL_START_FAILED" in str(failed.value)
+    assert repository.find_by_request("request-1").call_id == UUID(call_id)
+    assert stages._call_claims == before_claims == {}
+    assert speech.sessions == {}
+    assert contexts.calls == 0
+    await adapter.close()
+    await stages.close()
+
+
+def test_failed_control_retirement_is_identity_guarded():
+    speech = FakeRealtimeSpeechSessionFactory()
+    stages, _ = manager(speech_factory=speech)
+    request = CallOpenRequest(user_id="user", character_id="luotianyi", client_request_id="request-1")
+    transport = type("Transport", (), {})()
+    old = CallControl(stages, request, transport)
+    old._identity = CallIdentity("call-1", "request-1", "luotianyi", CallState.PREPARING)
+    replacement = CallControl(stages, request, transport)
+    replacement._identity = old._identity
+    stages._call_controls["call-1"] = replacement
+    stages._call_controls_by_request["request-1"] = replacement
+
+    stages._retire_failed_call_control(old)
+
+    assert stages._call_controls["call-1"] is replacement
+    assert stages._call_controls_by_request["request-1"] is replacement
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ["get_logger", "error"])
+async def test_diagnostic_failure_cannot_block_invalid_config_control_retirement(monkeypatch, failure_point):
+    speech = FakeRealtimeSpeechSessionFactory()
+    stages, repository = manager(
+        speech_factory=speech,
+        config={"call_stage": {"time_limit_seconds": 10, "time_limit_warning_seconds": 10}},
+    )
+
+    class Logger:
+        def error(self, *args, **kwargs):
+            if failure_point == "error":
+                raise RuntimeError("diagnostic error failed")
+
+    original_get_logger = get_logger
+
+    def failing_get_logger(name):
+        if name == "src.stage.stage_manager":
+            if failure_point == "get_logger":
+                raise RuntimeError("diagnostic lookup failed")
+            return Logger()
+        return original_get_logger(name)
+
+    monkeypatch.setattr("src.stage.stage_manager.get_logger", failing_get_logger)
+    adapter = call_adapter(stages)
+    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    first = json.loads((await adapter.next_output(connection)).text)
+    call_id = first["call_id"]
+    await adapter.next_output(connection)
+    control = stages.current_call_control(call_id)
+    await asyncio.wait_for(control.wait_realtime_stopped(), 2)
+
+    record = repository.find_by_id(UUID(call_id))
+    assert record.state is CallState.FAILED
+    assert stages._call_claims == {}
+    assert stages._lease_registry.current("user", "luotianyi") is None
+    assert stages._call_ownerships == {}
+    assert stages._call_stages == {}
+    assert stages.current_call_control(call_id) is None
+    assert "request-1" not in stages._call_controls_by_request
+    assert speech.sessions == {}
+
+    with pytest.raises(CallTransportError, match="CALL_START_FAILED"):
+        await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    assert repository.find_by_request("request-1").call_id == UUID(call_id)
+    await adapter.close()
+    await stages.close()
 
 
 def call_adapter(stages):

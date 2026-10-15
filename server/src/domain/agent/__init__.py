@@ -38,6 +38,7 @@ from .call_contracts import (
     CallSilenceElapsed,
     CallStarted,
     CallStimulus,
+    CallTimeLimitWarning,
     CallTurnCompleted,
 )
 from .execution_output import (
@@ -291,5 +292,6 @@ __all__ = (
     "CallStarted",
     "CallSettlementRequested",
     "CallStimulus",
+    "CallTimeLimitWarning",
     "CallTurnCompleted",
 )

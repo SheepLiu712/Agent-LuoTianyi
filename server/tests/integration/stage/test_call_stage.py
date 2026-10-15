@@ -212,6 +212,15 @@ class _SilenceHandler:
         return _report(request, plans)
 
 
+class _TimeLimitWarningHandler:
+    def __init__(self):
+        self.requests = []
+
+    async def handle(self, request, plans):
+        self.requests.append(request)
+        return _report(request, plans)
+
+
 class _NoOutputActionHandler:
     async def realize(self, action, execution_context, outputs):
         return d.ActionResult(
@@ -247,7 +256,7 @@ class _SayHandler:
         )
 
 
-def _agent(turn_handler, *, silence_handler=None):
+def _agent(turn_handler, *, silence_handler=None, time_limit_handler=None):
     no_plan = _NoPlanHandler()
     silence = silence_handler or no_plan
     return Agent(
@@ -258,6 +267,7 @@ def _agent(turn_handler, *, silence_handler=None):
                 (d.StimulusKind.CALL_STARTED, no_plan),
                 (d.StimulusKind.CALL_TURN_COMPLETED, turn_handler),
                 (d.StimulusKind.CALL_SILENCE_ELAPSED, silence),
+                (d.StimulusKind.CALL_TIME_LIMIT_WARNING, time_limit_handler or no_plan),
                 (d.StimulusKind.CALL_ENDING, no_plan),
             )
         ),
@@ -268,6 +278,226 @@ def _agent(turn_handler, *, silence_handler=None):
             )
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_time_limit_warning_and_hard_deadline_are_stage_owned_and_monotonic(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+    assert stage.state is CallState.ACTIVE
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert len(warning_handler.requests) == 1
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_time_limit_resume_does_not_reset_warning_or_deadline(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 3.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    assert await stage.resume() is True
+
+    clock.advance(0.5)
+    stage._time_limit_changed.set()
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+    assert await stage.resume() is False
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert len(warning_handler.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_time_limit_during_unrecovered_disconnect_yields_recovery_timeout(call_setup):
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    clock.advance(0.5)
+    stage._time_limit_changed.set()
+    await asyncio.sleep(0)
+    assert stage.state is CallState.RECONNECTING
+
+    clock.advance(2.5)
+    stage._time_limit_changed.set()
+    assert await stage.resume() is False
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
+    assert snapshot.terminal.active_duration_ms == 1500
+
+
+@pytest.mark.asyncio
+async def test_resume_after_deadline_counts_reconnect_and_immediately_time_limits(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    clock.advance(0.75)
+    stage._time_limit_changed.set()
+    await asyncio.sleep(0)
+
+    assert await stage.resume() is True
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert snapshot.terminal.active_duration_ms == 2250
+    assert warning_handler.requests == []
+
+
+@pytest.mark.asyncio
+async def test_warning_waits_for_resume_and_is_sent_once_before_deadline(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 3.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    clock.advance(0.6)
+    stage._time_limit_changed.set()
+    await asyncio.sleep(0)
+    assert warning_handler.requests == []
+
+    assert await stage.resume() is True
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+    clock.advance(0.9)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert len(warning_handler.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_early_hangup_cancels_time_limit_task_without_warning(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 10.0, "time_limit_warning_seconds": 2.0},
+        time_limit_handler=warning_handler,
+    )
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+
+    assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
+    assert warning_handler.requests == []
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_blocked_warning_does_not_delay_hard_time_limit(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    warning_handler.release = asyncio.Event()
+
+    async def blocked_handle(request, plans):
+        warning_handler.requests.append(request)
+        await warning_handler.release.wait()
+        return _report(request, plans)
+
+    warning_handler.handle = blocked_handle
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_wins_when_requested_at_time_limit_boundary(call_setup):
+    stage, provider, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(2.0)
+    await provider.emit(ProviderFailed("provider_connection_closed", True))
+    await _eventually(lambda: stage.termination_requested)
+    stage._time_limit_changed.set()
+
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
+    assert not stage.tasks
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"time_limit_seconds": 0},
+        {"time_limit_seconds": float("inf")},
+        {"time_limit_seconds": 10, "time_limit_warning_seconds": -1},
+        {"time_limit_seconds": 10, "time_limit_warning_seconds": 10},
+    ],
+)
+def test_time_limit_configuration_requires_finite_ordered_values(call_setup, config):
+    repository, record, ownership, clock = call_setup
+
+    with pytest.raises(ValueError, match="time_limit"):
+        CallStage(
+            ownership=ownership,
+            record=record,
+            agent=_agent(_TurnHandler()),
+            context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+            call_sessions=repository,
+            speech_factory=FakeRealtimeSpeechSessionFactory(),
+            transport=_Transport(),
+            monotonic=clock.tick,
+            wall_clock=clock.now,
+            config=config,
+        )
 
 
 async def _eventually(predicate, timeout=1.0):
@@ -316,7 +546,15 @@ def call_setup(tmp_path):
     return repository, record, ownership, clock
 
 
-async def _create(call_setup, *, decision=CallAnswerDecision.ACCEPT, config=None, release=None, silence_handler=None):
+async def _create(
+    call_setup,
+    *,
+    decision=CallAnswerDecision.ACCEPT,
+    config=None,
+    release=None,
+    silence_handler=None,
+    time_limit_handler=None,
+):
     repository, record, ownership, clock = call_setup
     speech = FakeRealtimeSpeechSessionFactory()
     transport = _Transport()
@@ -325,7 +563,11 @@ async def _create(call_setup, *, decision=CallAnswerDecision.ACCEPT, config=None
     stage = await CallStage.create(
         ownership=ownership,
         record=record,
-        agent=_agent(turn_handler, silence_handler=silence_handler),
+        agent=_agent(
+            turn_handler,
+            silence_handler=silence_handler,
+            time_limit_handler=time_limit_handler,
+        ),
         context_factory=context_factory,
         call_sessions=repository,
         speech_factory=speech,
