@@ -73,6 +73,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
   const callHangupRef = useRef<() => void>(() => {});
+  const refreshLatestHistoryRef = useRef<((username: string, token: string) => Promise<void>) | null>(null);
   const onLogoutRef = useRef(onLogout);
   onLogoutRef.current = onLogout;
   const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
@@ -133,7 +134,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     requestPermission: requestCallMicrophonePermission,
     ringtone,
     onBackConfirmation: handleBackConfirmation,
-    onReturnToChat: () => { void resumeChat(); },
+     onReturnToChat: () => {
+       void (async () => {
+         await resumeChat();
+         if (username && message_token) await refreshLatestHistoryRef.current?.(username, message_token);
+       })();
+     },
     onPermissionSettings: handlePermissionSettings,
     onCleanupError: handleCallCleanupError,
   });
@@ -141,7 +147,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
   useEffect(() => () => ringtone.stop(), [ringtone]);
 
-  const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
+  const { loadHistory, historyLoading, refreshLatestHistory } = useHistoryLogic(addHistoryMessage, {
+    username,
+    characterId: 'luotianyi',
+    token: message_token,
+    resetEpoch: 0,
+  });
+  refreshLatestHistoryRef.current = refreshLatestHistory;
 
   const animateDrawer = useCallback((open: boolean) => {
     setDrawerOpen(open);
@@ -492,6 +504,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             style={[styles.chatList, { backgroundColor: theme.chatList }]}
             contentContainerStyle={styles.chatListContent}
             showsVerticalScrollIndicator={true}
+            refreshing={historyLoading}
+            onRefresh={() => {
+              if (username && message_token) void refreshLatestHistory(username, message_token);
+            }}
             onScrollBeginDrag={Keyboard.dismiss}
           />
         </View>

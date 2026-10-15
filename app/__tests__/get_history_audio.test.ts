@@ -1,4 +1,4 @@
-import { getHistory, mapHistoryMessage } from '../utils/getHistory';
+import { getHistory, mapHistoryMessage, mapHistoryTimestamp } from '../utils/getHistory';
 
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn().mockResolvedValue({ exists: false }) }));
 jest.mock('../config', () => ({ server_config: { BASE_URL: 'http://localhost:60030' } }));
@@ -39,4 +39,9 @@ it('maps the HTTP call projection into the history bubble DTO', async () => {
     { type: 'call', callOutcome: 'declined', durationMs: 0 },
   ] });
   expect(mapHistoryMessage({ type: 'call', source: 'user', outcome: 'failed' }).callOutcome).toBeUndefined();
+});
+
+it('maps the server Asia/Shanghai timestamp without the device Date parser', () => {
+  expect(mapHistoryTimestamp('2026-10-16 12:00:00')).toBe(Date.UTC(2026, 9, 16, 4, 0, 0));
+  expect(mapHistoryTimestamp('not-a-timestamp')).toBeUndefined();
 });
