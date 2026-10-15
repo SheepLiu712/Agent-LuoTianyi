@@ -104,6 +104,164 @@ describe('AndroidCallAudio adapter', () => {
     expect(completed).toHaveBeenCalledTimes(1);
   });
 
+  it('commits a native completion that arrives before enqueue resolves exactly once', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const completed = jest.fn();
+    const stream = { callId: 'call', responseId: 'response', streamId: 1 };
+    let resolveEnqueue!: (generation: number) => void;
+    native.enqueuePlayback = async () => new Promise<number>((resolve) => { resolveEnqueue = resolve; });
+    audio.setConsumptionListener(completed);
+    await audio.initialize();
+
+    const enqueue = audio.enqueue({ stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true });
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 7, sessionGeneration: 1,
+    } satisfies NativePlaybackCompleted);
+    expect(completed).not.toHaveBeenCalled();
+    resolveEnqueue(7);
+    await enqueue;
+    expect(completed).toHaveBeenCalledTimes(1);
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 7, sessionGeneration: 1,
+    } satisfies NativePlaybackCompleted);
+    expect(completed).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an early completion when native enqueue rejects', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const completed = jest.fn();
+    const stream = { callId: 'call', responseId: 'response', streamId: 1 };
+    let rejectEnqueue!: (error: Error) => void;
+    native.enqueuePlayback = async () => new Promise<number>((_resolve, reject) => { rejectEnqueue = reject; });
+    audio.setConsumptionListener(completed);
+    await audio.initialize();
+
+    const enqueue = audio.enqueue({ stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true });
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 7, sessionGeneration: 1,
+    } satisfies NativePlaybackCompleted);
+    rejectEnqueue(new Error('native_enqueue_failed'));
+
+    await expect(enqueue).rejects.toThrow('native_enqueue_failed');
+    expect(completed).not.toHaveBeenCalled();
+  });
+
+  it('drops an early completion after stop wins the pending enqueue race', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const completed = jest.fn();
+    const stream = { callId: 'call', responseId: 'response', streamId: 1 };
+    let resolveEnqueue!: (generation: number) => void;
+    native.enqueuePlayback = async () => new Promise<number>((resolve) => { resolveEnqueue = resolve; });
+    audio.setConsumptionListener(completed);
+    await audio.initialize();
+
+    const enqueue = audio.enqueue({ stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true });
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 7, sessionGeneration: 1,
+    } satisfies NativePlaybackCompleted);
+    await audio.tombstone(stream);
+    resolveEnqueue(7);
+    await expect(enqueue).rejects.toThrow('stale_playback_session');
+
+    expect(completed).not.toHaveBeenCalled();
+  });
+
+  it('does not carry an early completion across adapter sessions', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const completed = jest.fn();
+    const stream = { callId: 'call', responseId: 'response', streamId: 1 };
+    let resolveEnqueue!: (generation: number) => void;
+    native.enqueuePlayback = async () => new Promise<number>((resolve) => { resolveEnqueue = resolve; });
+    audio.setConsumptionListener(completed);
+    await audio.initialize();
+
+    const enqueue = audio.enqueue({ stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true });
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 7, sessionGeneration: 1,
+    } satisfies NativePlaybackCompleted);
+    await audio.close();
+    resolveEnqueue(7);
+    await expect(enqueue).rejects.toThrow('stale_playback_session');
+    native.capability = { ...native.capability, sessionGeneration: 2 };
+    await audio.initialize();
+
+    expect(completed).not.toHaveBeenCalled();
+  });
+
+  it('does not let a stale enqueue cleanup erase the new session reservation for the same stream key', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const completed = jest.fn();
+    const stream = { callId: 'call', responseId: 'response', streamId: 1 };
+    const pending: { resolve(generation: number): void; reject(error: Error): void }[] = [];
+    native.enqueuePlayback = async () => new Promise<number>((resolve, reject) => {
+      pending.push({ resolve, reject });
+    });
+    audio.setConsumptionListener(completed);
+    await audio.initialize();
+
+    const oldEnqueue = audio.enqueue({
+      stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true,
+    });
+    await audio.close();
+    native.capability = { ...native.capability, sessionGeneration: 2 };
+    await audio.initialize();
+    const newEnqueue = audio.enqueue({
+      stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true,
+    });
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 9, sessionGeneration: 2,
+    } satisfies NativePlaybackCompleted);
+
+    pending[0].resolve(7);
+    await expect(oldEnqueue).rejects.toThrow('stale_playback_session');
+    expect(completed).not.toHaveBeenCalled();
+    pending[1].resolve(9);
+    await newEnqueue;
+    expect(completed).toHaveBeenCalledTimes(1);
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 9, sessionGeneration: 2,
+    } satisfies NativePlaybackCompleted);
+    expect(completed).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a stale enqueue rejection erase the new session reservation for the same stream key', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    const completed = jest.fn();
+    const stream = { callId: 'call', responseId: 'response', streamId: 1 };
+    const pending: { resolve(generation: number): void; reject(error: Error): void }[] = [];
+    native.enqueuePlayback = async () => new Promise<number>((resolve, reject) => {
+      pending.push({ resolve, reject });
+    });
+    audio.setConsumptionListener(completed);
+    await audio.initialize();
+
+    const oldEnqueue = audio.enqueue({
+      stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true,
+    });
+    await audio.close();
+    native.capability = { ...native.capability, sessionGeneration: 2 };
+    await audio.initialize();
+    const newEnqueue = audio.enqueue({
+      stream, format: PLAYBACK_FORMAT, payload: new Uint8Array([0, 0]), isFinal: true,
+    });
+    native.emit('onPlaybackCompleted', {
+      responseId: 'response', streamId: 1, generation: 9, sessionGeneration: 2,
+    } satisfies NativePlaybackCompleted);
+
+    pending[0].reject(new Error('old_enqueue_failed'));
+    await expect(oldEnqueue).rejects.toThrow('old_enqueue_failed');
+    pending[1].resolve(9);
+    await newEnqueue;
+
+    expect(completed).toHaveBeenCalledTimes(1);
+  });
+
   it('routes the built-in reply failure tone through the initialized native call audio module', async () => {
     const native = new FakeNativeCallAudio();
     const audio = new AndroidCallAudio({}, native, 'android');

@@ -295,6 +295,86 @@ describe('reliable call transport', () => {
     expect(completed).toMatchObject({ seq: 2, response_id: 'response-1', stream_id: 9 });
   });
 
+  test('commits an early native completion once only after final enqueue succeeds', async () => {
+    const { socket, native } = await establish();
+    let resolveEnqueue!: () => void;
+    native.enqueue = jest.fn(async (chunk) => {
+      native.listener?.({ stream: chunk.stream });
+      return new Promise<void>((resolve) => { resolveEnqueue = resolve; });
+    });
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'response-1', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]),
+    }));
+    await flush();
+
+    const completions = () => socket.sent.filter((wire): wire is string => typeof wire === 'string')
+      .map((wire) => JSON.parse(wire)).filter((message) => message.type === 'playback.completed');
+    expect(completions()).toHaveLength(0);
+    resolveEnqueue();
+    await flush();
+    expect(completions()).toHaveLength(1);
+    expect(completions()[0]).toMatchObject({ response_id: 'response-1', stream_id: 9 });
+    native.listener?.({ stream: { callId: CALL_ID, responseId: 'response-1', streamId: 9 } });
+    expect(completions()).toHaveLength(1);
+  });
+
+  test('discards an early native completion when final enqueue rejects', async () => {
+    const { socket, native, session } = await establish();
+    let rejectEnqueue!: (error: Error) => void;
+    native.enqueue = jest.fn(async (chunk) => {
+      native.listener?.({ stream: chunk.stream });
+      return new Promise<void>((_resolve, reject) => { rejectEnqueue = reject; });
+    });
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'response-1', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]),
+    }));
+    await flush();
+    rejectEnqueue(new Error('native_enqueue_failed'));
+    await flush();
+
+    const completions = socket.sent.filter((wire): wire is string => typeof wire === 'string')
+      .map((wire) => JSON.parse(wire)).filter((message) => message.type === 'playback.completed');
+    expect(completions).toHaveLength(0);
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'native_enqueue_failed' });
+  });
+
+  test('discards an early completion when stop retires the pending final enqueue', async () => {
+    const { socket, native } = await establish();
+    let resolveEnqueue!: () => void;
+    native.enqueue = jest.fn(async (chunk) => {
+      native.listener?.({ stream: chunk.stream });
+      return new Promise<void>((resolve) => { resolveEnqueue = resolve; });
+    });
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'response-1', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]),
+    }));
+    await flush();
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'playback.stop', seq: 5, call_id: CALL_ID,
+      response_id: 'response-1', stream_id: 9,
+      retire_server_seq: { from: 3, through: 4 }, reason: 'user_interrupted',
+    }));
+    await flush();
+    resolveEnqueue();
+    await flush();
+
+    const controls = socket.sent.filter((wire): wire is string => typeof wire === 'string').map((wire) => JSON.parse(wire));
+    expect(controls.filter((message) => message.type === 'playback.completed')).toHaveLength(0);
+    expect(controls.filter((message) => message.type === 'playback.stopped')).toHaveLength(1);
+  });
+
   test('orders binary audio that arrives before its stream_started control', async () => {
     const { socket, native } = await establish();
     const codec = new BinaryAudioFrameCodec();
