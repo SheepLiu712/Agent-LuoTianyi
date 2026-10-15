@@ -92,6 +92,7 @@ it.each(['granted', 'blocked'])('releases the input bar while the system permiss
   await act(async () => { await state.pressIn(event); });
   expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
   expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect((showMicrophoneSettings as jest.Mock).mock.calls[0][1]).toContain('处理中');
   expect(state.captureState).toBe('VoiceReady');
   // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不再重复弹一次设置入口。
   await act(async () => { answer(late); });

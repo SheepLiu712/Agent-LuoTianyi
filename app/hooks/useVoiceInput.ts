@@ -102,7 +102,10 @@ export function useVoiceInput(options: Options) {
       if (permission !== 'granted') {
         transition('PermissionPrompt');
         if (permissionRequest.current) {
-          showMicrophoneSettings(callbacks.current.onNotice);
+          showMicrophoneSettings(
+            callbacks.current.onNotice,
+            '权限请求仍在处理中。请稍候重试，或在系统设置中查看麦克风权限。',
+          );
           return;
         }
         // 单次授权回收后，Expo 可能把状态报告成 blocked；一次状态检查不足以证明不能再次询问。
