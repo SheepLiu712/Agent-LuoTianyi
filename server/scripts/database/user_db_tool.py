@@ -1,5 +1,6 @@
 import os
 import sys
+import traceback
 from getpass import getpass
 
 # Ensure project root is importable
@@ -96,14 +97,23 @@ def _delete_all_conversations(session, redis_client, user: User) -> None:
     print(f"已删除 {deleted} 条历史对话，并重置上下文计数与总结。")
 
 
-def _delete_all_vector_records(vector_store: VectorStore, user: User) -> None:
+def _delete_all_vector_records(vector_store: VectorStore, user: User) -> bool:
+    """删除该用户的全部向量记录；返回是否成功（取消视为未失败）。"""
     confirm = input("确认删除该用户的所有向量数据库记录？输入 YES 确认：").strip()
     if confirm != "YES":
         print("已取消删除。")
-        return
+        return True
 
-    deleted_count = vector_store.delete_user_records(user.uuid)
+    try:
+        deleted_count = vector_store.delete_user_records(user.uuid)
+    except Exception as error:
+        # delete_user_records 失败时抛出（不再返回 0 伪装成功）：给出可读结论，同时保留调用栈。
+        print(f"删除向量数据库记录失败：{type(error).__name__}: {error}")
+        print("可安全重试；若持续失败请检查向量库是否可访问。")
+        traceback.print_exc()
+        return False
     print(f"已删除 {deleted_count} 条向量数据库记录。")
+    return True
 
 
 def _reset_user_profile(session, redis_client, user: User) -> None:
@@ -116,11 +126,12 @@ def _reset_user_profile(session, redis_client, user: User) -> None:
     session.commit()
 
 
-def _reset_user(session, redis_client, vector_store, media_store, user: User) -> None:
+def _reset_user(session, redis_client, vector_store, media_store, user: User) -> bool:
+    """完全重置用户；返回是否成功（取消视为未失败）。"""
     confirm = input("确认完全重置用户（删除所有对话、向量记录，并重置画像）？输入 YES 确认：").strip()
     if confirm != "YES":
         print("已取消重置。")
-        return
+        return True
 
     report = UserResetService(
         conversation_service=database_service.get_database_manager().conversation_service,
@@ -130,13 +141,14 @@ def _reset_user(session, redis_client, vector_store, media_store, user: User) ->
     ).reset(user.uuid)
     if not report.success:
         print(f"完全重置失败，可安全重试；失败步骤：{', '.join(report.failed_steps)}")
-        return
+        return False
     user = session.query(User).filter(User.uuid == user.uuid).first()
     user.description = "新认识的朋友，还需要了解。"
     user.last_login = None
     session.commit()
     summary = ", ".join(f"{step.name}={step.deleted_count}" for step in report.steps)
     print(f"已完全重置用户：{summary}，并重置用户画像。")
+    return True
 
 
 def _print_menu() -> None:
@@ -148,6 +160,30 @@ def _print_menu() -> None:
     print("5. 重置用户画像为默认值")
     print("6. 完全重置用户（删除所有对话、向量记录，并重置画像）")
     print("0. 退出")
+
+
+def _run_menu(session, redis_client, vector_store, media_store, user: User) -> bool:
+    """执行菜单循环；返回本次会话是否出现过失败操作。"""
+    actions = {
+        "1": lambda: _update_nickname(session, redis_client, user),
+        "2": lambda: _update_description(session, redis_client, user),
+        "3": lambda: _delete_all_conversations(session, redis_client, user),
+        "4": lambda: _delete_all_vector_records(vector_store, user),
+        "5": lambda: _reset_user_profile(session, redis_client, user),
+        "6": lambda: _reset_user(session, redis_client, vector_store, media_store, user),
+    }
+    failed = False
+    while True:
+        _print_menu()
+        choice = input("输入选项编号：").strip()
+        if choice == "0":
+            return failed
+        action = actions.get(choice)
+        if action is None:
+            print("无效选项，请重新输入。")
+            continue
+        if action() is False:
+            failed = True
 
 
 def main() -> None:
@@ -169,27 +205,11 @@ def main() -> None:
 
         print(f"登录成功，当前用户：{user.username} (uuid={user.uuid})")
 
-        while True:
-            _print_menu()
-            choice = input("输入选项编号：").strip()
-
-            if choice == "1":
-                _update_nickname(session, redis_client, user)
-            elif choice == "2":
-                _update_description(session, redis_client, user)
-            elif choice == "3":
-                _delete_all_conversations(session, redis_client, user)
-            elif choice == "4":
-                _delete_all_vector_records(vector_store, user)
-            elif choice == "5":
-                _reset_user_profile(session, redis_client, user)
-            elif choice == "6":
-                _reset_user(session, redis_client, vector_store, media_store, user)
-            elif choice == "0":
-                print("已退出。")
-                return
-            else:
-                print("无效选项，请重新输入。")
+        if _run_menu(session, redis_client, vector_store, media_store, user):
+            # 删除类操作失败过就必须让退出码非 0，避免批处理/运维把失败当成功。
+            print("本次会话存在失败操作，退出码 1。")
+            raise SystemExit(1)
+        print("已退出。")
     finally:
         session.close()
 
