@@ -17,6 +17,7 @@ from src.adapter.websocket.call_v1.transport import CallTransportBackpressure
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
+from src.infrastructure.models.realtime_speech import ProviderFailed
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
 from src.stage import StageManager
@@ -351,6 +352,9 @@ async def test_stage_created_after_disconnect_stays_ringing_until_resume():
             if False:
                 yield None
 
+        async def wait_failure(self):
+            await asyncio.Event().wait()
+
     class Speech:
         is_configured = True
 
@@ -539,6 +543,72 @@ async def test_real_stage_resume_pending_overflow_terminates_after_business_comm
     assert stages._call_ownerships == {}
     assert repository.find_by_request("request-1").call_id == control._stage._record.call_id
     await adapter.close()
+    await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_known_provider_failure_rejects_public_adapter_resume_before_resumed_output(monkeypatch, tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'call.sqlite'}")
+    Base.metadata.create_all(engine)
+    repository = SqlCallSessionRepository(sessionmaker(bind=engine))
+    speech = FakeRealtimeSpeechSessionFactory()
+    clock = _IncrementingClock()
+    stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
+    adapter = call_adapter(stages)
+    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    await adapter.next_output(connection)
+    control = stages.current_call_control(call_id)
+    await asyncio.wait_for(control._stage_available.wait(), 1)
+
+    async def wait_for_ringing():
+        while control._stage.state is not CallState.RINGING:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_ringing(), 2)
+    await control._stage.apply_answer(
+        d.AnswerCall(
+            action_id="test-answer",
+            call_id=control._stage._record.call_id,
+            decision=CallAnswerDecision.ACCEPT,
+        )
+    )
+    await adapter.disconnect(connection)
+    provider = speech.sessions[control._stage._record.call_id]
+    termination_entered, release_termination = asyncio.Event(), asyncio.Event()
+    original_terminate_owned = control._stage._terminate_owned
+
+    async def delayed_terminate_owned(reason):
+        termination_entered.set()
+        await release_termination.wait()
+        return await original_terminate_owned(reason)
+
+    monkeypatch.setattr(control._stage, "_terminate_owned", delayed_terminate_owned)
+    await provider.emit(ProviderFailed("provider_connection_closed", True))
+    await asyncio.wait_for(termination_entered.wait(), 0.2)
+    session = adapter._hub.session_for(call_id)
+    before_cursor = session.server_ack_cursor
+    before_queue_size = session.business_sink.outputs.qsize()
+
+    try:
+        with pytest.raises(CallTransportError, match="CALL_RESUME_UNAVAILABLE"):
+            await asyncio.wait_for(
+                adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()),
+                1,
+            )
+    finally:
+        release_termination.set()
+
+    assert session.server_ack_cursor == before_cursor
+    assert session.business_sink.outputs.qsize() == before_queue_size
+    entry = adapter._hub._sessions.get(call_id)
+    assert entry is not None and entry.connection_id is None and entry.resume_token is None
+    await asyncio.wait_for(control.wait_realtime_stopped(), 2)
+    record = repository.find_by_id(call_id)
+    assert record.end_reason is CallEndReason.PROVIDER_FAILED
+    await adapter.close()
+    assert adapter._hub.session_for(call_id) is None
+    assert stages._lease_registry.current("user", "luotianyi") is None
     await stages.close()
 
 

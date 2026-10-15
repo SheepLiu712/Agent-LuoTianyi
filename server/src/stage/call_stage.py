@@ -212,6 +212,7 @@ class CallStage:
         self._context: InteractionContext | None = None
         self._provider: RealtimeSpeechSession | None = None
         self._pcm: asyncio.Queue[AudioFrame] = asyncio.Queue(self._pcm_capacity)
+        self._provider_input_allowed = asyncio.Event()
         self._pcm_buffered_bytes = 0
         self._receipts: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         self._provider_audio_sequence = 0
@@ -222,6 +223,7 @@ class CallStage:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._pcm_task: asyncio.Task[Any] | None = None
         self._events_task: asyncio.Task[Any] | None = None
+        self._provider_failure_task: asyncio.Task[Any] | None = None
         self._realize_task: asyncio.Task[Any] | None = None
         self._recovery_task: asyncio.Task[Any] | None = None
         self._silence_task: asyncio.Task[Any] | None = None
@@ -315,6 +317,9 @@ class CallStage:
             self._started = True
             self._pcm_task = self._track(asyncio.create_task(self._drain_pcm(), name="call-pcm"))
             self._events_task = self._track(asyncio.create_task(self._consume_events(), name="call-speech-events"))
+            self._provider_failure_task = self._track(
+                asyncio.create_task(self._await_provider_failure(), name="call-provider-failure")
+            )
             await self._submit_stimulus(self._answer_requested())
         except asyncio.CancelledError:
             raise
@@ -402,6 +407,7 @@ class CallStage:
         async with self._lifecycle_lock:
             if self.state is not CallState.ACTIVE:
                 return
+            self._provider_input_allowed.clear()
             disconnected_at = self._now()
             disconnected_monotonic = self._monotonic()
             # A turn whose reply crosses a transport disconnect cannot prove a
@@ -431,6 +437,8 @@ class CallStage:
     async def resume(self) -> bool:
         timed_out = False
         async with self._lifecycle_lock:
+            if self._termination_reason is not None:
+                return False
             if self.state is not CallState.RECONNECTING:
                 return False
             if self._recovery_deadline is None or self._monotonic() >= self._recovery_deadline:
@@ -445,6 +453,7 @@ class CallStage:
             else:
                 self._cancel_task(self._recovery_task)
                 await self._transition_or_close(CallState.ACTIVE)
+                self._provider_input_allowed.set()
                 self._first_disconnect_monotonic = None
                 self._recovery_deadline = None
                 # Product policy: a successful resume always starts a fresh full silence period.
@@ -467,7 +476,8 @@ class CallStage:
 
     def can_resume(self) -> bool:
         return (
-            self.state is CallState.RECONNECTING
+            self._termination_reason is None
+            and self.state is CallState.RECONNECTING
             and self._recovery_deadline is not None
             and self._monotonic() < self._recovery_deadline
         )
@@ -540,6 +550,11 @@ class CallStage:
         async for event in self._provider.events():
             if self.state in {CallState.ENDED, CallState.FAILED}:
                 return
+            observed_at = self._monotonic()
+            observed_at_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
+            observed_disconnected = await self._await_provider_event_admission(event)
+            if observed_disconnected is None:
+                continue
             if isinstance(event, SpeechStarted):
                 self._active_speech_item_id = event.item_id
                 self._playback.set_user_speaking(True)
@@ -547,24 +562,46 @@ class CallStage:
             elif isinstance(event, SpeechStopped):
                 self._release_user_speaking(event.item_id)
             elif isinstance(event, TurnCompleted):
-                self._spawn_handle(self._on_turn(event), name="call-turn-handle")
+                self._spawn_handle(
+                    self._on_turn(
+                        event,
+                        started_at=observed_at,
+                        started_at_timestamp=observed_at_timestamp,
+                        first_audio_disqualified=observed_disconnected,
+                    ),
+                    name="call-turn-handle",
+                )
             elif isinstance(event, TurnInvalid):
                 self._release_user_speaking(event.item_id)
             elif isinstance(event, ProviderFailed):
-                self._record_metric(
-                    CallMetricName.PROVIDER_ENDPOINT,
-                    duration_ms=0,
-                    status=CallMetricStatus.ERROR,
-                    labels={
-                        "provider": CallProvider.UNKNOWN.value,
-                        "result": CallMetricResult.FAILED.value,
-                        "error_code": "PROVIDER_EVENT_FAILED",
-                    },
-                )
-                await self.terminate(CallEndReason.PROVIDER_FAILED)
                 return
             elif isinstance(event, AmbientAudio):
                 continue
+
+    async def _await_provider_failure(self) -> None:
+        assert self._provider is not None
+        failure = await self._provider.wait_failure()
+        if failure is None or self._final is not None:
+            return
+        self._record_metric(
+            CallMetricName.PROVIDER_ENDPOINT,
+            duration_ms=0,
+            status=CallMetricStatus.ERROR,
+            labels={
+                "provider": CallProvider.UNKNOWN.value,
+                "result": CallMetricResult.FAILED.value,
+                "error_code": "PROVIDER_EVENT_FAILED",
+            },
+        )
+        await self.terminate(CallEndReason.PROVIDER_FAILED)
+
+    async def _await_provider_event_admission(self, event: object) -> bool | None:
+        observed_disconnected = self.state is CallState.RECONNECTING
+        if observed_disconnected and not isinstance(event, ProviderFailed):
+            await self._provider_input_allowed.wait()
+            if self.state is not CallState.ACTIVE:
+                return None
+        return observed_disconnected
 
     def _release_user_speaking(self, item_id: str | None) -> None:
         """Release only the provider turn that currently owns speaking state."""
@@ -576,14 +613,26 @@ class CallStage:
         self._playback.set_user_speaking(False)
         self._refresh_silence_task()
 
-    async def _on_turn(self, event: TurnCompleted) -> None:
+    async def _on_turn(
+        self,
+        event: TurnCompleted,
+        *,
+        started_at: float | None = None,
+        started_at_timestamp: str | None = None,
+        first_audio_disqualified: bool = False,
+    ) -> None:
         if self.state is not CallState.ACTIVE:
             return
+        if started_at is None:
+            started_at = self._monotonic()
+        if started_at_timestamp is None:
+            started_at_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
         sequence = len(self._turns) + 1
         self._turns[sequence] = _Turn(
             event.semantic.render(),
-            started_at=self._monotonic(),
-            started_at_timestamp=self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds"),
+            started_at=started_at,
+            started_at_timestamp=started_at_timestamp,
+            first_audio_disqualified=first_audio_disqualified,
         )
         self._unfinished_turns.add(sequence)
         self._playback.set_unfinished_user_turn_count(len(self._unfinished_turns))
@@ -826,6 +875,7 @@ class CallStage:
             return
         connected_at = self._now()
         await self._transition_or_close(CallState.ACTIVE, ledger_facts={"connected_at": connected_at})
+        self._provider_input_allowed.set()
         self._connected_monotonic = self._monotonic()
         if not self._started:
             return
@@ -835,8 +885,10 @@ class CallStage:
 
     async def _drain_pcm(self) -> None:
         while True:
+            await self._provider_input_allowed.wait()
             frame = await self._pcm.get()
             try:
+                await self._provider_input_allowed.wait()
                 if self.state is CallState.ACTIVE and self._provider is not None:
                     await self._provider.push_audio(frame)
             finally:

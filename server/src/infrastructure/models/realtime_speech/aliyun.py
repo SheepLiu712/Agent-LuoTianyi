@@ -84,6 +84,8 @@ class AliyunRealtimeSpeechSession:
         self._event_consumer_active = False
         self._pending_delivery: RealtimeSpeechEvent | None = None
         self._terminal_failure: ProviderFailed | None = None
+        self._failure_signal: ProviderFailed | None = None
+        self._terminal_ready = asyncio.Event()
         self._session_updated: asyncio.Future[None] | None = None
         self._writer: asyncio.Task[None] | None = None
         self._reader: asyncio.Task[None] | None = None
@@ -182,6 +184,10 @@ class AliyunRealtimeSpeechSession:
 
     async def close(self) -> None:
         await self._shutdown()
+
+    async def wait_failure(self) -> ProviderFailed | None:
+        await self._terminal_ready.wait()
+        return self._failure_signal
 
     async def _enqueue(self, message: dict[str, object]) -> None:
         if self._closed or self._failed:
@@ -525,6 +531,8 @@ class AliyunRealtimeSpeechSession:
                 return
             self._terminal_sent = True
             self._terminal_failure = failure
+            self._failure_signal = failure
+            self._terminal_ready.set()
             self._event_condition.notify_all()
 
     async def _shutdown(self) -> None:

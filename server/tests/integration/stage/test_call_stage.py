@@ -9,6 +9,9 @@ from sqlalchemy.orm import sessionmaker
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 
 import src.domain.agent as d
+from src.adapter.websocket.call_v1 import BinaryAudioFrameCodec, WireAudioFrame
+from src.adapter.websocket.call_v1.stage_binding import CallStageBinding
+from src.adapter.websocket.call_v1.transport import CallTransportSession
 from src.agent.context import ContextFactory
 from src.agent.facade import Agent
 from src.agent.handlers.action.router import ActionRouter
@@ -25,7 +28,8 @@ from src.domain.call import (
     CallSpeechDelivery,
     CallState,
 )
-from src.infrastructure.models.realtime_speech import SpeechStarted, TurnCompleted, TurnInvalid
+from src.infrastructure.models.realtime_speech import ProviderFailed, SpeechStarted, TurnCompleted, TurnInvalid
+from src.infrastructure.observability.call_metrics import CallMetricName
 from src.infrastructure.persistence.call_sessions import (
     BEIJING_TIMEZONE,
     CallSessionRecord,
@@ -122,6 +126,22 @@ class _BlockingTerminalTransport(_Transport):
 class _BlockingProviderFactory:
     async def create(self, _call_id):
         await asyncio.Event().wait()
+
+
+class _BlockingPushProviderFactory(FakeRealtimeSpeechSessionFactory):
+    async def create(self, call_id):
+        provider = await super().create(call_id)
+        provider.push_started = asyncio.Event()
+        provider.release_push = asyncio.Event()
+        original_push = provider.push_audio
+
+        async def push_audio(frame):
+            provider.push_started.set()
+            await provider.release_push.wait()
+            await original_push(frame)
+
+        provider.push_audio = push_audio
+        return provider
 
 
 def _report(request, plans):
@@ -405,6 +425,197 @@ async def test_pcm_receipts_are_bounded_idempotent_and_turns_require_completed_e
     stage.playback_completed(response_id, stream_id)
     await _eventually(lambda: stage._turns[1].status is CallReplyStatus.COMPLETED)
     await stage.terminate()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_preserves_accepted_pcm_and_completed_turn_exactly_once(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    transport = _Transport()
+    turn_handler = _TurnHandler()
+    turn_handler.gate.set()
+    captured_metrics = []
+
+    class Metrics:
+        def record(self, metric):
+            captured_metrics.append(metric)
+            return True
+
+    stage = await CallStage.create(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        transport=transport,
+        call_metrics=Metrics(),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    ingress = CallStageBinding(call_id=str(record.call_id), deliver=lambda _output: asyncio.sleep(0))
+    session = CallTransportSession(call_id=str(record.call_id), user_id="user", character_id="luotianyi", sink=ingress)
+    ingress.bind(stage=stage, session=session)
+    codec = BinaryAudioFrameCodec()
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        await session.receive_binary(codec.encode(WireAudioFrame(1, 2, 0, 0, 1, b"\x01\x00")))
+        await session.receive_binary(codec.encode(WireAudioFrame(1, 2, 0, 0, 2, b"\x02\x00")))
+        await provider.push_started.wait()
+
+        await stage.disconnect()
+        provider.release_push.set()
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="断线期已完成轮次")))
+        assert await stage.resume() is True
+
+        await asyncio.wait_for(stage._pcm.join(), 1)
+        assert [frame.sequence for frame in provider.pushed_frames] == [1, 2]
+        await _eventually(lambda: len(turn_handler.requests) == 1)
+        await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
+        assert [frame.payload for frame in provider.pushed_frames] == [b"\x01\x00", b"\x02\x00"]
+        assert [request.stimulus.audio_content.transcript for request in turn_handler.requests] == ["断线期已完成轮次"]
+        assert list(stage._turns) == [1]
+        assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured_metrics]
+
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="恢复后新轮次")))
+        await _eventually(lambda: len(turn_handler.requests) == 2)
+        await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
+        assert [metric.name for metric in captured_metrics].count(CallMetricName.FIRST_AUDIO) == 1
+    finally:
+        provider.release_push.set()
+        await stage.terminate(CallEndReason.USER_HANGUP)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_timeout_discards_paused_pcm_and_provider_events(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    turn_handler = _TurnHandler()
+    stage = await CallStage.create(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        transport=_Transport(),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x01\x00"), b"\x01\x00")
+        assert stage.accept_pcm(_receipt(record.call_id, 3, b"\x02\x00"), b"\x02\x00")
+        await provider.push_started.wait()
+        await stage.disconnect()
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="不得兑现")))
+        clock.advance(3.0)
+
+        assert await stage.resume() is False
+        await stage.wait_closed()
+
+        assert stage.context is None
+        assert stage._pcm.empty()
+        assert stage._pcm_buffered_bytes == 0
+        assert turn_handler.requests == []
+        assert not stage.tasks
+    finally:
+        provider.release_push.set()
+        await stage.terminate(CallEndReason.USER_HANGUP)
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_bypasses_paused_reconnect_events_and_cleans_owned_work(call_setup):
+    stage, provider, _, turn_handler = await _create(call_setup)
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    await stage.disconnect()
+    await provider.emit(TurnCompleted(CallAudioSemantic(transcript="恢复后才可兑现")))
+    await _eventually(
+        lambda: provider._events.empty() and stage._events_task is not None and not stage._events_task.done()
+    )
+
+    await provider.emit(ProviderFailed("provider_connection_closed", True))
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 0.2)
+
+    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
+    assert turn_handler.requests == []
+    assert stage.context is None
+    assert stage._pcm.empty()
+    assert stage._pcm_buffered_bytes == 0
+    assert not stage.tasks
+    assert provider.closed is True
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_requested_before_resume_rejects_resume_and_cleans_paused_work(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    turn_handler = _TurnHandler()
+    released = []
+    stage = await CallStage.create(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        transport=_Transport(),
+        release_ownership=lambda value: not released.append(value),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x01\x00"), b"\x01\x00")
+    assert stage.accept_pcm(_receipt(record.call_id, 3, b"\x02\x00"), b"\x02\x00")
+    await provider.push_started.wait()
+    await stage.disconnect()
+    await provider.emit(TurnCompleted(CallAudioSemantic(transcript="竞态中不得兑现")))
+    await _eventually(lambda: provider._events.empty())
+
+    termination_entered = asyncio.Event()
+    release_termination = asyncio.Event()
+    original_terminate_owned = stage._terminate_owned
+
+    async def delayed_terminate_owned(reason):
+        termination_entered.set()
+        await release_termination.wait()
+        return await original_terminate_owned(reason)
+
+    stage._terminate_owned = delayed_terminate_owned
+    await provider.emit(ProviderFailed("provider_connection_closed", True))
+    await asyncio.wait_for(termination_entered.wait(), 0.2)
+    assert stage.termination_requested is True
+
+    assert await stage.resume() is False
+    assert stage.state is CallState.RECONNECTING
+    assert not stage._provider_input_allowed.is_set()
+    assert turn_handler.requests == []
+    assert [frame.sequence for frame in provider.pushed_frames] == []
+
+    release_termination.set()
+    provider.release_push.set()
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
+    assert turn_handler.requests == []
+    assert stage.context is None
+    assert stage._pcm.empty()
+    assert stage._pcm_buffered_bytes == 0
+    await _eventually(lambda: released == [ownership])
+    assert released == [ownership]
+    assert provider.closed is True
+    assert not stage.tasks
 
 
 @pytest.mark.asyncio
