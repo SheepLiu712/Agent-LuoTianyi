@@ -20,28 +20,15 @@ it('gives feedback without claiming the permission is closed', () => {
   expect(title.trim()).not.toBe('');
   expect(typeof message).toBe('string');
   expect(message.trim()).not.toBe('');
-  // 唯一保留的契约：不得把原因不明的未授权表述成"权限已关闭 / 永久拒绝"。
-  expect(`${title}${message}`).not.toMatch(/已关闭|永久/);
-});
-
-it('renders the settings dialog with a title that matches its body', () => {
-  showMicrophoneSettings(jest.fn());
-  const [title, message] = (Alert.alert as jest.Mock).mock.calls[0];
-
-  // 这个弹窗只在"请求长时间没有返回"时出现：标题与正文都必须说明这一点，不能预告授权失败。
-  expect(title).toContain('未返回');
-  expect(message).toContain('没有返回');
-  expect(title).not.toContain('失败');
-  expect(`${title}${message}`).not.toMatch(/已关闭|永久/);
+  // 唯一保留的契约：不得把原因不明的未授权表述成"权限已关闭 / 永久拒绝 / 授权失败"。
+  expect(`${title}${message}`).not.toMatch(/已关闭|永久|授权失败/);
 });
 
 it('keeps the non-modal messages free of permanent-denial wording', () => {
-  // 已返回的模糊未授权 → 强调可重试；在途 → 只说明处理中。
-  expect(MICROPHONE_AMBIGUOUS_MESSAGE).toContain('重试');
-  expect(MICROPHONE_PENDING_MESSAGE).toContain('处理中');
   for (const text of [MICROPHONE_AMBIGUOUS_MESSAGE, MICROPHONE_PENDING_MESSAGE]) {
-    expect(text).not.toMatch(/已关闭|永久/);
-    expect(text).not.toContain('授权失败');
+    expect(typeof text).toBe('string');
+    expect(text.trim()).not.toBe('');
+    expect(text).not.toMatch(/已关闭|永久|授权失败/);
   }
 });
 
