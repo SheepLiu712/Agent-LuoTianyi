@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 
 from src.domain.call import CallEndReason, CallState
 from src.stage.stage_manager import (
@@ -35,6 +36,35 @@ class CallConnection:
 
     def __init__(self, token: object) -> None:
         self._token = token
+
+
+@dataclass(frozen=True, slots=True)
+class CallCapabilityStatus:
+    enabled: bool
+    trusted_host: bool
+    provider_ready: bool
+    call_tts_ready: bool
+    summary_ready: bool
+    settlement_ready: bool
+    stage_binding_ready: bool
+    recovery_ready: bool
+    character_ids: tuple[str, ...] = ()
+
+    @property
+    def available(self) -> bool:
+        return all(
+            (
+                self.enabled,
+                self.trusted_host,
+                self.provider_ready,
+                self.call_tts_ready,
+                self.summary_ready,
+                self.settlement_ready,
+                self.stage_binding_ready,
+                self.recovery_ready,
+                bool(self.character_ids),
+            )
+        )
 
 
 class _ConnectionState:
@@ -131,7 +161,17 @@ class CallWebSocketAdapter:
     """Own call.v1 establishment, restore, ordered receive, and transport release."""
 
     def __init__(
-        self, *, manager: StageManager, user_reset_fence=None, call_metrics=None, supports_character=None
+        self,
+        *,
+        manager: StageManager,
+        user_reset_fence=None,
+        call_metrics=None,
+        enabled: bool = False,
+        trusted_host: bool = True,
+        provider_ready: bool = True,
+        call_tts_character_ids=None,
+        call_summary_character_ids=None,
+        supports_character=None,
     ) -> None:
         self._manager = manager
         self._call_metrics = call_metrics
@@ -139,11 +179,42 @@ class CallWebSocketAdapter:
         self._connections: dict[object, _ConnectionState] = {}
         self._open_tasks: set[asyncio.Task] = set()
         self._open_cancellations: dict[asyncio.Task, asyncio.Event] = {}
-        self._supports_character = supports_character or (lambda _character_id: True)
+        self._enabled = enabled
+        self._trusted_host = trusted_host
+        self._provider_ready = provider_ready
+        self._call_tts_character_ids = call_tts_character_ids
+        self._call_summary_character_ids = call_summary_character_ids
+        self._supports_character = supports_character
         self._closed = False
 
+    @property
+    def capability_status(self) -> CallCapabilityStatus:
+        tts_ids = tuple(self._call_tts_character_ids()) if self._call_tts_character_ids is not None else ()
+        summary_ids = tuple(self._call_summary_character_ids()) if self._call_summary_character_ids is not None else ()
+        character_ids = tuple(character_id for character_id in tts_ids if character_id in frozenset(summary_ids))
+        legacy_ready = self._supports_character is not None
+        if legacy_ready and not character_ids:
+            character_ids = ("*",)
+        return CallCapabilityStatus(
+            enabled=self._enabled,
+            trusted_host=self._trusted_host,
+            provider_ready=self._provider_ready,
+            call_tts_ready=bool(tts_ids) or legacy_ready,
+            summary_ready=bool(summary_ids) or legacy_ready,
+            settlement_ready=self._manager.call_settlement_ready or legacy_ready,
+            stage_binding_ready=not self._closed and not self._manager.is_closed(),
+            recovery_ready=self._manager.call_recovery_ready or legacy_ready,
+            character_ids=character_ids,
+        )
+
+    def supports_call_character(self, character_id: str) -> bool:
+        status = self.capability_status
+        if self._supports_character is not None:
+            return status.available and self._supports_character(character_id)
+        return status.available and character_id in status.character_ids
+
     async def open(self, *, raw: str, user_id: str, connection_id: object) -> CallConnection:
-        if self._closed or self._manager.is_closed():
+        if self._closed or self._manager.is_closed() or not self.capability_status.available:
             raise CallTransportError("CALL_INGRESS_UNAVAILABLE", close_code=1013)
         try:
             message = decode_control_text(raw, sender="client", transport="call_ws")
@@ -191,7 +262,7 @@ class CallWebSocketAdapter:
         character_id = str(message["character_id"])
         request_id = str(message["client_request_id"])
         request_seq = int(message["seq"])
-        if not self._supports_character(character_id):
+        if not self.supports_call_character(character_id):
             raise self._start_error("CALL_CHARACTER_UNAVAILABLE", request_id, request_seq, close_code=1008)
         try:
             request = CallOpenRequest(

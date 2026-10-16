@@ -25,7 +25,13 @@ from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
 from ._finalization import CallFinalizationSink, FinalizationTasks, InteractionFinalizing
-from .call_settlement import CallAgentSettlement, CallResourceReleasePort, CallSettlement, CallSettlementConsumerImpl
+from .call_settlement import (
+    CallAgentSettlement,
+    CallResourceReleasePort,
+    CallSettlement,
+    CallSettlementConsumerImpl,
+    StaleCallRecoveryService,
+)
 from .chat_stage import ChatStage
 from .interaction_lease import (
     CallTransitionIntent,
@@ -221,6 +227,7 @@ class StageManager:
         call_resources: CallResourceReleasePort | None = None,
         call_metrics: CallMetrics | None = None,
         realtime_speech_factory: RealtimeSpeechSessionFactory | None = None,
+        recovery_projection_verifier: Any | None = None,
         user_reset_fence: Any | None = None,
         wall_clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
@@ -240,6 +247,18 @@ class StageManager:
         self._call_sessions = call_sessions
         self._realtime_speech_factory = realtime_speech_factory
         self._call_metrics = call_metrics
+        self._stale_call_recovery = (
+            StaleCallRecoveryService(
+                call_sessions=call_sessions,
+                conversation_service=conversation_service,
+                call_maintenance_batches=call_maintenance_batches,
+                projection_verifier=recovery_projection_verifier,
+            )
+            if recovery_projection_verifier is not None
+            else None
+        )
+        self._initialization: asyncio.Task[None] | None = None
+        self._recovery_ready = recovery_projection_verifier is None
         self._user_reset_fence = user_reset_fence
         self._wall_clock = wall_clock or (lambda: datetime.now(BEIJING_TIMEZONE))
         self._monotonic = monotonic
@@ -290,8 +309,50 @@ class StageManager:
     def call_settlement_ready(self) -> bool:
         return bool(self._call_settlement and self._call_settlement.is_ready)
 
+    @property
+    def call_recovery_ready(self) -> bool:
+        return self._recovery_ready
+
+    @property
+    def call_business_ready(self) -> bool:
+        return not self._closed and (
+            self._stale_call_recovery is None or (self.call_settlement_ready and self.call_recovery_ready)
+        )
+
+    async def initialize(self) -> None:
+        """Recover durable call state exactly once before opening call admission."""
+        if self._closed:
+            raise RuntimeError("stage manager closed during initialization")
+        if self._recovery_ready:
+            return
+        if self._initialization is None:
+            self._initialization = asyncio.create_task(self._initialize(), name="stage-manager-initialize")
+            self._initialization.add_done_callback(self._observe_initialization)
+        await complete_owned(self._await_initialization(self._initialization))
+
+    async def _initialize(self) -> None:
+        if self._stale_call_recovery is None:
+            raise RuntimeError("stale call recovery is not configured")
+        report = await self._stale_call_recovery.reconcile()
+        if report.failed or report.conflicted:
+            raise RuntimeError("stale call recovery did not converge")
+        if self._closed:
+            raise RuntimeError("stage manager closed during initialization")
+        self._recovery_ready = True
+
+    @staticmethod
+    def _observe_initialization(task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            task.exception()
+
+    @staticmethod
+    async def _await_initialization(task: asyncio.Task[None]) -> None:
+        await asyncio.shield(task)
+
     async def open_call(self, request: CallOpenRequest, transport: CallOpenTransport) -> CallControl:
         """Accept one call identity and retain its background establishment operation."""
+        if not self.call_business_ready:
+            raise RuntimeError("CALL_INGRESS_UNAVAILABLE")
         task = self._call_open_tasks.get(request.client_request_id)
         if task is None:
             task = asyncio.create_task(
@@ -1325,6 +1386,8 @@ class StageManager:
     async def _close(self) -> None:
         async with self._lock:
             self._closed = True
+            self._recovery_ready = False
+            initialization = self._initialization
             stages = tuple(self._stages.values())
             self._stages.clear()
             timers = tuple(self._expiry.values())
@@ -1333,6 +1396,8 @@ class StageManager:
                 timer.cancel()
             intent_timers = tuple(self._intent_expiry.values())
             self._intent_expiry.clear()
+        if initialization is not None and initialization is not asyncio.current_task():
+            await asyncio.gather(initialization, return_exceptions=True)
         await asyncio.gather(*timers, return_exceptions=True)
         for timer in intent_timers:
             timer.cancel()

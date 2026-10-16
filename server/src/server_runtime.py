@@ -5,12 +5,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.call_v1 import (
-    CallStageBinding,
-    CallTransportHub,
-    CallWebSocketAdapter,
-    parse_call_transport_enabled,
-)
+from src.adapter.websocket.call_v1 import CallCapabilityStatus, CallWebSocketAdapter, parse_call_transport_enabled
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
@@ -25,47 +20,18 @@ from src.infrastructure.persistence.call_maintenance_projection import CallMaint
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
-from src.stage.call_settlement import StaleCallRecoveryService
 from src.utils.logger import (
     get_logger,
     install_observability_log_handler,
     uninstall_observability_log_handler,
 )
+from src.utils.owned_operation import complete_owned
 from src.web.http import UserInterface
 from src.web.websocket import WebSocketService
 from src.world import WorldRuntime
 
 logger = get_logger(__name__)
 DEFAULT_WORLD_ID: Final = "default"
-
-
-@dataclass(frozen=True, slots=True)
-class CallCapabilityStatus:
-    enabled: bool
-    trusted_host: bool
-    provider_ready: bool
-    call_tts_ready: bool
-    summary_ready: bool
-    settlement_ready: bool
-    stage_binding_ready: bool
-    recovery_ready: bool
-    character_ids: tuple[str, ...] = ()
-
-    @property
-    def available(self) -> bool:
-        return all(
-            (
-                self.enabled,
-                self.trusted_host,
-                self.provider_ready,
-                self.call_tts_ready,
-                self.summary_ready,
-                self.settlement_ready,
-                self.stage_binding_ready,
-                self.recovery_ready,
-                bool(self.character_ids),
-            )
-        )
 
 
 @dataclass
@@ -84,16 +50,11 @@ class ServerRuntime:
     owns_observability: bool = field(default=True)
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
-    call_transport_hub: CallTransportHub | None = None
     call_adapter: CallWebSocketAdapter | None = None
     call_metrics: CallMetrics | None = None
     user_reset_fence: UserResetFence | None = None
     realtime_speech_factory: AliyunRealtimeSpeechSessionFactory | None = None
-    stale_call_recovery: StaleCallRecoveryService | None = None
     user_reset_service: UserResetService | None = None
-    call_capability: CallCapabilityStatus = field(
-        default_factory=lambda: CallCapabilityStatus(False, False, False, False, False, False, False, False, ())
-    )
     _call_transport_requested: bool = field(default=False, repr=False)
     _host_context: ServerHostContext = field(default_factory=ServerHostContext, repr=False)
     default_world_id: str = DEFAULT_WORLD_ID
@@ -198,7 +159,6 @@ class ServerRuntime:
                 ),
                 default_world_id=str(config.get("world", {}).get("world_id", DEFAULT_WORLD_ID)),
                 world_stage_config=config.get("world_stage", {}),
-                call_transport_hub=CallTransportHub(user_reset_fence=reset_fence),
                 call_metrics=call_metrics,
                 user_reset_fence=reset_fence,
                 realtime_speech_factory=speech_factory,
@@ -234,6 +194,7 @@ class ServerRuntime:
                 call_resources=agent_runtime,
                 call_metrics=call_metrics,
                 realtime_speech_factory=speech_factory,
+                recovery_projection_verifier=projection_verifier,
                 user_reset_fence=reset_fence,
                 config=config.get("stage_manager", {}),
             )
@@ -241,7 +202,11 @@ class ServerRuntime:
                 manager=runtime.stage_manager,
                 user_reset_fence=reset_fence,
                 call_metrics=call_metrics,
-                supports_character=runtime.supports_call_character,
+                enabled=call_requested,
+                trusted_host=resolved_host_context.supports_single_process_calls,
+                provider_ready=speech_factory.is_configured,
+                call_tts_character_ids=lambda: agent_runtime.call_tts_character_ids,
+                call_summary_character_ids=lambda: agent_runtime.call_summary_character_ids,
             )
 
             media_store = PermanentMediaStore(media_config) if media_config.get("root") else None
@@ -258,63 +223,42 @@ class ServerRuntime:
                 call_sessions=database_manager.call_sessions,
                 call_maintenance_batches=database_manager.call_maintenance_batches,
             )
-            runtime.stale_call_recovery = StaleCallRecoveryService(
-                call_sessions=database_manager.call_sessions,
-                conversation_service=database_manager.conversation_service,
-                call_maintenance_batches=database_manager.call_maintenance_batches,
-                projection_verifier=projection_verifier,
-            )
-
             runtime._wire_dependencies()
             # No new call admission until all previous-runtime candidates converge.
-            recovery_report = await runtime.stale_call_recovery.reconcile()
-            if recovery_report.failed or recovery_report.conflicted:
-                raise RuntimeError("stale call recovery did not converge")
-            runtime.call_capability = runtime._build_call_capability(recovery_ready=True)
+            await runtime.stage_manager.initialize()
             runtime._start_background_services()
             runtime.user_interface.generate_rsa_keys()
             return runtime
         except BaseException:
             logger.error("ServerRuntime initialization failed, starting rollback...")
-            await cls._rollback_failed_initialization(
-                runtime=runtime,
-                world=world,
-                database_manager=database_manager,
-                agent_runtime=agent_runtime,
-                observability=observability,
-                owns_observability=owns_observability,
+            await complete_owned(
+                cls._rollback_failed_initialization(
+                    runtime=runtime,
+                    world=world,
+                    database_manager=database_manager,
+                    agent_runtime=agent_runtime,
+                    observability=observability,
+                    owns_observability=owns_observability,
+                )
             )
             raise
 
     @property
     def call_transport_available(self) -> bool:
-        return self.call_capability.available
+        return self.call_capability_status.available
+
+    @property
+    def call_capability(self) -> CallCapabilityStatus:
+        return self.call_capability_status
 
     @property
     def call_capability_status(self) -> CallCapabilityStatus:
-        return self.call_capability
-
-    def _build_call_capability(self, *, recovery_ready: bool) -> CallCapabilityStatus:
-        character_id = self.agent_runtime.default_character_id
-        speaking = self.agent_runtime.skills.speaking
-        summary = self.agent_runtime.skills.call_summary
-        return CallCapabilityStatus(
-            enabled=self._call_transport_requested,
-            trusted_host=self._host_context.supports_single_process_calls,
-            provider_ready=bool(self.realtime_speech_factory and self.realtime_speech_factory.is_configured),
-            call_tts_ready=speaking.supports_call_audio(character_id)
-            and self.agent_runtime.skills.prepared_speech.supports_call_apology(character_id),
-            summary_ready=summary.supports_character(character_id),
-            settlement_ready=bool(self.stage_manager and self.stage_manager.call_settlement_ready),
-            stage_binding_ready=isinstance(self.stage_manager, StageManager)
-            and isinstance(self.call_transport_hub, CallTransportHub)
-            and callable(getattr(CallStageBinding, "bind_stage", None)),
-            recovery_ready=recovery_ready and self.stale_call_recovery is not None,
-            character_ids=(character_id,),
-        )
+        if self.call_adapter is None:
+            return CallCapabilityStatus(False, False, False, False, False, False, False, False, ())
+        return self.call_adapter.capability_status
 
     def supports_call_character(self, character_id: str) -> bool:
-        return self.call_capability.available and character_id in self.call_capability.character_ids
+        return self.call_adapter is not None and self.call_adapter.supports_call_character(character_id)
 
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
@@ -345,6 +289,42 @@ class ServerRuntime:
         owns_observability: bool,
     ) -> None:
         """在初始化失败的情况下，尝试回滚初始化失败的系统运行时，关闭已启动的后台服务和资源。"""
+        rollback = asyncio.create_task(
+            cls._rollback_failed_initialization_owned(
+                runtime=runtime,
+                world=world,
+                database_manager=database_manager,
+                agent_runtime=agent_runtime,
+                observability=observability,
+                owns_observability=owns_observability,
+            ),
+            name="server-runtime-initialization-rollback",
+        )
+        cancelled = False
+        while not rollback.done():
+            try:
+                await asyncio.shield(rollback)
+            except asyncio.CancelledError:
+                cancelled = True
+            except Exception:
+                break
+        result = rollback.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
+
+    @classmethod
+    async def _rollback_failed_initialization_owned(
+        cls,
+        *,
+        runtime: ServerRuntime | None,
+        world: WorldRuntime | None,
+        database_manager: DatabaseManager | None,
+        agent_runtime: AgentRuntime | None,
+        observability: ObservabilityService | None,
+        owns_observability: bool,
+    ) -> None:
+        """Run every rollback step to completion independently of caller cancellation."""
         errors: list[str] = []
 
         async def _clear_refs() -> None:
@@ -386,8 +366,10 @@ class ServerRuntime:
                 continue
             try:
                 await stop()
-            except BaseException as error:  # noqa: BLE001 - rollback must continue through all owned resources
-                errors.append(f"{name}: {type(error).__name__}: {error}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:  # noqa: BLE001 - rollback must continue through all owned resources
+                errors.append(f"{name}: {type(error).__name__}")
 
         if errors:
             logger.error("ServerRuntime initialization rollback had errors: " + "; ".join(errors))

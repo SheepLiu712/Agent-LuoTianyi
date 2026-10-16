@@ -66,6 +66,15 @@ def manager(*, speech_factory, repository=None, wall_clock=None):
     return stages, repository
 
 
+def call_adapter(stages):
+    return CallWebSocketAdapter(
+        manager=stages,
+        user_reset_fence=stages._user_reset_fence,
+        enabled=True,
+        supports_character=lambda _character_id: True,
+    )
+
+
 class _IncrementingClock:
     def __init__(self):
         self.value = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
@@ -94,7 +103,7 @@ class BlockingSpeechFactory:
 async def test_open_orders_preparing_before_ack_and_repeated_start_keeps_identity_and_deadline():
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     first = await asyncio.wait_for(adapter.open(raw=start_message(), user_id="user", connection_id=object()), 2)
     preparing = json.loads((await adapter.next_output(first)).text)
     ack = json.loads((await adapter.next_output(first)).text)
@@ -118,7 +127,7 @@ async def test_open_orders_preparing_before_ack_and_repeated_start_keeps_identit
 async def test_initialization_hangup_uses_same_control_and_does_not_create_second_provider():
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     await adapter.next_output(connection)
     await adapter.next_output(connection)
@@ -147,7 +156,7 @@ async def test_initialization_hangup_uses_same_control_and_does_not_create_secon
 async def test_unknown_resume_and_active_connection_takeover_are_rejected_without_new_identity():
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     with pytest.raises(CallTransportError, match="CALL_NOT_FOUND"):
         await adapter.open(raw=resume_message(str(uuid4())), user_id="user", connection_id=object())
     assert repository.find_by_request("missing") is None
@@ -163,7 +172,7 @@ async def test_unknown_resume_and_active_connection_takeover_are_rejected_withou
 async def test_cancelled_open_after_prepare_has_no_session_lease_or_request_task():
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     original = adapter._hub.register_and_attach_start
     registered = asyncio.Event()
     release = asyncio.Event()
@@ -202,7 +211,7 @@ async def test_cancelled_open_after_prepare_has_no_session_lease_or_request_task
 async def test_concurrent_same_request_uses_one_transport_and_rejects_second_connection():
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     first, second = await asyncio.gather(
         adapter.open(raw=start_message(), user_id="user", connection_id=object()),
         adapter.open(raw=start_message(), user_id="user", connection_id=object()),
@@ -224,7 +233,7 @@ async def test_concurrent_same_request_uses_one_transport_and_rejects_second_con
 async def test_cross_identity_request_conflict_is_normalized_without_call_details():
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user-a", connection_id=object())
     await adapter.next_output(connection)
     await adapter.next_output(connection)
@@ -244,7 +253,7 @@ async def test_cross_identity_request_conflict_is_normalized_without_call_detail
 async def test_adapter_close_waits_for_cancelled_open_compensation_before_closing_transport():
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     original = adapter._hub.register_and_attach_start
     registered = asyncio.Event()
     release = asyncio.Event()
@@ -292,7 +301,7 @@ async def test_stage_created_after_disconnect_stays_ringing_until_resume():
             return Session()
 
     stages, _ = manager(speech_factory=Speech())
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)
@@ -313,7 +322,7 @@ async def test_stage_created_after_disconnect_stays_ringing_until_resume():
 async def test_failed_business_resume_keeps_cursor_and_allows_later_resume(monkeypatch):
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)
@@ -340,7 +349,7 @@ async def test_failed_business_resume_keeps_cursor_and_allows_later_resume(monke
 async def test_resume_buffers_stage_output_without_blocking_and_flushes_after_resumed(monkeypatch):
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)
@@ -370,7 +379,7 @@ async def test_resume_buffers_stage_output_without_blocking_and_flushes_after_re
 async def test_stage_none_resume_precheck_is_read_only():
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     original_create = stages.create_call_stage
     create_entered, create_release = asyncio.Event(), asyncio.Event()
 
@@ -399,7 +408,7 @@ async def test_stage_none_resume_precheck_is_read_only():
 async def test_concurrent_resume_reservation_has_one_winner_without_cursor_side_effect():
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)
@@ -430,7 +439,7 @@ async def test_real_stage_resume_pending_overflow_terminates_after_business_comm
     speech = FakeRealtimeSpeechSessionFactory()
     clock = _IncrementingClock()
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)
@@ -479,7 +488,7 @@ async def test_resume_commit_failure_after_active_uses_sqlite_stage_termination(
     speech = FakeRealtimeSpeechSessionFactory()
     clock = _IncrementingClock()
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
 
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
@@ -541,7 +550,7 @@ async def test_resume_post_business_output_failure_terminates_real_sqlite_stage(
     speech = FakeRealtimeSpeechSessionFactory()
     clock = _IncrementingClock()
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)
@@ -606,7 +615,7 @@ async def test_cancelled_resume_after_business_commit_terminates_and_releases_ow
     speech = FakeRealtimeSpeechSessionFactory()
     clock = _IncrementingClock()
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
-    adapter = CallWebSocketAdapter(manager=stages, user_reset_fence=stages._user_reset_fence)
+    adapter = call_adapter(stages)
     connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
     call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
     await adapter.next_output(connection)

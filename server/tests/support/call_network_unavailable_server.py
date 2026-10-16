@@ -21,13 +21,13 @@ from fastapi import FastAPI
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
 from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.call_v1 import CallTransportHub
+from src.adapter.websocket.call_v1 import CallWebSocketAdapter
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.application.host_context import ServerHostContext
 from src.infrastructure.observability import CallMetrics, ObservabilityService
 from src.infrastructure.persistence.database import DatabaseManager, InviteCode
-from src.server_runtime import CallCapabilityStatus, ServerRuntime
+from src.server_runtime import ServerRuntime
 from src.stage import StageManager
 from src.web.http import routes
 from src.web.http.user_interface import UserInterface
@@ -66,6 +66,14 @@ def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntim
         get_context_factory=agents.context_factories.__getitem__,
         call_sessions=database.call_sessions,
     )
+    call_adapter = CallWebSocketAdapter(
+        manager=manager,
+        enabled=True,
+        trusted_host=host_context.supports_single_process_calls,
+        provider_ready=False,
+        call_tts_character_ids=lambda: agents.call_tts_character_ids,
+        call_summary_character_ids=lambda: agents.call_summary_character_ids,
+    )
     resolver = NoopMediaResolver()
     interface = UserInterface(database, resolver)
     interface.generate_rsa_keys()
@@ -81,9 +89,8 @@ def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntim
         observability=ObservabilityService({}),
         chat_adapter=adapter,
         stage_manager=manager,
-        call_transport_hub=CallTransportHub(),
+        call_adapter=call_adapter,
         call_metrics=CallMetrics(None),
-        call_capability=CallCapabilityStatus(True, False, False, False, False, False, False, False, ()),
         _call_transport_requested=True,
         _host_context=host_context,
     )
@@ -91,7 +98,7 @@ def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntim
 
 async def close_runtime(runtime: ServerRuntime) -> None:
     await runtime.stage_manager.close()  # type: ignore[union-attr]
-    await runtime.call_transport_hub.close()  # type: ignore[union-attr]
+    await runtime.call_adapter.close()  # type: ignore[union-attr]
     await runtime.agent_runtime.shutdown()
     await runtime.database_manager.shutdown()
     runtime.observability.close()

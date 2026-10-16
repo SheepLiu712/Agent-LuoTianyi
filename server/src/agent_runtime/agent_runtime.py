@@ -80,6 +80,25 @@ class AgentRuntime:
         """Expose the shared singing port only to the application composition root."""
         return self.skills.singing.backend
 
+    @property
+    def call_tts_character_ids(self) -> tuple[str, ...]:
+        """Return characters whose Agent-owned realtime call speech is ready."""
+        return tuple(
+            character_id
+            for character_id in self.character_ids
+            if self.skills.speaking.supports_call_audio(character_id)
+            and self.skills.prepared_speech.supports_call_apology(character_id)
+        )
+
+    @property
+    def call_summary_character_ids(self) -> tuple[str, ...]:
+        """Return characters whose Agent-owned call summary capability is ready."""
+        return tuple(
+            character_id
+            for character_id in self.character_ids
+            if self.skills.call_summary.supports_character(character_id)
+        )
+
     def release_call_maintenance(self, call_id: UUID) -> None:
         self.skills.call_maintenance.release(call_id)
 
