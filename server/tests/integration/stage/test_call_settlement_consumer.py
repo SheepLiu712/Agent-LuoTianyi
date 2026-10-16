@@ -84,7 +84,6 @@ async def test_real_agent_settlement_persists_one_private_call_record_and_progre
         ),
         call_sessions=database.call_sessions,
         conversation_service=database.conversation_service,
-        release_call_maintenance=runtime.release_call_maintenance,
         call_maintenance_batches=database.call_maintenance_batches,
     )
 
@@ -250,7 +249,6 @@ async def test_committed_call_winner_skips_summary_model_and_repairs_pending_cas
         ),
         call_sessions=database.call_sessions,
         conversation_service=database.conversation_service,
-        release_call_maintenance=runtime.release_call_maintenance,
         call_maintenance_batches=database.call_maintenance_batches,
     )
 
@@ -449,10 +447,9 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
         ),
         call_sessions=database.call_sessions,
         conversation_service=database.conversation_service,
-        release_call_maintenance=runtime.release_call_maintenance,
         call_maintenance_batches=database.call_maintenance_batches,
     )
-    settlement = CallSettlement(consumer=consumer, resources=Resources(), timeout_seconds=1)
+    settlement = CallSettlement(consumer=consumer, timeout_seconds=1)
     try:
         await settlement.settle(snapshot)
 
@@ -460,7 +457,7 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
         assert persisted.maintenance_status is not SettlementStatus.SUCCEEDED
         assert extract_calls == 0
         assert write_calls == 0
-        assert released == [call_id]
+        assert released == []
         with database.open_sql_session() as sql:
             row = sql.query(CallMaintenanceBatch).filter_by(maintenance_id="legacy-null").one()
             assert row.candidates == "[]"

@@ -15,6 +15,7 @@ from .models import (
     ConversationCompaction,
     ConversationEntry,
     ConversationSnapshot,
+    ConversationSummary,
 )
 
 if TYPE_CHECKING:
@@ -41,11 +42,44 @@ class ConversationContext:
             store = DatabaseConversationStore(database, identity)
         self._store = store
         self._snapshot = snapshot if snapshot is not None else self._store.load()[0]
+        self._call_maintenance_progress = 0
 
     def read(self) -> ConversationSnapshot:
         """返回旧总结和按时间排列的近期对话。"""
         self._state.check()
         return self._snapshot
+
+    def read_working(self) -> ConversationSnapshot:
+        """Return this interaction's own conversation, excluding call seed history."""
+        self._state.check()
+        load_working = getattr(self._store, "load_working", None)
+        return load_working() if load_working is not None else self._snapshot
+
+    def read_call_maintenance_progress(self) -> int:
+        self._state.check()
+        return self._call_maintenance_progress
+
+    def advance_call_maintenance_progress(self, *, expected: int, new: int) -> bool:
+        """Advance in-memory call maintenance progress after all effects succeed."""
+        self._state.check()
+        if self._call_maintenance_progress != expected:
+            return self._call_maintenance_progress == new
+        if new < expected:
+            raise ValueError("call maintenance progress cannot move backwards")
+        self._call_maintenance_progress = new
+        return True
+
+    async def update_call_working_summary(self, summary: ConversationSummary) -> None:
+        """Update the in-memory call summary without consuming its uncompressed tail."""
+        if not isinstance(summary, ConversationSummary) or not summary.text.strip():
+            raise ValueError("call working summary must be nonblank")
+        async with self._state.lock:
+            self._state.check()
+            update = getattr(self._store, "update_working_summary", None)
+            if update is None:
+                raise NotImplementedError("only call contexts have a working summary")
+            update(summary)
+            self._snapshot = self._store.load()[0]
 
     async def append(self, entries: tuple[ConversationEntry, ...]) -> None:
         """追加 entries 后刷新窗口；与同一用户、角色的压缩操作顺序执行。"""

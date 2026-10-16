@@ -5,6 +5,15 @@ from uuid import uuid4
 import pytest
 
 import src.domain.agent as d
+from src.agent.context import (
+    ContextIdentity,
+    ConversationContext,
+    ConversationEntry,
+    ConversationSnapshot,
+    ConversationSummary,
+    TextContent,
+)
+from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.skills.cognitive.call_settlement import (
     EMPTY_CALL_SUMMARY,
     FAILED_CALL_SUMMARY,
@@ -57,6 +66,50 @@ async def test_call_summary_empty_retry_fallback_and_length_limit():
     assert await CallSummarySkill({}).summarize(_invocation(), snapshot) == FAILED_CALL_SUMMARY
 
 
+@pytest.mark.asyncio
+async def test_call_summary_combines_working_prefix_and_tail_updates_same_context_without_seed():
+    def entry(entry_id, text):
+        return ConversationEntry(entry_id, datetime(2026, 1, 1), "user", TextContent(text))
+
+    seed = ConversationSnapshot(ConversationSummary("old seed summary"), (entry("e1", "old seed fact"),))
+    conversation = ConversationContext(
+        identity=ContextIdentity("luotianyi", "call", "user"),
+        _store=EphemeralCallConversationStore(seed),
+    )
+    await conversation.append((entry("c2", "uncompressed call tail"),))
+    conversation._store.update_working_summary(ConversationSummary("maintained call prefix"))
+    context = SimpleNamespace(conversation=conversation)
+
+    class Model:
+        def __init__(self):
+            self.inputs = []
+
+        async def generate_response(self, **kwargs):
+            self.inputs.append(kwargs)
+            return "updated complete call summary"
+
+    model = Model()
+    result = await CallSummarySkill({"luotianyi": model}).summarize(
+        _invocation(),
+        _snapshot(turns=(CallFinalTurn(2, "uncompressed call tail", CallReplyStatus.NOT_STARTED, None),)),
+        context=context,
+    )
+
+    assert result == "updated complete call summary"
+    assert model.inputs == [
+        {
+            "completed_turns": (
+                "本次通话已有摘要：maintained call prefix",
+                "user：uncompressed call tail",
+            )
+        }
+    ]
+    assert "old seed" not in repr(model.inputs)
+    working = conversation.read_working()
+    assert working.summary.text == result
+    assert tuple(item.entry_id for item in working.entries) == ("c2",)
+
+
 def test_call_settlement_input_keeps_all_user_facts_and_only_completed_formal_reply():
     snapshot = _snapshot(
         turns=(
@@ -94,7 +147,7 @@ def test_settlement_digest_changes_with_user_or_reply_fact_and_is_stable_for_sam
 
 
 @pytest.mark.asyncio
-async def test_call_maintenance_freezes_candidates_across_partial_write_retry():
+async def test_call_maintenance_without_repository_has_no_cross_call_retry_cache():
     class Memory:
         def __init__(self):
             self.extracts = 0
@@ -123,5 +176,5 @@ async def test_call_maintenance_freezes_candidates_across_partial_write_retry():
     )
 
     assert (turn_seq, profile) == (1, "喜欢音乐的用户")
-    assert memory.extracts == 1
+    assert memory.extracts == 2
     assert memory.writes == 2

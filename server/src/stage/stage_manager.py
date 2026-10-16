@@ -25,13 +25,7 @@ from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
 from ._finalization import CallFinalizationSink, FinalizationTasks, InteractionFinalizing
-from .call_settlement import (
-    CallAgentSettlement,
-    CallResourceReleasePort,
-    CallSettlement,
-    CallSettlementConsumerImpl,
-    StaleCallRecoveryService,
-)
+from .call_settlement import CallAgentSettlement, CallSettlement, CallSettlementConsumerImpl, StaleCallRecoveryService
 from .chat_stage import ChatStage
 from .interaction_lease import (
     CallTransitionIntent,
@@ -224,7 +218,6 @@ class StageManager:
         call_sessions: CallSessionRepository | None = None,
         conversation_service: ConversationService | None = None,
         call_maintenance_batches: SqlCallMaintenanceBatchRepository | None = None,
-        call_resources: CallResourceReleasePort | None = None,
         call_metrics: CallMetrics | None = None,
         realtime_speech_factory: RealtimeSpeechSessionFactory | None = None,
         recovery_projection_verifier: Any | None = None,
@@ -277,13 +270,11 @@ class StageManager:
                     ),
                     call_sessions=call_sessions,
                     conversation_service=conversation_service,
-                    release_call_maintenance=call_resources.release_call_maintenance,
                     call_maintenance_batches=call_maintenance_batches,
                     call_metrics=call_metrics,
                 ),
-                resources=call_resources,
             )
-            if call_resources is not None
+            if call_sessions is not None and conversation_service is not None and call_maintenance_batches is not None
             else None
         )
         self._lock = asyncio.Lock()
@@ -496,11 +487,11 @@ class StageManager:
     def current_call_control(self, call_id: str) -> CallControl | None:
         return self._call_controls.get(call_id)
 
-    def _start_call_finalization(self, ownership, snapshot) -> None:
+    def _start_call_finalization(self, ownership, snapshot, context) -> None:
         self._finalizations.start(
             ownership.call_id,
             (ownership.user_id, ownership.character_id),
-            lambda: self._finalize_call(ownership, snapshot),
+            lambda: self._finalize_call(ownership, snapshot, context),
         )
 
     def _start_call_termination(self, stage, ownership, reason) -> asyncio.Task:
@@ -510,15 +501,41 @@ class StageManager:
             lambda: stage._terminate_owned(reason),
         )
 
-    async def _finalize_call(self, ownership, snapshot) -> None:
+    async def _finalize_call(self, ownership, snapshot, context) -> None:
+        settlement_error: BaseException | None = None
         try:
             if self._call_settlement is None:
                 raise RuntimeError("call settlement is not configured")
-            await self._call_settlement.settle(snapshot)
+            await self._call_settlement.settle(snapshot, context=context)
+        except BaseException as error:
+            settlement_error = error
         finally:
-            self._release_call_stage_ownership(ownership)
-            self._call_controls.pop(ownership.call_id, None)
-            self._call_controls_by_request.pop(ownership.client_request_id, None)
+            try:
+                if context is not None:
+                    await complete_owned(context.close())
+            except BaseException as close_error:
+                if settlement_error is None:
+                    settlement_error = close_error
+                else:
+                    self._report_call_context_close_failure(ownership, settlement_error, close_error)
+            finally:
+                self._release_call_stage_ownership(ownership)
+                self._call_controls.pop(ownership.call_id, None)
+                self._call_controls_by_request.pop(ownership.client_request_id, None)
+        if settlement_error is not None:
+            raise settlement_error
+
+    @staticmethod
+    def _report_call_context_close_failure(ownership, settlement_error, close_error) -> None:
+        try:
+            get_logger(__name__).error(
+                "Call context close failed call=%s settlement_type=%s close_type=%s",
+                ownership.call_id,
+                type(settlement_error).__name__,
+                type(close_error).__name__,
+            )
+        except Exception:
+            pass
 
     async def begin_user_data_reset(self, user_id: str) -> object:
         async with self._lock:

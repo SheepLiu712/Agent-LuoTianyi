@@ -68,11 +68,28 @@ class ConversationCompactionSkill:
             return None
         if self._llm is None:
             raise RuntimeError("未配置对话总结模型")
-        covered = (
+        covered = self.planned_covered_entries(conversation_context)
+        return await self.compact_prefix(conversation_context, tuple(entry.entry_id for entry in covered))
+
+    def planned_covered_entries(self, conversation_context: ConversationContext) -> tuple:
+        """Return the configured prefix before invoking the summary model."""
+        snapshot = conversation_context.read()
+        return (
             snapshot.entries[: -self._config.not_zip_conversation_count]
             if self._config.not_zip_conversation_count
             else snapshot.entries
         )
+
+    async def compact_prefix(
+        self, conversation_context: ConversationContext, covered_entry_ids: tuple[str, ...]
+    ) -> ConversationCompaction:
+        """Summarize one validated prefix without consuming any later entries."""
+        snapshot = conversation_context.read()
+        covered = snapshot.entries[: len(covered_entry_ids)]
+        if tuple(entry.entry_id for entry in covered) != covered_entry_ids:
+            raise ValueError("压缩范围不是当前对话的连续前缀")
+        if not covered:
+            raise ValueError("压缩范围不能为空")
         recent = "\n".join(f"[{entry.timestamp:%Y-%m-%d}]{entry.source}: {entry.content.text}" for entry in covered)
         summary = await self._llm.generate_response(
             forget_conversation_days=self._config.forget_conversation_days,

@@ -16,6 +16,7 @@ class SummarizeCallHandler:
         summary = await self._skill.summarize(
             execution_invocation(self._character_id, context, user_id=action.user_id),
             action.final_snapshot,
+            context=context.interaction_context,
         )
         return _result(action, effect_ref=d.EffectRef(kind=d.EffectKind.CALL_SUMMARY, effect_id=summary))
 

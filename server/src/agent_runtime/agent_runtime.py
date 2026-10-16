@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
@@ -98,9 +97,6 @@ class AgentRuntime:
             for character_id in self.character_ids
             if self.skills.call_summary.supports_character(character_id)
         )
-
-    def release_call_maintenance(self, call_id: UUID) -> None:
-        self.skills.call_maintenance.release(call_id)
 
     def __init__(
         self,

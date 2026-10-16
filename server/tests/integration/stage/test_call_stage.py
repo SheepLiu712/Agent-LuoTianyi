@@ -513,8 +513,9 @@ async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_s
     settled = []
 
     class Settlement:
-        async def emit(self, snapshot):
+        async def emit(self, snapshot, context):
             settled.append(snapshot)
+            await context.close()
 
     stage = await CallStage.create(
         ownership=ownership,
@@ -553,8 +554,9 @@ async def test_blocked_terminal_delivery_is_bounded_after_settlement_admission(c
     settled = []
 
     class Settlement:
-        async def emit(self, snapshot):
+        async def emit(self, snapshot, context):
             settled.append(snapshot)
+            await context.close()
 
     stage = await CallStage.create(
         ownership=ownership,
@@ -598,7 +600,7 @@ async def test_settlement_admission_failure_records_only_admission_metric(call_s
             return True
 
     class Settlement:
-        async def emit(self, snapshot):
+        async def emit(self, snapshot, context):
             raise RuntimeError("reset admission rejected")
 
     stage = await CallStage.create(
@@ -844,10 +846,10 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
             stage.playback_completed(stream[1], stream[2])
         assert stage.context.conversation.read().summary.text == "compressed call prefix"
         assert len(stage.context.conversation.read().entries) == 32
-        assert repository.find_by_id(record.call_id).maintenance_turn_seq == 16
+        assert stage.context.conversation.read_call_maintenance_progress() == 16
         assert len(memory.inputs) == 1
         snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
-        assert snapshot.maintenance_turn_seq == 16
+        assert snapshot.maintenance_turn_seq == 0
         assert all(turn.reply_status is CallReplyStatus.COMPLETED for turn in snapshot.completed_turns)
     finally:
         if stage.snapshot is None:

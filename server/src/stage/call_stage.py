@@ -78,7 +78,7 @@ class CallTransportSink(Protocol):
 class CallSettlementSink(Protocol):
     """Observes the immutable terminal snapshot for the later settlement lane."""
 
-    async def emit(self, snapshot: CallFinalSnapshot) -> object: ...
+    async def emit(self, snapshot: CallFinalSnapshot, context: InteractionContext) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -906,7 +906,7 @@ class CallStage:
     async def _transition_or_close(self, state: CallState, **facts: object) -> None:
         await self._transition(state, **facts)
 
-    async def _finish(self, outcome: CallOutcome, reason: CallEndReason) -> CallFinalSnapshot:
+    async def _finish(self, outcome: CallOutcome, reason: CallEndReason) -> CallFinalSnapshot:  # noqa: C901
         try:
             # Admission is already closed (ENDING/DECLINED). Drain any owned
             # maintenance write before freezing the final progress boundary.
@@ -957,10 +957,12 @@ class CallStage:
             ending_error = error
         finally:
             self._ending_delivery = False
-        cleanup_error = await self._cleanup(release_ownership=False)
+        cleanup_error = await self._cleanup(release_ownership=False, close_context=False)
+        settlement_context = self._context
+        self._context = None
         if self._settlement_sink is not None:
             try:
-                await self._settlement_sink.emit(self._final)
+                await self._settlement_sink.emit(self._final, settlement_context)
             except BaseException as error:
                 self._record_metric(
                     CallMetricName.SETTLEMENT_ADMISSION,
@@ -969,6 +971,10 @@ class CallStage:
                     labels={"result": CallMetricResult.FAILED.value, "error_code": "SETTLEMENT_ADMISSION_FAILED"},
                 )
                 ending_error = ending_error or error
+                if settlement_context is not None:
+                    await settlement_context.close()
+        elif settlement_context is not None:
+            await settlement_context.close()
         # The manager has registered finalization before relinquishing the live call.
         self._release_call_ownership()
         await self._send_terminal_best_effort(self._final)
@@ -1060,7 +1066,7 @@ class CallStage:
             self._cancel_task(task)
         self._cancel_task(self._realize_task)
 
-    async def _cleanup(self, *, release_ownership: bool = True) -> BaseException | None:
+    async def _cleanup(self, *, release_ownership: bool = True, close_context: bool = True) -> BaseException | None:
         self._plans.clear()
         current = asyncio.current_task()
         pending = tuple(task for task in self._tasks if task is not current and not task.done())
@@ -1068,7 +1074,7 @@ class CallStage:
             self._cancel_task(task)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
-        cleanup_error = await self._close_resources()
+        cleanup_error = await self._close_resources(close_context=close_context)
         while not self._pcm.empty():
             try:
                 frame = self._pcm.get_nowait()
@@ -1093,7 +1099,7 @@ class CallStage:
         if self._release_ownership is not None and not self._ownership_released:
             self._ownership_released = self._release_ownership(self._ownership)
 
-    async def _close_resources(self) -> BaseException | None:
+    async def _close_resources(self, *, close_context: bool = True) -> BaseException | None:
         cleanup_error: BaseException | None = None
         if self._provider is not None:
             try:
@@ -1102,7 +1108,7 @@ class CallStage:
                 cleanup_error = error
             finally:
                 self._provider = None
-        if self._context is not None:
+        if close_context and self._context is not None:
             try:
                 await self._context.close()
             except BaseException as error:
