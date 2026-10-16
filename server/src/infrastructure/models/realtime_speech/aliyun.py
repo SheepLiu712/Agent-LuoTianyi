@@ -84,6 +84,8 @@ class AliyunRealtimeSpeechSession:
         self._event_consumer_active = False
         self._pending_delivery: RealtimeSpeechEvent | None = None
         self._terminal_failure: ProviderFailed | None = None
+        self._failure_signal: ProviderFailed | None = None
+        self._terminal_ready = asyncio.Event()
         self._session_updated: asyncio.Future[None] | None = None
         self._writer: asyncio.Task[None] | None = None
         self._reader: asyncio.Task[None] | None = None
@@ -182,6 +184,10 @@ class AliyunRealtimeSpeechSession:
 
     async def close(self) -> None:
         await self._shutdown()
+
+    async def wait_failure(self) -> ProviderFailed | None:
+        await self._terminal_ready.wait()
+        return self._failure_signal
 
     async def _enqueue(self, message: dict[str, object]) -> None:
         if self._closed or self._failed:
@@ -294,7 +300,7 @@ class AliyunRealtimeSpeechSession:
             if self._session_updated is not None and not self._session_updated.done():
                 self._session_updated.set_result(None)
         elif event_type == "input_audio_buffer.speech_started":
-            await self._emit(SpeechStarted())
+            await self._emit(SpeechStarted(_clean_string(message.get("item_id"))))
         elif event_type == "input_audio_buffer.speech_stopped":
             await self._handle_speech_stopped(message)
         elif event_type == "conversation.item.input_audio_transcription.completed":
@@ -331,9 +337,9 @@ class AliyunRealtimeSpeechSession:
                 return
             if item_id:
                 self._invalid_items.add(item_id)
-            await self._emit(TurnInvalid("turn_invalid"))
+            await self._emit(TurnInvalid("turn_invalid", item_id))
             return
-        await self._emit(SpeechStopped())
+        await self._emit(SpeechStopped(item_id))
 
     async def _handle_user_transcript(self, message: dict[str, Any]) -> None:
         item_id = _clean_string(message.get("item_id"))
@@ -342,7 +348,7 @@ class AliyunRealtimeSpeechSession:
         self._completed_items.add(item_id)
         transcript = _clean_string(message.get("transcript"))
         if transcript is None:
-            await self._emit(TurnInvalid("empty_transcript"))
+            await self._emit(TurnInvalid("empty_transcript", item_id))
             return
         await self._emit(TurnCompleted(CallAudioSemantic(transcript=transcript)))
 
@@ -525,6 +531,8 @@ class AliyunRealtimeSpeechSession:
                 return
             self._terminal_sent = True
             self._terminal_failure = failure
+            self._failure_signal = failure
+            self._terminal_ready.set()
             self._event_condition.notify_all()
 
     async def _shutdown(self) -> None:

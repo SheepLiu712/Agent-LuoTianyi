@@ -21,6 +21,7 @@ from src.agent.handlers.stimulus.call import (
     CallEndingHandler,
     CallSilenceElapsedHandler,
     CallStartedHandler,
+    CallTimeLimitWarningHandler,
     CallTurnCompletedHandler,
 )
 from src.agent.handlers.stimulus.call_settlement import CallSettlementRequestedHandler
@@ -225,6 +226,7 @@ class AgentRuntime:
                 StimulusKind.CALL_SILENCE_ELAPSED,
                 CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
             ),
+            (StimulusKind.CALL_TIME_LIMIT_WARNING, CallTimeLimitWarningHandler()),
             (StimulusKind.CALL_ENDING, CallEndingHandler()),
             (StimulusKind.CALL_SETTLEMENT_REQUESTED, CallSettlementRequestedHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),

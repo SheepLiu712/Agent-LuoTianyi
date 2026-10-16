@@ -252,6 +252,9 @@ class StageManager:
         config = {} if config is None else config
         self._config = _ManagerConfig.from_dict(config)
         self._stage_config = config.get("stage", {})
+        self._call_stage_config = config.get("call_stage", {})
+        if not isinstance(self._call_stage_config, dict):
+            raise TypeError("call_stage config must be a dictionary")
         self._get_agent, self._adapter = get_agent, adapter
         self._get_context_factory = get_context_factory
         self._due_event_provider = due_event_provider
@@ -498,6 +501,7 @@ class StageManager:
                 speech_factory=self._realtime_speech_factory,
                 transport=control._transport_sink,
                 call_metrics=self._call_metrics,
+                config=self._call_stage_config,
                 stage_created=lambda stage: self._publish_control_stage(control, stage),
                 connection_available=control._connected,
             )
@@ -505,15 +509,25 @@ class StageManager:
             if control._termination_reason is not None:
                 await stage.terminate(control._termination_reason)
         except BaseException as error:
-            get_logger(__name__).error(
-                "Call establishment failed request=%s type=%s error=%s",
-                control._request.client_request_id,
-                type(error).__name__,
-                error,
-            )
+            self._retire_failed_call_control(control)
+            try:
+                get_logger(__name__).error(
+                    "Call establishment failed request=%s type=%s error=%s",
+                    control._request.client_request_id,
+                    type(error).__name__,
+                    error,
+                )
+            except Exception:
+                pass
         finally:
             control._stage_available.set()
             control._ready.set()
+
+    def _retire_failed_call_control(self, control: CallControl) -> None:
+        if self._call_controls.get(control.identity.call_id) is control:
+            self._call_controls.pop(control.identity.call_id, None)
+        if self._call_controls_by_request.get(control._request.client_request_id) is control:
+            self._call_controls_by_request.pop(control._request.client_request_id, None)
 
     @staticmethod
     def _publish_control_stage(control: CallControl, stage: CallStage) -> None:

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from src.infrastructure.models.realtime_speech import (
     AudioFrame,
+    ProviderFailed,
     RealtimeSpeechConfig,
     RealtimeSpeechEvent,
     RealtimeSpeechSession,
@@ -20,6 +21,8 @@ class FakeRealtimeSpeechSession:
         self.pushed_frames: list[AudioFrame] = []
         self.closed = False
         self._events: asyncio.Queue[RealtimeSpeechEvent | None] = asyncio.Queue()
+        self._terminal = asyncio.Event()
+        self._failure: ProviderFailed | None = None
 
     async def start(self, config: RealtimeSpeechConfig) -> None:
         if self.closed:
@@ -34,6 +37,9 @@ class FakeRealtimeSpeechSession:
     async def emit(self, event: RealtimeSpeechEvent) -> None:
         if self.closed:
             raise RuntimeError("session is closed")
+        if isinstance(event, ProviderFailed):
+            self._failure = event
+            self._terminal.set()
         await self._events.put(event)
 
     async def events(self) -> AsyncIterator[RealtimeSpeechEvent]:
@@ -43,9 +49,14 @@ class FakeRealtimeSpeechSession:
                 return
             yield event
 
+    async def wait_failure(self) -> ProviderFailed | None:
+        await self._terminal.wait()
+        return self._failure
+
     async def close(self) -> None:
         if not self.closed:
             self.closed = True
+            self._terminal.set()
             await self._events.put(None)
 
     def pushed_evidence(self) -> list[dict[str, object]]:
