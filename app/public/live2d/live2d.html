@@ -348,6 +348,14 @@
     let nextStartTime = 0;
     let isWaitingForEnd = false;
     let isPlaying = false;
+    let callMouthRms = 0;
+    let callMouthActive = false;
+    let callMouthResetPending = false;
+    window.setCallMouthRms = (value) => {
+      callMouthRms = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+      callMouthActive = callMouthRms > 0;
+      callMouthResetPending = !callMouthActive;
+    };
     // 当前已排队的音频源，用于停止/清空队列（音频播放互斥，Bug#9）
     const activeSources = [];
     // 最后一段已排队的音频源，用于精确感知播放结束（Bug#7）
@@ -487,16 +495,22 @@
     // 浏览器原生的 60FPS 渲染循环
     const renderLoop = () => {
       requestAnimationFrame(renderLoop);
-      if (isPlaying === false) return; // 只有在有音频播放时才计算嘴型
+       if (isPlaying === false && !callMouthActive && !callMouthResetPending) return;
 
       // 3. 实时提取幅值 (RMS / 响度)
-      analyser.getByteTimeDomainData(dataArray);
-      let sumSquares = 0.0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const norm = (dataArray[i] / 128.0) - 1.0;
-        sumSquares += norm * norm;
-      }
-      const rms = Math.sqrt(sumSquares / dataArray.length);
+       let rms = callMouthRms;
+       if (callMouthResetPending) {
+         rms = 0;
+         callMouthResetPending = false;
+       } else if (!callMouthActive && isPlaying) {
+         analyser.getByteTimeDomainData(dataArray);
+         let sumSquares = 0.0;
+         for (let i = 0; i < dataArray.length; i++) {
+           const norm = (dataArray[i] / 128.0) - 1.0;
+           sumSquares += norm * norm;
+         }
+         rms = Math.max(rms, Math.sqrt(sumSquares / dataArray.length));
+       }
       // 4. 将幅值映射并写入底层模型，加上一点平滑系数防止高频抖动
       const targetMouthY = Math.max(Math.min(1.0, rms * 25 - 1), -1); // 简单线性映射，调整系数以适配嘴部张开程度
       if (window.setMouthOpenY) {

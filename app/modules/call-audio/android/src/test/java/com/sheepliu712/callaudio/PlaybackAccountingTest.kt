@@ -128,4 +128,43 @@ class PlaybackAccountingTest {
     assertTrue(registry.fail().isEmpty())
     assertTrue(registry.isIdle())
   }
+
+  @Test
+  fun nonFinalUnderrunEmitsOneIdleEdgeWithoutCompletingStream() {
+    val gate = PlaybackVisualIdleGate()
+    gate.onSubmitted()
+
+    assertTrue(gate.shouldEmitIdle(false, playedFrames = 4, submittedFrames = 4, finalPending = false))
+    assertFalse(gate.shouldEmitIdle(false, playedFrames = 4, submittedFrames = 4, finalPending = false))
+    assertFalse(gate.shouldEmitIdle(true, playedFrames = 4, submittedFrames = 4, finalPending = false))
+  }
+
+  @Test
+  fun finalPendingAndQueuedAudioDoNotEmitUnderrunIdle() {
+    val gate = PlaybackVisualIdleGate()
+    gate.onSubmitted()
+
+    assertFalse(gate.shouldEmitIdle(false, playedFrames = 4, submittedFrames = 4, finalPending = true))
+    assertFalse(gate.shouldEmitIdle(true, playedFrames = 4, submittedFrames = 4, finalPending = false))
+  }
+
+  @Test
+  fun laterSubmissionRearmsVisualIdleAfterUnderrun() {
+    val gate = PlaybackVisualIdleGate()
+    gate.onSubmitted()
+    assertTrue(gate.shouldEmitIdle(false, 4, 4, false))
+
+    gate.onSubmitted()
+    assertTrue(gate.shouldEmitIdle(false, 8, 8, false))
+  }
+
+  @Test
+  fun playbackRmsFollowsUnconsumedWindowAndClearsAtUnderrun() {
+    val accounting = PlaybackLoopAccounting(initialHead = 0)
+    accounting.recordSubmitted(4, 0.8)
+    accounting.observeHead(2)
+    assertEquals(0.8, accounting.rmsAtPlayedFrames(), 0.0001)
+    accounting.observeHead(4)
+    assertEquals(0.0, accounting.rmsAtPlayedFrames(), 0.0001)
+  }
 }
