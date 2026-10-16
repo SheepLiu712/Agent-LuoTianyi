@@ -6,7 +6,9 @@ import { MAX_VOICE_DURATION_MS, MIN_VOICE_DURATION_MS, voiceStateForMove } from 
 import { VoiceRecorderApi, voiceRecorder } from '../utils/voice_recorder';
 import {
   MICROPHONE_AMBIGUOUS_MESSAGE,
+  MICROPHONE_DENIED_NOTICE,
   MICROPHONE_PENDING_MESSAGE,
+  MICROPHONE_RETRIES_BEFORE_SETTINGS,
   PERMISSION_STUCK_AFTER_MS,
   showMicrophoneSettings,
 } from '../utils/voice_permission';
@@ -50,6 +52,9 @@ export function useVoiceInput(options: Options) {
   const permissionRequest = useRef<Promise<void> | null>(null);
   // 在途请求的起始时间：用于判断“是否已经卡住很久”，不用于推断用户意图。
   const permissionStartedAt = useRef(0);
+  // 连续未授权次数：一次状态检查 / 一次请求都无法区分取消、拒绝与永久拒绝，
+  // 因此按“连续失败”升级到设置入口，而不是猜原因。
+  const deniedAttempts = useRef(0);
 
   const resetCapture = useCallback(() => {
     if (mounted.current) { setElapsedMs(0); setSmoothedMeter(0); }
@@ -121,13 +126,25 @@ export function useVoiceInput(options: Options) {
           return;
         }
         // 单次授权回收后，Expo 可能把状态报告成 blocked；一次状态检查不足以证明不能再次询问，
-        // 也无法区分取消 / 普通拒绝 / 永久拒绝。必须先实际请求一次，再按结果处理：
-        // 已返回的模糊未授权只给非模态提示，不自动弹设置；在途过久才由上面的分支给设置出口。
+        // 也无法区分取消 / 普通拒绝 / 永久拒绝。因此不按原因判断，而按“连续失败次数”升级：
+        // 第一次未授权只给非模态提示，连续多次仍未授权才提供设置入口。
         // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
         // 迟到的结果只在“这次尝试仍是当前尝试”时才有意义：更晚的按住或已卸载都不该被它打扰。
         permissionStartedAt.current = Date.now();
         const request = recorder.requestPermission().then((result) => {
-          if (result === 'blocked' && valid()) callbacks.current.onNotice(MICROPHONE_AMBIGUOUS_MESSAGE);
+          if (!valid()) return;
+          if (result === 'granted') {
+            deniedAttempts.current = 0;
+            return;
+          }
+          if (result === 'blocked') {
+            deniedAttempts.current += 1;
+            if (deniedAttempts.current >= MICROPHONE_RETRIES_BEFORE_SETTINGS) {
+              showMicrophoneSettings(callbacks.current.onNotice, MICROPHONE_DENIED_NOTICE);
+            } else {
+              callbacks.current.onNotice(MICROPHONE_AMBIGUOUS_MESSAGE);
+            }
+          }
         }, () => {
           // 授权请求本身失败（原生拒绝/抛错）：与录音启动失败同样给出可行动提示，不能静默。
           if (valid()) callbacks.current.onNotice('录音启动失败，请重试');
@@ -137,6 +154,8 @@ export function useVoiceInput(options: Options) {
         permissionRequest.current = request;
         return;
       }
+      // 权限本已可用（例如用户刚在系统设置里授权）：连续失败计数清零。
+      deniedAttempts.current = 0;
       await callbacks.current.onStopAllAudio();
       if (!valid()) return;
       const started = await recorder.start({

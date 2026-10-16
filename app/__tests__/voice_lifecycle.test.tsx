@@ -2,14 +2,16 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { AppState, GestureResponderEvent } from 'react-native';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { MICROPHONE_AMBIGUOUS_MESSAGE, MICROPHONE_PENDING_MESSAGE, PERMISSION_STUCK_AFTER_MS, showMicrophoneSettings } from '../utils/voice_permission';
+import { MICROPHONE_AMBIGUOUS_MESSAGE, MICROPHONE_DENIED_NOTICE, MICROPHONE_PENDING_MESSAGE, PERMISSION_STUCK_AFTER_MS, showMicrophoneSettings } from '../utils/voice_permission';
 jest.mock('react-native', () => ({ AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {} }));
 jest.mock('../utils/voice_permission', () => ({
   showMicrophoneSettings: jest.fn(),
-  MICROPHONE_AMBIGUOUS_MESSAGE: '未获得麦克风权限，可重新按住说话重试；如果系统不再询问，可在系统设置中开启麦克风。',
-  MICROPHONE_PENDING_MESSAGE: '权限请求仍在处理中，请稍候重试。',
+  MICROPHONE_AMBIGUOUS_MESSAGE: '未获得麦克风权限，请再按住一次。',
+  MICROPHONE_PENDING_MESSAGE: '上一次权限请求还没结束。',
+  MICROPHONE_DENIED_NOTICE: { title: '未能获得麦克风权限', message: '再次尝试仍未获得麦克风权限，请到系统设置检查是否被禁止。' },
+  MICROPHONE_RETRIES_BEFORE_SETTINGS: 2,
   PERMISSION_STUCK_AFTER_MS: 8000,
 }));
 const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
@@ -128,7 +130,7 @@ it('reports a failed permission request instead of swallowing it', async () => {
   expect(state.captureState).toBe('Recording');
 });
 
-it('does not auto-open the settings dialog when a blocked result comes back', async () => {
+it('does not auto-open the settings dialog on the first blocked result', async () => {
   let answer!: (value: string) => void;
   options.recorder.getPermission.mockResolvedValueOnce('denied');
   options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
@@ -136,11 +138,50 @@ it('does not auto-open the settings dialog when a blocked result comes back', as
   await act(async () => { await state.pressIn(event); await state.pressOut(); });
   await act(async () => { answer('blocked'); });
 
-  // 已返回但原因不明：只给非模态提示，不擅自升级成“永久拒绝/去设置”。
+  // 第一次未授权：只给非模态提示，不擅自升级成“永久拒绝/去设置”。
   expect(options.onNotice).toHaveBeenCalledWith(MICROPHONE_AMBIGUOUS_MESSAGE);
   expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(state.captureState).toBe('VoiceReady');
+});
+
+it('offers the settings dialog after consecutive blocked results', async () => {
+  options.recorder.getPermission.mockResolvedValue('denied');
+  options.recorder.requestPermission.mockResolvedValue('blocked');
+  await mount();
+
+  await act(async () => { await state.pressIn(event); await state.pressOut(); });
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+
+  await act(async () => { await state.pressIn(event); await state.pressOut(); });
+
+  // 连续两次仍未授权：给出设置入口（永久拒绝的用户重试一次即可看到）。
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).toHaveBeenCalledWith(expect.any(Function), MICROPHONE_DENIED_NOTICE);
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+});
+
+it('resets the consecutive-failure count once permission is granted', async () => {
+  options.recorder.getPermission.mockResolvedValue('denied');
+  options.recorder.requestPermission.mockResolvedValue('blocked');
+  options.recorder.getPermission
+    .mockResolvedValueOnce('denied')    // 第一次：未授权 → 非模态
+    .mockResolvedValueOnce('granted')   // 第二次：授权成功 → 计数清零
+    .mockResolvedValueOnce('denied');   // 第三次：又未授权，但应重新从第一次算
+  await mount();
+
+  await act(async () => { await state.pressIn(event); await state.pressOut(); });
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+
+  await act(async () => { await state.pressIn(event); await state.pressOut(); });
+  expect(options.recorder.start).toHaveBeenCalledTimes(1);
+  expect(state.captureState).toBe('VoiceReady');
+
+  await act(async () => { await state.pressIn(event); await state.pressOut(); });
+
+  // 授权成功已把计数清零，所以这次未授权仍只是第一次，不弹设置。
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
 });
 
 it('offers the settings entry only after the pending request stays outstanding', async () => {

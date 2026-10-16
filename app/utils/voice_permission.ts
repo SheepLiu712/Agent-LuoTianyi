@@ -12,13 +12,21 @@ export interface MicrophoneNotice {
  * Expo 在 Android 上无法可靠区分"本次取消""普通拒绝"和"永久拒绝"，所以只陈述"这次没拿到权限"，
  * 用非模态提示让用户可重试，也告知设置入口；不自动弹出设置对话框，避免把可重试结果升级成永久拒绝。
  */
-export const MICROPHONE_AMBIGUOUS_MESSAGE =
-  '未获得麦克风权限。再按住一次重试；始终不弹系统询问时，请到系统设置开启麦克风。';
+export const MICROPHONE_AMBIGUOUS_MESSAGE = '未获得麦克风权限，请再按住一次。';
 
 /** 请求仍在途：只陈述当前事实，不预告结果，也不描述成需要等待的过程。 */
 export const MICROPHONE_PENDING_MESSAGE = '上一次权限请求还没结束。';
 
-/** 请求长时间没有返回：这是唯一提供设置出口的弹窗。 */
+/** 连续多次仍未授权：此时才提供设置入口（不再尝试区分取消 / 拒绝 / 永久拒绝）。 */
+export const MICROPHONE_DENIED_NOTICE: MicrophoneNotice = {
+  title: '未能获得麦克风权限',
+  message: '再次尝试仍未获得麦克风权限，请到系统设置检查是否被禁止。',
+};
+
+/** 连续未授权达到该次数后弹出设置入口。 */
+export const MICROPHONE_RETRIES_BEFORE_SETTINGS = 2;
+
+/** 请求长时间没有返回：这是另一个提供设置出口的场景。 */
 export const MICROPHONE_STUCK_NOTICE: MicrophoneNotice = {
   title: '麦克风权限请求无响应',
   message: '权限请求长时间没有响应，可重试或到系统设置检查麦克风权限。',
