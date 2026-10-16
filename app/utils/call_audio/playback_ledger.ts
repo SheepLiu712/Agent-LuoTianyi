@@ -30,6 +30,11 @@ export class PlaybackGenerationLedger {
     return true;
   }
 
+  acceptsProgress(stream: CallAudioStreamIdentity, generation: number): boolean {
+    const key = keyOf(stream);
+    return this.generations.get(key) === generation && !this.completed.has(key);
+  }
+
   clear(): void {
     this.generations.clear();
     this.completed.clear();

@@ -6,6 +6,7 @@ jest.mock('expo-constants', () => ({ __esModule: true, default: { executionEnvir
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('../utils/call_audio/native_call_audio', () => {
   class FakeAudio {
+    progressListener: ((progress: { rms: number }) => void) | undefined;
     initialize = jest.fn(async () => 'available');
     getCapability = jest.fn(async () => 'available');
     startCapture = jest.fn(async () => undefined);
@@ -15,7 +16,12 @@ jest.mock('../utils/call_audio/native_call_audio', () => {
     enqueue = jest.fn(async () => undefined);
     stop = jest.fn(async () => undefined);
     tombstone = jest.fn(async () => undefined);
+    playReplyFailureTone = jest.fn(async () => undefined);
     subscribeConsumption = jest.fn(() => jest.fn());
+    subscribePlaybackProgress = jest.fn((listener: (progress: { rms: number }) => void) => {
+      this.progressListener = listener;
+      return () => { this.progressListener = undefined; };
+    });
     close = jest.fn(async () => undefined);
     setCoordinatorEvents = jest.fn();
   }
@@ -223,5 +229,137 @@ describe('production call resolver', () => {
     const replacement = resolver.createAttempt();
     await replacement.close();
     await resolver.close();
+  });
+
+  it('wires production native playback progress to the visual-only mouth bridge', async () => {
+    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const mouthBridge = { update: jest.fn(), reset: jest.fn() };
+    const resolver = new ProductionCallResolver({
+      characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
+      fetchImpl: jest.fn(async () => ({
+        ok: true, status: 200,
+        json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+      })) as unknown as typeof fetch,
+      createNativeAudio: () => audio,
+    });
+    await resolver.refreshCapability();
+    const attempt = resolver.createAttempt();
+    const listener = (audio.subscribePlaybackProgress as jest.Mock).mock.calls[0][0];
+    listener({ rms: 0.35 });
+    expect(mouthBridge.update).toHaveBeenCalledWith(0.35);
+    await attempt.close();
+    expect(mouthBridge.reset).toHaveBeenCalled();
+    await resolver.close();
+  });
+
+  it('cleans the visual subscription exactly once when native initialization is unavailable', async () => {
+    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    audio.initialize.mockResolvedValue('unavailable');
+    const mouthBridge = { update: jest.fn(), reset: jest.fn() };
+    const resolver = new ProductionCallResolver({
+      characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
+      fetchImpl: jest.fn(async () => ({
+        ok: true, status: 200,
+        json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+      })) as unknown as typeof fetch,
+      createNativeAudio: () => audio,
+    });
+    await resolver.refreshCapability();
+    const attempt = resolver.createAttempt();
+    const listener = (audio.subscribePlaybackProgress as jest.Mock).mock.calls[0][0];
+
+    await expect(attempt.initializeNative()).resolves.toBe(false);
+    expect(audio.progressListener).toBeUndefined();
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+    listener({ rms: 0.8 });
+    expect(mouthBridge.update).not.toHaveBeenCalled();
+
+    await attempt.close();
+    await resolver.close();
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans the visual subscription exactly once when native initialization rejects', async () => {
+    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    audio.initialize.mockRejectedValue(new Error('initialize_failed'));
+    const mouthBridge = { update: jest.fn(), reset: jest.fn() };
+    const resolver = new ProductionCallResolver({
+      characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
+      fetchImpl: jest.fn(async () => ({
+        ok: true, status: 200,
+        json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+      })) as unknown as typeof fetch,
+      createNativeAudio: () => audio,
+    });
+    await resolver.refreshCapability();
+    const attempt = resolver.createAttempt();
+    const listener = (audio.subscribePlaybackProgress as jest.Mock).mock.calls[0][0];
+
+    await expect(attempt.initializeNative()).resolves.toBe(false);
+    expect(audio.progressListener).toBeUndefined();
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+    expect(audio.close).toHaveBeenCalledTimes(1);
+    listener({ rms: 0.7 });
+    expect(mouthBridge.update).not.toHaveBeenCalled();
+
+    await attempt.close();
+    await resolver.close();
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+    expect(audio.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans visuals at timeout and does not repeat cleanup when late availability closes native audio', async () => {
+    let resolveInitialize!: (value: string) => void;
+    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    audio.initialize = jest.fn(() => new Promise((resolve) => { resolveInitialize = resolve; }));
+    const mouthBridge = { update: jest.fn(), reset: jest.fn() };
+    const resolver = new ProductionCallResolver({
+      characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
+      fetchImpl: jest.fn(async () => ({
+        ok: true, status: 200,
+        json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+      })) as unknown as typeof fetch,
+      createNativeAudio: () => audio, nativeInitializeTimeoutMs: 1,
+    });
+    await resolver.refreshCapability();
+    const attempt = resolver.createAttempt();
+    const listener = (audio.subscribePlaybackProgress as jest.Mock).mock.calls[0][0];
+
+    await expect(attempt.initializeNative()).resolves.toBe(false);
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+    expect(audio.progressListener).toBeUndefined();
+    listener({ rms: 0.9 });
+    expect(mouthBridge.update).not.toHaveBeenCalled();
+
+    await attempt.close();
+    resolveInitialize('available');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(audio.close).toHaveBeenCalledTimes(1);
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+    await resolver.close();
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps visual cleanup idempotent when native close rejects', async () => {
+    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    audio.close.mockRejectedValue(new Error('native_close_failed'));
+    const mouthBridge = { update: jest.fn(), reset: jest.fn() };
+    const resolver = new ProductionCallResolver({
+      characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
+      fetchImpl: jest.fn(async () => ({
+        ok: true, status: 200,
+        json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+      })) as unknown as typeof fetch,
+      createNativeAudio: () => audio,
+    });
+    await resolver.refreshCapability();
+    const attempt = resolver.createAttempt();
+    await expect(attempt.initializeNative()).resolves.toBe(true);
+
+    await expect(attempt.close()).rejects.toThrow('native_close_failed');
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+    await resolver.close();
+    expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
+    expect(audio.close).toHaveBeenCalledTimes(1);
   });
 });

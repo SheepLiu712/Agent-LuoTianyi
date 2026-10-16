@@ -44,6 +44,10 @@ export type NativePlaybackCompleted = NativePlaybackIdentity;
 
 export type NativePlaybackStopped = NativePlaybackIdentity;
 
+export interface NativePlaybackProgress extends NativePlaybackIdentity {
+  rms: number;
+}
+
 export interface NativeAudioFailure {
   code: string;
   operation: 'capture' | 'playback' | 'session';

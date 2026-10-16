@@ -26,6 +26,9 @@ internal class PlaybackQueue(private val capacityBytes: Int) {
   fun nextStream(): StreamKey? = entries.firstOrNull()?.key
 
   @Synchronized
+  fun hasFor(identity: StreamKey): Boolean = entries.any { it.key == identity }
+
+  @Synchronized
   fun pollFor(identity: StreamKey): PlaybackChunk? {
     val index = entries.indexOfFirst { it.key == identity }
     if (index < 0) return null
@@ -85,9 +88,16 @@ internal class PlaybackLoopAccounting(initialHead: Long) {
     private set
   var finalTarget: Pair<PlaybackChunk, Long>? = null
     private set
+  private val rmsWindows = ArrayDeque<Pair<Long, Double>>()
 
-  fun recordSubmitted(frames: Long) {
+  fun recordSubmitted(frames: Long, rms: Double = 0.0) {
     submittedFrames += frames
+    if (frames > 0) rmsWindows.addLast(submittedFrames to rms)
+  }
+
+  fun rmsAtPlayedFrames(): Double {
+    while (rmsWindows.isNotEmpty() && rmsWindows.first().first <= playedFrames) rmsWindows.removeFirst()
+    return rmsWindows.firstOrNull()?.second ?: 0.0
   }
 
   fun markFinal(chunk: PlaybackChunk) {
@@ -124,6 +134,26 @@ internal class PlaybackLoopAccounting(initialHead: Long) {
     playedFrames = 0L
     submittedFrames = 0L
     finalTarget = null
+    rmsWindows.clear()
+  }
+}
+
+/** Emits one visual idle edge when a non-final stream underruns. */
+internal class PlaybackVisualIdleGate {
+  private var idleEmitted = true
+
+  fun onSubmitted() {
+    idleEmitted = false
+  }
+
+  fun shouldEmitIdle(hasQueuedChunk: Boolean, playedFrames: Long, submittedFrames: Long, finalPending: Boolean): Boolean {
+    if (idleEmitted || hasQueuedChunk || finalPending || playedFrames < submittedFrames) return false
+    idleEmitted = true
+    return true
+  }
+
+  fun reset() {
+    idleEmitted = true
   }
 }
 
