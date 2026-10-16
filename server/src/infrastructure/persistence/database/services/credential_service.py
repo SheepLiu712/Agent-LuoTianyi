@@ -67,6 +67,10 @@ class CredentialService:
         """创建一个新的 SQL 会话；调用者负责关闭。"""
         return self._sql_session_factory()
 
+    def new_session(self) -> Any:
+        """公开的会话工厂：注册用例需要在同一会话里组合多个写入。"""
+        return self._new_session()
+
     def _ensure_redis(self) -> RedisBuffer:
         return self._redis
 
@@ -257,58 +261,15 @@ class CredentialService:
         注册新用户。邀请码必须存在、未禁用且未使用；成功后只标记为已使用，不自动禁用。
         成功返回 (True, "注册成功")，失败返回 (False, "失败原因")。
         """
-        db = self._new_session()
+        db = self.new_session()
         try:
-            available_code = (
-                db.query(InviteCode.code)
-                .filter(
-                    InviteCode.code == invite_code_str,
-                    InviteCode.is_used.is_(False),
-                    InviteCode.disabled.is_(False),
-                )
-                .first()
-            )
-            if not available_code:
-                logger.info(f"Register failed: invalid invite code for username={username}")
-                return False, "注册失败，请检查邀请码或用户名"
-
-            existing_user = db.query(User).filter_by(username=username).first()
-            if existing_user:
-                logger.info(f"Register failed: username already exists: {username}")
-                return False, "注册失败，请检查邀请码或用户名"
-
-            user_uuid = str(uuid.uuid4())
-            new_user = User(
-                uuid=user_uuid,
-                username=username,
-                password=_hash_password(password),
-            )
-            db.add(new_user)
-            db.flush()
-
-            claimed = (
-                db.query(InviteCode)
-                .filter(
-                    InviteCode.code == invite_code_str,
-                    InviteCode.is_used.is_(False),
-                    InviteCode.disabled.is_(False),
-                )
-                .update(
-                    {
-                        InviteCode.is_used: True,
-                        InviteCode.used_at: datetime.now(tz=None),
-                        InviteCode.user_id: user_uuid,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            if claimed != 1:
+            ok, message, user_uuid = self.create_account_with_invite(db, username, password, invite_code_str)
+            if not ok:
                 db.rollback()
-                logger.info("Register failed: invite code unavailable for username=%s", username)
-                return False, "注册失败，请检查邀请码或用户名"
+                return False, message
 
             db.commit()
-            self._cache_user_uuid(username, user_uuid)
+            self.cache_user_uuid(username, user_uuid)
             return True, "注册成功"
         except Exception as e:
             logger.error("Error registering user %s (%s)", username, type(e).__name__)
@@ -316,6 +277,71 @@ class CredentialService:
             return False, "注册失败，请检查邀请码或用户名"
         finally:
             db.close()
+
+    def create_account_with_invite(
+        self, db, username: str, password: str, invite_code_str: str
+    ) -> Tuple[bool, str, Optional[str]]:
+        """在调用者给定的事务里创建账号并占用邀请码；不提交、不回滚、不关闭会话。
+
+        供注册用例把账号、协议签署与注册请求结果放进同一次提交（UA-2）。
+        失败返回 (False, "失败原因", None)，成功返回 (True, "注册成功", user_uuid)。
+        """
+        available_code = (
+            db.query(InviteCode.code)
+            .filter(
+                InviteCode.code == invite_code_str,
+                InviteCode.is_used.is_(False),
+                InviteCode.disabled.is_(False),
+            )
+            .first()
+        )
+        if not available_code:
+            logger.info(f"Register failed: invalid invite code for username={username}")
+            return False, "注册失败，请检查邀请码或用户名", None
+
+        existing_user = db.query(User).filter_by(username=username).first()
+        if existing_user:
+            logger.info(f"Register failed: username already exists: {username}")
+            return False, "注册失败，请检查邀请码或用户名", None
+
+        user_uuid = str(uuid.uuid4())
+        new_user = User(
+            uuid=user_uuid,
+            username=username,
+            password=_hash_password(password),
+        )
+        db.add(new_user)
+        db.flush()
+
+        claimed = (
+            db.query(InviteCode)
+            .filter(
+                InviteCode.code == invite_code_str,
+                InviteCode.is_used.is_(False),
+                InviteCode.disabled.is_(False),
+            )
+            .update(
+                {
+                    InviteCode.is_used: True,
+                    InviteCode.used_at: datetime.now(tz=None),
+                    InviteCode.user_id: user_uuid,
+                },
+                synchronize_session=False,
+            )
+        )
+        if claimed != 1:
+            logger.info("Register failed: invite code unavailable for username=%s", username)
+            return False, "注册失败，请检查邀请码或用户名", None
+
+        return True, "注册成功", user_uuid
+
+    def cache_user_uuid(self, username: str, user_uuid: str) -> None:
+        """把用户名到 uuid 的映射写入缓存；注册与登录共用。"""
+        self._cache_user_uuid(username, user_uuid)
+
+    def verify_password(self, password: str, stored_hash: str) -> bool:
+        """校验明文密码与已存 bcrypt 哈希是否相符。"""
+        return _verify_password(password, stored_hash)
 
     def verify_user(self, username: str, password: str) -> bool:
         """
