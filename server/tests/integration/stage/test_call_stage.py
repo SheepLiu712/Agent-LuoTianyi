@@ -61,6 +61,9 @@ class _Clock:
     def tick(self):
         return self.monotonic
 
+    def advance(self, seconds):
+        self.monotonic += seconds
+
 
 class _Transport:
     def __init__(self):
@@ -144,8 +147,10 @@ class _AnswerHandler:
 class _TurnHandler:
     def __init__(self):
         self.gate = asyncio.Event()
+        self.requests = []
 
     async def handle(self, request, plans):
+        self.requests.append(request)
         await self.gate.wait()
         response_id = f"response-{request.stimulus.turn_seq}"
         await plans.emit(
@@ -175,6 +180,15 @@ class _TurnHandler:
 
 class _NoPlanHandler:
     async def handle(self, request, plans):
+        return _report(request, plans)
+
+
+class _SilenceHandler:
+    def __init__(self):
+        self.requests = []
+
+    async def handle(self, request, plans):
+        self.requests.append(request)
         return _report(request, plans)
 
 
@@ -213,8 +227,9 @@ class _SayHandler:
         )
 
 
-def _agent(turn_handler):
+def _agent(turn_handler, *, silence_handler=None):
     no_plan = _NoPlanHandler()
+    silence = silence_handler or no_plan
     return Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
@@ -222,7 +237,7 @@ def _agent(turn_handler):
                 (d.StimulusKind.CALL_ANSWER_REQUESTED, _AnswerHandler()),
                 (d.StimulusKind.CALL_STARTED, no_plan),
                 (d.StimulusKind.CALL_TURN_COMPLETED, turn_handler),
-                (d.StimulusKind.CALL_SILENCE_ELAPSED, no_plan),
+                (d.StimulusKind.CALL_SILENCE_ELAPSED, silence),
                 (d.StimulusKind.CALL_ENDING, no_plan),
             )
         ),
@@ -281,7 +296,7 @@ def call_setup(tmp_path):
     return repository, record, ownership, clock
 
 
-async def _create(call_setup, *, decision=CallAnswerDecision.ACCEPT, config=None, release=None):
+async def _create(call_setup, *, decision=CallAnswerDecision.ACCEPT, config=None, release=None, silence_handler=None):
     repository, record, ownership, clock = call_setup
     speech = FakeRealtimeSpeechSessionFactory()
     transport = _Transport()
@@ -290,7 +305,7 @@ async def _create(call_setup, *, decision=CallAnswerDecision.ACCEPT, config=None
     stage = await CallStage.create(
         ownership=ownership,
         record=record,
-        agent=_agent(turn_handler),
+        agent=_agent(turn_handler, silence_handler=silence_handler),
         context_factory=context_factory,
         call_sessions=repository,
         speech_factory=speech,
@@ -390,6 +405,66 @@ async def test_pcm_receipts_are_bounded_idempotent_and_turns_require_completed_e
     stage.playback_completed(response_id, stream_id)
     await _eventually(lambda: stage._turns[1].status is CallReplyStatus.COMPLETED)
     await stage.terminate()
+
+
+@pytest.mark.asyncio
+async def test_invalid_turn_releases_matching_speech_and_preserves_newer_speech(call_setup):
+    silence_handler = _SilenceHandler()
+    stage, provider, _, _ = await _create(call_setup, silence_handler=silence_handler)
+    repository, record, _, clock = call_setup
+    maintenance_turn_seq = repository.find_by_id(record.call_id).maintenance_turn_seq
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    await provider.emit(SpeechStarted("invalid-turn"))
+    await _eventually(lambda: stage._playback._user_speaking)
+    stage.register_playback("response", 1)
+    stage.playback_final("response", 1)
+    stage.playback_completed("response", 1)
+    assert stage._playback.silence_started_at is None
+
+    await provider.emit(TurnInvalid("turn_invalid", "invalid-turn"))
+    await _eventually(lambda: stage._playback.silence_started_at == clock.monotonic)
+    assert stage._turns == {}
+    assert stage._unfinished_turns == set()
+    clock.advance(5)
+    await _eventually(lambda: len(silence_handler.requests) == 1, timeout=6.0)
+    assert silence_handler.requests[0].stimulus.kind is d.StimulusKind.CALL_SILENCE_ELAPSED
+
+    await provider.emit(SpeechStarted("new-turn"))
+    await _eventually(lambda: stage._playback._user_speaking)
+    new_turn_generation = stage._generation
+    await provider.emit(TurnInvalid("turn_invalid", "invalid-turn"))
+    await asyncio.sleep(0)
+    assert stage._playback._user_speaking is True
+    assert stage._generation == new_turn_generation
+    assert stage._turns == {}
+    assert stage._unfinished_turns == set()
+    assert repository.find_by_id(record.call_id).maintenance_turn_seq == maintenance_turn_seq
+    await stage.terminate()
+
+
+@pytest.mark.asyncio
+async def test_invalid_turn_without_identity_releases_speaking_without_formal_turn_or_reply(call_setup):
+    stage, provider, _, turn_handler = await _create(call_setup)
+    repository, record, _, _ = call_setup
+    maintenance_turn_seq = repository.find_by_id(record.call_id).maintenance_turn_seq
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    await provider.emit(SpeechStarted())
+    await _eventually(lambda: stage._playback._user_speaking)
+    generation = stage._generation
+
+    await provider.emit(TurnInvalid("turn_invalid"))
+    await _eventually(lambda: not stage._playback._user_speaking)
+
+    assert stage._generation == generation
+    assert stage._turns == {}
+    assert stage._unfinished_turns == set()
+    assert turn_handler.requests == []
+    assert not stage._plans
+    assert repository.find_by_id(record.call_id).maintenance_turn_seq == maintenance_turn_seq
+    await stage.terminate()
+    assert not stage.tasks
 
 
 @pytest.mark.asyncio
