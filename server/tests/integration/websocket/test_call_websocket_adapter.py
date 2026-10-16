@@ -77,7 +77,8 @@ def manager(
 
 
 @pytest.mark.asyncio
-async def test_public_open_emits_warning_at_five_seconds_and_time_limits_at_seven_seconds():
+@pytest.mark.parametrize("repository_kind", ["memory", "sqlite"])
+async def test_public_open_emits_warning_at_five_seconds_and_time_limits_at_seven_seconds(tmp_path, repository_kind):
     class Clock:
         value = 100.0
 
@@ -167,10 +168,28 @@ async def test_public_open_emits_warning_at_five_seconds_and_time_limits_at_seve
             )
 
     clock = Clock()
+    wall_now = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
     agent = CallAgent()
     speech = FakeRealtimeSpeechSessionFactory()
+    engine = None
+    if repository_kind == "sqlite":
+        engine = create_engine(f"sqlite:///{tmp_path / 'call-lifecycle.sqlite'}")
+        Base.metadata.create_all(engine)
+        repository = SqlCallSessionRepository(sessionmaker(bind=engine, expire_on_commit=False))
+    else:
+        repository = InMemoryCallSessionRepository()
+    lifecycle_updates = []
+    original_update = repository.update_if_state
+
+    def record_update(*args, **kwargs):
+        lifecycle_updates.append(kwargs["record"])
+        return original_update(*args, **kwargs)
+
+    repository.update_if_state = record_update
     stages, repository = manager(
         speech_factory=speech,
+        repository=repository,
+        wall_clock=lambda: wall_now,
         monotonic=clock,
         agent=agent,
         config={"call_stage": {"time_limit_seconds": 7, "time_limit_warning_seconds": 2}},
@@ -218,10 +237,22 @@ async def test_public_open_emits_warning_at_five_seconds_and_time_limits_at_seve
 
     assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
     assert terminal["end_reason"] == CallEndReason.TIME_LIMIT.value
-    assert repository.find_by_id(UUID(call_id)).end_reason is CallEndReason.TIME_LIMIT
+    persisted = repository.find_by_id(UUID(call_id))
+    assert persisted.end_reason is CallEndReason.TIME_LIMIT
+    assert persisted.ended_at == wall_now
+    assert [record.state for record in lifecycle_updates] == [
+        CallState.RINGING,
+        CallState.ACTIVE,
+        CallState.ENDING,
+        CallState.ENDED,
+    ]
+    lifecycle_timestamps = [persisted.requested_at, *(record.updated_at for record in lifecycle_updates)]
+    assert all(later > earlier for earlier, later in zip(lifecycle_timestamps, lifecycle_timestamps[1:]))
 
     await adapter.close()
     await stages.close()
+    if engine is not None:
+        engine.dispose()
     assert not control._stage.tasks
     assert stages._lease_registry.current("user", "luotianyi") is None
     assert stages._call_ownerships == {}

@@ -14,7 +14,7 @@ import time
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -997,7 +997,9 @@ class CallStage:
             lifecycle = CallLifecycle()
             lifecycle._snapshot = self._lifecycle.snapshot
             snapshot = lifecycle.transition(state, outcome=outcome, end_reason=end_reason)
-            changes: dict[str, object] = {"state": state, "updated_at": self._now()}
+            wall_now = self._now()
+            updated_at = max(wall_now, self._record.updated_at + timedelta(microseconds=1))
+            changes: dict[str, object] = {"state": state, "updated_at": updated_at}
             if outcome is not None:
                 changes["outcome"] = outcome
             if end_reason is not None:
@@ -1005,7 +1007,7 @@ class CallStage:
             if ledger_facts:
                 changes.update(ledger_facts)
             if state is CallState.ENDED:
-                changes["ended_at"] = self._now()
+                changes["ended_at"] = wall_now
             updated = self._record.with_update(**changes)
             changed = await complete_owned(
                 asyncio.to_thread(
