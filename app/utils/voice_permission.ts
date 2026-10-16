@@ -13,15 +13,15 @@ export interface MicrophoneNotice {
  * 用非模态提示让用户可重试，也告知设置入口；不自动弹出设置对话框，避免把可重试结果升级成永久拒绝。
  */
 export const MICROPHONE_AMBIGUOUS_MESSAGE =
-  '没拿到麦克风权限。可以再按住试一次；如果一直不弹系统询问，请到系统设置里打开麦克风。';
+  '未获得麦克风权限。再按住一次重试；始终不弹系统询问时，请到系统设置开启麦克风。';
 
-/** 请求仍在途：只陈述当前事实，不预告结果。 */
-export const MICROPHONE_PENDING_MESSAGE = '上一次权限请求还没有返回。';
+/** 请求仍在途：只陈述当前事实，不预告结果，也不描述成需要等待的过程。 */
+export const MICROPHONE_PENDING_MESSAGE = '上一次权限请求还没结束。';
 
-/** 请求长时间没有返回：此时才提供设置出口。 */
+/** 请求长时间没有返回：这是唯一提供设置出口的弹窗。 */
 export const MICROPHONE_STUCK_NOTICE: MicrophoneNotice = {
-  title: '麦克风权限请求未返回',
-  message: '系统权限请求长时间没有返回，可以重试或到系统设置检查麦克风权限。',
+  title: '麦克风权限请求无响应',
+  message: '权限请求长时间没有响应，可重试或到系统设置检查麦克风权限。',
 };
 
 /**
