@@ -5,7 +5,12 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.call_v1 import CallStageBinding, CallTransportHub, parse_call_transport_enabled
+from src.adapter.websocket.call_v1 import (
+    CallStageBinding,
+    CallTransportHub,
+    CallWebSocketAdapter,
+    parse_call_transport_enabled,
+)
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
@@ -80,6 +85,7 @@ class ServerRuntime:
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
     call_transport_hub: CallTransportHub | None = None
+    call_adapter: CallWebSocketAdapter | None = None
     call_metrics: CallMetrics | None = None
     user_reset_fence: UserResetFence | None = None
     realtime_speech_factory: AliyunRealtimeSpeechSessionFactory | None = None
@@ -227,8 +233,15 @@ class ServerRuntime:
                 call_maintenance_batches=database_manager.call_maintenance_batches,
                 call_resources=agent_runtime,
                 call_metrics=call_metrics,
+                realtime_speech_factory=speech_factory,
                 user_reset_fence=reset_fence,
                 config=config.get("stage_manager", {}),
+            )
+            runtime.call_adapter = CallWebSocketAdapter(
+                manager=runtime.stage_manager,
+                user_reset_fence=reset_fence,
+                call_metrics=call_metrics,
+                supports_character=runtime.supports_call_character,
             )
 
             media_store = PermanentMediaStore(media_config) if media_config.get("root") else None
@@ -356,12 +369,8 @@ class ServerRuntime:
                 runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None,
             ),
             (
-                "call transport hub",
-                (
-                    runtime.call_transport_hub.close
-                    if runtime is not None and runtime.call_transport_hub is not None
-                    else None
-                ),
+                "call adapter",
+                (runtime.call_adapter.close if runtime is not None and runtime.call_adapter is not None else None),
             ),
             ("world runtime", world.stop_background_services if world is not None else None),
             (
@@ -414,7 +423,7 @@ class ServerRuntime:
                 ("world runtime", self.world.stop_background_services),
                 ("world stages", self.close_world_stages),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
-                ("call transport hub", self.call_transport_hub.close if self.call_transport_hub is not None else None),
+                ("call adapter", self.call_adapter.close if self.call_adapter is not None else None),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
                 ("database manager", self.database_manager.shutdown),
                 ("global references", self._shutdown_clear_global_references),

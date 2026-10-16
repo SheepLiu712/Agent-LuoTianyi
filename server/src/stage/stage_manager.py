@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from src.agent.context import ContextFactory
@@ -95,6 +95,98 @@ class CallStageOwnership:
     generation: int
 
 
+@dataclass(frozen=True, slots=True)
+class CallOpenRequest:
+    user_id: str
+    character_id: str
+    client_request_id: str
+    source_interaction_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CallIdentity:
+    call_id: str
+    client_request_id: str
+    character_id: str
+    state: CallState
+
+
+class CallOpenTransport(Protocol):
+    async def prepare(self, identity: CallIdentity) -> None: ...
+
+    async def abort_prepare(self) -> None: ...
+
+    def bind_stage(self, stage: CallStage) -> None: ...
+
+
+class CallControl:
+    """Finite business control for one accepted call; transport internals stay hidden."""
+
+    def __init__(self, manager: StageManager, request: CallOpenRequest, transport: CallOpenTransport) -> None:
+        self._manager = manager
+        self._request = request
+        self._transport_sink = transport
+        self._identity: CallIdentity | None = None
+        self._stage: CallStage | None = None
+        self._connected = True
+        self._termination_reason: CallEndReason | None = None
+        self._setup_task: asyncio.Task | None = None
+        self._stage_available = asyncio.Event()
+        self._ready = asyncio.Event()
+
+    def release(self) -> None:
+        """Allow the accepted transport handshake to begin business setup exactly once."""
+        if self._setup_task is None:
+            self._setup_task = asyncio.create_task(
+                self._manager._establish_open_call(self), name=f"call-open-establish-{self.identity.call_id}"
+            )
+
+    @property
+    def identity(self) -> CallIdentity:
+        if self._identity is None:
+            raise RuntimeError("call identity is not prepared")
+        return self._identity
+
+    async def disconnect(self) -> None:
+        self._connected = False
+        if self._stage is not None:
+            await self._stage.set_connection_available(False)
+
+    async def resume(self) -> bool:
+        if self._stage is None:
+            return self._setup_task is not None and not self._setup_task.done()
+        if self._stage.state in {CallState.PREPARING, CallState.RINGING}:
+            return True
+        return self._stage.can_resume()
+
+    async def commit_resume(self) -> bool:
+        self._connected = True
+        if self._stage is None:
+            return self._setup_task is not None and not self._setup_task.done()
+        if self._stage.state in {CallState.PREPARING, CallState.RINGING}:
+            await self._stage.set_connection_available(True)
+            return True
+        return await self._stage.resume()
+
+    async def terminate(self, reason: CallEndReason = CallEndReason.USER_HANGUP):
+        if self._termination_reason is None:
+            self._termination_reason = reason
+        if self._stage is None and self._setup_task is not None and not self._setup_task.done():
+            await self._stage_available.wait()
+        if self._stage is None:
+            if self._setup_task is not None:
+                await asyncio.shield(self._setup_task)
+        if self._stage is None:
+            return None
+        return await self._stage.terminate(self._termination_reason)
+
+    async def wait_realtime_stopped(self):
+        await self._ready.wait()
+        if self._stage is None:
+            return None
+        return await self._stage.wait_closed()
+
+
 class CallStartFailed(RuntimeError):
     """Stable duplicate-start failure preserving the durable call identity."""
 
@@ -128,6 +220,7 @@ class StageManager:
         call_maintenance_batches: SqlCallMaintenanceBatchRepository | None = None,
         call_resources: CallResourceReleasePort | None = None,
         call_metrics: CallMetrics | None = None,
+        realtime_speech_factory: RealtimeSpeechSessionFactory | None = None,
         user_reset_fence: Any | None = None,
         wall_clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
@@ -145,6 +238,8 @@ class StageManager:
         self._due_event_provider = due_event_provider
         self._lease_registry = lease_registry or InteractionLeaseRegistry()
         self._call_sessions = call_sessions
+        self._realtime_speech_factory = realtime_speech_factory
+        self._call_metrics = call_metrics
         self._user_reset_fence = user_reset_fence
         self._wall_clock = wall_clock or (lambda: datetime.now(BEIJING_TIMEZONE))
         self._monotonic = monotonic
@@ -183,6 +278,9 @@ class StageManager:
         self._call_claims: dict[str, CallStartClaim] = {}
         self._call_ownerships: dict[str, CallStageOwnership] = {}
         self._call_stages: dict[str, CallStage] = {}
+        self._call_controls: dict[str, CallControl] = {}
+        self._call_controls_by_request: dict[str, CallControl] = {}
+        self._call_open_tasks: dict[str, asyncio.Task[CallControl]] = {}
         self._call_stage_creations: set[asyncio.Task[Any]] = set()
         self._call_stage_creation_users: dict[asyncio.Task[Any], str] = {}
         self._call_ownership_generation = 0
@@ -191,6 +289,151 @@ class StageManager:
     @property
     def call_settlement_ready(self) -> bool:
         return bool(self._call_settlement and self._call_settlement.is_ready)
+
+    async def open_call(self, request: CallOpenRequest, transport: CallOpenTransport) -> CallControl:
+        """Accept one call identity and retain its background establishment operation."""
+        task = self._call_open_tasks.get(request.client_request_id)
+        if task is None:
+            task = asyncio.create_task(
+                self._open_call(request, transport), name=f"call-open-{request.client_request_id}"
+            )
+            self._call_open_tasks[request.client_request_id] = task
+            task.add_done_callback(lambda done, key=request.client_request_id: self._observe_open_call(key, done))
+        control = await asyncio.shield(task)
+        if control._request != request:
+            raise ValueError("client_request_id is already starting another call")
+        return control
+
+    async def _open_call(self, request: CallOpenRequest, transport: CallOpenTransport) -> CallControl:
+        if self._realtime_speech_factory is None:
+            raise RuntimeError("realtime speech factory is not bound")
+        control = CallControl(self, request, transport)
+        self._call_controls_by_request[request.client_request_id] = control
+        try:
+            start = asyncio.create_task(
+                self.start_call(
+                    user_id=request.user_id,
+                    character_id=request.character_id,
+                    source_interaction_id=request.source_interaction_id,
+                    client_request_id=request.client_request_id,
+                ),
+                name=f"call-open-claim-{request.client_request_id}",
+            )
+            claim = await asyncio.shield(start)
+            record = claim.record
+            identity = CallIdentity(
+                str(record.call_id), request.client_request_id, request.character_id, CallState.PREPARING
+            )
+            control._identity = identity
+            self._call_controls[identity.call_id] = control
+            try:
+                await transport.prepare(identity)
+            except BaseException as error:
+                await transport.abort_prepare()
+                await self.fail_pending_call_claim(claim, error)
+                raise
+            control._claim = claim
+            return control
+        except BaseException:
+            self._call_controls_by_request.pop(request.client_request_id, None)
+            if control._identity is not None:
+                self._call_controls.pop(control._identity.call_id, None)
+            raise
+
+    def _observe_open_call(self, request_id: str, task: asyncio.Task[CallControl]) -> None:
+        if self._call_open_tasks.get(request_id) is task:
+            self._call_open_tasks.pop(request_id, None)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            get_logger(__name__).error("Call open failed request=%s type=%s", request_id, type(error).__name__)
+
+    async def resume_call(self, call_id: str, *, user_id: str, character_id: str) -> CallControl:
+        control = self._call_controls.get(call_id)
+        if control is None:
+            raise RuntimeError("CALL_NOT_FOUND")
+        if control._request.user_id != user_id or control.identity.character_id != character_id:
+            raise RuntimeError("RESUME_OWNERSHIP_MISMATCH")
+        if not await control.resume():
+            raise RuntimeError("CALL_RESUME_UNAVAILABLE")
+        return control
+
+    async def commit_call_resume(self, control: CallControl) -> None:
+        if self._call_controls.get(control.identity.call_id) is not control or not await control.commit_resume():
+            raise RuntimeError("CALL_RESUME_UNAVAILABLE")
+
+    async def find_call_by_request(
+        self, client_request_id: str, *, user_id: str, character_id: str
+    ) -> CallControl | None:
+        task = self._call_open_tasks.get(client_request_id)
+        if task is not None:
+            control = await asyncio.shield(task)
+            if control._request.user_id != user_id or control.identity.character_id != character_id:
+                raise ValueError("client_request_id belongs to another call owner")
+            return control
+        control = self._call_controls_by_request.get(client_request_id)
+        if control is not None:
+            if control._request.user_id != user_id or control.identity.character_id != character_id:
+                raise ValueError("client_request_id belongs to another call owner")
+            return control
+        if self._call_sessions is None:
+            return None
+        record = await self._repository_call(self._call_sessions.find_by_request, client_request_id)
+        if record is None:
+            return None
+        if record.user_id != user_id or record.character_id != character_id:
+            raise ValueError("client_request_id belongs to another call owner")
+        raise CallStartFailed(record)
+
+    async def abort_open_call(self, control: CallControl, error: BaseException) -> None:
+        """Compensate a prepared call whose initial ACK was not committed."""
+        claim = getattr(control, "_claim", None)
+        if claim is not None:
+            await self.fail_pending_call_claim(claim, error)
+        self._call_controls.pop(control.identity.call_id, None)
+        if self._call_controls_by_request.get(control._request.client_request_id) is control:
+            self._call_controls_by_request.pop(control._request.client_request_id, None)
+
+    async def _establish_open_call(self, control: CallControl) -> None:
+        claim = getattr(control, "_claim", None)
+        if claim is None:
+            control._stage_available.set()
+            control._ready.set()
+            return
+        try:
+            stage = await self.create_call_stage(
+                claim,
+                user_id=control._request.user_id,
+                character_id=control._request.character_id,
+                client_request_id=control._request.client_request_id,
+                speech_factory=self._realtime_speech_factory,
+                transport=control._transport_sink,
+                call_metrics=self._call_metrics,
+                stage_created=lambda stage: self._publish_control_stage(control, stage),
+                connection_available=control._connected,
+            )
+            self._publish_control_stage(control, stage)
+            if control._termination_reason is not None:
+                await stage.terminate(control._termination_reason)
+        except BaseException as error:
+            get_logger(__name__).error(
+                "Call establishment failed request=%s type=%s error=%s",
+                control._request.client_request_id,
+                type(error).__name__,
+                error,
+            )
+        finally:
+            control._stage_available.set()
+            control._ready.set()
+
+    @staticmethod
+    def _publish_control_stage(control: CallControl, stage: CallStage) -> None:
+        control._stage = stage
+        control._stage_available.set()
+
+    def current_call_control(self, call_id: str) -> CallControl | None:
+        return self._call_controls.get(call_id)
 
     def _start_call_finalization(self, ownership, snapshot) -> None:
         self._finalizations.start(
@@ -213,6 +456,8 @@ class StageManager:
             await self._call_settlement.settle(snapshot)
         finally:
             self._release_call_stage_ownership(ownership)
+            self._call_controls.pop(ownership.call_id, None)
+            self._call_controls_by_request.pop(ownership.client_request_id, None)
 
     async def begin_user_data_reset(self, user_id: str) -> object:
         async with self._lock:
@@ -301,6 +546,9 @@ class StageManager:
         if self._closing is None:
             self._closing = asyncio.create_task(self._close(), name="stage-manager-close")
         await asyncio.shield(self._closing)
+
+    def is_closed(self) -> bool:
+        return self._closed
 
     async def _connect(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
         async with self._lock:
@@ -634,7 +882,7 @@ class StageManager:
     ) -> CallStartClaim:
         if record.user_id != user_id or record.character_id != character_id:
             raise ValueError("client_request_id belongs to another call owner")
-        if record.state is CallState.FAILED:
+        if record.state in {CallState.FAILED, CallState.ENDING, CallState.ENDED, CallState.DECLINED}:
             raise CallStartFailed(record)
         lease = self._lease_registry.current(user_id, character_id)
         if lease is None or lease.source is not InteractionSource.CALL or lease.interaction_id != str(record.call_id):
@@ -774,6 +1022,8 @@ class StageManager:
         transport: CallTransportSink,
         call_metrics: CallMetrics | None = None,
         config: dict[str, object] | None = None,
+        stage_created: Callable[[CallStage], None] | None = None,
+        connection_available: bool = True,
     ) -> CallStage:
         """Consume a validated claim, then create and register exactly one CallStage."""
         await self._require_generation(user_id, claim.admission_generation)
@@ -786,6 +1036,8 @@ class StageManager:
             transport=transport,
             call_metrics=call_metrics,
             config=config,
+            stage_created=stage_created,
+            connection_available=connection_available,
         )
         if self._user_reset_fence is not None:
             task, _ = await self._user_reset_fence.spawn(user_id, operation, name="call-stage-create")
@@ -807,6 +1059,8 @@ class StageManager:
         transport: CallTransportSink,
         call_metrics: Any | None,
         config: dict[str, object] | None,
+        stage_created: Callable[[CallStage], None] | None,
+        connection_available: bool,
     ) -> CallStage:
         from .call_stage import CallStage
 
@@ -837,10 +1091,13 @@ class StageManager:
                 monotonic=self._monotonic,
                 wall_clock=self._wall_clock,
                 config=config,
+                connection_available=connection_available,
             )
             bind_stage = getattr(transport, "bind_stage", None)
             if bind_stage is not None:
                 bind_stage(stage)
+            if stage_created is not None:
+                stage_created(stage)
             await stage.start()
         except BaseException as original_error:
             if stage is not None and stage.termination_requested:
@@ -1094,6 +1351,11 @@ class StageManager:
         call_stages = tuple(self._call_stages.values())
         if call_stages:
             await asyncio.gather(*(stage.close() for stage in call_stages), return_exceptions=True)
+        controls = tuple(control for control in self._call_controls.values() if control._stage not in call_stages)
+        if controls:
+            await asyncio.gather(
+                *(control.terminate(CallEndReason.SYSTEM_FAILURE) for control in controls), return_exceptions=True
+            )
         self._call_stages.clear()
         await self._finalizations.close()
         self._lease_registry.close()

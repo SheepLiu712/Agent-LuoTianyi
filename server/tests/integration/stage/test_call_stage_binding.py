@@ -208,7 +208,7 @@ async def test_binding_does_not_encode_internal_or_terminal_states_as_call_state
     )
     binding.bind(stage=_Stage(), session=session)
 
-    await binding.send_state(CallStateChanged(binding.call_id, state))
+    await binding.send_state(CallStateChanged(binding.call_id, state, "request"))
 
     assert delivered == []
     assert session.next_server_seq == 1

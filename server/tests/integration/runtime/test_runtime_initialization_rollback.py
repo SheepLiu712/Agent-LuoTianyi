@@ -176,7 +176,7 @@ async def test_initialization_rollback_waits_for_stage_manager_before_agent_and_
         stage_manager = SimpleNamespace(
             close=lambda: _record_wait(calls, "stage_manager_started", "stage_manager_stopped", stage_release)
         )
-        call_transport_hub = SimpleNamespace(close=lambda: _record(calls, "transport"))
+        call_adapter = SimpleNamespace(close=lambda: _record(calls, "transport"))
 
     world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
     agent = SimpleNamespace(shutdown=lambda: _record(calls, "agent"))

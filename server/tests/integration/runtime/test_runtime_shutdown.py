@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -94,7 +95,7 @@ async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks
         observability=object(),
         client_llm_executor=ClientLLMExecutor(),
         owns_observability=False,
-        call_transport_hub=hub,
+        call_adapter=SimpleNamespace(close=hub.close),
     )
 
     await runtime.shutdown()
