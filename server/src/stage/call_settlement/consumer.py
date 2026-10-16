@@ -97,6 +97,9 @@ class CallSettlementConsumerImpl:
             context=context,
             deadline=deadline,
         )
+        await complete_owned(self._settle_durable_results(record, winner, result))
+
+    async def _settle_durable_results(self, record, winner, result) -> None:
         summary_error = None
         if record.summary_status is not SettlementStatus.SUCCEEDED:
             try:
@@ -109,8 +112,6 @@ class CallSettlementConsumerImpl:
                 CallMetricResult.FAILED if summary_error is not None else CallMetricResult.SUCCEEDED,
                 status=CallMetricStatus.ERROR if summary_error is not None else CallMetricStatus.SUCCESS,
             )
-        if summary_error is not None:
-            raise summary_error
         maintenance_error = None
         if record.maintenance_status is not SettlementStatus.SUCCEEDED:
             try:
@@ -123,6 +124,8 @@ class CallSettlementConsumerImpl:
                 CallMetricResult.FAILED if maintenance_error is not None else CallMetricResult.SUCCEEDED,
                 status=CallMetricStatus.ERROR if maintenance_error is not None else CallMetricStatus.SUCCESS,
             )
+        if summary_error is not None:
+            raise summary_error
         if maintenance_error is not None:
             raise maintenance_error
 

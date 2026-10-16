@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ import src.agent.skills.expression.speaking.backend as speaking_backend
 from src.agent_runtime import agent_runtime as runtime_module
 from src.application.user.user_conversation_helper import UserConversationHelper
 from src.domain.call import (
+    CallAgentSettlementResult,
     CallEndReason,
     CallFinalSnapshot,
     CallFinalTurn,
@@ -41,6 +43,100 @@ from src.stage.call_settlement import (
     CallSettlementConsumerImpl,
     StaleCallRecoveryService,
 )
+
+
+class _FixedAgentSettlement:
+    async def settle(self, *args, **kwargs):
+        return CallAgentSettlementResult(summary="固定概要", maintenance_turn_seq=RuntimeError("maintenance failed"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_phase", ["conversation_write", "summary_cas", "maintenance_cas"])
+async def test_durable_finalization_cancellation_finishes_both_status_lanes(tmp_path, blocked_phase):
+    database = DatabaseManager({"sql_db_folder": str(tmp_path), "sql_db_file": f"cancel-{blocked_phase}.sqlite"})
+    with database.open_sql_session() as sql:
+        sql.add(User(uuid="user", username=f"cancel-{blocked_phase}", password="offline", description=""))
+        sql.commit()
+    call_id = uuid4()
+    requested_at = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
+    record = CallSessionRecord(
+        call_id=call_id,
+        client_request_id=f"cancel-{blocked_phase}",
+        user_id="user",
+        character_id="luotianyi",
+        state=CallState.ENDED,
+        requested_at=requested_at,
+        created_at=requested_at,
+        updated_at=requested_at,
+        outcome=CallOutcome.CONNECTED,
+        end_reason=CallEndReason.USER_HANGUP,
+        connected_at=requested_at,
+        ended_at=requested_at,
+        active_duration_ms=1_000,
+    )
+    database.call_sessions.create_if_absent(record)
+    snapshot = CallFinalSnapshot(
+        CallTerminalFacts(call_id, CallOutcome.CONNECTED, CallEndReason.USER_HANGUP, 1_000, requested_at),
+        (CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),),
+        0,
+    )
+    entered = threading.Event()
+    release = threading.Event()
+
+    def block_then_call(operation):
+        def wrapped(*args, **kwargs):
+            entered.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError(f"{blocked_phase} barrier timed out")
+            return operation(*args, **kwargs)
+
+        return wrapped
+
+    if blocked_phase == "conversation_write":
+        database.conversation_service.add_call_conversation = block_then_call(
+            database.conversation_service.add_call_conversation
+        )
+    elif blocked_phase == "summary_cas":
+        database.call_sessions.update_summary_settlement = block_then_call(
+            database.call_sessions.update_summary_settlement
+        )
+    else:
+        database.call_sessions.update_maintenance_settlement = block_then_call(
+            database.call_sessions.update_maintenance_settlement
+        )
+
+    consumer = CallSettlementConsumerImpl(
+        agent_settlement=_FixedAgentSettlement(),
+        call_sessions=database.call_sessions,
+        conversation_service=database.conversation_service,
+        call_maintenance_batches=database.call_maintenance_batches,
+    )
+    task = asyncio.create_task(consumer.settle(snapshot))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        persisted = database.call_sessions.find_by_id(call_id)
+        assert persisted.summary_status is SettlementStatus.SUCCEEDED
+        assert persisted.maintenance_status is SettlementStatus.FAILED
+        with database.open_sql_session() as sql:
+            assert sql.query(Conversation).filter_by(user_id="user", type="call").count() == 1
+        await asyncio.sleep(0.05)
+        assert database.call_sessions.find_by_id(call_id) == persisted
+        assert not [
+            pending for pending in asyncio.all_tasks() if pending is not asyncio.current_task() and not pending.done()
+        ]
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await database.shutdown()
 
 
 @pytest.mark.asyncio
@@ -697,7 +793,7 @@ async def test_issue_324_summary_deadline_persists_static_fallback_and_stops_tas
 
 
 @pytest.mark.asyncio
-async def test_issue_324_write_failure_marks_summary_failed_then_startup_recovers_once(monkeypatch, tmp_path):
+async def test_issue_324_write_failure_marks_stable_summary_failed_and_finishes_maintenance(monkeypatch, tmp_path):
     vector = DeterministicVectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: vector)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: expected is vector)
@@ -760,6 +856,7 @@ async def test_issue_324_write_failure_marks_summary_failed_then_startup_recover
         await settlement.settle(snapshot)
         failed = database.call_sessions.find_by_id(call_id)
         assert failed.summary_status is SettlementStatus.FAILED
+        assert failed.maintenance_status is SettlementStatus.SUCCEEDED
         monkeypatch.setattr(database.conversation_service, "add_call_conversation", original_write)
         recovery = StaleCallRecoveryService(
             call_sessions=database.call_sessions,
@@ -772,10 +869,10 @@ async def test_issue_324_write_failure_marks_summary_failed_then_startup_recover
         second = await recovery.reconcile()
         repaired = database.call_sessions.find_by_id(call_id)
         with database.open_sql_session() as sql:
-            assert sql.query(Conversation).filter_by(user_id="user", type="call").count() == 1
-        assert first.recovered == 1
+            assert sql.query(Conversation).filter_by(user_id="user", type="call").count() == 0
+        assert first.scanned == 0
         assert second.scanned == 0
-        assert repaired.summary_status is SettlementStatus.SUCCEEDED
+        assert repaired.summary_status is SettlementStatus.FAILED
         assert repaired.maintenance_status is SettlementStatus.SUCCEEDED
     finally:
         await runtime.shutdown()

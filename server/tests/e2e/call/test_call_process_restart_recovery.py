@@ -34,6 +34,11 @@ def _server_command(root: Path) -> list[str]:
     return [sys.executable, "-u", "-c", _SERVER_BOOTSTRAP, str(root)]
 
 
+def _expected_server_source() -> str:
+    source = Path(__file__).resolve().parents[2] / "support" / f"{_SERVER_MODULE.rsplit('.', 1)[-1]}.py"
+    return os.path.normcase(os.path.normpath(str(source.resolve())))
+
+
 def _start_server(root: Path):
     repo = Path(__file__).resolve().parents[4]
     log_path = root / f"server-{time.time_ns()}.log"
@@ -300,7 +305,7 @@ def test_issue_324_production_deadline_survives_two_real_runtime_restarts(tmp_pa
         assert deadline["call_conversations"] == 1
         assert deadline["maintenance_started"]
         assert deadline["maintenance_stopped"]
-        assert "call-check-324" in deadline["source"]
+        assert os.path.normcase(os.path.normpath(deadline["source"])) == _expected_server_source()
     finally:
         _stop_server(process, http, url, log, log_path)
 
