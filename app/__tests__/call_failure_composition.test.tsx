@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { CallFailureBanner } from '../components/call/CallFailureBanner';
 import { useCallSession } from '../hooks/useCallSession';
@@ -69,7 +69,7 @@ function textOf(node: any): string {
 }
 
 describe('call failure production composition', () => {
-  test('FakeSocket 鈫?CallTransportSession 鈫?CallSession 鈫?hook/reducer 鈫?visible banner', async () => {
+  test('FakeSocket → CallTransportSession → CallSession → hook/reducer → visible banner', async () => {
     const sockets = new Sockets();
     const transport = new CallTransportSession({
       url: 'ws://example/call_ws', credentials: { username: 'u', token: 't' }, characterId: 'luotianyi',
@@ -93,8 +93,8 @@ describe('call failure production composition', () => {
     await act(async () => { await flush(); });
     expect(result.state.phase).toBe('IDLE');
     const rendered = tree.root.findAllByType('Text' as any).map(textOf).join('');
-    expect(rendered).toContain('閫氳瘽杩炴帴澶辫触');
-    expect(rendered).toContain('妫€鏌ョ綉缁滃悗閲嶈瘯');
+    expect(rendered).toContain('通话连接失败');
+    expect(rendered).toContain('检查网络后重试');
     expect(rendered).not.toContain(CALL_ID);
     act(() => tree.unmount());
   });
