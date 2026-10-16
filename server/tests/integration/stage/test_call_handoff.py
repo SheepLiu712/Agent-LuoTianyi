@@ -22,7 +22,15 @@ from src.web.websocket.service import WebSocketConnection
 from .test_chat_stage import RecordingAgent, Socket, StageContextFactory
 
 
-def manager(*, agent=None, clock=None, config=None, repository=None, lease_registry=None, user_reset_fence=None):
+def manager(
+    *,
+    agent=None,
+    clock=None,
+    config=None,
+    repository=None,
+    lease_registry=None,
+    user_reset_fence=None,
+):
     adapter = WebSocketAdapter()
     repository = repository or InMemoryCallSessionRepository()
     factory = StageContextFactory()
@@ -106,7 +114,7 @@ async def test_call_start_closes_chat_context_before_returning_call_claim():
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
@@ -125,13 +133,13 @@ async def test_duplicate_call_start_returns_same_claim_without_intent():
     stage_manager, _, _ = manager()
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    first = await stage_manager.start_call(
+    first = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
         client_request_id="request-1",
     )
-    duplicate = await stage_manager.start_call(
+    duplicate = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id="already-retired",
@@ -149,7 +157,7 @@ async def test_take_call_claim_validates_identity_and_preserves_deadline_for_dup
     stage_manager, _, _ = manager()
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
@@ -157,26 +165,26 @@ async def test_take_call_claim_validates_identity_and_preserves_deadline_for_dup
     )
 
     with pytest.raises(ValueError, match="identity mismatch"):
-        stage_manager.take_call_claim(
+        stage_manager._take_call_claim(
             claim,
             user_id="other",
             character_id="luotianyi",
             client_request_id="request-1",
         )
-    ownership = stage_manager.take_call_claim(
+    ownership = stage_manager._take_call_claim(
         claim,
         user_id="user",
         character_id="luotianyi",
         client_request_id="request-1",
     )
     with pytest.raises(ValueError, match="not pending"):
-        stage_manager.take_call_claim(
+        stage_manager._take_call_claim(
             claim,
             user_id="user",
             character_id="luotianyi",
             client_request_id="request-1",
         )
-    duplicate = await stage_manager.start_call(
+    duplicate = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id="retired",
@@ -184,19 +192,19 @@ async def test_take_call_claim_validates_identity_and_preserves_deadline_for_dup
     )
 
     assert ownership.setup_deadline == claim.setup_deadline == duplicate.setup_deadline
-    assert stage_manager.current_call_ownership(str(claim.record.call_id)) == ownership
+    assert stage_manager._current_call_ownership(str(claim.record.call_id)) == ownership
 
 
 @pytest.mark.asyncio
 async def test_release_call_rejects_stale_or_wrong_ownership_and_cleans_deadline():
     stage_manager, _, _ = manager()
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=None,
         client_request_id="request-direct",
     )
-    ownership = stage_manager.take_call_claim(
+    ownership = stage_manager._take_call_claim(
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -211,10 +219,10 @@ async def test_release_call_rejects_stale_or_wrong_ownership_and_cleans_deadline
         generation=ownership.generation,
     )
 
-    assert not stage_manager.release_call(wrong)
-    assert stage_manager.release_call(ownership)
-    assert not stage_manager.release_call(ownership)
-    assert stage_manager.current_call_ownership(ownership.call_id) is None
+    assert not stage_manager._release_call(wrong)
+    assert stage_manager._release_call(ownership)
+    assert not stage_manager._release_call(ownership)
+    assert stage_manager._current_call_ownership(ownership.call_id) is None
     assert "request-direct" not in stage_manager._call_setup_deadlines
 
 
@@ -229,7 +237,7 @@ async def test_setup_deadline_is_captured_before_background_task_runs():
     stage_manager, _, _ = manager()
     stage_manager._monotonic = monotonic
 
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=None,
@@ -247,13 +255,13 @@ async def test_concurrent_duplicate_start_shares_one_handoff_and_one_winner():
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
     first, second = await asyncio.gather(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
             client_request_id="request-1",
         ),
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -274,7 +282,7 @@ async def test_wrong_request_or_source_does_not_retire_chat():
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
     with pytest.raises(ValueError, match="matching call transition"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -289,14 +297,17 @@ async def test_wrong_request_or_source_does_not_retire_chat():
 @pytest.mark.asyncio
 async def test_termination_maintenance_failure_marks_ledger_failed_and_releases_ownership():
     async def failed_realize(_plan, _context, _sink):
-        return SimpleNamespace(status=d.ExecutionStatus.FAILED, error_code=d.ExecutionErrorCode.INTERNAL_ERROR)
+        return SimpleNamespace(
+            status=d.ExecutionStatus.FAILED,
+            error_code=d.ExecutionErrorCode.INTERNAL_ERROR,
+        )
 
     stage_manager, repository, _ = manager(agent=RecordingAgent(realize=failed_realize))
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
     with pytest.raises(RuntimeError, match="maintenance failed"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -320,7 +331,7 @@ async def test_ledger_create_failure_restores_chat_and_requires_reprepare():
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -331,7 +342,7 @@ async def test_ledger_create_failure_restores_chat_and_requires_reprepare():
     assert stage.context.closed is False
     assert not stage_manager._adapter.is_business_input_suspended(connection)
     with pytest.raises(ValueError, match="matching call transition"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -351,7 +362,7 @@ async def test_same_request_other_operation_is_rejected_without_leaking_claim():
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
     first = asyncio.create_task(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -361,7 +372,7 @@ async def test_same_request_other_operation_is_rejected_without_leaking_claim():
     await asyncio.sleep(0)
 
     with pytest.raises(ValueError, match="another call"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="other-user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -383,7 +394,7 @@ async def test_cancelled_start_completes_owned_handoff_before_propagating_cancel
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
     task = asyncio.create_task(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -418,7 +429,7 @@ async def test_normal_disconnect_keeps_chat_for_60_second_reconnect():
 async def test_direct_start_without_chat_claims_empty_slot_and_persists_ledger():
     stage_manager, repository, _ = manager()
 
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=None,
@@ -436,7 +447,7 @@ async def test_direct_start_cannot_steal_offline_retained_chat():
     await stage_manager.disconnect(connection)
 
     with pytest.raises(ValueError, match="already owned"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -452,13 +463,13 @@ async def test_two_direct_devices_race_to_one_request_winner():
     stage_manager, repository, _ = manager()
 
     first, second = await asyncio.gather(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
             client_request_id="request-direct",
         ),
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -479,7 +490,7 @@ async def test_direct_ledger_failure_releases_transition_ownership():
     stage_manager, _, _ = manager(repository=FailingRepository())
 
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -515,7 +526,7 @@ async def test_blocking_repository_runs_off_loop_and_late_create_is_failed_after
             await asyncio.sleep(0)
 
     start = asyncio.create_task(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -548,7 +559,7 @@ async def test_shutdown_waits_for_blocking_direct_repository_and_cleans_late_led
 
     stage_manager, repository, _ = manager(repository=BlockingRepository())
     start = asyncio.create_task(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -574,7 +585,7 @@ async def test_call_ledger_timestamp_is_aware_beijing_and_strictly_advances():
     stage_manager, repository, _ = manager(clock=lambda: instant)
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
@@ -587,14 +598,17 @@ async def test_call_ledger_timestamp_is_aware_beijing_and_strictly_advances():
 
 @pytest.mark.asyncio
 async def test_handoff_persists_preparing_claim_in_real_sqlite(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'handoff.db'}", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'handoff.db'}",
+        connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(engine)
     repository = SqlCallSessionRepository(sessionmaker(bind=engine))
     stage_manager, _, _ = manager(repository=repository)
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
@@ -611,7 +625,7 @@ async def test_manager_shutdown_releases_call_lease():
     stage_manager, _, _ = manager()
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
@@ -636,7 +650,7 @@ async def test_shutdown_waits_blocked_handoff_and_never_grants_call_lease():
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
     start = asyncio.create_task(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -678,7 +692,7 @@ async def test_setup_timeout_waits_for_owned_termination_before_releasing_transi
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
     start = asyncio.create_task(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -692,7 +706,7 @@ async def test_setup_timeout_waits_for_owned_termination_before_releasing_transi
     assert not start.done()
     assert stage.context.closed is False
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -733,7 +747,7 @@ async def test_caller_cancel_after_setup_deadline_still_completes_timeout_cleanu
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
     start = asyncio.create_task(
-        stage_manager.start_call(
+        stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -764,7 +778,7 @@ async def test_call_ledger_rejects_naive_wall_clock_without_retiring_chat():
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -789,9 +803,12 @@ class _BlockingSqlCallRepository(SqlCallSessionRepository):
 
 
 @pytest.mark.asyncio
-async def test_user_reset_invalidates_blocking_sql_start_and_leaves_no_live_claim(tmp_path):
+async def test_user_reset_invalidates_blocking_sql_start_and_leaves_no_live_claim(
+    tmp_path,
+):
     engine = create_engine(
-        f"sqlite:///{tmp_path / 'reset-start.db'}", connect_args={"check_same_thread": False, "timeout": 30}
+        f"sqlite:///{tmp_path / 'reset-start.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
     )
     Base.metadata.create_all(engine)
     started = threading.Event()
@@ -800,8 +817,11 @@ async def test_user_reset_invalidates_blocking_sql_start_and_leaves_no_live_clai
     fence = UserResetFence()
     stage_manager, _, _ = manager(repository=repository, user_reset_fence=fence)
     start = asyncio.create_task(
-        stage_manager.start_call(
-            user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="reset-race"
+        stage_manager._claim_call(
+            user_id="owner",
+            character_id="luotianyi",
+            source_interaction_id=None,
+            client_request_id="reset-race",
         )
     )
     assert await asyncio.to_thread(started.wait, 3)
@@ -822,13 +842,18 @@ async def test_user_reset_invalidates_blocking_sql_start_and_leaves_no_live_clai
 
 
 @pytest.mark.asyncio
-async def test_user_reset_waits_creation_after_claim_take_and_fence_is_registry_backstop(monkeypatch):
+async def test_user_reset_waits_creation_after_claim_take_and_fence_is_registry_backstop(
+    monkeypatch,
+):
     from src.stage.call_stage import CallStage
 
     fence = UserResetFence()
     stage_manager, _, _ = manager(user_reset_fence=fence)
-    claim = await stage_manager.start_call(
-        user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="creation-race"
+    claim = await stage_manager._claim_call(
+        user_id="owner",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="creation-race",
     )
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -841,7 +866,7 @@ async def test_user_reset_waits_creation_after_claim_take_and_fence_is_registry_
 
     monkeypatch.setattr(CallStage, "start", blocking_start)
     creation = asyncio.create_task(
-        stage_manager.create_call_stage(
+        stage_manager._create_call_stage(
             claim,
             user_id="owner",
             character_id="luotianyi",
@@ -861,7 +886,6 @@ async def test_user_reset_waits_creation_after_claim_take_and_fence_is_registry_
     release.set()
     assert isinstance((await asyncio.gather(creation, return_exceptions=True))[0], RuntimeError)
     await asyncio.wait_for(waiting, timeout=3)
-    await stage_manager.stop_user_interactions("owner")
     assert not stage_manager._call_ownerships
     assert not stage_manager._call_stages
     await fence.end("owner", token)
@@ -874,8 +898,11 @@ async def test_postclaim_setup_failure_emits_once_and_releases_ownership(monkeyp
     from src.stage import call_stage as call_stage_module
 
     stage_manager, repository, _ = manager()
-    claim = await stage_manager.start_call(
-        user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id=failure_seam
+    claim = await stage_manager._claim_call(
+        user_id="owner",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id=failure_seam,
     )
 
     class Transport:
@@ -900,7 +927,7 @@ async def test_postclaim_setup_failure_emits_once_and_releases_ownership(monkeyp
         monkeypatch.setattr(call_stage_module, "CallStage", FailingCallStage)
     try:
         with pytest.raises(RuntimeError, match="FAILED"):
-            await stage_manager.create_call_stage(
+            await stage_manager._create_call_stage(
                 claim,
                 user_id="owner",
                 character_id="luotianyi",
@@ -913,15 +940,15 @@ async def test_postclaim_setup_failure_emits_once_and_releases_ownership(monkeyp
             monkeypatch.setattr(call_stage_module, "CallStage", original)
 
     assert transport.failures == [CallEndReason.SYSTEM_FAILURE]
-    assert stage_manager.current_call_ownership(str(claim.record.call_id)) is None
-    assert stage_manager.current_call_stage(str(claim.record.call_id)) is None
+    assert stage_manager._current_call_ownership(str(claim.record.call_id)) is None
+    assert stage_manager._call_stages.get(str(claim.record.call_id)) is None
     failed = repository.find_by_request(failure_seam)
     assert failed is not None
     assert failed.call_id == claim.record.call_id
     assert failed.state is CallState.FAILED
     assert failed.end_reason is CallEndReason.SYSTEM_FAILURE
     with pytest.raises(RuntimeError, match="CALL_START_FAILED") as repeated:
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="owner",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -940,7 +967,7 @@ async def test_postclaim_setup_failure_marks_real_sqlite_failed_and_duplicate_ke
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
     repository = SqlCallSessionRepository(sessions)
     stage_manager, _, _ = manager(repository=repository)
-    claim = await stage_manager.start_call(
+    claim = await stage_manager._claim_call(
         user_id="owner",
         character_id="luotianyi",
         source_interaction_id=None,
@@ -957,7 +984,7 @@ async def test_postclaim_setup_failure_marks_real_sqlite_failed_and_duplicate_ke
 
     monkeypatch.setattr(call_stage_module, "CallStage", FailingCallStage)
     with pytest.raises(RuntimeError, match="CONSTRUCTOR_FAILED"):
-        await stage_manager.create_call_stage(
+        await stage_manager._create_call_stage(
             claim,
             user_id="owner",
             character_id="luotianyi",
@@ -972,7 +999,7 @@ async def test_postclaim_setup_failure_marks_real_sqlite_failed_and_duplicate_ke
     assert failed.state is CallState.FAILED
     assert failed.end_reason is CallEndReason.SYSTEM_FAILURE
     with pytest.raises(RuntimeError, match="CALL_START_FAILED") as repeated:
-        await stage_manager.start_call(
+        await stage_manager._claim_call(
             user_id="owner",
             character_id="luotianyi",
             source_interaction_id=None,
@@ -986,10 +1013,13 @@ async def test_postclaim_setup_failure_marks_real_sqlite_failed_and_duplicate_ke
 @pytest.mark.asyncio
 async def test_fail_pending_claim_is_identity_safe_and_does_not_release_taken_ownership():
     stage_manager, repository, _ = manager()
-    pending = await stage_manager.start_call(
-        user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="pending-fail"
+    pending = await stage_manager._claim_call(
+        user_id="owner",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="pending-fail",
     )
-    assert await stage_manager.fail_pending_call_claim(pending, RuntimeError("PRE_STAGE_FAILED")) is True
+    assert await stage_manager._fail_pending_call_claim(pending, RuntimeError("PRE_STAGE_FAILED")) is True
     failed = repository.find_by_request("pending-fail")
     assert failed.state is CallState.FAILED
     assert failed.end_reason is CallEndReason.SYSTEM_FAILURE
@@ -997,15 +1027,18 @@ async def test_fail_pending_claim_is_identity_safe_and_does_not_release_taken_ow
     assert stage_manager._call_setup_deadlines == {}
     assert stage_manager._lease_registry.current("owner", "luotianyi") is None
 
-    taken = await stage_manager.start_call(
-        user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="taken"
+    taken = await stage_manager._claim_call(
+        user_id="owner",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="taken",
     )
-    ownership = stage_manager.take_call_claim(
+    ownership = stage_manager._take_call_claim(
         taken, user_id="owner", character_id="luotianyi", client_request_id="taken"
     )
-    assert await stage_manager.fail_pending_call_claim(taken, RuntimeError("STALE")) is False
-    assert stage_manager.current_call_ownership(ownership.call_id) == ownership
-    stage_manager.release_call(ownership)
+    assert await stage_manager._fail_pending_call_claim(taken, RuntimeError("STALE")) is False
+    assert stage_manager._current_call_ownership(ownership.call_id) == ownership
+    stage_manager._release_call(ownership)
     await stage_manager.close()
 
 
@@ -1013,22 +1046,30 @@ async def test_fail_pending_claim_is_identity_safe_and_does_not_release_taken_ow
 async def test_old_claim_generation_and_reset_owner_are_rejected_while_other_user_continues():
     fence = UserResetFence()
     stage_manager, _, _ = manager(user_reset_fence=fence)
-    old_claim = await stage_manager.start_call(
-        user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="old-claim"
+    old_claim = await stage_manager._claim_call(
+        user_id="owner",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="old-claim",
     )
     token = await fence.begin("owner")
-    await stage_manager.stop_user_interactions("owner")
-    other = await stage_manager.start_call(
-        user_id="other", character_id="luotianyi", source_interaction_id=None, client_request_id="other-call"
+    other = await stage_manager._claim_call(
+        user_id="other",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="other-call",
     )
     assert other.record.user_id == "other"
     with pytest.raises(RuntimeError, match="RESET_IN_PROGRESS"):
-        await stage_manager.start_call(
-            user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="new-owner"
+        await stage_manager._claim_call(
+            user_id="owner",
+            character_id="luotianyi",
+            source_interaction_id=None,
+            client_request_id="new-owner",
         )
     await fence.end("owner", token)
     with pytest.raises(RuntimeError, match="INVALIDATED_OPERATION"):
-        await stage_manager.create_call_stage(
+        await stage_manager._create_call_stage(
             old_claim,
             user_id="owner",
             character_id="luotianyi",
@@ -1036,12 +1077,13 @@ async def test_old_claim_generation_and_reset_owner_are_rejected_while_other_use
             speech_factory=None,
             transport=None,
         )
-    await stage_manager.stop_user_interactions("other")
     await stage_manager.close()
 
 
 @pytest.mark.asyncio
-async def test_post_start_generation_wait_does_not_hold_manager_registry_lock(monkeypatch):
+async def test_post_start_generation_wait_does_not_hold_manager_registry_lock(
+    monkeypatch,
+):
     from src.stage.call_stage import CallStage
 
     class BlockingFence(UserResetFence):
@@ -1066,13 +1108,16 @@ async def test_post_start_generation_wait_does_not_hold_manager_registry_lock(mo
 
     fence = BlockingFence()
     stage_manager, _, _ = manager(user_reset_fence=fence)
-    claim = await stage_manager.start_call(
-        user_id="owner", character_id="luotianyi", source_interaction_id=None, client_request_id="lock-race"
+    claim = await stage_manager._claim_call(
+        user_id="owner",
+        character_id="luotianyi",
+        source_interaction_id=None,
+        client_request_id="lock-race",
     )
     monkeypatch.setattr(CallStage, "start", start_without_resources)
     monkeypatch.setattr(CallStage, "abort_failed_start", abort_without_resources)
     creation = asyncio.create_task(
-        stage_manager.create_call_stage(
+        stage_manager._create_call_stage(
             claim,
             user_id="owner",
             character_id="luotianyi",

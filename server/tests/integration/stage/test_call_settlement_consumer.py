@@ -46,13 +46,27 @@ async def test_real_agent_settlement_persists_one_private_call_record_and_progre
     vector = DeterministicVectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: vector)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: expected is vector)
-    monkeypatch.setattr(speaking_backend, "init_tts_module", lambda _config: DeterministicCallTTSModule())
+    monkeypatch.setattr(
+        speaking_backend,
+        "init_tts_module",
+        lambda _config: DeterministicCallTTSModule(),
+    )
     database = DatabaseManager({"sql_db_folder": str(tmp_path), "sql_db_file": "settlement.sqlite"})
     with database.open_sql_session() as sql:
-        sql.add(User(uuid="user", username="settlement-user", password="offline", description=""))
+        sql.add(
+            User(
+                uuid="user",
+                username="settlement-user",
+                password="offline",
+                description="",
+            )
+        )
         sql.commit()
     runtime = runtime_module.AgentRuntime(
-        runtime_config(tmp_path), DeterministicLLMService(), database, media_resolver=NoopMediaResolver()
+        runtime_config(tmp_path),
+        DeterministicLLMService(),
+        database,
+        media_resolver=NoopMediaResolver(),
     )
     call_id = uuid4()
     requested_at = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
@@ -73,7 +87,13 @@ async def test_real_agent_settlement_persists_one_private_call_record_and_progre
     )
     database.call_sessions.create_if_absent(record)
     snapshot = CallFinalSnapshot(
-        CallTerminalFacts(call_id, CallOutcome.CONNECTED, CallEndReason.USER_HANGUP, 65_000, requested_at),
+        CallTerminalFacts(
+            call_id,
+            CallOutcome.CONNECTED,
+            CallEndReason.USER_HANGUP,
+            65_000,
+            requested_at,
+        ),
         (CallFinalTurn(1, "用户说喜欢音乐", CallReplyStatus.COMPLETED, "角色回应会记住"),),
         0,
     )
@@ -161,7 +181,9 @@ async def test_preanswer_call_records_without_agent_model_or_turn_progress(tmp_p
     )
     database.call_sessions.create_if_absent(record)
     snapshot = CallFinalSnapshot(
-        CallTerminalFacts(call_id, CallOutcome.DECLINED, CallEndReason.DECLINED, 0, requested_at), (), 0
+        CallTerminalFacts(call_id, CallOutcome.DECLINED, CallEndReason.DECLINED, 0, requested_at),
+        (),
+        0,
     )
 
     class AgentPort:
@@ -191,7 +213,11 @@ async def test_committed_call_winner_skips_summary_model_and_repairs_pending_cas
     vector = DeterministicVectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: vector)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: expected is vector)
-    monkeypatch.setattr(speaking_backend, "init_tts_module", lambda _config: DeterministicCallTTSModule())
+    monkeypatch.setattr(
+        speaking_backend,
+        "init_tts_module",
+        lambda _config: DeterministicCallTTSModule(),
+    )
     database = DatabaseManager({"sql_db_folder": str(tmp_path), "sql_db_file": "winner.sqlite"})
     with database.open_sql_session() as sql:
         sql.add(User(uuid="user", username="winner", password="offline", description=""))
@@ -217,7 +243,13 @@ async def test_committed_call_winner_skips_summary_model_and_repairs_pending_cas
     )
     database.call_sessions.create_if_absent(record)
     snapshot = CallFinalSnapshot(
-        CallTerminalFacts(call_id, CallOutcome.CONNECTED, CallEndReason.USER_HANGUP, 1000, requested_at),
+        CallTerminalFacts(
+            call_id,
+            CallOutcome.CONNECTED,
+            CallEndReason.USER_HANGUP,
+            1000,
+            requested_at,
+        ),
         (CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),),
         0,
     )
@@ -266,7 +298,9 @@ async def test_committed_call_winner_skips_summary_model_and_repairs_pending_cas
 
 
 @pytest.mark.asyncio
-async def test_same_call_different_snapshot_digest_rejects_before_agent_or_writes(tmp_path):
+async def test_same_call_different_snapshot_digest_rejects_before_agent_or_writes(
+    tmp_path,
+):
     database = DatabaseManager({"sql_db_folder": str(tmp_path), "sql_db_file": "conflict.sqlite"})
     with database.open_sql_session() as sql:
         sql.add(User(uuid="user", username="conflict", password="offline", description=""))
@@ -290,7 +324,13 @@ async def test_same_call_different_snapshot_digest_rejects_before_agent_or_write
     )
     database.call_sessions.create_if_absent(record)
     first = CallFinalSnapshot(
-        CallTerminalFacts(call_id, CallOutcome.CONNECTED, CallEndReason.USER_HANGUP, 1000, requested_at),
+        CallTerminalFacts(
+            call_id,
+            CallOutcome.CONNECTED,
+            CallEndReason.USER_HANGUP,
+            1000,
+            requested_at,
+        ),
         (CallFinalTurn(1, "原始事实", CallReplyStatus.NOT_STARTED, None),),
         0,
     )
@@ -370,13 +410,20 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
     vector = DeterministicVectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: vector)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: expected is vector)
-    monkeypatch.setattr(speaking_backend, "init_tts_module", lambda _config: DeterministicCallTTSModule())
+    monkeypatch.setattr(
+        speaking_backend,
+        "init_tts_module",
+        lambda _config: DeterministicCallTTSModule(),
+    )
     database = DatabaseManager({"sql_db_folder": str(tmp_path), "sql_db_file": "legacy-null.sqlite"})
     with database.open_sql_session() as sql:
         sql.add(User(uuid="user", username="legacy", password="offline", description=""))
         sql.commit()
     runtime = runtime_module.AgentRuntime(
-        runtime_config(tmp_path), DeterministicLLMService(), database, media_resolver=NoopMediaResolver()
+        runtime_config(tmp_path),
+        DeterministicLLMService(),
+        database,
+        media_resolver=NoopMediaResolver(),
     )
     call_id = uuid4()
     requested_at = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
@@ -397,7 +444,13 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
     )
     database.call_sessions.create_if_absent(record)
     snapshot = CallFinalSnapshot(
-        CallTerminalFacts(call_id, CallOutcome.CONNECTED, CallEndReason.USER_HANGUP, 1000, requested_at),
+        CallTerminalFacts(
+            call_id,
+            CallOutcome.CONNECTED,
+            CallEndReason.USER_HANGUP,
+            1000,
+            requested_at,
+        ),
         (CallFinalTurn(1, "敏感用户事实", CallReplyStatus.COMPLETED, "正式回复"),),
         0,
     )
@@ -433,13 +486,6 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
 
     memory.extract_maintenance_candidates = no_extract
     memory.write_maintenance_candidates = no_write
-    released = []
-
-    class Resources:
-        def release_call_maintenance(self, value):
-            released.append(value)
-            return True
-
     consumer = CallSettlementConsumerImpl(
         agent_settlement=CallAgentSettlement(
             get_agent=runtime.get_agent,
@@ -457,7 +503,6 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
         assert persisted.maintenance_status is not SettlementStatus.SUCCEEDED
         assert extract_calls == 0
         assert write_calls == 0
-        assert released == []
         with database.open_sql_session() as sql:
             row = sql.query(CallMaintenanceBatch).filter_by(maintenance_id="legacy-null").one()
             assert row.candidates == "[]"

@@ -18,11 +18,9 @@ from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 import src.agent.skills.expression.speaking.backend as speaking_backend
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.call_v1 import (
-    BinaryAudioFrameCodec,
-    CallStageBinding,
-    CallTransportSession,
-)
+from src.adapter.websocket.call_v1 import BinaryAudioFrameCodec
+from src.adapter.websocket.call_v1.stage_binding import CallStageBinding
+from src.adapter.websocket.call_v1.transport import CallTransportSession
 from src.agent_runtime import agent_runtime as runtime_module
 from src.domain.call import CallAudioSemantic, CallEndReason, CallState
 from src.infrastructure.models.realtime_speech import (
@@ -81,7 +79,14 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
 
     database = DatabaseManager({"sql_db_folder": str(tmp_path), "sql_db_file": "coherent.sqlite"})
     with database.open_sql_session() as sql:
-        sql.add(User(uuid="user", username="call-user", password="offline", description="喜欢音乐"))
+        sql.add(
+            User(
+                uuid="user",
+                username="call-user",
+                password="offline",
+                description="喜欢音乐",
+            )
+        )
         sql.commit()
     llm = DeterministicLLMService()
     runtime = runtime_module.AgentRuntime(
@@ -112,13 +117,13 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
 
     settlement = CallSettlement(consumer=SettlementConsumer())
     manager._call_settlement = settlement
-    claim = await manager.start_call(
+    claim = await manager._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=None,
         client_request_id="component-evidence",
     )
-    ownership = manager.take_call_claim(
+    ownership = manager._take_call_claim(
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -139,7 +144,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         call_sessions=database.call_sessions,
         speech_factory=provider_factory,
         transport=binding,
-        release_ownership=manager.release_call,
+        release_ownership=manager._release_call,
         settlement_sink=CallFinalizationSink(manager, ownership),
     )
     binding.bind(stage=stage, session=session)
@@ -273,7 +278,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         assert stage.state is CallState.ENDED
         assert provider.closed is True
         assert stage.context is None
-        assert manager.current_call_ownership(binding.call_id) is None
+        assert manager._current_call_ownership(binding.call_id) is None
         assert settled == [snapshot]
         with pytest.raises(RuntimeError):
             call_memory.snapshot()

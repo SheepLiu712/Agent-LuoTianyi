@@ -65,7 +65,7 @@ async def test_server_runtime_shutdown_is_ordered_idempotent_and_retryable():
 async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks():
     import asyncio
 
-    from src.adapter.websocket.call_v1 import CallTransportHub
+    from src.adapter.websocket.call_v1.transport import CallTransportHub
 
     calls = []
     world = OrderedAsyncService(calls, "world", "stop_background_services")
@@ -106,7 +106,9 @@ async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks
 
 
 @pytest.mark.asyncio
-async def test_admin_shell_keeps_retry_handle_until_runtime_cleanup_succeeds(monkeypatch):
+async def test_admin_shell_keeps_retry_handle_until_runtime_cleanup_succeeds(
+    monkeypatch,
+):
     events = []
 
     class FlakySupervisor:

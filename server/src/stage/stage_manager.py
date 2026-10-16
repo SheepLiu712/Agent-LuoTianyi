@@ -6,7 +6,7 @@ import asyncio
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
@@ -24,8 +24,17 @@ from src.infrastructure.persistence.call_sessions import (
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
-from ._finalization import CallFinalizationSink, FinalizationTasks, InteractionFinalizing
-from .call_settlement import CallAgentSettlement, CallSettlement, CallSettlementConsumerImpl, StaleCallRecoveryService
+from ._finalization import (
+    CallFinalizationSink,
+    FinalizationTasks,
+    InteractionFinalizing,
+)
+from .call_settlement import (
+    CallAgentSettlement,
+    CallSettlement,
+    CallSettlementConsumerImpl,
+    StaleCallRecoveryService,
+)
 from .chat_stage import ChatStage
 from .interaction_lease import (
     CallTransitionIntent,
@@ -40,8 +49,12 @@ if TYPE_CHECKING:
     from src.agent.facade import Agent
     from src.infrastructure.models.realtime_speech import RealtimeSpeechSessionFactory
     from src.infrastructure.observability.call_metrics import CallMetrics
-    from src.infrastructure.persistence.call_maintenance import SqlCallMaintenanceBatchRepository
-    from src.infrastructure.persistence.database.services.conversation_service import ConversationService
+    from src.infrastructure.persistence.call_maintenance import (
+        SqlCallMaintenanceBatchRepository,
+    )
+    from src.infrastructure.persistence.database.services.conversation_service import (
+        ConversationService,
+    )
     from src.stage.call_stage import CallStage, CallTransportSink
     from src.web.websocket.service import WebSocketConnection
 
@@ -122,7 +135,12 @@ class CallOpenTransport(Protocol):
 class CallControl:
     """Finite business control for one accepted call; transport internals stay hidden."""
 
-    def __init__(self, manager: StageManager, request: CallOpenRequest, transport: CallOpenTransport) -> None:
+    def __init__(
+        self,
+        manager: StageManager,
+        request: CallOpenRequest,
+        transport: CallOpenTransport,
+    ) -> None:
         self._manager = manager
         self._request = request
         self._transport_sink = transport
@@ -138,7 +156,8 @@ class CallControl:
         """Allow the accepted transport handshake to begin business setup exactly once."""
         if self._setup_task is None:
             self._setup_task = asyncio.create_task(
-                self._manager._establish_open_call(self), name=f"call-open-establish-{self.identity.call_id}"
+                self._manager._establish_open_call(self),
+                name=f"call-open-establish-{self.identity.call_id}",
             )
 
     @property
@@ -344,10 +363,24 @@ class StageManager:
         """Accept one call identity and retain its background establishment operation."""
         if not self.call_business_ready:
             raise RuntimeError("CALL_INGRESS_UNAVAILABLE")
+        request = replace(
+            request,
+            source_interaction_id=await self._infer_call_source_interaction(
+                user_id=request.user_id, character_id=request.character_id
+            ),
+        )
+        existing = await self._find_call_by_request(
+            request.client_request_id,
+            user_id=request.user_id,
+            character_id=request.character_id,
+        )
+        if existing is not None:
+            return existing
         task = self._call_open_tasks.get(request.client_request_id)
         if task is None:
             task = asyncio.create_task(
-                self._open_call(request, transport), name=f"call-open-{request.client_request_id}"
+                self._open_call(request, transport),
+                name=f"call-open-{request.client_request_id}",
             )
             self._call_open_tasks[request.client_request_id] = task
             task.add_done_callback(lambda done, key=request.client_request_id: self._observe_open_call(key, done))
@@ -363,7 +396,7 @@ class StageManager:
         self._call_controls_by_request[request.client_request_id] = control
         try:
             start = asyncio.create_task(
-                self.start_call(
+                self._claim_call(
                     user_id=request.user_id,
                     character_id=request.character_id,
                     source_interaction_id=request.source_interaction_id,
@@ -374,7 +407,10 @@ class StageManager:
             claim = await asyncio.shield(start)
             record = claim.record
             identity = CallIdentity(
-                str(record.call_id), request.client_request_id, request.character_id, CallState.PREPARING
+                str(record.call_id),
+                request.client_request_id,
+                request.character_id,
+                CallState.PREPARING,
             )
             control._identity = identity
             self._call_controls[identity.call_id] = control
@@ -382,7 +418,7 @@ class StageManager:
                 await transport.prepare(identity)
             except BaseException as error:
                 await transport.abort_prepare()
-                await self.fail_pending_call_claim(claim, error)
+                await self._fail_pending_call_claim(claim, error)
                 raise
             control._claim = claim
             return control
@@ -415,7 +451,7 @@ class StageManager:
         if self._call_controls.get(control.identity.call_id) is not control or not await control.commit_resume():
             raise RuntimeError("CALL_RESUME_UNAVAILABLE")
 
-    async def find_call_by_request(
+    async def _find_call_by_request(
         self, client_request_id: str, *, user_id: str, character_id: str
     ) -> CallControl | None:
         task = self._call_open_tasks.get(client_request_id)
@@ -442,7 +478,7 @@ class StageManager:
         """Compensate a prepared call whose initial ACK was not committed."""
         claim = getattr(control, "_claim", None)
         if claim is not None:
-            await self.fail_pending_call_claim(claim, error)
+            await self._fail_pending_call_claim(claim, error)
         self._call_controls.pop(control.identity.call_id, None)
         if self._call_controls_by_request.get(control._request.client_request_id) is control:
             self._call_controls_by_request.pop(control._request.client_request_id, None)
@@ -454,7 +490,7 @@ class StageManager:
             control._ready.set()
             return
         try:
-            stage = await self.create_call_stage(
+            stage = await self._create_call_stage(
                 claim,
                 user_id=control._request.user_id,
                 character_id=control._request.character_id,
@@ -637,11 +673,17 @@ class StageManager:
             key = (connection.user_uuid, character_id)
             self._require_chat_admission(key)
             stage = self._stages.get(key)
-            if stage is None or stage.state in (StageState.TERMINATING, StageState.TERMINATED):
+            if stage is None or stage.state in (
+                StageState.TERMINATING,
+                StageState.TERMINATED,
+            ):
                 if stage is not None:
                     self._lease_registry.release(
                         InteractionLease(
-                            stage.user_id, stage.character_id, stage.interaction_id, InteractionSource.CHAT
+                            stage.user_id,
+                            stage.character_id,
+                            stage.interaction_id,
+                            InteractionSource.CHAT,
                         )
                     )
                 stage = await ChatStage.create(
@@ -691,7 +733,11 @@ class StageManager:
             if (ownership.user_id, ownership.character_id) != key:
                 continue
             stage = self._call_stages.get(call_id)
-            if stage is not None and stage.state in {CallState.ENDING, CallState.ENDED, CallState.DECLINED}:
+            if stage is not None and stage.state in {
+                CallState.ENDING,
+                CallState.ENDED,
+                CallState.DECLINED,
+            }:
                 raise InteractionFinalizing()
 
     async def prepare_call_transition(
@@ -707,7 +753,12 @@ class StageManager:
                 await self._user_reset_fence.require_admission(connection.user_uuid)
             self._require_finalization_idle((connection.user_uuid, character_id))
             stage = self._bound_stage(connection, character_id)
-            lease = InteractionLease(stage.user_id, stage.character_id, stage.interaction_id, InteractionSource.CHAT)
+            lease = InteractionLease(
+                stage.user_id,
+                stage.character_id,
+                stage.interaction_id,
+                InteractionSource.CHAT,
+            )
             intent = self._lease_registry.prepare_call_transition(lease=lease, client_request_id=client_request_id)
             self._adapter.suspend_business_input(connection, interaction_id=stage.interaction_id)
             key = (stage.user_id, stage.character_id)
@@ -720,7 +771,7 @@ class StageManager:
             )
             return intent
 
-    async def start_call(
+    async def _claim_call(
         self,
         *,
         user_id: str,
@@ -746,7 +797,7 @@ class StageManager:
                 if self._user_reset_fence is not None:
                     task, _ = await self._user_reset_fence.spawn_factory(
                         user_id,
-                        lambda admitted: self._start_call(
+                        lambda admitted: self._claim_call_operation(
                             user_id=user_id,
                             character_id=character_id,
                             source_interaction_id=source_interaction_id,
@@ -757,7 +808,7 @@ class StageManager:
                         name="call-handoff",
                     )
                 else:
-                    operation = self._start_call(
+                    operation = self._claim_call_operation(
                         user_id=user_id,
                         character_id=character_id,
                         source_interaction_id=source_interaction_id,
@@ -771,7 +822,7 @@ class StageManager:
                 task.add_done_callback(lambda finished, key=client_request_id: self._call_start_done(key, finished))
         return await complete_owned(self._await_call_start(task))
 
-    async def infer_call_source_interaction(self, *, user_id: str, character_id: str) -> str | None:
+    async def _infer_call_source_interaction(self, *, user_id: str, character_id: str) -> str | None:
         """Return the only chat interaction a new call may transition from."""
         async with self._lock:
             stage = self._stages.get((user_id, character_id))
@@ -789,7 +840,7 @@ class StageManager:
             self._call_setup_deadlines.pop(client_request_id, None)
             get_logger(__name__).debug("Call handoff failed request=%s", client_request_id)
 
-    async def _start_call(
+    async def _claim_call_operation(
         self,
         *,
         user_id: str,
@@ -960,7 +1011,12 @@ class StageManager:
     ) -> CallStartClaim:
         if record.user_id != user_id or record.character_id != character_id:
             raise ValueError("client_request_id belongs to another call owner")
-        if record.state in {CallState.FAILED, CallState.ENDING, CallState.ENDED, CallState.DECLINED}:
+        if record.state in {
+            CallState.FAILED,
+            CallState.ENDING,
+            CallState.ENDED,
+            CallState.DECLINED,
+        }:
             raise CallStartFailed(record)
         lease = self._lease_registry.current(user_id, character_id)
         if lease is None or lease.source is not InteractionSource.CALL or lease.interaction_id != str(record.call_id):
@@ -969,7 +1025,7 @@ class StageManager:
         generation = pending.admission_generation if pending is not None else 0
         return CallStartClaim(record, lease, True, setup_deadline, generation)
 
-    def take_call_claim(
+    def _take_call_claim(
         self,
         claim: CallStartClaim,
         *,
@@ -1007,7 +1063,7 @@ class StageManager:
         self._call_ownerships[call_id] = ownership
         return ownership
 
-    async def fail_pending_call_claim(self, claim: CallStartClaim, error: BaseException) -> bool:
+    async def _fail_pending_call_claim(self, claim: CallStartClaim, error: BaseException) -> bool:
         """Fail only the still-pending claim identified by this exact value."""
         call_id = str(claim.record.call_id)
         async with self._lock:
@@ -1025,71 +1081,10 @@ class StageManager:
         await self._mark_call_failed(claim.record, error)
         return True
 
-    def current_call_ownership(self, call_id: str) -> CallStageOwnership | None:
+    def _current_call_ownership(self, call_id: str) -> CallStageOwnership | None:
         return self._call_ownerships.get(call_id)
 
-    def current_call_stage(self, call_id: str) -> CallStage | None:
-        """Return the runtime CallStage currently bound to this call identity."""
-        return self._call_stages.get(call_id)
-
-    async def stop_user_interactions(self, user_id: str) -> int:
-        """Retire all chat/call interactions for one user and wait for owned cleanup."""
-        starts = tuple(
-            task
-            for request_id, task in self._call_starts.items()
-            if self._call_start_operations.get(request_id, (None,))[0] == user_id
-        )
-        if starts:
-            await asyncio.gather(*starts, return_exceptions=True)
-        creations = tuple(
-            task for task, owner in self._call_stage_creation_users.items() if owner == user_id and not task.done()
-        )
-        if creations:
-            await asyncio.gather(*creations, return_exceptions=True)
-        async with self._lock:
-            chat_stages = tuple(stage for (owner, _), stage in self._stages.items() if owner == user_id)
-            for stage in chat_stages:
-                self._stages.pop((stage.user_id, stage.character_id), None)
-                timer = self._expiry.pop(stage, None)
-                if timer is not None:
-                    timer.cancel()
-                self._connections.pop(stage, None)
-            call_stages = tuple(
-                stage
-                for call_id, stage in self._call_stages.items()
-                if self._call_ownerships.get(call_id) is not None and self._call_ownerships[call_id].user_id == user_id
-            )
-            claims = tuple(
-                (call_id, claim) for call_id, claim in self._call_claims.items() if claim.record.user_id == user_id
-            )
-            for call_id, claim in claims:
-                self._call_claims.pop(call_id, None)
-                self._call_setup_deadlines.pop(claim.record.client_request_id, None)
-                self._lease_registry.release(claim.lease)
-            ownerships = tuple(
-                ownership for ownership in self._call_ownerships.values() if ownership.user_id == user_id
-            )
-            for ownership in ownerships:
-                self.release_call(ownership)
-            for key, timer in tuple(self._intent_expiry.items()):
-                if key[0] == user_id:
-                    timer.cancel()
-                    self._intent_expiry.pop(key, None)
-            self._lease_registry.clear_user_transitions(user_id)
-        chat_results = await asyncio.gather(
-            *(
-                asyncio.shield(self._start_chat_finalization(stage, InteractionEndingReason.SHUTDOWN))
-                for stage in chat_stages
-            ),
-            return_exceptions=True,
-        )
-        call_results = await asyncio.gather(*(stage.close() for stage in call_stages), return_exceptions=True)
-        errors = [result for result in (*chat_results, *call_results) if isinstance(result, BaseException)]
-        if errors:
-            raise RuntimeError("USER_INTERACTION_STOP_FAILED") from errors[0]
-        return len(chat_stages) + len(call_stages) + len(claims) + len(ownerships)
-
-    async def create_call_stage(
+    async def _create_call_stage(
         self,
         claim: CallStartClaim,
         *,
@@ -1105,7 +1100,7 @@ class StageManager:
     ) -> CallStage:
         """Consume a validated claim, then create and register exactly one CallStage."""
         await self._require_generation(user_id, claim.admission_generation)
-        operation = self._create_call_stage(
+        operation = self._create_call_stage_owned(
             claim,
             user_id=user_id,
             character_id=character_id,
@@ -1126,7 +1121,7 @@ class StageManager:
         task.add_done_callback(self._call_stage_creation_done)
         return await asyncio.shield(task)
 
-    async def _create_call_stage(
+    async def _create_call_stage_owned(
         self,
         claim: CallStartClaim,
         *,
@@ -1143,14 +1138,14 @@ class StageManager:
         from .call_stage import CallStage
 
         await self._require_generation(user_id, claim.admission_generation)
-        ownership = self.take_call_claim(
+        ownership = self._take_call_claim(
             claim,
             user_id=user_id,
             character_id=character_id,
             client_request_id=client_request_id,
         )
         if self._call_sessions is None:
-            self.release_call(ownership)
+            self._release_call(ownership)
             raise RuntimeError("call session repository is not bound")
         stage = None
         try:
@@ -1195,7 +1190,7 @@ class StageManager:
             if (
                 not should_close
                 and stage.snapshot is None
-                and self.current_call_ownership(ownership.call_id) == ownership
+                and self._current_call_ownership(ownership.call_id) == ownership
             ):
                 self._call_stages[ownership.call_id] = stage
         if should_close:
@@ -1221,7 +1216,7 @@ class StageManager:
                 await send_failed(reason)
             except BaseException as cleanup_error:
                 self._log_call_cleanup_failure("failure delivery", claim, original_error, cleanup_error)
-        self.release_call(ownership)
+        self._release_call(ownership)
         try:
             await self._mark_call_failed(claim.record, original_error)
         except BaseException as cleanup_error:
@@ -1243,9 +1238,9 @@ class StageManager:
 
     def _release_call_stage_ownership(self, ownership: CallStageOwnership) -> bool:
         self._call_stages.pop(ownership.call_id, None)
-        return self.release_call(ownership)
+        return self._release_call(ownership)
 
-    def release_call(self, ownership: CallStageOwnership) -> bool:
+    def _release_call(self, ownership: CallStageOwnership) -> bool:
         """Release only the current CallStage ownership generation."""
         if self._call_ownerships.get(ownership.call_id) != ownership:
             return False
@@ -1265,7 +1260,11 @@ class StageManager:
         character_id: str,
         source_interaction_id: str | None,
         client_request_id: str,
-    ) -> tuple[ChatStage | None, WebSocketConnection | None, CallTransitionOwnership | InteractionLease]:
+    ) -> tuple[
+        ChatStage | None,
+        WebSocketConnection | None,
+        CallTransitionOwnership | InteractionLease,
+    ]:
         async with self._lock:
             if self._closed:
                 raise ValueError("stage manager is closed")
@@ -1436,7 +1435,8 @@ class StageManager:
         controls = tuple(control for control in self._call_controls.values() if control._stage not in call_stages)
         if controls:
             await asyncio.gather(
-                *(control.terminate(CallEndReason.SYSTEM_FAILURE) for control in controls), return_exceptions=True
+                *(control.terminate(CallEndReason.SYSTEM_FAILURE) for control in controls),
+                return_exceptions=True,
             )
         self._call_stages.clear()
         await self._finalizations.close()
@@ -1464,7 +1464,9 @@ class StageManager:
 
     def _start_chat_finalization(self, stage, reason):
         return self._finalizations.start(
-            stage.interaction_id, (stage.user_id, stage.character_id), lambda: self._retire(stage, reason)
+            stage.interaction_id,
+            (stage.user_id, stage.character_id),
+            lambda: self._retire(stage, reason),
         )
 
     async def _retire(self, stage: ChatStage, reason: InteractionEndingReason) -> None:
@@ -1472,15 +1474,24 @@ class StageManager:
             result = await stage.terminate(reason)
             if result.error is not None:
                 get_logger(__name__).error(
-                    "Stage retirement failed interaction=%s error=%s", stage.interaction_id, result.error
+                    "Stage retirement failed interaction=%s error=%s",
+                    stage.interaction_id,
+                    result.error,
                 )
         except Exception as error:
             get_logger(__name__).error(
-                "Stage retirement raised interaction=%s type=%s", stage.interaction_id, type(error).__name__
+                "Stage retirement raised interaction=%s type=%s",
+                stage.interaction_id,
+                type(error).__name__,
             )
         finally:
             await self._adapter.disconnect(stage)
             self._connections.pop(stage, None)
             self._lease_registry.release(
-                InteractionLease(stage.user_id, stage.character_id, stage.interaction_id, InteractionSource.CHAT)
+                InteractionLease(
+                    stage.user_id,
+                    stage.character_id,
+                    stage.interaction_id,
+                    InteractionSource.CHAT,
+                )
             )

@@ -29,7 +29,14 @@ def successful_call_server(tmp_path):
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(repo / "server"), str(repo / "server/tests"), env.get("PYTHONPATH", "")])
     env["PYTHONIOENCODING"] = "utf-8"
-    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ):
         env.pop(key, None)
     stdout_path = root / "stdout.log"
     stderr_path = root / "stderr.log"
@@ -62,6 +69,7 @@ def successful_call_server(tmp_path):
             yield url, session, root
         finally:
             if process.poll() is None and url is not None:
+                _release_test_write(session, url)
                 try:
                     session.post(url + "/test/stop", timeout=2)
                 except requests.RequestException:
@@ -77,6 +85,13 @@ def successful_call_server(tmp_path):
             stderr.flush()
             log_path.write_text(_process_output(stdout_path, stderr_path), encoding="utf-8")
             assert process.returncode == 0, log_path.read_text(encoding="utf-8")
+
+
+def _release_test_write(session, url):
+    try:
+        session.post(url + "/test/settlement_write/release", timeout=2)
+    except requests.RequestException:
+        pass
 
 
 def _process_output(stdout_path: Path, stderr_path: Path) -> str:
@@ -97,9 +112,24 @@ def _encrypted_password(http: requests.Session, url: str, password: str) -> str:
 def _authenticate(ws, token: str) -> None:
     assert json.loads(ws.recv())["type"] == "system_ready"
     ws.send(
-        json.dumps({"type": "user_auth", "client_msg_id": "auth-1", "payload": {"username": "alice", "token": token}})
+        json.dumps(
+            {
+                "type": "user_auth",
+                "client_msg_id": "auth-1",
+                "payload": {"username": "alice", "token": token},
+            }
+        )
     )
     assert json.loads(ws.recv())["type"] == "auth_ok"
+
+
+def _receive_chat_ready(ws, timeout: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        event = json.loads(ws.recv())
+        if event.get("type") == "chat.ready":
+            return event
+    raise AssertionError("did not receive chat.ready")
 
 
 def _control(ws, message: dict) -> None:
@@ -144,17 +174,183 @@ def _complete(ws, call_id: str, sequence: int, stream: dict) -> None:
     )
 
 
-def test_successful_call_loopback_preserves_privacy_and_reset_credentials(successful_call_server):
+def _start_call(ws, request_id: str) -> str:
+    _control(
+        ws,
+        {
+            "protocol": "call.v1",
+            "type": "call.start",
+            "seq": 1,
+            "client_request_id": request_id,
+            "character_id": "luotianyi",
+            "audio": {"encoding": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+        },
+    )
+    preparing = _receive_until(ws, "call.state")
+    assert preparing["state"] == "preparing"
+    assert _receive_until(ws, "ack")["ack_seq"] == 1
+    assert _receive_until(ws, "call.active")["call_id"] == preparing["call_id"]
+    return preparing["call_id"]
+
+
+def _hangup(ws, call_id: str, sequence: int = 2) -> None:
+    _control(
+        ws,
+        {
+            "protocol": "call.v1",
+            "type": "call.hangup",
+            "seq": sequence,
+            "call_id": call_id,
+            "reason": "user_hangup",
+        },
+    )
+    assert _receive_until(ws, "call.ended", timeout=10)["end_reason"] == "user_hangup"
+
+
+def test_production_entry_finalization_blocks_then_restores_chat_and_call(
+    successful_call_server,
+):
+    url, http, _root = successful_call_server
+    password = "offline-password"
+    assert http.post(
+        url + "/auth/register",
+        json={
+            "username": "alice",
+            "password": _encrypted_password(http, url, password),
+            "invite_code": "invite",
+        },
+        timeout=10,
+    ).ok
+    login = http.post(
+        url + "/auth/login",
+        json={
+            "username": "alice",
+            "password": _encrypted_password(http, url, password),
+        },
+        timeout=10,
+    )
+    token = login.json()["message_token"]
+    ws_url = "ws" + url[4:]
+
+    chat = websocket.create_connection(ws_url + "/chat_ws", timeout=5, http_proxy_host=None)
+    _authenticate(chat, token)
+    _receive_chat_ready(chat)
+    chat.send(
+        json.dumps(
+            {
+                "protocol": "call.v1",
+                "type": "call.switch_prepare",
+                "client_request_id": "finalizing-call-1",
+                "character_id": "luotianyi",
+            }
+        )
+    )
+    assert _receive_chat_switch_ready(chat)["type"] == "call.switch_ready"
+    chat.close()
+
+    call = websocket.create_connection(ws_url + "/call_ws", timeout=5, http_proxy_host=None)
+    _authenticate(call, token)
+    first_call_id = _start_call(call, "finalizing-call-1")
+    assert http.post(url + "/test/settlement_write/block_next", timeout=5).ok
+    _hangup(call, first_call_id)
+    call.close()
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if http.get(url + "/test/settlement_write/status", timeout=5).json()["entered"]:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("settlement write did not enter the controlled barrier")
+
+    reset = http.post(
+        url + "/user/data/reset",
+        json={"username": "alice"},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=5,
+    )
+    assert reset.status_code == 409
+    assert reset.json()["detail"] == {"code": "USER_INTERACTION_BUSY", "retryable": True}
+
+    blocked_chat = websocket.create_connection(ws_url + "/chat_ws", timeout=5, http_proxy_host=None)
+    _authenticate(blocked_chat, token)
+    error = json.loads(blocked_chat.recv())
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "INTERACTION_FINALIZING"
+    assert error["payload"]["retryable"] is True
+    blocked_chat.close()
+
+    blocked_call = websocket.create_connection(ws_url + "/call_ws", timeout=5, http_proxy_host=None)
+    _authenticate(blocked_call, token)
+    _control(
+        blocked_call,
+        {
+            "protocol": "call.v1",
+            "type": "call.start",
+            "seq": 1,
+            "client_request_id": "finalizing-call-blocked",
+            "character_id": "luotianyi",
+            "audio": {"encoding": "pcm_s16le", "sample_rate": 16000, "channels": 1},
+        },
+    )
+    error = _receive_until(blocked_call, "error")
+    assert error["code"] == "INTERACTION_FINALIZING" and error["retryable"] is True
+    blocked_call.close()
+
+    assert http.post(url + "/test/settlement_write/release", timeout=5).ok
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        restored = websocket.create_connection(ws_url + "/chat_ws", timeout=5, http_proxy_host=None)
+        _authenticate(restored, token)
+        event = json.loads(restored.recv())
+        if event.get("type") == "chat.ready":
+            break
+        assert event["type"] == "error"
+        assert event["payload"]["code"] == "INTERACTION_FINALIZING"
+        assert event["payload"]["retryable"] is True
+        restored.close()
+        time.sleep(0.05)
+    else:
+        raise AssertionError("chat admission did not recover after finalization")
+    restored.send(
+        json.dumps(
+            {
+                "protocol": "call.v1",
+                "type": "call.switch_prepare",
+                "client_request_id": "finalizing-call-2",
+                "character_id": "luotianyi",
+            }
+        )
+    )
+    assert _receive_chat_switch_ready(restored)["type"] == "call.switch_ready"
+    restored.close()
+
+    second = websocket.create_connection(ws_url + "/call_ws", timeout=5, http_proxy_host=None)
+    _authenticate(second, token)
+    second_call_id = _start_call(second, "finalizing-call-2")
+    assert second_call_id != first_call_id
+    _hangup(second, second_call_id)
+    second.close()
+
+
+def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
+    successful_call_server,
+):
     url, http, root = successful_call_server
     assert http.get(url + "/test/evidence", timeout=5).json()["call_transport_available"] is True
     password = "offline-password"
     encrypted = _encrypted_password(http, url, password)
     assert http.post(
-        url + "/auth/register", json={"username": "alice", "password": encrypted, "invite_code": "invite"}, timeout=10
+        url + "/auth/register",
+        json={"username": "alice", "password": encrypted, "invite_code": "invite"},
+        timeout=10,
     ).ok
     login = http.post(
         url + "/auth/login",
-        json={"username": "alice", "password": _encrypted_password(http, url, password)},
+        json={
+            "username": "alice",
+            "password": _encrypted_password(http, url, password),
+        },
         timeout=10,
     )
     assert login.ok
@@ -214,7 +410,10 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(succes
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             provider_audio = http.get(url + "/test/evidence", timeout=5).json()["provider_audio"]
-            frames = next((item["frames"] for item in provider_audio if item["call_id"] == call_id), [])
+            frames = next(
+                (item["frames"] for item in provider_audio if item["call_id"] == call_id),
+                [],
+            )
             if frames:
                 break
             time.sleep(0.05)
@@ -271,7 +470,13 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(succes
             )
             _control(
                 resumed,
-                {"protocol": "call.v1", "type": "call.hangup", "seq": 6, "call_id": call_id, "reason": "user_hangup"},
+                {
+                    "protocol": "call.v1",
+                    "type": "call.hangup",
+                    "seq": 6,
+                    "call_id": call_id,
+                    "reason": "user_hangup",
+                },
             )
             ended = _receive_until(resumed, "call.ended", timeout=10)
             assert ended["end_reason"] == "user_hangup"
@@ -299,7 +504,10 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(succes
     assert "用户与角色讨论" not in call_history["content"]
 
     reset = http.post(
-        url + "/user/data/reset", json={"username": "alice"}, headers={"Authorization": f"Bearer {token}"}, timeout=15
+        url + "/user/data/reset",
+        json={"username": "alice"},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
     )
     assert reset.ok, reset.text
     time.sleep(0.2)
@@ -312,7 +520,10 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(succes
     }
     relogin = http.post(
         url + "/auth/login",
-        json={"username": "alice", "password": _encrypted_password(http, url, password)},
+        json={
+            "username": "alice",
+            "password": _encrypted_password(http, url, password),
+        },
         timeout=10,
     )
     assert relogin.ok

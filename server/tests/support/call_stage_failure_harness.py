@@ -86,9 +86,11 @@ class FailingTransport:
 class Settlement:
     def __init__(self):
         self.snapshots = []
+        self.settlement_contexts = []
 
-    async def emit(self, snapshot):
+    async def emit(self, snapshot, settlement_context):
         self.snapshots.append(snapshot)
+        self.settlement_contexts.append(settlement_context)
 
 
 class TurnHandler:

@@ -477,8 +477,8 @@ async def maintain(
 
 ### 当前基线
 
-- 服务端目前只有 `/chat_ws`，Stage 以 ChatStage 为主，没有 CallStage 与 `call.v1`。
-- 现有 `adapter.websocket.WebSocketAdapter` 已经承担聊天信道的协议转换、逻辑交互绑定和异步输出投递；通话应扩展这一既有 Adapter 模块，而不是让 Web 绕过 Adapter 直连 CallStage。
+- 服务端现有 `/chat_ws` 与独立 `/call_ws`；`CallWebSocketAdapter` 封装 call.v1 接入、恢复与传输，`StageManager.open_call` 封装完整业务建立，`CallStage` 已进入正式装配。
+- 聊天继续使用 `adapter.websocket.WebSocketAdapter`；通话使用并列的 `adapter.websocket.call_v1.CallWebSocketAdapter`。Web 只负责鉴权与物理收发，不直连 CallStage，也不构造 Hub/Session/Binding。
 - Android 聊天页目前没有电话入口；现有 WebView 音频链路面向普通聊天播放。
 - 现有 Conversation 内容类型没有通话内容。
 - 现有反思流程会在普通聊天回复后频繁执行记忆、压缩和画像更新，本功能要求迁移为统一认知维护边界。

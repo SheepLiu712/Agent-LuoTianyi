@@ -91,7 +91,11 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
     vector = DeterministicVectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: vector)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: expected is vector)
-    monkeypatch.setattr(speaking_backend, "init_tts_module", lambda _config: DeterministicCallTTSModule())
+    monkeypatch.setattr(
+        speaking_backend,
+        "init_tts_module",
+        lambda _config: DeterministicCallTTSModule(),
+    )
 
     database = DatabaseManager({"sql_db_folder": str(tmp_path), "sql_db_file": "handoff.sqlite"})
     with database.open_sql_session() as sql:
@@ -176,13 +180,13 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
 
     stage = None
     try:
-        claim = await manager.start_call(
+        claim = await manager._claim_call(
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=None,
             client_request_id="real-handoff",
         )
-        stage = await manager.create_call_stage(
+        stage = await manager._create_call_stage(
             claim,
             user_id="user",
             character_id="luotianyi",
@@ -223,7 +227,11 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         )
         stage._turns = {
             1: _Turn("turn one user", CallReplyStatus.COMPLETED, "turn one agent"),
-            2: _Turn("uncompressed tail user", CallReplyStatus.COMPLETED, "uncompressed tail agent"),
+            2: _Turn(
+                "uncompressed tail user",
+                CallReplyStatus.COMPLETED,
+                "uncompressed tail agent",
+            ),
         }
 
         snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
@@ -241,7 +249,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         with pytest.raises(InteractionFinalizing):
             manager._require_chat_admission(("user", "luotianyi"))
         with pytest.raises(InteractionFinalizing):
-            await manager.start_call(
+            await manager._claim_call(
                 user_id="user",
                 character_id="luotianyi",
                 source_interaction_id=None,
@@ -273,7 +281,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         assert store._snapshot.entries == ()
         assert store._snapshot.summary.text == ""
         assert store._base_snapshot.entries == ()
-        assert manager.current_call_ownership(str(claim.record.call_id)) is None
+        assert manager._current_call_ownership(str(claim.record.call_id)) is None
         manager._require_chat_admission(("user", "luotianyi"))
         token = await manager.begin_user_data_reset("user")
         await manager.end_user_data_reset("user", token)

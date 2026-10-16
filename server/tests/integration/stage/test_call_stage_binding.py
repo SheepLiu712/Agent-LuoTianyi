@@ -6,12 +6,11 @@ from uuid import UUID
 
 import pytest
 
-from src.adapter.websocket.call_v1 import (
-    BinaryAudioFrameCodec,
-    CallStageBinding,
+from src.adapter.websocket.call_v1 import BinaryAudioFrameCodec, WireAudioFrame
+from src.adapter.websocket.call_v1.stage_binding import CallStageBinding
+from src.adapter.websocket.call_v1.transport import (
     CallTransportConfig,
     CallTransportSession,
-    WireAudioFrame,
 )
 from src.domain.agent import CALL_PCM_FORMAT
 from src.domain.call import (
@@ -48,7 +47,9 @@ class _Stage:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ack_seq", [1, 2, 3])
-async def test_interrupt_after_partial_or_full_transport_ack_preserves_retirement(ack_seq):
+async def test_interrupt_after_partial_or_full_transport_ack_preserves_retirement(
+    ack_seq,
+):
     delivered = []
 
     async def deliver(output):
@@ -100,7 +101,11 @@ async def test_completion_racing_stop_accepts_both_receipts_and_next_audio():
     await binding.send_pcm("response", 1, b"\x00\x01", final=True)
     stage._playback.mark_final_sent("response", 1)
     await binding.stop_response("response", (1,))
-    base = {"protocol": "call.v1", "call_id": binding.call_id, "response_id": "response"}
+    base = {
+        "protocol": "call.v1",
+        "call_id": binding.call_id,
+        "response_id": "response",
+    }
     completed = json.dumps({**base, "type": "playback.completed", "seq": 1, "stream_id": 1})
     stopped = json.dumps({**base, "type": "playback.stopped", "seq": 2, "stop_seq": 3})
 

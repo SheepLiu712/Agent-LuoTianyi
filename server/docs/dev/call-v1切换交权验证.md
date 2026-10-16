@@ -16,7 +16,7 @@
 8. 将 lease 从 CALL_TRANSITION 切换为稳定 call ID 的 CALL
 9. 返回 `CallStartClaim`
 
-当前没有 CallStage 生产实现，因此 claim 不创建新的 InteractionContext。CL-6 后续 factory 只能在该 claim 之后创建通话 Context，确保两个 Context 不同时存活。
+本文记录的是切换交权阶段的历史验证。当前已有正式 CallStage 生产实现；`StageManager.open_call` 在内部消费 claim 并创建通话 Context，仍保证旧 Chat Context 完成移交后才创建 Call Context。
 
 ## 失败和幂等
 
@@ -47,7 +47,7 @@
 ## 限制
 
 - 生产 `call_transport_available` 仍为 false
-- 没有 CallStage、provider、call Context factory attach 或完整 `/call_ws` start 接线
+- 当时没有 CallStage、provider、call Context factory attach 或完整 `/call_ws` start 接线；这些缺口现由后续工单实现，本文不作为当前能力清单
 - 当前集成测试使用真实 ChatStage / Agent termination / Context close 与 repository contract；CallStage future seam 不以 fake 冒充生产能力
 - 多 worker 拓扑没有权威 attestation，call 保持禁用，chat 不受影响
 
