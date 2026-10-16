@@ -1,6 +1,7 @@
 """Admission stays fenced until all chat/call finalization writes have stopped."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -193,6 +194,308 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     await stages.close()
     assert cleaned == [claim.record.call_id]
     assert not stages._finalizations.has_user("user")
+
+
+@pytest.mark.asyncio
+async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_first_reason(call_setup):
+    repository, _, _, clock = call_setup
+    stages = StageManager(
+        get_agent=lambda _: _agent(_TurnHandler()),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        conversation_service=object(),
+        call_maintenance_batches=object(),
+        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
+        user_reset_fence=UserResetFence(),
+        wall_clock=clock.now,
+        monotonic=clock.tick,
+    )
+    stages._call_settlement._consumer.settle = lambda _snapshot: asyncio.sleep(0)
+    claim = await stages.start_call(
+        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="terminate-owned"
+    )
+    stage = await stages.create_call_stage(
+        claim,
+        user_id="user",
+        character_id="luotianyi",
+        client_request_id="terminate-owned",
+        transport=_Transport(),
+        speech_factory=FakeRealtimeSpeechSessionFactory(),
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+    settlement_entered, settlement_release = asyncio.Event(), asyncio.Event()
+    original_close = stage._provider.close
+    close_calls = 0
+
+    async def close_provider():
+        nonlocal close_calls
+        close_calls += 1
+        entered.set()
+        await release.wait()
+        await original_close()
+
+    settlement_calls = 0
+
+    async def settle(_snapshot):
+        nonlocal settlement_calls
+        settlement_calls += 1
+        settlement_entered.set()
+        await settlement_release.wait()
+
+    stages._call_settlement._consumer.settle = settle
+
+    stage._provider.close = close_provider
+    first = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    await asyncio.wait_for(entered.wait(), 1)
+    second = asyncio.create_task(stage.terminate(CallEndReason.SYSTEM_FAILURE))
+    second.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await second
+    assert not first.done()
+    assert close_calls == 1
+    await assert_finalizing(stages)
+    release.set()
+    snapshot = await first
+    await asyncio.wait_for(settlement_entered.wait(), 1)
+    assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
+    assert close_calls == 1
+    assert settlement_calls == 1
+    assert await stage.terminate(CallEndReason.PROVIDER_FAILED) is snapshot
+    assert settlement_calls == 1
+    settlement_release.set()
+    await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_terminate_during_context_initialization_prevents_late_resources(call_setup):
+    repository, _, _, clock = call_setup
+    create_entered, create_release = asyncio.Event(), asyncio.Event()
+    created_contexts = []
+    speech_factory = FakeRealtimeSpeechSessionFactory()
+
+    class CapturingTransport(_Transport):
+        def bind_stage(self, stage):
+            self.stage = stage
+
+    transport = CapturingTransport()
+
+    class SlowFactory:
+        async def create(self, *args, **kwargs):
+            create_entered.set()
+            await create_release.wait()
+            context = await ContextFactory(character_id="luotianyi", database=_ContextDatabase()).create(
+                *args, **kwargs
+            )
+            created_contexts.append(context)
+            return context
+
+    stages = StageManager(
+        get_agent=lambda _: _agent(_TurnHandler()),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _: SlowFactory(),
+        call_sessions=repository,
+        conversation_service=object(),
+        call_maintenance_batches=object(),
+        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
+        user_reset_fence=UserResetFence(),
+        wall_clock=clock.now,
+        monotonic=clock.tick,
+    )
+    claim = await stages.start_call(
+        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="terminate-start"
+    )
+    creation = asyncio.create_task(
+        stages.create_call_stage(
+            claim,
+            user_id="user",
+            character_id="luotianyi",
+            client_request_id="terminate-start",
+            transport=transport,
+            speech_factory=speech_factory,
+        )
+    )
+    await asyncio.wait_for(create_entered.wait(), 1)
+    ownership = stages.current_call_ownership(str(claim.record.call_id))
+    assert ownership is not None
+    stage = transport.stage
+    snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+    assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
+    create_release.set()
+    assert await creation is stage
+    await asyncio.sleep(0)
+    assert created_contexts == []
+    assert speech_factory.sessions == {}
+    assert stages.current_call_stage(str(claim.record.call_id)) is None
+    await stages.close()
+
+
+class _RecordingContextFactory:
+    def __init__(self, contexts):
+        self.contexts = contexts
+
+    async def create(self, *args, **kwargs):
+        context = await ContextFactory(character_id="luotianyi", database=_ContextDatabase()).create(*args, **kwargs)
+        original_close = context.close
+
+        async def close():
+            context.was_closed = True
+            await original_close()
+
+        context.was_closed = False
+        context.close = close
+        self.contexts.append(context)
+        return context
+
+
+class _BlockingProvider:
+    def __init__(self, blocked_phase, entered, release):
+        self.blocked_phase, self.entered, self.release = blocked_phase, entered, release
+        self.closed = False
+
+    async def start(self, _config):
+        if self.blocked_phase == "provider_start":
+            self.entered.set()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                await self.release.wait()
+                raise
+
+    async def close(self):
+        self.closed = True
+
+    async def events(self):
+        if False:
+            yield None
+
+
+class _BlockingSpeechFactory:
+    def __init__(self, blocked_phase, entered, release, providers):
+        self.blocked_phase, self.entered, self.release = blocked_phase, entered, release
+        self.providers = providers
+
+    async def create(self, _call_id):
+        provider = _BlockingProvider(self.blocked_phase, self.entered, self.release)
+        self.providers.append(provider)
+        if self.blocked_phase == "provider_create":
+            self.entered.set()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                await self.release.wait()
+                return provider
+        return provider
+
+
+class _CapturingTransport(_Transport):
+    def bind_stage(self, stage):
+        self.stage = stage
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_phase", ["provider_create", "provider_start"])
+async def test_terminate_after_context_creation_closes_partial_provider_resources(call_setup, blocked_phase):
+    repository, _, _, clock = call_setup
+    entered, release = asyncio.Event(), asyncio.Event()
+    contexts, providers = [], []
+    context_factory = _RecordingContextFactory(contexts)
+    speech_factory = _BlockingSpeechFactory(blocked_phase, entered, release, providers)
+    transport = _CapturingTransport()
+    stages = StageManager(
+        get_agent=lambda _: _agent(_TurnHandler()),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _: context_factory,
+        call_sessions=repository,
+        conversation_service=object(),
+        call_maintenance_batches=object(),
+        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
+        user_reset_fence=UserResetFence(),
+        wall_clock=clock.now,
+        monotonic=clock.tick,
+    )
+    stages._call_settlement._consumer.settle = lambda _snapshot: asyncio.sleep(0)
+    claim = await stages.start_call(
+        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id=blocked_phase
+    )
+    creation = asyncio.create_task(
+        stages.create_call_stage(
+            claim,
+            user_id="user",
+            character_id="luotianyi",
+            client_request_id=blocked_phase,
+            transport=transport,
+            speech_factory=speech_factory,
+        )
+    )
+    await asyncio.wait_for(entered.wait(), 1)
+    ending = asyncio.create_task(transport.stage.terminate(CallEndReason.USER_HANGUP))
+    await asyncio.sleep(0)
+    assert not ending.done()
+    release.set()
+    snapshot = await ending
+    assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
+    assert await creation is transport.stage
+    assert len(contexts) == 1 and contexts[0].was_closed
+    assert len(providers) == 1 and providers[0].closed
+    assert stages.current_call_stage(str(claim.record.call_id)) is None
+    await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_finalization_timeout_waits_for_real_thread_write_before_releasing_admission(call_setup, monkeypatch):
+    repository, _, _, clock = call_setup
+    thread_started, thread_release, thread_finished = threading.Event(), threading.Event(), threading.Event()
+
+    class Consumer:
+        is_ready = True
+
+        async def settle(self, _snapshot):
+            from src.utils.owned_operation import complete_owned
+
+            def write():
+                thread_started.set()
+                thread_release.wait()
+                thread_finished.set()
+
+            await complete_owned(asyncio.to_thread(write))
+
+    monkeypatch.setattr(CallSettlementConsumerImpl, "settle", Consumer.settle)
+    stages = StageManager(
+        get_agent=lambda _: _agent(_TurnHandler()),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        conversation_service=object(),
+        call_maintenance_batches=object(),
+        call_resources=SimpleNamespace(release_call_maintenance=lambda _call_id: None),
+        user_reset_fence=UserResetFence(),
+        wall_clock=clock.now,
+        monotonic=clock.tick,
+    )
+    stages._call_settlement._timeout = 0.01
+    claim = await stages.start_call(
+        user_id="user", character_id="luotianyi", source_interaction_id=None, client_request_id="thread-write"
+    )
+    stage = await stages.create_call_stage(
+        claim,
+        user_id="user",
+        character_id="luotianyi",
+        client_request_id="thread-write",
+        transport=_Transport(),
+        speech_factory=FakeRealtimeSpeechSessionFactory(),
+    )
+    await stage.terminate(CallEndReason.USER_HANGUP)
+    await asyncio.to_thread(thread_started.wait)
+    await asyncio.sleep(0.02)
+    assert not thread_finished.is_set()
+    await assert_finalizing(stages)
+    closing = asyncio.create_task(stages.close())
+    await asyncio.sleep(0)
+    assert not closing.done()
+    thread_release.set()
+    await closing
+    assert thread_finished.is_set()
 
 
 @pytest.mark.asyncio

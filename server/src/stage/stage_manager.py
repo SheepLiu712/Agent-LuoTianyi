@@ -199,6 +199,13 @@ class StageManager:
             lambda: self._finalize_call(ownership, snapshot),
         )
 
+    def _start_call_termination(self, stage, ownership, reason) -> asyncio.Task:
+        return self._finalizations.start_termination(
+            ownership.call_id,
+            (ownership.user_id, ownership.character_id),
+            lambda: stage._terminate_owned(reason),
+        )
+
     async def _finalize_call(self, ownership, snapshot) -> None:
         try:
             if self._call_settlement is None:
@@ -825,6 +832,7 @@ class StageManager:
                 transport=transport,
                 release_ownership=self._release_call_stage_ownership,
                 settlement_sink=CallFinalizationSink(self, ownership),
+                termination_owner=lambda current, reason: self._start_call_termination(current, ownership, reason),
                 call_metrics=call_metrics,
                 monotonic=self._monotonic,
                 wall_clock=self._wall_clock,
@@ -835,6 +843,9 @@ class StageManager:
                 bind_stage(stage)
             await stage.start()
         except BaseException as original_error:
+            if stage is not None and stage.termination_requested:
+                await stage.terminate()
+                return stage
             await self._cleanup_failed_call_stage(
                 claim=claim,
                 ownership=ownership,
@@ -843,22 +854,24 @@ class StageManager:
                 original_error=original_error,
             )
             raise
+        await self._require_generation(user_id, claim.admission_generation)
         async with self._lock:
-            await self._require_generation(user_id, claim.admission_generation)
-            if self._closed:
-                await stage.close()
-                raise ValueError("stage manager closed during call stage creation")
-            if stage.snapshot is None and self.current_call_ownership(ownership.call_id) == ownership:
+            should_close = self._closed
+            if (
+                not should_close
+                and stage.snapshot is None
+                and self.current_call_ownership(ownership.call_id) == ownership
+            ):
                 self._call_stages[ownership.call_id] = stage
+        if should_close:
+            await stage.close()
+            raise ValueError("stage manager closed during call stage creation")
         return stage
 
     async def _cleanup_failed_call_stage(self, *, claim, ownership, stage, transport, original_error) -> None:
         if stage is not None and stage.snapshot is None:
             try:
-                if stage._started:
-                    await stage.close()
-                else:
-                    await stage._cleanup()
+                await stage.abort_failed_start()
             except BaseException as cleanup_error:
                 self._log_call_cleanup_failure("stage", claim, original_error, cleanup_error)
         reason = (

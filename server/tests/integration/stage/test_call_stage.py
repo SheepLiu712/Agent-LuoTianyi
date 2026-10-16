@@ -469,6 +469,42 @@ async def test_resume_keeps_context_and_does_not_emit_another_call_started(call_
 
 
 @pytest.mark.asyncio
+async def test_user_hangup_reason_wins_recovery_deadline_race(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    await stage.disconnect()
+    stage._recovery_deadline = stage._monotonic()
+    original = stage._terminate_owned
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed(reason):
+        entered.set()
+        await release.wait()
+        return await original(reason)
+
+    stage._terminate_owned = delayed
+    hangup = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    await asyncio.wait_for(entered.wait(), 1)
+    deadline = asyncio.create_task(stage._recover_deadline())
+    await asyncio.sleep(0)
+    release.set()
+    snapshot = await hangup
+    await deadline
+    assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
+    assert stage.snapshot is snapshot
+
+
+@pytest.mark.asyncio
+async def test_expired_resume_uses_owned_termination_without_recovery_self_wait(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    await stage.disconnect()
+    stage._recovery_deadline = stage._monotonic()
+
+    assert await asyncio.wait_for(stage.resume(), 1) is False
+    assert stage.snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
 async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_settlement(call_setup):
     repository, record, ownership, clock = call_setup
     speech = FakeRealtimeSpeechSessionFactory()
