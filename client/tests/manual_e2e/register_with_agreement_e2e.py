@@ -16,6 +16,8 @@ python tests/manual_e2e/register_with_agreement_e2e.py \
 脚本只做只读的业务断言，不改服务端数据；它会真实创建账号（这是验证原子注册的必要副作用），
 因此**必须使用测试服务端与测试邀请码**。
 
+说明：脚本走真实 AuthApi→HTTP 链路，但不模拟响应丢失、进程重启或真实并发；这些场景由自动化契约测试/桌面验收覆盖。
+
 覆盖场景（与 spec 接口规范 4 对应）：
 
 1. 旧客户端（不带同意字段）→ 403 AGREEMENT_REQUIRED，且不创建账号、不消耗邀请码；
@@ -92,7 +94,7 @@ def main() -> int:
         agreement_version=args.current_version,
         accepted=True,
     )
-    check("响应丢失后同请求 ID 重试仍成功", replay.ok is True, {"ok": replay.ok, "message": replay.message})
+    check("同请求 ID 重复提交仍恢复原结果", replay.ok is True, {"ok": replay.ok, "message": replay.message})
 
     conflict = api.register_with_agreement(
         other_username,
@@ -135,7 +137,7 @@ def main() -> int:
         agreement_version=args.current_version,
         accepted=True,
     )
-    check("另一请求 ID 抢同一邀请码失败", competing.ok is False, {"ok": competing.ok, "message": competing.message})
+    check("另一请求 ID 顺序重用已用邀请码失败", competing.ok is False, {"ok": competing.ok, "message": competing.message})
 
     print()
     if failures:

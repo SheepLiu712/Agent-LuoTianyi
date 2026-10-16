@@ -139,8 +139,20 @@ class RegistrationService:
                 )
             )
             db.commit()
-        except RegistrationError:
+        except RegistrationError as error:
             db.rollback()
+            # 两个相同 request ID 可能同时通过首次 replay 检查；若另一事务已提交，
+            # 本事务会在邀请码占用处失败。回滚后重新核验原请求，保证幂等重试最终返回同一结果。
+            if error.code is None and registration_request_id:
+                replayed = self._replay_after_race(
+                    username=username,
+                    password=password,
+                    invite_code=invite_code,
+                    registration_request_id=registration_request_id,
+                    agreement_version=agreement_version,
+                )
+                if replayed is not None:
+                    return replayed
             raise
         except Exception:
             db.rollback()
@@ -150,6 +162,29 @@ class RegistrationService:
 
         self._credentials.cache_user_uuid(username, user_uuid)
         return payload
+
+    def _replay_after_race(
+        self,
+        *,
+        username: str,
+        password: str,
+        invite_code: str,
+        registration_request_id: str,
+        agreement_version: str,
+    ) -> Optional[dict]:
+        """事务竞争失败后，用独立会话确认另一提交是否已完成同一请求。"""
+        db = self._credentials.new_session()
+        try:
+            return self._replay(
+                db,
+                username=username,
+                password=password,
+                invite_code=invite_code,
+                registration_request_id=registration_request_id,
+                agreement_version=agreement_version,
+            )
+        finally:
+            db.close()
 
     @staticmethod
     def _require_agreement_input(

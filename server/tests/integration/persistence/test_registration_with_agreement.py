@@ -235,6 +235,31 @@ def test_failure_after_claiming_invite_rolls_back_every_write(env, monkeypatch):
     assert state["invite"].is_used is False
 
 
+def test_same_request_id_race_replays_the_committed_result(env, monkeypatch):
+    service = env.build()
+    first = submit(service, registration_request_id="req-race")
+    original_replay = service._replay
+    calls = 0
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_replay(db, **kwargs)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    second = submit(service, registration_request_id="req-race")
+
+    assert second == first
+    assert calls == 2
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["signatures"]) == 1
+    assert len(state["requests"]) == 1
+    assert state["invite"].is_used is True
+
+
 def test_two_requests_competing_for_one_invite_code_leave_exactly_one_account(env):
     service = env.build()
     submit(service)
