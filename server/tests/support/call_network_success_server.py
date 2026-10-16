@@ -35,6 +35,7 @@ import server_main  # noqa: E402
 import src.agent.skills.expression.speaking.backend as speaking_backend  # noqa: E402
 import src.agent_runtime.agent_runtime as agent_runtime_module  # noqa: E402
 import src.server_runtime as server_runtime_module  # noqa: E402
+from src.agent.context import ConversationMode  # noqa: E402
 from src.application.server_lifecycle import ServerLifecycle  # noqa: E402
 from support.call_coherent_runtime import (  # noqa: E402
     DeterministicCallTTSModule,
@@ -205,6 +206,8 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
     settlement_write_release = threading.Event()
     settlement_write_release.set()
     settlement_write_armed = threading.Event()
+    settlement_maintenance_started = threading.Event()
+    settlement_maintenance_stopped = threading.Event()
 
     @server_main.app.get("/test/evidence")
     async def evidence():
@@ -246,6 +249,94 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
     async def release_settlement_write():
         settlement_write_release.set()
         return {"ok": True}
+
+    @server_main.app.post("/test/issue_324/deadline")
+    async def issue_324_deadline():
+        from src.domain.call import (
+            CallEndReason,
+            CallFinalSnapshot,
+            CallFinalTurn,
+            CallOutcome,
+            CallReplyStatus,
+            CallState,
+            CallTerminalFacts,
+        )
+        from src.infrastructure.persistence.call_sessions import CallSessionRecord
+        from src.infrastructure.persistence.database.sql_database import Conversation, User
+        from src.stage.call_settlement import CallSettlement
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            user_id = user.uuid
+        now = datetime.now(timezone.utc)
+        call_id = uuid4()
+        record = CallSessionRecord(
+            call_id=call_id,
+            client_request_id=f"issue-324-deadline-{uuid4()}",
+            user_id=user_id,
+            character_id="luotianyi",
+            state=CallState.ENDED,
+            requested_at=now,
+            created_at=now,
+            updated_at=now,
+            connected_at=now,
+            ended_at=now,
+            outcome=CallOutcome.CONNECTED,
+            end_reason=CallEndReason.USER_HANGUP,
+            active_duration_ms=5_000,
+        )
+        runtime.database_manager.call_sessions.create_if_absent(record)
+        snapshot = CallFinalSnapshot(
+            CallTerminalFacts(call_id, CallOutcome.CONNECTED, CallEndReason.USER_HANGUP, 5_000, now),
+            (CallFinalTurn(1, "redacted-user-fact", CallReplyStatus.COMPLETED, "redacted-agent-reply"),),
+            0,
+        )
+        maintenance = runtime.agent_runtime.skills.call_maintenance
+        original = maintenance.maintain_ending
+
+        async def blocked_maintenance(*args, **kwargs):
+            settlement_maintenance_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                settlement_maintenance_stopped.set()
+
+        maintenance.maintain_ending = blocked_maintenance
+        context = await runtime.agent_runtime.context_factories["luotianyi"].create(
+            str(call_id),
+            mode=ConversationMode.CALL,
+            user_id=user_id,
+            requested_at=now.replace(tzinfo=None),
+        )
+        runtime.stage_manager._call_settlement = CallSettlement(
+            consumer=runtime.stage_manager._call_settlement._consumer,
+            timeout_seconds=0.3,
+        )
+        try:
+            await runtime.stage_manager._call_settlement.settle(snapshot, context=context)
+        finally:
+            maintenance.maintain_ending = original
+            await context.close()
+        persisted = runtime.database_manager.call_sessions.find_by_id(call_id)
+        with runtime.database_manager.open_sql_session() as session:
+            conversations = session.query(Conversation).filter_by(user_id=user_id, type="call").count()
+        print(
+            "CALL_TEST_PHASE issue-324-deadline-complete"
+            f" call_id={call_id} summary={persisted.summary_status.value}"
+            f" maintenance={persisted.maintenance_status.value} conversations={conversations}",
+            flush=True,
+        )
+        return {
+            "call_id": str(call_id),
+            "summary_status": persisted.summary_status.value,
+            "maintenance_status": persisted.maintenance_status.value,
+            "conversation_id": None if persisted.conversation_id is None else str(persisted.conversation_id),
+            "call_conversations": conversations,
+            "maintenance_started": settlement_maintenance_started.is_set(),
+            "maintenance_stopped": settlement_maintenance_stopped.is_set(),
+            "source": str(Path(__file__).resolve()),
+        }
 
     @server_main.app.get("/test/reset_counts")
     async def reset_counts():

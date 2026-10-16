@@ -7,6 +7,8 @@ from hashlib import sha256
 
 from .contracts import CallFinalSnapshot
 
+FAILED_CALL_SUMMARY = "本次通话未能形成可用概要"
+
 
 @dataclass(frozen=True, slots=True)
 class CallAgentSettlementResult:

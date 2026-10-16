@@ -10,7 +10,7 @@ from src.infrastructure.persistence.call_sessions import CallSessionRecord, Sett
 from src.infrastructure.persistence.database.sql_database import Base
 
 
-def _record(*, state, outcome, end_reason, summary, maintenance, now):
+def _record(*, state, outcome, end_reason, summary, maintenance, now, claimed=True):
     return CallSessionRecord(
         call_id=uuid4(),
         client_request_id=str(uuid4()),
@@ -26,6 +26,7 @@ def _record(*, state, outcome, end_reason, summary, maintenance, now):
         active_duration_ms=1,
         summary_status=summary,
         maintenance_status=maintenance,
+        settlement_input_digest="d" * 64 if claimed else None,
     )
 
 
@@ -134,4 +135,25 @@ def test_recovery_candidate_matrix(tmp_path, state, outcome, end_reason, summary
     candidates = {item.call_id for item in repository.list_recovery_pending()}
 
     assert (record.call_id in candidates) is expected
+    engine.dispose()
+
+
+def test_unclaimed_normal_pending_record_remains_recovery_eligible(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'unclaimed.sqlite'}")
+    Base.metadata.create_all(engine)
+    repository = SqlCallSessionRepository(sessionmaker(bind=engine))
+    now = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
+    record = repository.create_if_absent(
+        _record(
+            state=CallState.ENDED,
+            outcome=CallOutcome.CONNECTED,
+            end_reason=CallEndReason.USER_HANGUP,
+            summary=SettlementStatus.PENDING,
+            maintenance=SettlementStatus.PENDING,
+            now=now,
+            claimed=False,
+        )
+    )
+
+    assert record.call_id in {item.call_id for item in repository.list_recovery_pending()}
     engine.dispose()

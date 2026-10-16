@@ -13,13 +13,12 @@ from typing import Protocol
 from src.agent.context import ConversationSummary, UserProfile
 from src.agent.skills.contracts import SkillInvocation
 from src.domain.agent import MaintenanceCandidate
-from src.domain.call import CallFinalSnapshot, CallReplyStatus
+from src.domain.call import FAILED_CALL_SUMMARY, CallFinalSnapshot, CallReplyStatus
 from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
 from src.utils.owned_operation import complete_owned
 
 EMPTY_CALL_SUMMARY = "本次通话未形成有效对话内容"
-FAILED_CALL_SUMMARY = "本次通话未能形成可用概要"
 
 
 def render_call_turns(snapshot: CallFinalSnapshot, *, after_turn_seq: int = 0) -> tuple[str, ...]:

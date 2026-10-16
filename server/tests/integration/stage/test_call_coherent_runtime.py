@@ -111,7 +111,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     settled = []
 
     class SettlementConsumer:
-        async def settle(self, snapshot, *, context=None):
+        async def settle(self, snapshot, *, context=None, deadline=None):
             settled.append(snapshot)
             await context.close()
 

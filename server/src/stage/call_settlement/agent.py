@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
 from src.agent.context import ConversationMode
-from src.domain.call import CallAgentSettlementResult, CallFinalSnapshot, CallState
+from src.domain.call import FAILED_CALL_SUMMARY, CallAgentSettlementResult, CallFinalSnapshot, CallState
 from src.infrastructure.persistence.call_sessions import CallSessionRecord
 
 
@@ -25,6 +26,7 @@ class CallAgentSettlement:
         skip_summary: bool = False,
         settlement_input_digest: str,
         context,
+        deadline=None,
     ) -> CallAgentSettlementResult:
         owns_context = context is None
         if context is None:
@@ -42,8 +44,10 @@ class CallAgentSettlement:
                 raise RuntimeError("Agent did not produce one call settlement plan")
             summary_action, maintenance_action = plans.plans[0].actions
             try:
-                maintenance = await self._realize_maintenance_with_retry(
-                    record, maintenance_action, plans.plans[0], context
+                maintenance = await self._run_with_phase_deadline(
+                    self._realize_maintenance_with_retry(record, maintenance_action, plans.plans[0], context),
+                    deadline,
+                    "maintenance",
                 )
             except Exception as error:
                 maintenance = error
@@ -51,16 +55,36 @@ class CallAgentSettlement:
                 summary = None
             else:
                 try:
-                    summary = await self._realize_one(record, summary_action, plans.plans[0], context)
+                    summary = await self._run_with_phase_deadline(
+                        self._realize_one(record, summary_action, plans.plans[0], context),
+                        deadline,
+                        "summary",
+                    )
                 except Exception as error:
                     summary = error
             return CallAgentSettlementResult(
-                summary="" if skip_summary else _effect_or_error(summary, d.EffectKind.CALL_SUMMARY),
+                summary="" if skip_summary else _summary_or_fallback(summary),
                 maintenance_turn_seq=_turn_or_error(maintenance),
             )
         finally:
             if owns_context:
                 await context.close()
+
+    @staticmethod
+    async def _run_with_phase_deadline(operation, deadline, phase):
+        if deadline is None:
+            return await operation
+        remaining = deadline.remaining(phase)
+        if remaining <= 0:
+            operation.close()
+            raise TimeoutError(f"call settlement {phase} budget exhausted")
+        task = asyncio.create_task(operation)
+        done, _ = await asyncio.wait((task,), timeout=remaining)
+        if done:
+            return task.result()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise TimeoutError(f"call settlement {phase} timed out")
 
     async def _realize_maintenance_with_retry(self, record, action, plan, context):
         try:
@@ -150,3 +174,8 @@ def _turn_or_error(result):
     if isinstance(value, BaseException):
         return value
     return int(value)
+
+
+def _summary_or_fallback(result):
+    value = _effect_or_error(result, d.EffectKind.CALL_SUMMARY)
+    return FAILED_CALL_SUMMARY if isinstance(value, BaseException) else value

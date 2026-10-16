@@ -113,7 +113,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     class Consumer:
         is_ready = True
 
-        async def settle(self, snapshot, *, context=None):
+        async def settle(self, snapshot, *, context=None, deadline=None):
             entered.set()
             try:
                 await release.wait()
@@ -226,7 +226,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
         monotonic=clock.tick,
     )
 
-    async def settle(_snapshot, *, context=None):
+    async def settle(_snapshot, *, context=None, deadline=None):
         await context.close()
 
     stages._call_settlement._consumer.settle = settle
@@ -258,7 +258,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
 
     settlement_calls = 0
 
-    async def settle(_snapshot, *, context=None):
+    async def settle(_snapshot, *, context=None, deadline=None):
         nonlocal settlement_calls
         settlement_calls += 1
         settlement_entered.set()
@@ -482,7 +482,7 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
     class Consumer:
         is_ready = True
 
-        async def settle(self, _snapshot, *, context=None):
+        async def settle(self, _snapshot, *, context=None, deadline=None):
             from src.utils.owned_operation import complete_owned
 
             def write():
@@ -563,7 +563,7 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
     class Consumer:
         is_ready = True
 
-        async def settle(self, _snapshot, *, context=None):
+        async def settle(self, _snapshot, *, context=None, deadline=None):
             pass
 
     stages = StageManager(

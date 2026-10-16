@@ -27,7 +27,7 @@ async def test_settlement_completes_without_shared_agent_resource_release(mode):
     call_id = uuid4()
 
     class Consumer:
-        async def settle(self, snapshot, *, context=None):
+        async def settle(self, snapshot, *, context=None, deadline=None):
             assert snapshot.terminal.call_id == call_id
             if mode == "failure":
                 raise RuntimeError("failed")
@@ -45,7 +45,7 @@ async def test_timeout_waits_for_owned_consumer_cleanup():
     cleanup_gate = asyncio.Event()
 
     class Consumer:
-        async def settle(self, snapshot, *, context=None):
+        async def settle(self, snapshot, *, context=None, deadline=None):
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -69,7 +69,7 @@ async def test_timeout_during_owned_batch_create_waits_until_repository_returns(
     writes = []
 
     class Consumer:
-        async def settle(self, snapshot, *, context=None):
+        async def settle(self, snapshot, *, context=None, deadline=None):
             from src.utils.owned_operation import complete_owned
 
             def create_batch():

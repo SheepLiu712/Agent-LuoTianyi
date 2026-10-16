@@ -50,7 +50,7 @@ class CallSettlementConsumerImpl:
             and self._batches is not None
         )
 
-    async def settle(self, snapshot: CallFinalSnapshot, *, context=None) -> None:
+    async def settle(self, snapshot: CallFinalSnapshot, *, context=None, deadline=None) -> None:
         record = await complete_owned(asyncio.to_thread(self._calls.find_by_id, snapshot.terminal.call_id))
         self._validate_record(record, snapshot)
         digest = call_settlement_input_digest(snapshot)
@@ -63,7 +63,7 @@ class CallSettlementConsumerImpl:
         await self._reconcile_completed_batches(record)
         if self._settled(record):
             return
-        await self._settle_record(record, snapshot, digest, context)
+        await self._settle_record(record, snapshot, digest, context, deadline)
 
     def _record_metric(self, call_id, name, result, *, status=CallMetricStatus.SUCCESS) -> None:
         if self._call_metrics is None:
@@ -81,7 +81,7 @@ class CallSettlementConsumerImpl:
             )
         )
 
-    async def _settle_record(self, record, snapshot, digest, context) -> None:
+    async def _settle_record(self, record, snapshot, digest, context, deadline) -> None:
         winner = await self._load_summary_winner(record)
         if record.outcome is not CallOutcome.CONNECTED:
             if record.summary_status is not SettlementStatus.SUCCEEDED:
@@ -95,33 +95,39 @@ class CallSettlementConsumerImpl:
             skip_summary=winner is not None,
             settlement_input_digest=digest,
             context=context,
+            deadline=deadline,
         )
-        lanes = []
+        await complete_owned(self._settle_durable_results(record, winner, result))
+
+    async def _settle_durable_results(self, record, winner, result) -> None:
+        summary_error = None
         if record.summary_status is not SettlementStatus.SUCCEEDED:
-            lanes.append(self._settle_summary(record, winner if winner is not None else result.summary))
-        if record.maintenance_status is not SettlementStatus.SUCCEEDED:
-            lanes.append(self._settle_maintenance(record, result.maintenance_turn_seq))
-        outcomes = await asyncio.gather(*lanes, return_exceptions=True)
-        for name, outcome in zip(
-            (
-                name
-                for name, required in (
-                    (CallMetricName.SUMMARY, record.summary_status is not SettlementStatus.SUCCEEDED),
-                    (CallMetricName.MAINTENANCE, record.maintenance_status is not SettlementStatus.SUCCEEDED),
-                )
-                if required
-            ),
-            outcomes,
-        ):
+            try:
+                await self._settle_summary(record, winner if winner is not None else result.summary)
+            except BaseException as error:
+                summary_error = error
             self._record_metric(
                 record.call_id,
-                name,
-                CallMetricResult.FAILED if isinstance(outcome, BaseException) else CallMetricResult.SUCCEEDED,
-                status=CallMetricStatus.ERROR if isinstance(outcome, BaseException) else CallMetricStatus.SUCCESS,
+                CallMetricName.SUMMARY,
+                CallMetricResult.FAILED if summary_error is not None else CallMetricResult.SUCCEEDED,
+                status=CallMetricStatus.ERROR if summary_error is not None else CallMetricStatus.SUCCESS,
             )
-        errors = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
-        if errors:
-            raise errors[0]
+        maintenance_error = None
+        if record.maintenance_status is not SettlementStatus.SUCCEEDED:
+            try:
+                await self._settle_maintenance(record, result.maintenance_turn_seq)
+            except BaseException as error:
+                maintenance_error = error
+            self._record_metric(
+                record.call_id,
+                CallMetricName.MAINTENANCE,
+                CallMetricResult.FAILED if maintenance_error is not None else CallMetricResult.SUCCEEDED,
+                status=CallMetricStatus.ERROR if maintenance_error is not None else CallMetricStatus.SUCCESS,
+            )
+        if summary_error is not None:
+            raise summary_error
+        if maintenance_error is not None:
+            raise maintenance_error
 
     @staticmethod
     def _settled(record) -> bool:
@@ -190,6 +196,7 @@ class CallSettlementConsumerImpl:
         except Exception:
             winner = await self._load_summary_winner(record)
             if winner is None:
+                await self._summary_cas(record, SettlementStatus.FAILED, None)
                 raise
         await self._summary_cas(record, SettlementStatus.SUCCEEDED, conversation_id)
 

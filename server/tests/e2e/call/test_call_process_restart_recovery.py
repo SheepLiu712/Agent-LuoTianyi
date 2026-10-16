@@ -34,6 +34,11 @@ def _server_command(root: Path) -> list[str]:
     return [sys.executable, "-u", "-c", _SERVER_BOOTSTRAP, str(root)]
 
 
+def _expected_server_source() -> str:
+    source = Path(__file__).resolve().parents[2] / "support" / f"{_SERVER_MODULE.rsplit('.', 1)[-1]}.py"
+    return os.path.normcase(os.path.normpath(str(source.resolve())))
+
+
 def _start_server(root: Path):
     repo = Path(__file__).resolve().parents[4]
     log_path = root / f"server-{time.time_ns()}.log"
@@ -271,6 +276,51 @@ def test_process_restart_repairs_partial_summary_and_maintenance_exactly_once(tm
                 evidence["maintenance_batches"],
                 evidence["profile"],
             )
+            if expected is None:
+                expected = current
+            else:
+                assert current == expected
+        finally:
+            _stop_server(process, http, url, log, log_path)
+
+
+def test_issue_324_production_deadline_survives_two_real_runtime_restarts(tmp_path):
+    root = tmp_path / "issue-324-deadline-restart"
+    root.mkdir()
+    process, http, url, log, log_path = _start_server(root)
+    try:
+        registered = http.post(
+            url + "/auth/register",
+            json={
+                "username": "alice",
+                "password": _encrypted_password(http, url, "offline-password"),
+                "invite_code": "invite",
+            },
+            timeout=10,
+        )
+        assert registered.ok, registered.text
+        deadline = http.post(url + "/test/issue_324/deadline", timeout=30).json()
+        assert deadline["summary_status"] == "succeeded"
+        assert deadline["maintenance_status"] == "failed"
+        assert deadline["call_conversations"] == 1
+        assert deadline["maintenance_started"]
+        assert deadline["maintenance_stopped"]
+        assert os.path.normcase(os.path.normpath(deadline["source"])) == _expected_server_source()
+    finally:
+        _stop_server(process, http, url, log, log_path)
+
+    expected = None
+    for _restart in range(2):
+        process, http, url, log, log_path = _start_server(root)
+        try:
+            evidence = http.get(url + "/test/recovery_counts", timeout=5).json()
+            by_id = {item["call_id"]: item for item in evidence["calls"]}
+            record = by_id[deadline["call_id"]]
+            assert record["summary_status"] == "succeeded"
+            assert record["maintenance_status"] == "failed"
+            assert record["conversation_id"] == deadline["conversation_id"]
+            assert evidence["call_conversations"] == 1
+            current = (record["conversation_id"], evidence["call_conversations"], evidence["maintenance_batches"])
             if expected is None:
                 expected = current
             else:
