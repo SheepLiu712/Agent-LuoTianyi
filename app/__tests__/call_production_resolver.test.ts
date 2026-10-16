@@ -15,6 +15,7 @@ jest.mock('../utils/call_audio/native_call_audio', () => {
     enqueue = jest.fn(async () => undefined);
     stop = jest.fn(async () => undefined);
     tombstone = jest.fn(async () => undefined);
+    playReplyFailureTone = jest.fn(async () => undefined);
     subscribeConsumption = jest.fn(() => jest.fn());
     close = jest.fn(async () => undefined);
     setCoordinatorEvents = jest.fn();

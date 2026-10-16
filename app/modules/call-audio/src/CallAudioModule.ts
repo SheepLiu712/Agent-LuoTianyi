@@ -26,6 +26,7 @@ export interface CallAudioNativeModule {
   ): Promise<number>;
   stopPlayback(responseId?: string, streamId?: number): Promise<void>;
   tombstone(responseId: string, streamId: number): Promise<void>;
+  playReplyFailureTone(): Promise<void>;
   addListener(
     eventName: 'onCapturedAudio',
     listener: (event: NativeCapturedFrame) => void,

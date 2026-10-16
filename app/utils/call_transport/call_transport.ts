@@ -45,6 +45,8 @@ interface StreamState {
   format?: { encoding: string; sampleRateHz: number; channels: number };
   generation: number;
   finalAccepted: boolean;
+  finalEnqueuePending: boolean;
+  completionPending: boolean;
   stopped: boolean;
 }
 
@@ -88,6 +90,7 @@ export class CallTransportSession {
   private readonly unsubscribeConsumption: () => void;
   private terminalPromise: Promise<void> | null = null;
   private pendingEnded: CallEnded | null = null;
+  private replyFailureTone: Promise<void> | null = null;
 
   constructor(private readonly options: CallTransportOptions) {
     this.outbox = new ReliableCallOutbox(96_000, options.controlOutboxEntries ?? 64);
@@ -316,14 +319,30 @@ export class CallTransportSession {
       if (!stream || !stream.registered || stream.stopped) throw new Error('UNREGISTERED_STREAM');
       frame.audio.responseId = stream.identity.responseId;
       const generation = stream.generation;
-      await this.options.nativeAudio.enqueue({
-        stream: stream.identity,
-        format: { encoding: 'pcm_s16le', sampleRateHz: 24_000, channels: 1 },
-        payload: frame.audio.payload,
-        isFinal: frame.audio.final,
-      });
+      if (frame.audio.final) stream.finalEnqueuePending = true;
+      try {
+        await this.options.nativeAudio.enqueue({
+          stream: stream.identity,
+          format: { encoding: 'pcm_s16le', sampleRateHz: 24_000, channels: 1 },
+          payload: frame.audio.payload,
+          isFinal: frame.audio.final,
+        });
+      } catch (error) {
+        if (frame.audio.final && stream.generation === generation) {
+          stream.finalEnqueuePending = false;
+          stream.completionPending = false;
+        }
+        throw error;
+      }
       if (stream.stopped || stream.generation !== generation) throw new Error('FRAME_RETIRED');
-      if (frame.audio.final) stream.finalAccepted = true;
+      if (frame.audio.final) {
+        stream.finalEnqueuePending = false;
+        stream.finalAccepted = true;
+        if (stream.completionPending) {
+          stream.completionPending = false;
+          this.completePlayback(stream);
+        }
+      }
       return;
     }
     if (!frame.control) throw new Error('INVALID_INCOMING_FRAME');
@@ -337,8 +356,11 @@ export class CallTransportSession {
         return;
       case 'call.active':
         this.validateCallIdentity(message);
-        this.update({ status: 'connected', connectedAtMonotonicMs: this.options.clock.monotonicMs() });
-        await this.options.nativeAudio.startCapture(INPUT_AUDIO_FORMAT, (frame) => this.onCapturedAudio(frame.payload));
+        const newlyActive = this.snapshot.connectedAtServerMs === undefined;
+        this.acceptActive(message);
+        if (newlyActive) {
+          await this.options.nativeAudio.startCapture(INPUT_AUDIO_FORMAT, (frame) => this.onCapturedAudio(frame.payload));
+        }
         return;
       case 'audio.stream_started':
         this.registerStream(message);
@@ -363,6 +385,27 @@ export class CallTransportSession {
     this.update({ callId: message.call_id, status: 'starting' });
   }
 
+  private acceptActive(message: Extract<ControlMessage, { type: 'call.active' }>): void {
+    const existingAnchor = this.snapshot.connectedAtServerMs;
+    if (existingAnchor !== undefined) {
+      if (existingAnchor !== message.connected_at_ms) throw new Error('CONNECTED_AT_MISMATCH');
+      return;
+    }
+
+    const receivedMonotonicMs = this.options.clock.monotonicMs();
+    // `connected_at_ms` is a server UTC epoch (see stage_binding), not a
+    // monotonic value.  Convert its elapsed portion at receipt once, then only
+    // use the local monotonic clock so later wall-clock changes cannot jump the
+    // displayed duration. A future server timestamp deterministically starts at
+    // zero; call.v1 has no server-now field with which to estimate clock skew.
+    const elapsedAtReceiptMs = Math.max(0, this.options.clock.wallClockMs() - message.connected_at_ms);
+    this.update({
+      status: 'connected',
+      connectedAtServerMs: message.connected_at_ms,
+      connectedAtMonotonicMs: receivedMonotonicMs - elapsedAtReceiptMs,
+    });
+  }
+
   private registerStream(message: AudioStreamStarted): void {
     this.validateCallIdentity(message);
     const existing = this.streams.get(message.stream_id);
@@ -384,6 +427,8 @@ export class CallTransportSession {
       format,
       generation: this.playbackGeneration,
       finalAccepted: false,
+      finalEnqueuePending: false,
+      completionPending: false,
       stopped: false,
     });
   }
@@ -407,6 +452,8 @@ export class CallTransportSession {
         } : undefined,
         generation: this.playbackGeneration,
         finalAccepted: false,
+        finalEnqueuePending: false,
+        completionPending: false,
         stopped: false,
       };
       this.streams.set(message.stream_id, stream);
@@ -414,6 +461,8 @@ export class CallTransportSession {
     if (stream.identity.responseId !== message.response_id) throw new Error('STOP_STREAM_MISMATCH');
     stream.stopped = true;
     stream.generation += 1;
+    stream.finalEnqueuePending = false;
+    stream.completionPending = false;
     await this.options.nativeAudio.tombstone(stream.identity);
     await this.options.nativeAudio.stop(stream.identity);
     if (this.closed) return;
@@ -425,8 +474,16 @@ export class CallTransportSession {
 
   private onPlaybackConsumed(receipt: PlaybackConsumptionReceipt): void {
     const stream = this.streams.get(receipt.stream.streamId);
-    if (!stream || stream.stopped || !stream.finalAccepted) return;
+    if (!stream || stream.stopped) return;
     if (stream.identity.callId !== receipt.stream.callId || stream.identity.responseId !== receipt.stream.responseId) return;
+    if (!stream.finalAccepted) {
+      if (stream.finalEnqueuePending) stream.completionPending = true;
+      return;
+    }
+    this.completePlayback(stream);
+  }
+
+  private completePlayback(stream: StreamState): void {
     const key = `${stream.identity.responseId}:${stream.identity.streamId}`;
     if (this.completedStreams.has(key)) return;
     try {
@@ -518,8 +575,27 @@ export class CallTransportSession {
     this.pendingEnded = message;
   }
 
-  private handleProtocolError(message: CallProtocolError): never {
+  private handleProtocolError(message: CallProtocolError): void {
+    if (
+      message.code === 'CALL_TTS_FAILED' &&
+      this.snapshot.status === 'connected' &&
+      message.call_id !== undefined
+    ) {
+      this.validateCallIdentity({ call_id: message.call_id });
+      this.playReplyFailureTone();
+      return;
+    }
     throw new Error(message.code || 'SERVER_PROTOCOL_ERROR');
+  }
+
+  private playReplyFailureTone(): void {
+    if (this.replyFailureTone || this.closed) return;
+    const playing = this.options.nativeAudio.playReplyFailureTone()
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.replyFailureTone === playing) this.replyFailureTone = null;
+      });
+    this.replyFailureTone = playing;
   }
 
   private sendSequencedControl(factory: (seq: number) => ControlMessage): void {

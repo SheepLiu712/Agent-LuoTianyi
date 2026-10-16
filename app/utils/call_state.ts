@@ -114,7 +114,13 @@ export function reduceCallState(state: CallState, event: CallEvent): CallTransit
 
     case 'call_active':
       if (state.phase !== 'PREPARING' && state.phase !== 'RINGING') return transition(state);
-      return transition({ ...state, phase: 'ACTIVE', callId: event.callId, activeStartedAtMs: event.connectedAtMs });
+      return transition({
+        ...state,
+        phase: 'ACTIVE',
+        callId: event.callId,
+        connectedAtServerMs: event.connectedAtServerMs,
+        activeStartedAtMs: event.connectedAtMs,
+      });
 
     case 'user_hangup':
     case 'back_confirmed':

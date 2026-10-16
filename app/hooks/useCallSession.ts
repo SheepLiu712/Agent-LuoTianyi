@@ -4,6 +4,7 @@ import type { CallSession } from '../utils/call_session/call_session';
 import type { CallCapabilities, CallTransportSnapshot } from '../types/call_transport';
 import type { CallEvent, CallState } from '../types/call';
 import { initialCallState, reduceCallState } from '../utils/call_state';
+import { callMonotonicNowMs } from '../utils/call_clock';
 
 type SessionPort = Pick<CallSession, 'prepare' | 'start' | 'hangup' | 'subscribe' | 'onError' | 'close'>;
 interface SessionOwner {
@@ -51,7 +52,7 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const ownerRef = useRef<SessionOwner | null>(null);
   const compatibilityConsumedRef = useRef(false);
   stateRef.current = state;
-  const now = suppliedNow ?? Date.now;
+  const now = suppliedNow ?? callMonotonicNowMs;
   const ringing = state.phase === 'PREPARING' || state.phase === 'RINGING';
   const canStart = Platform.OS === 'android' && capabilities.serverAvailable && capabilities.nativeAvailable && Boolean(createSession || (compatibilitySession && !compatibilityConsumedRef.current));
 
@@ -129,7 +130,15 @@ export function useCallSession(options: CallSessionOptions = {}) {
         if (snapshot.status === 'starting') dispatchEvent({ type: 'server_state', state: 'PREPARING', callId: snapshot.callId });
         if (snapshot.status === 'connected' && snapshot.callId) {
           if (connectedRef.current) dispatchEvent({ type: 'transport_resumed', nowMs: now() });
-          else { connectedRef.current = true; dispatchEvent({ type: 'call_active', callId: snapshot.callId, connectedAtMs: now() }); }
+          else {
+            connectedRef.current = true;
+            dispatchEvent({
+              type: 'call_active',
+              callId: snapshot.callId,
+              connectedAtMs: snapshot.connectedAtMonotonicMs ?? now(),
+              connectedAtServerMs: snapshot.connectedAtServerMs,
+            });
+          }
         }
         if (snapshot.status === 'recovering') dispatchEvent({ type: 'transport_lost', nowMs: now() });
         if (snapshot.status === 'failed' || snapshot.status === 'closed') dispatchEvent({ type: 'call_ended', nowMs: now() });
