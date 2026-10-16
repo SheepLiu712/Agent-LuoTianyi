@@ -38,6 +38,7 @@ import PreferencesScreen from './preferences';
 import LlmSettingsScreen from './llm_settings';
 import { useCallSession } from '../hooks/useCallSession';
 import { CallScreen } from '../components/call/CallScreen';
+import { CallFailureBanner } from '../components/call/CallFailureBanner';
 import { requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
 import { ExpoCallRingtone } from '../utils/call_session/ringtone';
 import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
@@ -378,6 +379,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
       {call.state.phase !== 'IDLE' ? <CallScreen state={call.state} theme={theme} onHangup={call.hangup} onBack={handleBackConfirmation} /> : null}
+      {call.failureNotice ? <CallFailureBanner notice={call.failureNotice} theme={theme} onDismiss={call.dismissFailure} /> : null}
 
       <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
         <Image

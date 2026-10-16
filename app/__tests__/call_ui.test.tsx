@@ -193,6 +193,39 @@ describe('call UI', () => {
     expect(ringtone.stop).toHaveBeenCalled();
   });
 
+  it('uses the injected monotonic clock for the visible timer, not the wall clock', () => {
+    let monotonic = 10_000;
+    const active = { ...initialCallState, phase: 'ACTIVE' as const, callId: 'c1', activeStartedAtMs: 9_000 };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<CallScreen state={active} theme={theme} onHangup={jest.fn()} onBack={jest.fn()} now={() => monotonic} />);
+    });
+    expect(tree.root.findAllByType('Text' as any).map(textOf).join('')).toContain('00:01');
+    monotonic = 10_500;
+    act(() => { jest.advanceTimersByTime(1000); });
+    expect(tree.root.findAllByType('Text' as any).map(textOf).join('')).toContain('00:01');
+    act(() => tree.unmount());
+  });
+
+  it('forwards the transport monotonic anchor instead of resetting it at UI receipt', async () => {
+    let listener!: (snapshot: any) => void;
+    const session = {
+      prepare: jest.fn(async () => undefined), start: jest.fn(async () => undefined), hangup: jest.fn(async () => undefined), close: jest.fn(),
+      subscribe: jest.fn((next: (snapshot: any) => void) => { listener = next; return jest.fn(); }),
+      onError: jest.fn(() => jest.fn()),
+    } as unknown as CallSession;
+    let result: any;
+    let root!: ReturnType<typeof create>;
+    act(() => { root = create(<Probe options={{ session, capabilities: { serverAvailable: true, nativeAvailable: true }, requestPermission: () => new Promise(() => {}), now: () => 9_999 }} onState={(value) => { result = value; }} />); });
+    await act(async () => { await result.start(false); });
+    act(() => { result.dispatch({ type: 'permission_granted' }); });
+    act(() => { result.dispatch({ type: 'transport_authenticated' }); });
+    act(() => { listener({ status: 'connected', callId: 'c1', connectedAtServerMs: 1_000, connectedAtMonotonicMs: 100, activeDurationMs: 250 }); });
+
+    expect(result.state).toMatchObject({ phase: 'ACTIVE', connectedAtServerMs: 1_000, activeStartedAtMs: 100 });
+    act(() => root.unmount());
+  });
+
   it('invalidates generation on synchronous hangup failure, closes once, and ignores late connected snapshots', async () => {
     let listener!: (snapshot: any) => void;
     const cleanupError = jest.fn();
