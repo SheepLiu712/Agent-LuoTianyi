@@ -71,9 +71,11 @@ function fakeNative(): CallNativeAudioPort & {
   unsubscribeCount: number;
   stopCaptureCount: number;
   stopPlaybackCount: number;
+  replyFailureToneCount: number;
 } {
   return {
     frames: [], enqueued: [], pauseCount: 0, unsubscribeCount: 0, stopCaptureCount: 0, stopPlaybackCount: 0,
+    replyFailureToneCount: 0,
     async getCapability() { return 'available'; },
     async startCapture(_format, onFrame) { this.frames.push(onFrame); },
     async stopCapture() { this.stopCaptureCount += 1; },
@@ -82,6 +84,7 @@ function fakeNative(): CallNativeAudioPort & {
     async enqueue(chunk) { this.enqueued.push(chunk.payload); },
     async stop() { this.stopPlaybackCount += 1; },
     async tombstone() {},
+    async playReplyFailureTone() { this.replyFailureToneCount += 1; },
     subscribeConsumption(listener) { this.listener = listener; return () => { this.listener = undefined; this.unsubscribeCount += 1; }; },
   };
 }
@@ -108,7 +111,9 @@ async function establish() {
   socket.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
   await flush();
   socket.message(serverControl({ protocol: 'call.v1', type: 'call.state', seq: 1, call_id: CALL_ID, client_request_id: 'request-1', state: 'preparing' }));
-  socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 10 }));
+  // The server timestamp is a UTC epoch. It intentionally differs from local
+  // receipt time by 100 ms, rather than pretending it is a local monotonic value.
+  socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 1_000 }));
   await flush();
   return { sockets, native, clock, session, socket };
 }
@@ -121,6 +126,64 @@ describe('reliable call transport', () => {
     outbox.acknowledge(1);
     expect(() => outbox.replayMissing(1)).toThrow('REPLAY_NOT_AVAILABLE');
     expect(() => outbox.acknowledge(2)).toThrow('INVALID_ACK_CURSOR');
+  });
+
+  test('preserves the server epoch anchor when ACTIVE is delayed and derives elapsed time on the local monotonic clock', async () => {
+    const { clock, session } = await establish();
+
+    // The fixture delivers ACTIVE at monotonic 100 although the server connected
+    // at epoch 1,000. The server's wall-clock epoch is intentionally not a
+    // monotonic timestamp, so it must not be subtracted from `clock.now`.
+    expect(session.state.connectedAtServerMs).toBe(1_000);
+    expect(session.state.activeDurationMs).toBe(100);
+
+    clock.advance(500);
+    expect(session.state.activeDurationMs).toBe(600);
+  });
+
+  test('keeps its initial server anchor and local duration across duplicate ACTIVE and resume', async () => {
+    const { clock, native, session, socket, sockets } = await establish();
+    clock.advance(400);
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 3, call_id: CALL_ID, connected_at_ms: 1_000 }));
+    await flush();
+    expect(session.state).toMatchObject({ connectedAtServerMs: 1_000, activeDurationMs: 500 });
+    expect(native.frames).toHaveLength(1);
+
+    socket.emit('close', { code: 1006 });
+    clock.advance(500);
+    const recovery = sockets.sockets[1];
+    recovery.message(JSON.stringify({ type: 'system_ready', payload: {} }));
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 3,
+    }));
+    await flush();
+
+    expect(session.state).toMatchObject({ status: 'connected', connectedAtServerMs: 1_000, activeDurationMs: 1_000 });
+  });
+
+  test('clamps a future server epoch at zero and remains monotonic after a local wall-clock jump', async () => {
+    const sockets = new FakeSockets();
+    const native = fakeNative();
+    const clock = new FakeClock();
+    clock.wallClockMs = () => 1_000;
+    const session = new CallTransportSession({
+      url: 'ws://example/call_ws', credentials: { username: 'u', token: 't' }, characterId: 'luotianyi',
+      sockets, nativeAudio: native, clock, serverAvailable: true, nativeAvailable: true,
+    });
+    await session.start({ clientRequestId: 'request-1', characterId: 'luotianyi' });
+    const socket = sockets.sockets[0];
+    socket.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.state', seq: 1, call_id: CALL_ID, client_request_id: 'request-1', state: 'preparing' }));
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 2_000 }));
+    await flush();
+    expect(session.state.activeDurationMs).toBe(0);
+
+    clock.wallClockMs = () => 50;
+    clock.advance(400);
+    expect(session.state.activeDurationMs).toBe(400);
   });
 
   test('does not NACK future frames while contiguous frames await native acceptance', () => {
@@ -326,6 +389,82 @@ describe('reliable call transport', () => {
     expect(established.sockets.sockets).toHaveLength(1);
   });
 
+  test('keeps an active call usable after CALL_TTS_FAILED and accepts the next response', async () => {
+    const { session, socket, native } = await establish();
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_TTS_FAILED',
+      message: 'call reply audio could not be generated', retryable: false, call_id: CALL_ID,
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(socket.readyState).toBe(1);
+    expect(native.stopCaptureCount).toBe(0);
+    expect(native.replyFailureToneCount).toBe(1);
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'next-response', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]),
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(native.enqueued).toEqual([new Uint8Array([1, 0])]);
+    const controls = socket.sent.filter((wire): wire is string => typeof wire === 'string').map((wire) => JSON.parse(wire));
+    expect(controls.some((message) => message.type === 'playback.completed')).toBe(false);
+  });
+
+  test('keeps unrelated protocol errors fatal', async () => {
+    const { session, socket, native } = await establish();
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_SETUP_FAILED',
+      message: 'system_failure', retryable: false, call_id: CALL_ID,
+    }));
+    await flush();
+
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'CALL_SETUP_FAILED' });
+    expect(native.replyFailureToneCount).toBe(0);
+  });
+
+  test('does not terminate the call when the local reply failure tone cannot play', async () => {
+    const { session, socket, native } = await establish();
+    native.playReplyFailureTone = async () => { throw new Error('local_tone_failed'); };
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_TTS_FAILED',
+      message: 'call reply audio could not be generated', retryable: false, call_id: CALL_ID,
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(socket.readyState).toBe(1);
+    expect(native.stopCaptureCount).toBe(0);
+  });
+
+  test('coalesces duplicate CALL_TTS_FAILED notifications while the same local cue is playing', async () => {
+    const { session, socket, native } = await establish();
+    let finishTone!: () => void;
+    native.playReplyFailureTone = jest.fn(async () => new Promise<void>((resolve) => { finishTone = resolve; }));
+    const failure = serverControl({
+      protocol: 'call.v1', type: 'error', code: 'CALL_TTS_FAILED',
+      message: 'call reply audio could not be generated', retryable: false, call_id: CALL_ID,
+    });
+
+    socket.message(failure);
+    socket.message(failure);
+    await flush();
+
+    expect(native.playReplyFailureTone).toHaveBeenCalledTimes(1);
+    expect(session.state.status).toBe('connected');
+    finishTone();
+    await flush();
+  });
+
   test('a stop placeholder accepts its delayed matching registration without reviving playback', async () => {
     const { socket, native } = await establish();
     socket.message(serverControl({
@@ -504,7 +643,7 @@ describe('reliable call transport', () => {
     await flush();
     expect(session.state.status).toBe('connected');
     clock.advance(500);
-    expect(session.state.activeDurationMs).toBe(1_500);
+    expect(session.state.activeDurationMs).toBe(1_600);
     socket.message(serverControl({ protocol: 'call.v1', type: 'call.ended', seq: 3, call_id: CALL_ID, outcome: 'connected', end_reason: 'system_failure', active_duration_ms: 1 }));
     await flush();
     expect(session.state.status).toBe('connected');
@@ -515,7 +654,7 @@ describe('reliable call transport', () => {
     clock.advance(1_000);
     socket.emit('close', { code: 1006 });
     clock.advance(3_000);
-    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'RECOVERY_TIMEOUT', activeDurationMs: 1_000 });
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'RECOVERY_TIMEOUT', activeDurationMs: 1_100 });
   });
 
   test('network recovery preserves audio and buffers captured PCM until the resumed handshake', async () => {
@@ -603,7 +742,7 @@ describe('reliable call transport', () => {
   test('repeats a cumulative ACK for an identical duplicate after ACK loss', async () => {
     const { socket, session } = await establish();
     const before = socket.sent.length;
-    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 10 }));
+    socket.message(serverControl({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: 1_000 }));
     await flush();
     expect(socket.sent).toHaveLength(before + 1);
     expect(JSON.parse(socket.sent.at(-1) as string)).toMatchObject({ type: 'ack', ack_seq: 2 });

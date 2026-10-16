@@ -19,6 +19,7 @@ type Listener = (event: any) => void;
 class FakeNativeCallAudio implements CallAudioNativeModule {
   private readonly listeners = new Map<string, Set<Listener>>();
   generation = 0;
+  replyFailureToneCount = 0;
   capability: NativeCapability = {
     available: true,
     captureFormat: CAPTURE_FORMAT as NativeCapability['captureFormat'],
@@ -39,6 +40,7 @@ class FakeNativeCallAudio implements CallAudioNativeModule {
   async enqueuePlayback() { return ++this.generation; }
   async stopPlayback() {}
   async tombstone() {}
+  async playReplyFailureTone() { this.replyFailureToneCount += 1; }
   addListener(eventName: string, listener: Listener) {
     const listeners = this.listeners.get(eventName) ?? new Set();
     listeners.add(listener);
@@ -100,6 +102,16 @@ describe('AndroidCallAudio adapter', () => {
       sessionGeneration: 1,
     } satisfies NativePlaybackCompleted);
     expect(completed).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes the built-in reply failure tone through the initialized native call audio module', async () => {
+    const native = new FakeNativeCallAudio();
+    const audio = new AndroidCallAudio({}, native, 'android');
+    await audio.initialize();
+
+    await audio.playReplyFailureTone();
+
+    expect(native.replyFailureToneCount).toBe(1);
   });
 
   it('recreates capture effects after reacquiring focus during resume', async () => {
