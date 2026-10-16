@@ -41,6 +41,7 @@ from src.infrastructure.models.realtime_speech import (
     SpeechStarted,
     SpeechStopped,
     TurnCompleted,
+    TurnInvalid,
 )
 from src.infrastructure.observability.call_metrics import (
     CallMetric,
@@ -157,6 +158,9 @@ class _Turn:
     status: CallReplyStatus = CallReplyStatus.NOT_STARTED
     formal_text: str | None = None
     started_at: float = 0.0
+    started_at_timestamp: str = ""
+    first_audio_recorded: bool = False
+    first_audio_disqualified: bool = False
 
 
 class CallStage:
@@ -208,6 +212,7 @@ class CallStage:
         self._context: InteractionContext | None = None
         self._provider: RealtimeSpeechSession | None = None
         self._pcm: asyncio.Queue[AudioFrame] = asyncio.Queue(self._pcm_capacity)
+        self._provider_input_allowed = asyncio.Event()
         self._pcm_buffered_bytes = 0
         self._receipts: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         self._provider_audio_sequence = 0
@@ -218,6 +223,7 @@ class CallStage:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._pcm_task: asyncio.Task[Any] | None = None
         self._events_task: asyncio.Task[Any] | None = None
+        self._provider_failure_task: asyncio.Task[Any] | None = None
         self._realize_task: asyncio.Task[Any] | None = None
         self._recovery_task: asyncio.Task[Any] | None = None
         self._silence_task: asyncio.Task[Any] | None = None
@@ -238,6 +244,7 @@ class CallStage:
         self._responses: dict[str, _Response] = {}
         self._tombstones: set[str] = set()
         self._generation = 0
+        self._active_speech_item_id: str | None = None
         self._next_stream_id = 1
         self._pending_send = 0
         self._connected_monotonic: float | None = None
@@ -250,7 +257,6 @@ class CallStage:
         self._lifecycle_lock = asyncio.Lock()
         self._transport_abort_task: asyncio.Task[Any] | None = None
         self._aborting_transport = False
-        self._first_audio_started_at: float | None = None
         self._reconnect_count = 0
         self._connection_available = connection_available
         self._pending_answer: d.AnswerCall | None = None
@@ -311,6 +317,9 @@ class CallStage:
             self._started = True
             self._pcm_task = self._track(asyncio.create_task(self._drain_pcm(), name="call-pcm"))
             self._events_task = self._track(asyncio.create_task(self._consume_events(), name="call-speech-events"))
+            self._provider_failure_task = self._track(
+                asyncio.create_task(self._await_provider_failure(), name="call-provider-failure")
+            )
             await self._submit_stimulus(self._answer_requested())
         except asyncio.CancelledError:
             raise
@@ -398,8 +407,15 @@ class CallStage:
         async with self._lifecycle_lock:
             if self.state is not CallState.ACTIVE:
                 return
+            self._provider_input_allowed.clear()
             disconnected_at = self._now()
             disconnected_monotonic = self._monotonic()
+            # A turn whose reply crosses a transport disconnect cannot prove a
+            # continuous first-audio delivery path. Do not turn its later
+            # buffered or replayed output into a successful latency sample.
+            for turn in self._turns.values():
+                if not turn.first_audio_recorded:
+                    turn.first_audio_disqualified = True
             await self._transition_or_close(CallState.RECONNECTING, ledger_facts={"disconnected_at": disconnected_at})
             if self._first_disconnect_monotonic is None:
                 self._first_disconnect_monotonic = disconnected_monotonic
@@ -421,6 +437,8 @@ class CallStage:
     async def resume(self) -> bool:
         timed_out = False
         async with self._lifecycle_lock:
+            if self._termination_reason is not None:
+                return False
             if self.state is not CallState.RECONNECTING:
                 return False
             if self._recovery_deadline is None or self._monotonic() >= self._recovery_deadline:
@@ -435,6 +453,7 @@ class CallStage:
             else:
                 self._cancel_task(self._recovery_task)
                 await self._transition_or_close(CallState.ACTIVE)
+                self._provider_input_allowed.set()
                 self._first_disconnect_monotonic = None
                 self._recovery_deadline = None
                 # Product policy: a successful resume always starts a fresh full silence period.
@@ -457,7 +476,8 @@ class CallStage:
 
     def can_resume(self) -> bool:
         return (
-            self.state is CallState.RECONNECTING
+            self._termination_reason is None
+            and self.state is CallState.RECONNECTING
             and self._recovery_deadline is not None
             and self._monotonic() < self._recovery_deadline
         )
@@ -530,35 +550,90 @@ class CallStage:
         async for event in self._provider.events():
             if self.state in {CallState.ENDED, CallState.FAILED}:
                 return
+            observed_at = self._monotonic()
+            observed_at_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
+            observed_disconnected = await self._await_provider_event_admission(event)
+            if observed_disconnected is None:
+                continue
             if isinstance(event, SpeechStarted):
+                self._active_speech_item_id = event.item_id
                 self._playback.set_user_speaking(True)
                 self._interrupt()
             elif isinstance(event, SpeechStopped):
-                self._playback.set_user_speaking(False)
-                self._refresh_silence_task()
+                self._release_user_speaking(event.item_id)
             elif isinstance(event, TurnCompleted):
-                self._spawn_handle(self._on_turn(event), name="call-turn-handle")
-            elif isinstance(event, ProviderFailed):
-                self._record_metric(
-                    CallMetricName.PROVIDER_ENDPOINT,
-                    duration_ms=0,
-                    status=CallMetricStatus.ERROR,
-                    labels={
-                        "provider": CallProvider.UNKNOWN.value,
-                        "result": CallMetricResult.FAILED.value,
-                        "error_code": "PROVIDER_EVENT_FAILED",
-                    },
+                self._spawn_handle(
+                    self._on_turn(
+                        event,
+                        started_at=observed_at,
+                        started_at_timestamp=observed_at_timestamp,
+                        first_audio_disqualified=observed_disconnected,
+                    ),
+                    name="call-turn-handle",
                 )
-                await self.terminate(CallEndReason.PROVIDER_FAILED)
+            elif isinstance(event, TurnInvalid):
+                self._release_user_speaking(event.item_id)
+            elif isinstance(event, ProviderFailed):
                 return
             elif isinstance(event, AmbientAudio):
                 continue
 
-    async def _on_turn(self, event: TurnCompleted) -> None:
+    async def _await_provider_failure(self) -> None:
+        assert self._provider is not None
+        failure = await self._provider.wait_failure()
+        if failure is None or self._final is not None:
+            return
+        self._record_metric(
+            CallMetricName.PROVIDER_ENDPOINT,
+            duration_ms=0,
+            status=CallMetricStatus.ERROR,
+            labels={
+                "provider": CallProvider.UNKNOWN.value,
+                "result": CallMetricResult.FAILED.value,
+                "error_code": "PROVIDER_EVENT_FAILED",
+            },
+        )
+        await self.terminate(CallEndReason.PROVIDER_FAILED)
+
+    async def _await_provider_event_admission(self, event: object) -> bool | None:
+        observed_disconnected = self.state is CallState.RECONNECTING
+        if observed_disconnected and not isinstance(event, ProviderFailed):
+            await self._provider_input_allowed.wait()
+            if self.state is not CallState.ACTIVE:
+                return None
+        return observed_disconnected
+
+    def _release_user_speaking(self, item_id: str | None) -> None:
+        """Release only the provider turn that currently owns speaking state."""
+        if item_id is not None and item_id != self._active_speech_item_id:
+            return
+        if item_id is None and self._active_speech_item_id is not None:
+            return
+        self._active_speech_item_id = None
+        self._playback.set_user_speaking(False)
+        self._refresh_silence_task()
+
+    async def _on_turn(
+        self,
+        event: TurnCompleted,
+        *,
+        started_at: float | None = None,
+        started_at_timestamp: str | None = None,
+        first_audio_disqualified: bool = False,
+    ) -> None:
         if self.state is not CallState.ACTIVE:
             return
+        if started_at is None:
+            started_at = self._monotonic()
+        if started_at_timestamp is None:
+            started_at_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
         sequence = len(self._turns) + 1
-        self._turns[sequence] = _Turn(event.semantic.render(), started_at=self._monotonic())
+        self._turns[sequence] = _Turn(
+            event.semantic.render(),
+            started_at=started_at,
+            started_at_timestamp=started_at_timestamp,
+            first_audio_disqualified=first_audio_disqualified,
+        )
         self._unfinished_turns.add(sequence)
         self._playback.set_unfinished_user_turn_count(len(self._unfinished_turns))
         stimulus = d.CallTurnCompleted(
@@ -800,6 +875,7 @@ class CallStage:
             return
         connected_at = self._now()
         await self._transition_or_close(CallState.ACTIVE, ledger_facts={"connected_at": connected_at})
+        self._provider_input_allowed.set()
         self._connected_monotonic = self._monotonic()
         if not self._started:
             return
@@ -809,8 +885,10 @@ class CallStage:
 
     async def _drain_pcm(self) -> None:
         while True:
+            await self._provider_input_allowed.wait()
             frame = await self._pcm.get()
             try:
+                await self._provider_input_allowed.wait()
                 if self.state is CallState.ACTIVE and self._provider is not None:
                     await self._provider.push_audio(frame)
             finally:
@@ -1184,17 +1262,26 @@ class CallStage:
         value = self._wall_clock()
         return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
-    def _record_metric(self, name, *, duration_ms, status=CallMetricStatus.SUCCESS, numeric=None, labels=None) -> None:
+    def _record_metric(
+        self,
+        name,
+        *,
+        duration_ms,
+        status=CallMetricStatus.SUCCESS,
+        numeric=None,
+        labels=None,
+        start_ts: str | None = None,
+    ) -> None:
         if self._call_metrics is None:
             return
-        timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
+        end_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
         try:
             self._call_metrics.record(
                 CallMetric(
                     call_id=self._record.call_id,
                     name=name,
-                    start_ts=timestamp,
-                    end_ts=timestamp,
+                    start_ts=start_ts or end_timestamp,
+                    end_ts=end_timestamp,
                     duration_ms=duration_ms,
                     status=status,
                     numeric=numeric,
@@ -1467,13 +1554,6 @@ class _OutputSink:
         now = self._stage._monotonic()
         if response.audio_started_at is None:
             response.audio_started_at = now
-            if self._stage._first_audio_started_at is None:
-                self._stage._first_audio_started_at = now
-                self._stage._record_metric(
-                    CallMetricName.FIRST_AUDIO,
-                    duration_ms=0,
-                    labels={"result": CallMetricResult.SUCCEEDED.value},
-                )
         if response.stream_id is None:
             response.stream_id = self._stage._next_stream_id
             self._stage._next_stream_id += 1
@@ -1490,6 +1570,7 @@ class _OutputSink:
         finally:
             self._stage._pending_send -= 1
             self._stage._playback.set_pending_send_count(self._stage._pending_send)
+        self._record_first_audio(response, output)
         if output.final:
             self._stage.playback_final(response_id, response.stream_id)
             self._stage._record_metric(
@@ -1497,3 +1578,18 @@ class _OutputSink:
                 duration_ms=max(0, (self._stage._monotonic() - response.audio_started_at) * 1000),
                 labels={"result": CallMetricResult.SUCCEEDED.value},
             )
+
+    def _record_first_audio(self, response: _Response, output: d.AudioChunkOutput) -> None:
+        """Record the first nonempty PCM chunk successfully accepted by transport per user turn."""
+        if not output.data or response.turn_seq is None:
+            return
+        turn = self._stage._turns.get(response.turn_seq)
+        if turn is None or turn.first_audio_recorded or turn.first_audio_disqualified:
+            return
+        turn.first_audio_recorded = True
+        self._stage._record_metric(
+            CallMetricName.FIRST_AUDIO,
+            duration_ms=max(0, (self._stage._monotonic() - turn.started_at) * 1000),
+            labels={"result": CallMetricResult.SUCCEEDED.value},
+            start_ts=turn.started_at_timestamp,
+        )

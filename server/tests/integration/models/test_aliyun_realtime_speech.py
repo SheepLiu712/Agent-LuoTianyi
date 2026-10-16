@@ -133,8 +133,8 @@ async def test_normalizes_only_final_user_and_ambient_transcripts():
         }
     )
 
-    assert isinstance(await asyncio.wait_for(anext(events), 0.5), SpeechStarted)
-    assert isinstance(await asyncio.wait_for(anext(events), 0.5), SpeechStopped)
+    assert await asyncio.wait_for(anext(events), 0.5) == SpeechStarted("user-1")
+    assert await asyncio.wait_for(anext(events), 0.5) == SpeechStopped("user-1")
     completed = await asyncio.wait_for(anext(events), 0.5)
     ambient = await asyncio.wait_for(anext(events), 0.5)
     assert isinstance(completed, TurnCompleted)
@@ -172,8 +172,8 @@ async def test_invalid_duplicate_late_and_empty_transcripts_do_not_complete_turn
         {"type": "conversation.item.input_audio_transcription.completed", "item_id": "valid", "transcript": "duplicate"}
     )
 
-    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid")
-    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("empty_transcript")
+    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid", "invalid")
+    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("empty_transcript", "empty")
     completed = await asyncio.wait_for(anext(events), 0.5)
     assert isinstance(completed, TurnCompleted)
     assert completed.semantic.transcript == "one"
@@ -533,7 +533,7 @@ async def test_invalid_and_completed_events_keep_order_before_single_failure():
     await socket.server_event({"type": "error", "error": {"type": "server_error"}})
     await socket.server_event({"type": "error", "error": {"type": "server_error"}})
 
-    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid")
+    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid", "invalid")
     completed = await asyncio.wait_for(anext(events), 0.5)
     assert isinstance(completed, TurnCompleted)
     assert completed.semantic.transcript == "kept"
@@ -586,6 +586,34 @@ async def test_writer_failure_wins_race_with_reader_close_once():
     with pytest.raises(StopAsyncIteration):
         await anext(events)
     await session.close()
+
+
+@pytest.mark.asyncio
+async def test_failure_signal_is_independent_from_fifo_event_delivery():
+    session, socket = await started_session(event_queue_size=2)
+    events = session.events()
+    await socket.server_event(
+        {"type": "conversation.item.input_audio_transcription.completed", "item_id": "user", "transcript": "kept"}
+    )
+    await wait_for_condition(lambda: len(session._event_buffer) == 1)
+    await socket.server_event({"type": "error", "error": {"type": "server_error"}})
+
+    assert await asyncio.wait_for(session.wait_failure(), 0.1) == ProviderFailed("provider_server_error", True)
+    completed = await asyncio.wait_for(anext(events), 0.5)
+    assert isinstance(completed, TurnCompleted)
+    assert completed.semantic.transcript == "kept"
+    assert await asyncio.wait_for(anext(events), 0.5) == ProviderFailed("provider_server_error", True)
+    await session.close()
+
+
+@pytest.mark.asyncio
+async def test_wait_failure_returns_none_on_normal_close():
+    session, _socket = await started_session()
+    waiter = asyncio.create_task(session.wait_failure())
+
+    await session.close()
+
+    assert await asyncio.wait_for(waiter, 0.1) is None
 
 
 @pytest.mark.asyncio
@@ -667,7 +695,7 @@ async def test_cancel_then_failure_new_consumer_drains_fifo_failure_and_stop():
     await socket.server_event({"type": "error", "error": {"type": "server_error"}})
 
     second_events = session.events()
-    assert await asyncio.wait_for(anext(second_events), 0.5) == TurnInvalid("turn_invalid")
+    assert await asyncio.wait_for(anext(second_events), 0.5) == TurnInvalid("turn_invalid", "invalid")
     completed = await asyncio.wait_for(anext(second_events), 0.5)
     assert isinstance(completed, TurnCompleted)
     assert completed.semantic.transcript == "kept"

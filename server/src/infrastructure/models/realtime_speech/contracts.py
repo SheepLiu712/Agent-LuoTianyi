@@ -36,12 +36,12 @@ class AudioFrame:
 
 @dataclass(frozen=True, slots=True)
 class SpeechStarted:
-    pass
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class SpeechStopped:
-    pass
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +52,7 @@ class TurnCompleted:
 @dataclass(frozen=True, slots=True)
 class TurnInvalid:
     error_code: str
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,8 @@ class RealtimeSpeechSession(Protocol):
     async def push_audio(self, frame: AudioFrame) -> None: ...
 
     def events(self) -> AsyncIterator[RealtimeSpeechEvent]: ...
+
+    async def wait_failure(self) -> ProviderFailed | None: ...
 
     async def close(self) -> None: ...
 
