@@ -46,9 +46,14 @@ class Clock implements CallClock {
   clearTimeout(handle: unknown): void { globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>); }
 }
 
-const native: CallNativeAudioPort = {
+type CallNativeAudioPortWithFailureTone = CallNativeAudioPort & {
+  playReplyFailureTone(): Promise<void>;
+};
+
+const native: CallNativeAudioPortWithFailureTone = {
   getCapability: async () => 'available', startCapture: async () => {}, stopCapture: async () => {}, enqueue: async () => {},
   stop: async () => {}, tombstone: async () => {}, pauseCapture: async () => {}, resumeCapture: async () => {},
+  playReplyFailureTone: async () => {},
   subscribeConsumption: (_listener: (receipt: PlaybackConsumptionReceipt) => void) => () => {},
 };
 const CALL_ID = '11111111-1111-1111-1111-111111111111';
