@@ -36,12 +36,12 @@ class AudioFrame:
 
 @dataclass(frozen=True, slots=True)
 class SpeechStarted:
-    pass
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class SpeechStopped:
-    pass
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +52,7 @@ class TurnCompleted:
 @dataclass(frozen=True, slots=True)
 class TurnInvalid:
     error_code: str
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

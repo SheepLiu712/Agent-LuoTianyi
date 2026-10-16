@@ -133,8 +133,8 @@ async def test_normalizes_only_final_user_and_ambient_transcripts():
         }
     )
 
-    assert isinstance(await asyncio.wait_for(anext(events), 0.5), SpeechStarted)
-    assert isinstance(await asyncio.wait_for(anext(events), 0.5), SpeechStopped)
+    assert await asyncio.wait_for(anext(events), 0.5) == SpeechStarted("user-1")
+    assert await asyncio.wait_for(anext(events), 0.5) == SpeechStopped("user-1")
     completed = await asyncio.wait_for(anext(events), 0.5)
     ambient = await asyncio.wait_for(anext(events), 0.5)
     assert isinstance(completed, TurnCompleted)
@@ -172,8 +172,8 @@ async def test_invalid_duplicate_late_and_empty_transcripts_do_not_complete_turn
         {"type": "conversation.item.input_audio_transcription.completed", "item_id": "valid", "transcript": "duplicate"}
     )
 
-    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid")
-    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("empty_transcript")
+    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid", "invalid")
+    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("empty_transcript", "empty")
     completed = await asyncio.wait_for(anext(events), 0.5)
     assert isinstance(completed, TurnCompleted)
     assert completed.semantic.transcript == "one"
@@ -533,7 +533,7 @@ async def test_invalid_and_completed_events_keep_order_before_single_failure():
     await socket.server_event({"type": "error", "error": {"type": "server_error"}})
     await socket.server_event({"type": "error", "error": {"type": "server_error"}})
 
-    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid")
+    assert await asyncio.wait_for(anext(events), 0.5) == TurnInvalid("turn_invalid", "invalid")
     completed = await asyncio.wait_for(anext(events), 0.5)
     assert isinstance(completed, TurnCompleted)
     assert completed.semantic.transcript == "kept"
@@ -667,7 +667,7 @@ async def test_cancel_then_failure_new_consumer_drains_fifo_failure_and_stop():
     await socket.server_event({"type": "error", "error": {"type": "server_error"}})
 
     second_events = session.events()
-    assert await asyncio.wait_for(anext(second_events), 0.5) == TurnInvalid("turn_invalid")
+    assert await asyncio.wait_for(anext(second_events), 0.5) == TurnInvalid("turn_invalid", "invalid")
     completed = await asyncio.wait_for(anext(second_events), 0.5)
     assert isinstance(completed, TurnCompleted)
     assert completed.semantic.transcript == "kept"
