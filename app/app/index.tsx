@@ -38,6 +38,7 @@ import PreferencesScreen from './preferences';
 import LlmSettingsScreen from './llm_settings';
 import { useCallSession } from '../hooks/useCallSession';
 import { CallScreen } from '../components/call/CallScreen';
+import { CallFailureBanner } from '../components/call/CallFailureBanner';
 import { requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
 import { ExpoCallRingtone } from '../utils/call_session/ringtone';
 import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
@@ -72,6 +73,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
   const callHangupRef = useRef<() => void>(() => {});
+  const refreshLatestHistoryRef = useRef<((username: string, token: string) => Promise<void>) | null>(null);
   const onLogoutRef = useRef(onLogout);
   onLogoutRef.current = onLogout;
   const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
@@ -132,7 +134,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     requestPermission: requestCallMicrophonePermission,
     ringtone,
     onBackConfirmation: handleBackConfirmation,
-    onReturnToChat: () => { void resumeChat(); },
+     onReturnToChat: () => {
+       void (async () => {
+         await resumeChat();
+         if (username && message_token) await refreshLatestHistoryRef.current?.(username, message_token);
+       })();
+     },
     onPermissionSettings: handlePermissionSettings,
     onCleanupError: handleCallCleanupError,
   });
@@ -140,7 +147,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
   useEffect(() => () => ringtone.stop(), [ringtone]);
 
-  const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
+  const { loadHistory, historyLoading, refreshLatestHistory } = useHistoryLogic(addHistoryMessage, {
+    username,
+    characterId: 'luotianyi',
+    token: message_token,
+    resetEpoch: 0,
+  });
+  refreshLatestHistoryRef.current = refreshLatestHistory;
 
   const animateDrawer = useCallback((open: boolean) => {
     setDrawerOpen(open);
@@ -378,6 +391,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
       {call.state.phase !== 'IDLE' ? <CallScreen state={call.state} theme={theme} onHangup={call.hangup} onBack={handleBackConfirmation} /> : null}
+      {call.failureNotice ? <CallFailureBanner notice={call.failureNotice} theme={theme} onDismiss={call.dismissFailure} /> : null}
 
       <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
         <Image
@@ -490,6 +504,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             style={[styles.chatList, { backgroundColor: theme.chatList }]}
             contentContainerStyle={styles.chatListContent}
             showsVerticalScrollIndicator={true}
+            refreshing={historyLoading}
+            onRefresh={() => {
+              if (username && message_token) void refreshLatestHistory(username, message_token);
+            }}
             onScrollBeginDrag={Keyboard.dismiss}
           />
         </View>

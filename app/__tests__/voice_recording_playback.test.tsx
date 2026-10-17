@@ -87,6 +87,48 @@ describe('recording and playback through chat, processor and native voice manage
     await restarted.stop();
   });
 
+  it('updates an existing call from history through useChatLogic without duplicating its uuid', async () => {
+    await act(async () => {
+      state.addHistoryMessage([{
+        uuid: 'call-1', type: 'call', content: 'initial summary', isUser: true, timestamp: 1000,
+        durationMs: 1000, callOutcome: 'connected', audioLocalUri: 'file://call.m4a', audioPlayState: 'playing',
+        audioDownloadState: 'ready', audioAvailable: true,
+      }]);
+    });
+    await act(async () => {
+      state.addHistoryMessage([{
+        uuid: 'call-1', type: 'call', content: 'settled summary', isUser: true, timestamp: 2000,
+        durationMs: 2000, callOutcome: 'connected',
+      }], 'latest');
+    });
+
+    expect(state.messages.filter((message) => message.uuid === 'call-1')).toHaveLength(1);
+    expect(state.messages.find((message) => message.uuid === 'call-1')).toEqual(expect.objectContaining({
+      content: 'settled summary', timestamp: 2000, durationMs: 2000, callOutcome: 'connected',
+      audioLocalUri: 'file://call.m4a', audioPlayState: 'playing', audioDownloadState: 'ready',
+      audioAvailable: true, sendStatus: 'submitted',
+    }));
+  });
+
+  it('does not let an older history response overwrite a live agent message without sendStatus', async () => {
+    now.mockReturnValue(2000);
+    await act(async () => { incoming({ uuid: 'agent-live', text: 'live-new' }); await flush(); });
+    expect(state.messages.find((message) => message.uuid === 'agent-live')).toEqual(expect.objectContaining({
+      content: 'live-new', timestamp: 2000,
+    }));
+
+    await act(async () => {
+      state.addHistoryMessage([{
+        uuid: 'agent-live', type: 'text', content: 'stale-old', isUser: false, timestamp: 1000,
+      }], 'older');
+    });
+
+    expect(state.messages.filter((message) => message.uuid === 'agent-live')).toHaveLength(1);
+    expect(state.messages.find((message) => message.uuid === 'agent-live')).toEqual(expect.objectContaining({
+      content: 'live-new', timestamp: 2000,
+    }));
+  });
+
   it.each(['user', 'agent'])('stops %s history playback and resets the button before recording', async (kind) => {
     await act(async () => { state.addHistoryMessage([{ uuid: 'history', type: kind === 'user' ? 'audio' : 'text',
       content: 'history', isUser: kind === 'user', timestamp: 1, audioAvailable: true, audioLocalUri: 'file://history.m4a' }]); });

@@ -12,6 +12,8 @@ import { addDebugTrace } from '../utils/debug_trace';
 import { useVoiceInput } from './useVoiceInput';
 import { voicePlaybackManager } from '../utils/voice_playback_manager';
 import { runImageSelection } from '../utils/image_selection';
+import { mergeHistoryMessages } from '../utils/history_merge';
+import type { HistoryMergeMode } from '../utils/history_merge';
 
 function createUuid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -40,6 +42,10 @@ export const useChatLogic = (
   const clickTimestampsRef = useRef<number[]>([]);
   const voiceFilesRef = useRef(new Map<string, { localUri: string; durationMs: number }>());
   const voiceAckMapRef = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    setMessages([]);
+  }, [username, characterId]);
 
   const updateMessageByUuid = useCallback((uuid: string, updater: (msg: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((msg) => (msg.uuid === uuid ? updater(msg) : msg)));
@@ -440,7 +446,7 @@ export const useChatLogic = (
   const handleToggleAgentAudio = toggleHistoryAudio;
   const toggleVoicePlayback = toggleHistoryAudio;
 
-  const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
+  const addHistoryMessage = useCallback((newMessages: ChatMessage[], mode: HistoryMergeMode = 'older') => {
     for (const msg of newMessages) {
       if (!msg.isUser && msg.audioAvailable && msg.audioLocalUri) {
         messageProcessorRef.current?.setLocalAudioPath(msg.uuid, msg.audioLocalUri);
@@ -457,16 +463,14 @@ export const useChatLogic = (
           .map(([uploadId]) => uploadId),
       );
       const retained = prev.filter((msg) => !optimisticToReplace.has(msg.uuid));
-      const existingUuids = new Set(retained.map((msg) => msg.uuid));
       const normalized = newMessages
-        .filter((msg) => !existingUuids.has(msg.uuid))
         .map((msg) => ({
           ...msg,
           sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
           audioPlayState: msg.audioPlayState || 'idle',
           audioDownloadState: msg.type === 'audio' ? 'idle' : msg.audioDownloadState,
         }));
-      const next = [...retained, ...normalized.reverse()];
+      const next = mergeHistoryMessages(retained, normalized.reverse(), mode);
 
       if (nowScrollIndex >= 0) {
         // 快速滑动时目标 index 可能尚未渲染，scrollToIndex 会抛 invariant violation 导致应用闪退。

@@ -337,8 +337,11 @@ export class CallTransportSession {
         return;
       case 'call.active':
         this.validateCallIdentity(message);
-        this.update({ status: 'connected', connectedAtMonotonicMs: this.options.clock.monotonicMs() });
-        await this.options.nativeAudio.startCapture(INPUT_AUDIO_FORMAT, (frame) => this.onCapturedAudio(frame.payload));
+        const newlyActive = this.snapshot.connectedAtServerMs === undefined;
+        this.acceptActive(message);
+        if (newlyActive) {
+          await this.options.nativeAudio.startCapture(INPUT_AUDIO_FORMAT, (frame) => this.onCapturedAudio(frame.payload));
+        }
         return;
       case 'audio.stream_started':
         this.registerStream(message);
@@ -361,6 +364,27 @@ export class CallTransportSession {
     }
     if (this.snapshot.callId && this.snapshot.callId !== message.call_id) throw new Error('CALL_ID_MISMATCH');
     this.update({ callId: message.call_id, status: 'starting' });
+  }
+
+  private acceptActive(message: Extract<ControlMessage, { type: 'call.active' }>): void {
+    const existingAnchor = this.snapshot.connectedAtServerMs;
+    if (existingAnchor !== undefined) {
+      if (existingAnchor !== message.connected_at_ms) throw new Error('CONNECTED_AT_MISMATCH');
+      return;
+    }
+
+    const receivedMonotonicMs = this.options.clock.monotonicMs();
+    // `connected_at_ms` is a server UTC epoch (see stage_binding), not a
+    // monotonic value.  Convert its elapsed portion at receipt once, then only
+    // use the local monotonic clock so later wall-clock changes cannot jump the
+    // displayed duration. A future server timestamp deterministically starts at
+    // zero; call.v1 has no server-now field with which to estimate clock skew.
+    const elapsedAtReceiptMs = Math.max(0, this.options.clock.wallClockMs() - message.connected_at_ms);
+    this.update({
+      status: 'connected',
+      connectedAtServerMs: message.connected_at_ms,
+      connectedAtMonotonicMs: receivedMonotonicMs - elapsedAtReceiptMs,
+    });
   }
 
   private registerStream(message: AudioStreamStarted): void {

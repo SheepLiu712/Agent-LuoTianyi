@@ -14,6 +14,26 @@ export interface ImageResponse {
     newClientPath?: string; // 确定的新的缓存路径，实际上是URI，包含了文件协议头
 }
 
+// Conversation timestamps are serialized by the server from its naïve
+// Asia/Shanghai database datetime. Convert that wire format without relying on
+// the device's Date parser or local timezone.
+export function mapHistoryTimestamp(timestamp: unknown): number | undefined {
+    if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
+        return timestamp;
+    }
+    if (typeof timestamp !== 'string') {
+        return undefined;
+    }
+
+    const match = timestamp.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/);
+    if (!match) {
+        return undefined;
+    }
+    const [, year, month, day, hour, minute, second, fraction = ''] = match;
+    const milliseconds = Number(`${fraction}000`.slice(0, 3));
+    return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour) - 8, Number(minute), Number(second), milliseconds);
+}
+
 async function attachLocalAudioIfExists(msg: any, baseMessage: ChatMessage): Promise<ChatMessage> {
     // 历史音频使用固定本地缓存路径，重启后按 uuid 回连。
     // 唱歌消息在服务端以 type='sing' 持久化，同样需要回连音频（Bug#5）。
@@ -50,10 +70,10 @@ export function mapHistoryMessage(msg: any): ChatMessage {
         : undefined;
     return {
         uuid: msg.uuid || "unknown_id",
-        content: isCall ? '[语音通话]' : msg.content || (msg.type === 'audio' ? '[语音消息]' : ''),
+        content: isCall ? msg.content || '[语音通话]' : msg.content || (msg.type === 'audio' ? '[语音消息]' : ''),
         isUser: msg.source === 'user',
         type: isCall ? 'call' : msg.type,
-        timestamp: msg.timestamp,
+        timestamp: mapHistoryTimestamp(msg.timestamp),
         durationMs: isCall ? msg.active_duration_ms : msg.duration_ms ?? msg.durationMs,
         ...(isCall ? { callOutcome } : {}),
         audioAvailable: msg.type === 'audio' ? msg.audio_available !== false : undefined,
