@@ -15,9 +15,9 @@ class AgentBinder(QObject):
     delete_signal = Signal()
     free_signal = Signal(bool)
     history_signal = Signal(list, int)  # history_list, current_top_index
-    agent_thinking_signal = Signal(bool) # 是否正在思考中
-    local_tts_state_signal = Signal(str, str) # event, conv_uuid
-    expression_signal = Signal(str) # Live2D expression command
+    agent_thinking_signal = Signal(bool)  # 是否正在思考中
+    local_tts_state_signal = Signal(str, str)  # event, conv_uuid
+    expression_signal = Signal(str)  # Live2D expression command
 
     def __init__(
         self,
@@ -33,12 +33,19 @@ class AgentBinder(QObject):
         auto_login_callback: Callable[[str, str], bool],
         login_callback: Callable[[str, str, bool], Tuple[bool, str]],
         register_callback: Callable[[str, str, str], Tuple[bool, str]],
-        reset_account_callback: Callable[[str, str, str], Tuple[bool, str]] | None = None,
+        reset_account_callback: (
+            Callable[[str, str, str], Tuple[bool, str]] | None
+        ) = None,
         send_proactive_text_callback: Callable[[str], str] | None = None,
         set_base_url_callback: Callable[[str, bool], None] | None = None,
         send_image_selecting_callback: Callable[[], None] | None = None,
         send_image_selecting_cancel_callback: Callable[[], None] | None = None,
         is_server_audio_active_callback: Callable[[], bool] | None = None,
+        register_with_agreement_callback: Callable[..., object] | None = None,
+        fetch_agreement_callback: Callable[[], tuple] | None = None,
+        login_details_callback: Callable[..., tuple] | None = None,
+        auto_login_details_callback: Callable[..., tuple] | None = None,
+        accept_agreement_callback: Callable[..., tuple] | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -61,8 +68,15 @@ class AgentBinder(QObject):
         self.send_image_selecting_callback = send_image_selecting_callback
         self.send_image_selecting_cancel_callback = send_image_selecting_cancel_callback
         self.is_server_audio_active_callback = is_server_audio_active_callback
+        self.register_with_agreement_callback = register_with_agreement_callback
+        self.fetch_agreement_callback = fetch_agreement_callback
+        self.login_details_callback = login_details_callback
+        self.auto_login_details_callback = auto_login_details_callback
+        self.accept_agreement_callback = accept_agreement_callback
 
-        self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
+        self.msg_to_bubble: Dict[str, ChatBubble] = (
+            {}
+        )  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
         # 将跨线程的更新请求通过 Qt 信号转发到主线程执行
         self.update_signal.connect(self._handle_update_signal)
 
@@ -77,9 +91,9 @@ class AgentBinder(QObject):
         self.expression_signal.emit(expression)
 
     def emit_update_signal(self, msg_id: str, text: str):
-        '''
+        """
         根据发来的消息ID和状态，更新对应气泡的状态，具体而言是在气泡旁边显示一个状态图标。
-        '''
+        """
         # Emit a Qt signal so the actual widget operations run in the UI thread.
         self.update_signal.emit(msg_id, text)
 
@@ -102,17 +116,19 @@ class AgentBinder(QObject):
         elif text == "has_audio":
             # 当后端保存了本地音频文件，通知气泡添加播放图标
             try:
-                if hasattr(bubble, 'add_audio_label'):
+                if hasattr(bubble, "add_audio_label"):
                     bubble.add_audio_label()
                 else:
                     bubble.set_play_icon()
             except Exception:
                 pass
             finally:
-                self.msg_to_bubble.pop(msg_id, None)  # 无论成功与否都移除映射关系，避免内存泄漏
-        
+                self.msg_to_bubble.pop(
+                    msg_id, None
+                )  # 无论成功与否都移除映射关系，避免内存泄漏
+
     def emit_agent_thinking_signal(self, state: str):
-        is_thinking = (state == "thinking")
+        is_thinking = state == "thinking"
         self.agent_thinking_signal.emit(is_thinking)
 
     def emit_local_tts_state_signal(self, event: str, conv_uuid: str):
@@ -124,17 +140,55 @@ class AgentBinder(QObject):
         self.logger.error("Auto login callback not set")
         return False
 
-    def on_login(self, username: str, password: str, do_auto_login: bool = False) -> Tuple[bool, str]:
+    def on_auto_login_with_details(self, username: str, token: str):
+        if self.auto_login_details_callback:
+            return self.auto_login_details_callback(username, token)
+        return self.on_auto_login(username, token), "登录失败", {}
+
+    def on_login(
+        self, username: str, password: str, do_auto_login: bool = False
+    ) -> Tuple[bool, str]:
         if self.login_callback:
             return self.login_callback(username, password, do_auto_login)
         self.logger.error("Login callback not set")
         return False, "Login callback not set"
 
-    def on_register(self, username: str, password: str, invite_code: str) -> Tuple[bool, str]:
+    def on_login_with_details(
+        self, username: str, password: str, do_auto_login: bool = False
+    ):
+        if self.login_details_callback:
+            return self.login_details_callback(username, password, do_auto_login)
+        return (*self.on_login(username, password, do_auto_login), {})
+
+    def on_accept_agreement(self, username: str, version: str, **kwargs):
+        if self.accept_agreement_callback:
+            return self.accept_agreement_callback(username, version, **kwargs)
+        return False, "当前客户端未接线协议签署", {"code": "AGREEMENT_NOT_SENT"}
+
+    def on_register(
+        self, username: str, password: str, invite_code: str
+    ) -> Tuple[bool, str]:
         if self.register_callback:
             return self.register_callback(username, password, invite_code)
         self.logger.error("Register callback not set")
         return False, "Register callback not set"
+
+    def on_register_with_agreement(self, **kwargs):
+        """带协议同意的注册提交；未接线时返回 None，由调用方回退到旧路径。"""
+        if self.register_with_agreement_callback:
+            return self.register_with_agreement_callback(**kwargs)
+        return None
+
+    def on_registration_server_identity(self) -> str:
+        """返回注册回调绑定的服务器地址，用于恢复请求的服务器隔离。"""
+        owner = getattr(self.register_with_agreement_callback, "__self__", None)
+        return str(getattr(owner, "base_url", "") or "")
+
+    def on_fetch_agreement(self):
+        """拉取当前协议正文；返回 (ok, detail, payload)。"""
+        if self.fetch_agreement_callback:
+            return self.fetch_agreement_callback()
+        return False, "当前客户端未接线协议接口", None
 
     def on_set_model(self, model: Live2dModel):
         self.set_model_callback(model)
@@ -153,9 +207,16 @@ class AgentBinder(QObject):
     def on_send_typing(self, text_length: int):
         self.send_typing_callback(text_length=text_length)
 
-    def on_send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
+    def on_send_touch(
+        self,
+        touch_area: str | list,
+        click_frequency: dict = None,
+        touch_meta: dict = None,
+    ):
         if self.send_touch_callback:
-            self.send_touch_callback(touch_area, click_frequency=click_frequency, touch_meta=touch_meta)
+            self.send_touch_callback(
+                touch_area, click_frequency=click_frequency, touch_meta=touch_meta
+            )
 
     def is_server_audio_active(self) -> bool:
         if self.is_server_audio_active_callback:
@@ -186,7 +247,9 @@ class AgentBinder(QObject):
         if self.send_image_selecting_cancel_callback:
             self.send_image_selecting_cancel_callback()
 
-    def on_reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+    def on_reset_account(
+        self, invite_code: str, new_username: str, new_password: str
+    ) -> Tuple[bool, str]:
         """通过邀请码重置账号。"""
         if self.reset_account_callback:
             return self.reset_account_callback(invite_code, new_username, new_password)
@@ -205,10 +268,12 @@ class AgentBinder(QObject):
         :param end_index: 结束索引（不包含），-1表示从最新开始
         """
         if self.fetch_history_callback:
-            thread = threading.Thread(target=self._fetch_history, args=(count, end_index))
+            thread = threading.Thread(
+                target=self._fetch_history, args=(count, end_index)
+            )
             thread.daemon = True
             thread.start()
-    
+
     def send_text_proactive(self, text: str) -> str:
         """
         程序化地发送文本消息（用于主动提醒等场景）
@@ -219,7 +284,9 @@ class AgentBinder(QObject):
         if self.send_proactive_text_callback:
             msg_id = self.send_proactive_text_callback(text)
             return msg_id
-        self.logger.warning("send_proactive_text_callback not set, falling back to send_text")
+        self.logger.warning(
+            "send_proactive_text_callback not set, falling back to send_text"
+        )
         if self.send_text_callback:
             msg_id = self.send_text_callback(text)
             return msg_id

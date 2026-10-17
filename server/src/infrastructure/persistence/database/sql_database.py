@@ -396,6 +396,31 @@ class AgreementVersion(Base):
     created_at = Column(String, nullable=False)
 
 
+class AgreementSignature(Base):
+    """账号对某个协议版本的首次成功签署；重复同意不新增记录，也不覆盖首次时间。"""
+
+    __tablename__ = "agreement_signatures"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_uuid = Column(String, ForeignKey("users.uuid"), nullable=False)
+    agreement_version = Column(String, ForeignKey("agreement_versions.version"), nullable=False)
+    accepted_at = Column(String, nullable=False)
+
+    __table_args__ = (UniqueConstraint("user_uuid", "agreement_version", name="uq_agreement_signature_user_version"),)
+
+
+class RegistrationRequest(Base):
+    """已成功注册请求的结果，用于响应丢失后按同一请求 ID 恢复原结果。"""
+
+    __tablename__ = "registration_requests"
+
+    registration_request_id = Column(String, primary_key=True)
+    user_uuid = Column(String, ForeignKey("users.uuid"), nullable=False)
+    agreement_version = Column(String, ForeignKey("agreement_versions.version"), nullable=False)
+    response_json = Column(Text, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
 # Database URL
 SessionLocal = None
 engine = None
