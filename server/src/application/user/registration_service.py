@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
+
 from src.application.user.agreement_service import (
     AgreementService,
     Clock,
@@ -139,6 +141,14 @@ class RegistrationService:
                 )
             )
             db.commit()
+        except IntegrityError:
+            db.rollback()
+            replayed = self._recover_integrity_error(
+                username, password, invite_code, registration_request_id, agreement_version
+            )
+            if replayed is not None:
+                return replayed
+            raise
         except RegistrationError as error:
             db.rollback()
             # 两个相同 request ID 可能同时通过首次 replay 检查；若另一事务已提交，
@@ -183,6 +193,41 @@ class RegistrationService:
                 registration_request_id=registration_request_id,
                 agreement_version=agreement_version,
             )
+        finally:
+            db.close()
+
+    def _recover_integrity_error(
+        self,
+        username: str,
+        password: str,
+        invite_code: str,
+        registration_request_id: str,
+        agreement_version: str,
+    ) -> Optional[dict]:
+        """仅将已提交同请求或确认的注册竞争从完整性错误归一为业务结果。"""
+        replayed = self._replay_after_race(
+            username=username,
+            password=password,
+            invite_code=invite_code,
+            registration_request_id=registration_request_id,
+            agreement_version=agreement_version,
+        )
+        if replayed is not None:
+            return replayed
+        if self._has_competing_registration(username=username, invite_code=invite_code):
+            raise RegistrationError()
+        return None
+
+    def _has_competing_registration(self, *, username: str, invite_code: str) -> bool:
+        """回滚后确认完整性错误是否由另一笔注册占用用户名或邀请码造成。"""
+        db = self._credentials.new_session()
+        try:
+            username_claimed = db.query(User.uuid).filter(User.username == username).first() is not None
+            invite_claimed = (
+                db.query(InviteCode.code).filter(InviteCode.code == invite_code, InviteCode.is_used.is_(True)).first()
+                is not None
+            )
+            return username_claimed or invite_claimed
         finally:
             db.close()
 

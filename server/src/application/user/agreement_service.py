@@ -21,6 +21,18 @@ class AgreementTimeError(ValueError):
     """签署时间不符合服务端约定。"""
 
 
+class AgreementAcceptanceError(Exception):
+    code: str
+    status_code: int
+
+    def __init__(self, detail: str, *, code: str, status_code: int, extra: Optional[dict] = None) -> None:
+        self.detail = detail
+        self.code = code
+        self.status_code = status_code
+        self.extra = dict(extra or {})
+        super().__init__(detail)
+
+
 def agreement_now(clock: Optional[Clock] = None) -> datetime:
     """取当前签署时刻（UTC+8）；注入时钟必须返回带时区的时间。"""
     moment = clock() if clock is not None else datetime.now(UTC8)
@@ -58,9 +70,12 @@ def validate_signature_time(value: str, now: datetime) -> str:
 
 
 class AgreementService:
-    def __init__(self, current_version: str, docs: dict[str, AgreementDoc]):
+    def __init__(
+        self, current_version: str, docs: dict[str, AgreementDoc], exempt_user_uuids: Optional[set[str]] = None
+    ):
         self._current_version = current_version
         self._docs = docs
+        self._exempt_user_uuids = frozenset(exempt_user_uuids or ())
 
     @property
     def current_version(self) -> str:
@@ -71,6 +86,29 @@ class AgreementService:
 
     def get_current(self) -> AgreementDoc:
         return self._docs[self._current_version]
+
+    def is_exempt(self, user_uuid: str) -> bool:
+        return user_uuid in self._exempt_user_uuids
+
+    def is_login_eligible(self, session, user_uuid: str) -> bool:
+        return self.is_exempt(user_uuid) or first_signed_at(session, user_uuid, self.current_version) is not None
+
+    def accept(self, session, *, user_uuid: str, version: str, accepted: bool, clock: Optional[Clock] = None) -> str:
+        if accepted is not True:
+            raise AgreementAcceptanceError("必须明确提交同意", code="INVALID_AGREEMENT_INPUT", status_code=422)
+        if not self.is_current(version):
+            raise AgreementAcceptanceError(
+                "用户协议已更新，请重新阅读",
+                code="AGREEMENT_CHANGED",
+                status_code=409,
+                extra={"agreement_version": self.current_version},
+            )
+        now = agreement_now(clock)
+        accepted_at = format_agreement_time(now)
+        validate_signature_time(accepted_at, now)
+        stored, _ = record_signature(session, user_uuid=user_uuid, agreement_version=version, accepted_at=accepted_at)
+        session.commit()
+        return stored
 
 
 def first_signed_at(session, user_uuid: str, agreement_version: str) -> Optional[str]:

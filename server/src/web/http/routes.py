@@ -10,6 +10,7 @@ from src.utils.logger import get_logger
 
 from .runtime_access import require_bearer_token, runtime_not_ready_detail
 from .types import (
+    AgreementAcceptRequest,
     AutoLoginRequest,
     DynamicCommentCreateRequest,
     DynamicCommentListQuery,
@@ -60,6 +61,15 @@ async def get_agreement(server_runtime: "ServerRuntime" = Depends(get_runtime)):
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.post("/auth/agreement/accept")
+async def accept_agreement(
+    req: AgreementAcceptRequest,
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+    request: Request = None,
+):
+    return await server_runtime.user_interface.accept_agreement(req, server_runtime, request)
 
 
 @router.get("/llm/client-model-types")

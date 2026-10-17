@@ -52,7 +52,12 @@ class _LoadSignals(QObject):
 class _LoadTask(QRunnable):
     """在后台线程拉取协议正文，避免阻塞界面。"""
 
-    def __init__(self, request_id: int, loader: Callable[[], Mapping[str, Any]], signals: _LoadSignals) -> None:
+    def __init__(
+        self,
+        request_id: int,
+        loader: Callable[[], Mapping[str, Any]],
+        signals: _LoadSignals,
+    ) -> None:
         super().__init__()
         self._request_id = request_id
         self._loader = loader
@@ -237,7 +242,9 @@ class AgreementSignDialog(QDialog):
         self.retry_btn.setVisible(False)
         self._load_request_id += 1
         self._load_in_flight = True
-        self._thread_pool.start(_LoadTask(self._load_request_id, self._load_document, self._load_signals))
+        self._thread_pool.start(
+            _LoadTask(self._load_request_id, self._load_document, self._load_signals)
+        )
         return True
 
     def begin_submit(self) -> None:
@@ -246,12 +253,19 @@ class AgreementSignDialog(QDialog):
         self._set_error("")
         self._refresh_actions()
 
-    def finish_submit(self, success: bool, message: str = "") -> None:
+    def finish_submit(
+        self, success: bool, message: str = "", *, close: bool = False
+    ) -> None:
         """提交结果：成功关闭窗口；失败恢复可操作状态并保留本窗口的阅读状态。"""
         if success:
             self._timer.stop()
             self._allow_close = True
             self.accept()
+            return
+        if close:
+            self._timer.stop()
+            self._allow_close = True
+            self.reject()
             return
         self.gate.end_submit()
         self._allow_close = False
@@ -325,7 +339,11 @@ class AgreementSignDialog(QDialog):
             self.set_document(result)
             return
         # 与只读窗口同一个加载契约：loader 返回 (ok, detail, payload)。
-        ok, detail, payload = result if isinstance(result, tuple) and len(result) == 3 else (False, "", None)
+        ok, detail, payload = (
+            result
+            if isinstance(result, tuple) and len(result) == 3
+            else (False, "", None)
+        )
         if not ok or not isinstance(payload, Mapping):
             self._fail_load(str(detail) if detail else "")
             return
@@ -352,4 +370,9 @@ class AgreementSignDialog(QDialog):
         super().closeEvent(event)
 
 
-__all__ = ["AgreementSignDialog", "COLOR_DISABLED", "TEXT_REJECT", "TEXT_REJECT_READONLY"]
+__all__ = [
+    "AgreementSignDialog",
+    "COLOR_DISABLED",
+    "TEXT_REJECT",
+    "TEXT_REJECT_READONLY",
+]

@@ -1,3 +1,5 @@
+from typing import Literal, Union
+
 from fastapi import File, Form, UploadFile
 from pydantic import BaseModel, ConfigDict, StrictBool
 
@@ -50,6 +52,30 @@ class ResetAccountRequest(BaseModel):
 class AutoLoginRequest(BaseModel):
     username: str
     token: str
+
+
+class PasswordAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["password"]
+    username: str
+    password: str
+
+
+class AutoLoginAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["auto_login"]
+    username: str
+    token: str
+
+
+class AgreementAcceptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agreement_version: str
+    accepted: StrictBool
+    credential: Union[PasswordAgreementCredential, AutoLoginAgreementCredential]
 
 
 class PreferenceGetRequest(BaseModel):

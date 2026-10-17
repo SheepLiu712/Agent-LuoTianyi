@@ -16,6 +16,7 @@ class RegisterOutcome:
     message: str
     code: str = ""
     agreement_version: str = ""
+    status_code: int = 0
 
 
 def _error_code(response: requests.Response) -> str:
@@ -89,7 +90,9 @@ class AuthApi:
         self.verify_ssl = verify_ssl
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
 
-    def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str, dict]:
+    def login(
+        self, username: str, password: str, request_token: bool = False
+    ) -> Tuple[bool, str, dict]:
         encrypted_password = encrypt_pwd.encrypt_password(
             password,
             base_url=self.base_url,
@@ -109,7 +112,15 @@ class AuthApi:
             timeout=15,
         )
         if resp.status_code != 200:
-            return False, _error_detail(resp, "Login Failed"), {}
+            return (
+                False,
+                _error_detail(resp, "Login Failed"),
+                {
+                    "code": _error_code(resp),
+                    "agreement_version": _agreement_version(resp),
+                    "status_code": resp.status_code,
+                },
+            )
 
         data = resp.json()
         return True, "Login Successful", data
@@ -122,10 +133,74 @@ class AuthApi:
             timeout=15,
         )
         if resp.status_code != 200:
-            return False, {}
+            return False, {
+                "code": _error_code(resp),
+                "message": _error_detail(resp, "登录失败"),
+                "agreement_version": _agreement_version(resp),
+                "status_code": resp.status_code,
+            }
         return True, resp.json()
 
-    def register(self, username: str, password: str, invite_code: str) -> Tuple[bool, str]:
+    def accept_agreement(
+        self,
+        username: str,
+        version: str,
+        *,
+        password: str | None = None,
+        token: str | None = None,
+    ):
+        if (password is None) == (token is None):
+            return False, "协议签署凭据无效", {"status_code": 422}
+        if password is not None:
+            encrypted = encrypt_pwd.encrypt_password(
+                password, base_url=self.base_url, verify_ssl=self.verify_ssl
+            )
+            if not encrypted:
+                return (
+                    False,
+                    "无法发送协议签署请求，请检查服务器连接后重试",
+                    {"code": "AGREEMENT_NOT_SENT"},
+                )
+            credential = {
+                "kind": "password",
+                "username": username,
+                "password": encrypted,
+            }
+        else:
+            credential = {
+                "kind": "auto_login",
+                "username": username,
+                "token": token or "",
+            }
+        resp = self.session.post(
+            f"{self.base_url}/auth/agreement/accept",
+            json={
+                "agreement_version": version,
+                "accepted": True,
+                "credential": credential,
+            },
+            verify=self.verify_ssl,
+            timeout=15,
+        )
+        try:
+            body = resp.json()
+        except Exception:
+            body = {}
+        if resp.status_code == 200:
+            return True, "协议签署成功", body
+        return (
+            False,
+            _error_detail(resp, "协议签署失败"),
+            {
+                "code": _error_code(resp),
+                "agreement_version": _agreement_version(resp),
+                "status_code": resp.status_code,
+            },
+        )
+
+    def register(
+        self, username: str, password: str, invite_code: str
+    ) -> Tuple[bool, str]:
         outcome = self.register_with_agreement(username, password, invite_code)
         return outcome.ok, outcome.message
 
@@ -150,7 +225,11 @@ class AuthApi:
             verify_ssl=self.verify_ssl,
         )
         if not encrypted_password:
-            return RegisterOutcome(False, "Failed to encrypt password. Check server connection.")
+            return RegisterOutcome(
+                False,
+                "无法发送注册请求，请检查服务器连接后重试",
+                code="REGISTRATION_NOT_SENT",
+            )
 
         payload: dict = {
             "username": username,
@@ -179,9 +258,12 @@ class AuthApi:
             message,
             code=_error_code(resp),
             agreement_version=_agreement_version(resp),
+            status_code=resp.status_code,
         )
 
-    def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+    def reset_account(
+        self, invite_code: str, new_username: str, new_password: str
+    ) -> Tuple[bool, str]:
         """通过邀请码重置账号的用户名和密码。"""
         encrypted_password = encrypt_pwd.encrypt_password(
             new_password,

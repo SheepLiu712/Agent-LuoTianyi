@@ -668,8 +668,22 @@ class CredentialService:
         }
 
     def authenticate_password_login(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+        state = self.authenticate_password_identity(username, password)
+        if state is None:
+            return None
+        return self._rotate_authenticated_session(
+            username=username,
+            state=state[0],
+            expected_password=state[1],
+            replacement_password=state[2],
+        )
+
+    def authenticate_password_identity(
+        self, username: str, password: str
+    ) -> Optional[tuple[Dict[str, Any], str, Optional[str]]]:
+        """只验证密码身份，不轮换会话或更新登录时间。"""
         if not self.jwt_secret:
-            logger.error("JWT_SECRET is not set. Cannot authenticate password login.")
+            logger.error("JWT_SECRET is not set. Cannot authenticate password identity.")
             return None
         try:
             state = self._load_login_state(username)
@@ -686,12 +700,7 @@ class CredentialService:
                     return None
                 replacement_password = _hash_password(password)
 
-            return self._rotate_authenticated_session(
-                username=username,
-                state=state,
-                expected_password=stored_password,
-                replacement_password=replacement_password,
-            )
+            return state, stored_password, replacement_password
         except Exception as exc:
             logger.error(
                 "Password authentication failed for %s (%s)",
@@ -701,6 +710,11 @@ class CredentialService:
             return None
 
     def authenticate_auto_login(self, username: str, token: str) -> Optional[Dict[str, Any]]:
+        state = self.authenticate_auto_login_identity(username, token)
+        return self._rotate_authenticated_session(username=username, state=state) if state else None
+
+    def authenticate_auto_login_identity(self, username: str, token: str) -> Optional[Dict[str, Any]]:
+        """只验证自动登录凭据，不轮换令牌或更新登录时间。"""
         if not self.jwt_secret:
             logger.error("JWT_SECRET is not set. Cannot authenticate automatic login.")
             return None
@@ -714,7 +728,7 @@ class CredentialService:
                 or not hmac.compare_digest(str(stored_auth_token), token)
             ):
                 return None
-            return self._rotate_authenticated_session(username=username, state=state)
+            return state
         except Exception as exc:
             logger.error(
                 "Automatic authentication failed for %s (%s)",
@@ -722,6 +736,41 @@ class CredentialService:
                 type(exc).__name__,
             )
             return None
+
+    def lock_current_agreement_identity(
+        self,
+        db,
+        *,
+        username: str,
+        identity: Dict[str, Any],
+        credential_kind: str,
+        expected_password: Optional[str] = None,
+    ) -> bool:
+        """在签署事务中条件写入认证快照，避免重置后旧凭据仍可签署。
+
+        SQLite 没有行级 ``SELECT FOR UPDATE``。条件 ``UPDATE`` 是事务的首个
+        写操作，因此会在检查凭据仍有效的同时取得写锁；调用方必须在同一事务
+        中立即写入签署记录并提交。
+        """
+        user_uuid = str(identity["user_uuid"])
+        filters = [User.uuid == user_uuid, User.username == username]
+        if credential_kind == "password":
+            stored_password = expected_password if expected_password is not None else identity.get("password")
+            if not stored_password:
+                return False
+            filters.append(User.password == stored_password)
+        elif credential_kind == "auto_login":
+            auth_token = identity.get("auth_token")
+            if not auth_token:
+                return False
+            filters.append(User.auth_token == auth_token)
+        else:
+            return False
+
+        # The self-assignment has no observable account effect, but serializes this
+        # credential check with reset_account before agreement state is written.
+        matched = db.query(User).filter(*filters).update({User.auth_token: User.auth_token}, synchronize_session=False)
+        return matched == 1
 
     def update_login_time(self, user_id: str) -> Optional[float]:
         """

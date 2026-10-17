@@ -30,10 +30,22 @@ class CredentialService:
         self.elapsed_from_last_login = elapsed_from_last_login
 
     def authenticate_auto_login(self, username: str, token: str) -> dict:
-        return self._result()
+        return {"user_uuid": "user"}
 
     def authenticate_password_login(self, username: str, password: str) -> dict:
         return self._result()
+
+    def authenticate_auto_login_identity(self, username: str, token: str) -> dict:
+        return {"user_uuid": "user"}
+
+    def authenticate_password_identity(self, username: str, password: str) -> tuple[dict, str, None]:
+        return {"user_uuid": "user"}, "hash", None
+
+    def _rotate_authenticated_session(self, **kwargs) -> dict:
+        return self._result()
+
+    def new_session(self):
+        return SimpleNamespace(close=lambda: None)
 
     def _result(self) -> dict:
         return {
@@ -55,6 +67,7 @@ def runtime(elapsed_from_last_login: float | None):
             database_manager=database,
             stage_manager=stage_manager,
             agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
+            agreement_service=SimpleNamespace(is_login_eligible=lambda _db, _user_uuid: True),
         ),
         stage_manager,
     )

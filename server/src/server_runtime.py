@@ -16,6 +16,7 @@ from src.infrastructure.media import MediaResolver, create_media_resolver
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import ObservabilityService, set_observability_service
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
+from src.infrastructure.persistence.database.sql_database import User
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
 from src.utils.logger import (
@@ -91,6 +92,23 @@ class ServerRuntime:
             agreement_session = database_manager.open_sql_session()
             try:
                 agreement_service = prepare_agreements(agreement_session, AGREEMENT_RESOURCE)
+                exempt_user_uuids = config.get("user_agreements", {}).get("exempt_user_uuids", [])
+                if not isinstance(exempt_user_uuids, list) or any(
+                    not isinstance(user_uuid, str) or not user_uuid for user_uuid in exempt_user_uuids
+                ):
+                    raise ValueError("user_agreements.exempt_user_uuids 必须是非空账号 ID 的列表")
+                existing_user_uuids = {
+                    user_uuid
+                    for (user_uuid,) in agreement_session.query(User.uuid).filter(User.uuid.in_(exempt_user_uuids))
+                }
+                missing_user_uuids = set(exempt_user_uuids) - existing_user_uuids
+                if missing_user_uuids:
+                    raise ValueError(f"协议豁免账号不存在: {sorted(missing_user_uuids)}")
+                agreement_service = AgreementService(
+                    agreement_service.current_version,
+                    agreement_service._docs,
+                    set(exempt_user_uuids),
+                )
             finally:
                 agreement_session.close()
 

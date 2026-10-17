@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from src.application.user.registration_service import RegistrationService
 from src.application.user.agreement_service import AgreementService
+from src.application.user.registration_service import RegistrationService
 from src.infrastructure.persistence.database.database_service import DatabaseManager
 from src.infrastructure.persistence.database.services import credential_service
 from src.infrastructure.persistence.database.sql_database import (

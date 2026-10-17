@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { auth } from '../components/auth';
 import { loadSavedServerUrl, server_config } from '../config/index';
 import { encryptPassword, getPublicKey, type PublicKeyFailureReason } from '../utils/crypto';
@@ -8,13 +8,16 @@ import { addDebugTrace } from '../utils/debug_trace';
 import { classifyAutoLoginStatus, runAutoLoginWithRetry } from '../utils/auto_login';
 import { voicePlaybackManager } from '../utils/voice_playback_manager';
 import { AgreementPayload, parseAgreementPayload } from '../utils/agreement';
+import { loadRegistrationResume, markRegistrationSameUserLogin, markRegistrationUnknown, saveRegistrationResume, clearRegistrationResume } from '../utils/registration_resume';
+import { classifyAgreementSubmitFailure } from '../utils/agreement_failure';
+import { authFetch, isUnknownRegistrationResult } from '../utils/auth_request';
 
 const AUTO_LOGIN_KEY = 'auto_login';
 const USERNAME_KEY = 'saved_username';
 const AUTOLOGIN_TOKEN_KEY = 'auto_login_token';
 
 /** 根据加密失败原因生成面向用户的明确提示 */
-function describeEncryptFailure(scope: '登录' | '注册', reason: PublicKeyFailureReason | 'crypto'): string {
+function describeEncryptFailure(scope: '登录' | '注册' | '协议提交', reason: PublicKeyFailureReason | 'crypto'): string {
   switch (reason) {
     case 'network':
       return `${scope}失败，无法获取加密密钥，请检查网络后重试`;
@@ -28,11 +31,29 @@ function describeEncryptFailure(scope: '登录' | '注册', reason: PublicKeyFai
 // 自动登录进行中的标记，避免并发调用同时轮换 login_token 导致会话失效
 let autoLoginInFlight: Promise<boolean> | null = null;
 
+async function clearStoredAutoLoginCredentials(): Promise<void> {
+  await AsyncStorage.removeItem(AUTO_LOGIN_KEY);
+  await AsyncStorage.removeItem(USERNAME_KEY);
+  await SecureStore.deleteItemAsync(AUTOLOGIN_TOKEN_KEY);
+  await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
+}
+
 export interface AuthState {
   isLoggedIn: boolean;
   isLoading: boolean;  // 正在向服务器请求
   publicKeyLoaded: boolean;  // 公钥是否已加载
 }
+
+export type AgreementCredential =
+  | { kind: 'password'; username: string; password: string; autoLogin?: boolean }
+  | { kind: 'auto_login'; username: string; token: string };
+export interface PendingAgreement {
+  agreement: AgreementPayload;
+  credential: AgreementCredential;
+  registration?: { username: string; password: string; confirmPassword: string; inviteCode: string; requestId: string };
+  phase?: 'sign' | 'login';
+}
+export interface AuthResult { success: boolean; message: string; code?: string; agreement?: AgreementPayload; status?: number }
 
 /** 失败响应里取一句可显示的文案。
 
@@ -55,6 +76,11 @@ function agreementFailureMessage(detail: unknown): string {
 interface AgreementFetchOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+}
+
+async function getCurrentAgreementForAuth(): Promise<AgreementPayload | null> {
+  const result = await fetchCurrentAgreement();
+  return result.success ? result.data : null;
 }
 
 export async function fetchCurrentAgreement(
@@ -104,6 +130,10 @@ export function useAuth() {
     isLoading: true,
     publicKeyLoaded: false,
   });
+  const [pendingAgreement, setPendingAgreement] = useState<PendingAgreement | null>(null);
+  const registrationIdentityLock = useRef<Record<string, string>>({});
+  const autoLoginLastStatus = useRef<number | undefined>(undefined);
+  const dismissAgreement = useCallback(() => setPendingAgreement(null), []);
 
   /**
    * 尝试自动登录：瞬时故障（网络错误/5xx/429）按退避重试，
@@ -113,11 +143,12 @@ export function useAuth() {
   const tryAutoLogin = useCallback(async (username: string, token: string): Promise<boolean> => {
     const outcome = await runAutoLoginWithRetry(async (attemptNumber) => {
       try {
-        const response = await fetch(`${server_config.BASE_URL}/auth/auto_login`, {
+        const response = await authFetch(`${server_config.BASE_URL}/auth/auto_login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, token }),
         });
+        autoLoginLastStatus.current = response.status;
         if (response.ok) {
           const result = await response.json();
           // 获取到新的token后可以更新存储的token
@@ -127,14 +158,24 @@ export function useAuth() {
           auth.message_token = result.message_token;
           return 'ok';
         }
+        if (response.status === 403) {
+          const body: any = await response.json().catch(() => ({}));
+          if (body.code === 'AGREEMENT_REQUIRED') {
+            const agreement = await getCurrentAgreementForAuth();
+            if (agreement) setPendingAgreement({ agreement, credential: { kind: 'auto_login', username, token } });
+            return 'invalid';
+          }
+        }
         const classified = classifyAutoLoginStatus(response.status);
         if (classified === 'invalid') {
+          await clearStoredAutoLoginCredentials();
           addDebugTrace('auth', 'auto login rejected', { status: response.status, attempt: attemptNumber });
         } else {
           addDebugTrace('auth', 'auto login transient failure', { status: response.status, attempt: attemptNumber });
         }
         return classified;
       } catch (e) {
+        autoLoginLastStatus.current = undefined;
         // 网络波动/超时视为瞬时故障，退避后重试
         addDebugTrace('auth', 'auto login network failure', { error: String(e), attempt: attemptNumber });
         return 'transient';
@@ -217,7 +258,7 @@ export function useAuth() {
     initializeAuth();
   }, [initializeAuth]);
 
-  const login = useCallback(async (username: string, password: string, autoLogin: boolean): Promise<{ success: boolean; message: string }> => {
+  const login = useCallback(async (username: string, password: string, autoLogin: boolean): Promise<AuthResult> => {
     try {
       // 验证输入
       if (!username.trim() || !password.trim()) {
@@ -231,7 +272,7 @@ export function useAuth() {
         return { success: false, message: describeEncryptFailure('登录', encrypted.reason) };
       }
       // 发送登录请求
-      const response = await fetch(`${server_config.BASE_URL}/auth/login`, {
+      const response = await authFetch(`${server_config.BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -241,7 +282,13 @@ export function useAuth() {
       });
       const result = await response.json();
       if (!response.ok) {
-        return { success: false, message: result.detail || '登录失败' };
+        const code = result.code || result.detail?.code;
+        if (response.status === 403 && code === 'AGREEMENT_REQUIRED') {
+          const agreement = await getCurrentAgreementForAuth();
+          if (agreement) setPendingAgreement({ agreement, credential: { kind: 'password', username, password, autoLogin }, phase: 'sign' });
+          return { success: false, message: '请阅读并同意用户协议', code, agreement: agreement || undefined };
+        }
+        return { success: false, message: typeof result.detail === 'string' ? result.detail : '登录失败', code, status: response.status };
       }
 
       // 保存自动登录设置
@@ -263,6 +310,10 @@ export function useAuth() {
       }));
       auth.username = username;
       auth.message_token = result.message_token;
+      const resume = await loadRegistrationResume(server_config.BASE_URL);
+      if (resume?.state === 'same_user_login' && resume.username === username) {
+        await clearRegistrationResume(server_config.BASE_URL);
+      }
 
       return { success: true, message: '登录成功' };
     } catch (e) {
@@ -276,13 +327,23 @@ export function useAuth() {
     password: string,
     confirmPassword: string,
     inviteCode: string,
-  ): Promise<{ success: boolean; message: string }> => {
+    registrationRequestId?: string,
+    agreementVersion?: string,
+  ): Promise<AuthResult> => {
     try {
-      // TODO: 替换为实际的服务器注册请求
       if (!username.trim()) return { success: false, message: '用户名不能为空' };
       if (!password.trim()) return { success: false, message: '密码不能为空' };
       if (password !== confirmPassword) return { success: false, message: '两次密码不一致' };
       if (!inviteCode.trim()) return { success: false, message: '邀请码不能为空' };
+
+      const existing = await loadRegistrationResume(server_config.BASE_URL);
+      if (existing?.state === 'same_user_login') {
+        return {
+          success: false,
+          code: 'LOGIN_CONFIRMATION_REQUIRED',
+          message: '原注册结果无法核验，请先使用原账号登录确认；确认前不能创建新账号',
+        };
+      }
 
       // 加密密码
       const encrypted = await encryptPassword(password);
@@ -292,26 +353,126 @@ export function useAuth() {
       }
 
       // 发送注册请求
-      const response = await fetch(`${server_config.BASE_URL}/auth/register`, {
+      const resumeKey = registrationRequestId ? `${server_config.BASE_URL}\u0000${registrationRequestId}` : '';
+      const lockedIdentity = `${username}\u0000${password}\u0000${inviteCode}\u0000${agreementVersion || ''}`;
+      if (resumeKey && registrationIdentityLock.current[resumeKey] && registrationIdentityLock.current[resumeKey] !== lockedIdentity) {
+        return { success: false, message: '注册结果尚未确认，请先使用原用户名、密码和邀请码重试' };
+      }
+      if (resumeKey) registrationIdentityLock.current[resumeKey] = lockedIdentity;
+      if (registrationRequestId && agreementVersion) {
+        if (!existing || existing.requestId !== registrationRequestId) {
+          await saveRegistrationResume({
+            server: server_config.BASE_URL,
+            requestId: registrationRequestId,
+            username,
+            agreementVersion,
+            state: 'never_sent',
+          });
+        }
+      }
+      const response = await authFetch(`${server_config.BASE_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username,
           password: encrypted.encrypted,
           invite_code: inviteCode,
+          ...(registrationRequestId ? { registration_request_id: registrationRequestId } : {}),
+          ...(agreementVersion ? { agreement_version: agreementVersion, accepted: true } : {}),
         }),
       });
-      const result = await response.json();
+      let result: any;
+      try {
+        result = await response.json();
+      } catch {
+        if (registrationRequestId && agreementVersion) {
+          await markRegistrationUnknown(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
+        }
+        return { success: false, message: '注册结果未确认，请使用原信息重试' };
+      }
       if (!response.ok) {
-        return { success: false, message: result.detail || '注册失败' };
+        if (isUnknownRegistrationResult(response.status)) {
+          if (registrationRequestId && agreementVersion) {
+            await markRegistrationUnknown(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
+          }
+        }
+        const code = result.code || result.detail?.code;
+        if (code === 'AGREEMENT_CHANGED') {
+          await clearRegistrationResume(server_config.BASE_URL);
+          if (resumeKey) delete registrationIdentityLock.current[resumeKey];
+        } else if (code === 'REGISTRATION_REQUEST_UNVERIFIABLE' && registrationRequestId && agreementVersion) {
+          await markRegistrationSameUserLogin(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
+        }
+        return { success: false, message: typeof result.detail === 'string' ? result.detail : '注册失败', code, agreement: code === 'AGREEMENT_CHANGED' ? await getCurrentAgreementForAuth() || undefined : undefined };
       }
 
+      if (registrationRequestId && agreementVersion && result?.message) {
+        await clearRegistrationResume(server_config.BASE_URL);
+        if (resumeKey) delete registrationIdentityLock.current[resumeKey];
+      }
       return { success: true, message: '注册成功，请登录' };
     } catch (e) {
+      if (registrationRequestId && agreementVersion) {
+        await markRegistrationUnknown(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
+      }
       addDebugTrace('auth', 'register error', { error: String(e) });
       return { success: false, message: '注册失败，请联系管理员' };
     }
-  }, []);
+  }, [getCurrentAgreementForAuth]);
+
+  const acceptAgreement = useCallback(async (pending: PendingAgreement): Promise<AuthResult> => {
+    try {
+      if (pending.phase === 'login') {
+        const resumed = pending.credential.kind === 'password'
+          ? await login(pending.credential.username, pending.credential.password, Boolean(pending.credential.autoLogin))
+          : await tryAutoLogin(pending.credential.username, pending.credential.token).then(success => ({ success, message: success ? '登录成功' : '登录失败', status: autoLoginLastStatus.current }));
+        if (resumed.success) setPendingAgreement(null);
+        if (resumed.status === 401) {
+          dismissAgreement();
+          if (pending.credential.kind === 'auto_login') await clearStoredAutoLoginCredentials();
+        }
+        return resumed;
+      }
+      let credential: AgreementCredential = pending.credential;
+      if (pending.credential.kind === 'password') {
+        const encrypted = await encryptPassword(pending.credential.password);
+        if (!encrypted.ok) return { success: false, message: describeEncryptFailure('协议提交', encrypted.reason) };
+        credential = { kind: 'password', username: pending.credential.username, password: encrypted.encrypted };
+      }
+      const response = await authFetch(`${server_config.BASE_URL}/auth/agreement/accept`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agreement_version: pending.agreement.version, accepted: true, credential }),
+      });
+      const body: any = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const code = body.code || body.detail?.code;
+        const failure = classifyAgreementSubmitFailure(response.status, code);
+        if (failure === 'credential_invalid') {
+          dismissAgreement();
+          if (pending.credential.kind === 'auto_login') {
+            await clearStoredAutoLoginCredentials();
+          }
+          return { success: false, message: '登录凭据已失效，请重新登录', code };
+        }
+        const agreement = failure === 'version_changed' ? await getCurrentAgreementForAuth() || undefined : undefined;
+        if (agreement) setPendingAgreement({ ...pending, agreement, phase: 'sign' });
+        return { success: false, message: typeof body.detail === 'string' ? body.detail : '协议提交失败，请重试', code, agreement };
+      }
+      const signedPending = { ...pending, phase: 'login' as const };
+      setPendingAgreement(signedPending);
+      const result = pending.credential.kind === 'password'
+        ? await login(pending.credential.username, pending.credential.password, Boolean(pending.credential.autoLogin))
+        : await tryAutoLogin(pending.credential.username, pending.credential.token).then(success => ({ success, message: success ? '登录成功' : '登录失败', status: autoLoginLastStatus.current }));
+      if (result.success) setPendingAgreement(null);
+      if (result.status === 401) {
+        dismissAgreement();
+        if (pending.credential.kind === 'auto_login') await clearStoredAutoLoginCredentials();
+      }
+      return result;
+    } catch {
+      return { success: false, message: '协议提交失败，请重试' };
+    }
+  }, [dismissAgreement, getCurrentAgreementForAuth, login, tryAutoLogin]);
 
   const logout = useCallback(async () => {
     try {
@@ -329,12 +490,15 @@ export function useAuth() {
     } catch (e) {
       addDebugTrace('auth', 'logout error', { error: String(e) });
     }
-  }, []);
+  }, [getCurrentAgreementForAuth]);
 
   return {
     ...authState,
     login,
     register,
+    pendingAgreement,
+    acceptAgreement,
+    dismissAgreement,
     logout,
   };
 }
