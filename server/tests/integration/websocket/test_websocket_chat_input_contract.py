@@ -30,6 +30,8 @@ class Socket:
 
 
 class Stage:
+    input_suspended = False
+
     def __init__(self):
         self.interaction_id = "interaction"
         self.user_id = "user-1"

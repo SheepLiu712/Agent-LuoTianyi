@@ -3,6 +3,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from support.stage_manager import make_stage_manager
 
 import src.server_runtime as runtime_module
 from src.adapter.websocket import WebSocketAdapter
@@ -10,7 +11,6 @@ from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.infrastructure.persistence.database import vector_store as vector_store_module
 from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
-from src.stage import StageManager
 from src.stage.call_settlement import CallRecoveryReport
 
 
@@ -206,7 +206,7 @@ async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_de
     entered = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _character: object(),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),
@@ -277,7 +277,7 @@ async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_fail
     entered = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _character: object(),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),

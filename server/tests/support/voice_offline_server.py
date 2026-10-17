@@ -37,11 +37,11 @@ from src.agent.skills.expression.speaking import SpeakingSkill
 from src.domain import CharacterProfile
 from src.infrastructure.media import PermanentMediaStore, create_media_resolver
 from src.infrastructure.persistence.database import DatabaseManager, InviteCode
-from src.stage import StageManager
 from src.web.http import routes
 from src.web.http.user_interface import UserInterface
 from src.web.websocket import endpoint
 from src.web.websocket.service import WebSocketService
+from support.stage_manager import make_stage_manager
 
 
 class OfflineModels:
@@ -146,7 +146,7 @@ def make_runtime(root):
     agent = make_agent(root, resolver, models)
     adapter = WebSocketAdapter(config)
     factory = ContextFactory(character_id="luotianyi", database=database.conversation_service)
-    manager = StageManager(get_agent=lambda _: agent, adapter=adapter, get_context_factory=lambda _: factory)
+    manager = make_stage_manager(get_agent=lambda _: agent, adapter=adapter, get_context_factory=lambda _: factory)
     interface = UserInterface(database, resolver)
     interface.generate_rsa_keys()
     return SimpleNamespace(

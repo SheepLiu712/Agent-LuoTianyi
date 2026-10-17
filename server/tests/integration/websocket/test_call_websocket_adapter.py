@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
@@ -19,7 +20,6 @@ from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage import StageManager
 from src.stage.call_stage import CallStateChanged
 from src.utils.logger import get_logger
 from tests.integration.stage.test_call_stage import _ContextDatabase
@@ -57,7 +57,7 @@ def resume_message(call_id):
 
 def manager(*, speech_factory, repository=None, wall_clock=None):
     repository = repository or InMemoryCallSessionRepository()
-    stages = StageManager(
+    stages = make_stage_manager(
         get_agent=lambda _character: RecordingAgent(),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
@@ -138,7 +138,7 @@ async def test_call_start_during_finalization_returns_retryable_public_error(
 
         raise InteractionFinalizing()
 
-    monkeypatch.setattr(stages, "open_call", reject_finalizing)
+    monkeypatch.setattr(stages, "_get_call_control", reject_finalizing)
     with pytest.raises(CallTransportError) as rejected:
         await adapter.open(raw=start_message(), user_id="user", connection_id=object())
 
@@ -390,7 +390,7 @@ async def test_failed_business_resume_keeps_cursor_and_allows_later_resume(monke
     async def fail_resume(*args, **kwargs):
         raise RuntimeError("CALL_RESUME_UNAVAILABLE")
 
-    monkeypatch.setattr(stages, "resume_call", fail_resume)
+    monkeypatch.setattr(stages, "_resume_call_control", fail_resume)
     with pytest.raises(CallTransportError, match="CALL_RESUME_UNAVAILABLE"):
         await adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object())
     assert session.server_ack_cursor == before

@@ -4,12 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from support.stage_manager import make_stage_manager
 
+from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.call_v1 import CallWebSocketAdapter, parse_call_transport_enabled
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.stage import StageManager
 from src.stage.call_settlement import CallRecoveryReport
-from src.stage.stage_manager import CallOpenRequest
 
 
 @pytest.mark.parametrize("config", [{}, {"call_transport": {}}, {"call_transport": {"enabled": False}}])
@@ -124,9 +125,12 @@ async def test_manager_rejects_call_admission_until_recovery_completes():
     await entered.wait()
 
     with pytest.raises(RuntimeError, match="CALL_INGRESS_UNAVAILABLE"):
-        await manager.open_call(
-            CallOpenRequest("user", "luotianyi", "request"),
-            SimpleNamespace(),
+        await manager.try_to_get_stage(
+            stage_type="call",
+            user_id="user",
+            character_id="luotianyi",
+            client_request_id="request",
+            transport=SimpleNamespace(),
         )
 
     release.set()
@@ -247,9 +251,9 @@ async def test_cancelled_initialize_waiters_do_not_cancel_owner_and_close_drains
 
 
 def _manager_with_blocking_thread_recovery(*, error=None):
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _character: object(),
-        adapter=SimpleNamespace(),
+        adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),
     )
     manager._recovery_ready = False

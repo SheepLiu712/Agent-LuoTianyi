@@ -113,7 +113,7 @@ class VoiceUploadAssembler:
             if phase == "chunk":
                 return self._chunk(payload, user_id, upload_id)
             if phase == "finalize":
-                return await self._finalize(event, payload, user_id, character_id, upload_id)
+                return await self._finalize(event, payload, user_id, character_id, upload_id, sink)
             if phase == "abort":
                 return self._abort(event, payload, user_id, upload_id)
             raise VoiceUploadError("BAD_MESSAGE", "invalid voice upload phase")
@@ -302,6 +302,7 @@ class VoiceUploadAssembler:
         user_id: str,
         character_id: str,
         upload_id: str,
+        sink: StimulusSink,
     ) -> VoiceUploadAck:
         if set(payload) - {"phase", "upload_id", "target_character_ids", "target_character_id", "character_id"}:
             raise VoiceUploadError("BAD_MESSAGE", "finalize contains unsupported fields")
@@ -329,7 +330,7 @@ class VoiceUploadAssembler:
             client_msg_id=upload_id,
             duration_ms=duration_ms,
         )
-        if not upload.sink.can_accept(stimulus) or not upload.sink.submit(stimulus):
+        if not sink.can_accept(stimulus) or not sink.submit(stimulus):
             raise VoiceUploadError("OVERLOADED", "chat ingress queue is full", retryable=True)
         parameters = (
             upload.character_id,

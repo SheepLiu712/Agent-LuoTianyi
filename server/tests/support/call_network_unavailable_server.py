@@ -28,7 +28,6 @@ from src.application.host_context import ServerHostContext
 from src.infrastructure.observability import CallMetrics, ObservabilityService
 from src.infrastructure.persistence.database import DatabaseManager, InviteCode
 from src.server_runtime import ServerRuntime
-from src.stage import StageManager
 from src.web.http import routes
 from src.web.http.user_interface import UserInterface
 from src.web.websocket import call_endpoint, endpoint
@@ -41,6 +40,7 @@ from support.call_coherent_runtime import (
     NoopMediaResolver,
     runtime_config,
 )
+from support.stage_manager import make_stage_manager
 
 
 def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntime:
@@ -60,7 +60,7 @@ def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntim
     llm = DeterministicLLMService()
     agents = agent_runtime_module.AgentRuntime(runtime_config(root), llm, database, media_resolver=NoopMediaResolver())
     adapter = WebSocketAdapter(default_character_id=agents.default_character_id)
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=agents.get_agent,
         adapter=adapter,
         get_context_factory=agents.context_factories.__getitem__,

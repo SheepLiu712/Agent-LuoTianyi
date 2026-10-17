@@ -6,7 +6,7 @@ import io
 import json
 import wave
 from io import BytesIO
-from threading import get_ident
+from threading import Event, get_ident
 from types import SimpleNamespace
 
 import pytest
@@ -54,6 +54,8 @@ class Socket:
 
 
 class Endpoint:
+    input_suspended = False
+
     """只替换 Stage，观察 adapter 交付的刺激和连接通知。"""
 
     def __init__(self, interaction_id="interaction", user_id="user", character_id="luotianyi"):
@@ -64,7 +66,7 @@ class Endpoint:
         self.states = []
 
     def can_accept(self, stimulus):
-        return self.available
+        return self.available and not self.input_suspended
 
     def submit(self, stimulus):
         self.stimuli.append(stimulus)
@@ -642,16 +644,16 @@ async def test_adapter_dedup_overload_typing_and_maintenance_bypass():
     _, connection, adapter, stage = await setup_output()
     event = WSMessage(event_type="user_typing", client_msg_id="typing", payload={"text_length": 4})
     stage.available = False
-    assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.OVERLOADED
+    assert await adapter.receive(connection, event) is ChatEventAcceptance.OVERLOADED
     stage.available = True
-    assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.ACCEPTED
-    assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.DUPLICATE
+    assert await adapter.receive(connection, event) is ChatEventAcceptance.ACCEPTED
+    assert await adapter.receive(connection, event) is ChatEventAcceptance.DUPLICATE
     assert len(stage.stimuli) == 1 and isinstance(stage.stimuli[0], d.UserTyping)
     assert stage.stimuli[0].text_length == 4
     bad = WSMessage(event_type="user_typing", client_msg_id="bad", payload={"text_length": True})
-    assert await adapter.try_accept_event(connection, bad) is ChatEventAcceptance.BAD_MESSAGE
+    assert await adapter.receive(connection, bad) is ChatEventAcceptance.BAD_MESSAGE
     assert (
-        await adapter.try_accept_event(connection, WSMessage(event_type="heartbeat", payload={}))
+        await adapter.receive(connection, WSMessage(event_type="heartbeat", payload={}))
         is ChatEventAcceptance.UNSUPPORTED
     )
     await adapter.disconnect(stage)
@@ -661,17 +663,54 @@ async def test_adapter_dedup_overload_typing_and_maintenance_bypass():
 async def test_adapter_business_suspension_rejects_without_dedup_or_stage_delivery():
     _, connection, adapter, stage = await setup_output()
     event = WSMessage(event_type="user_typing", client_msg_id="suspended", payload={"text_length": 4})
-    adapter.suspend_business_input(connection, interaction_id=stage.interaction_id)
+    stage.input_suspended = True
 
-    rejection = await adapter.try_accept_event(connection, event)
+    rejection = await adapter.receive(connection, event)
 
     assert rejection.code == "CALL_SWITCH_PENDING"
     assert rejection.retryable is True
     assert stage.stimuli == []
     assert not adapter._is_duplicate_client_message(connection, event)
-    assert adapter.resume_business_input(connection, interaction_id=stage.interaction_id)
-    assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.ACCEPTED
+    stage.input_suspended = False
+    assert await adapter.receive(connection, event) is ChatEventAcceptance.ACCEPTED
     await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["suspend", "disconnect", "rebind"])
+async def test_image_finishing_after_admission_changes_is_not_delivered(tmp_path, monkeypatch, change):
+    _, connection, adapter, stage = await setup_output(WebSocketAdapter({"media_store": {"root": str(tmp_path)}}))
+    entered, release = Event(), Event()
+    persist = adapter._media_store.persist_image
+
+    def blocked_persist(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return persist(**kwargs)
+
+    monkeypatch.setattr(adapter._media_store, "persist_image", blocked_persist)
+    event = WSMessage(
+        event_type="user_image",
+        client_msg_id="late-image",
+        payload={"image_base64": base64.b64encode(png_bytes()).decode("ascii")},
+    )
+    receiving = asyncio.create_task(adapter.receive(connection, event))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        if change == "suspend":
+            stage.input_suspended = True
+        elif change == "disconnect":
+            await adapter.disconnect(stage)
+        else:
+            await adapter.bind(stage, WebSocketConnection(Socket(), "user", "replacement"))
+        release.set()
+        assert await receiving is ChatEventAcceptance.OVERLOADED
+        assert not stage.stimuli
+        assert not adapter._is_duplicate_client_message(connection, event)
+    finally:
+        release.set()
+        await asyncio.gather(receiving, return_exceptions=True)
+        await adapter.disconnect(stage)
 
 
 def test_adapter_warns_when_media_store_is_not_configured(caplog, capture_project_log):
@@ -699,7 +738,7 @@ async def test_touch_and_image_selection_business_events_become_typed_stimuli():
     )
 
     for event in events:
-        assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.ACCEPTED
+        assert await adapter.receive(connection, event) is ChatEventAcceptance.ACCEPTED
 
     touch, opened, closed = stage.stimuli
     assert isinstance(touch, d.TouchInteraction)
@@ -712,13 +751,13 @@ async def test_touch_and_image_selection_business_events_become_typed_stimuli():
 
 
 @pytest.mark.asyncio
-async def test_voice_is_known_business_input_but_rejected_until_protocol_exists():
+async def test_malformed_voice_upload_is_rejected_by_unified_entry():
     _, connection, adapter, stage = await setup_output()
     event = WSMessage(event_type="user_voice", client_msg_id="voice", payload={})
 
     assert "user_voice" in BUSINESS_INPUT_EVENTS
     assert adapter.supports_input(event)
-    assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.BAD_MESSAGE
+    assert (await adapter.receive(connection, event)).code == "BAD_MESSAGE"
     assert stage.stimuli == []
     await adapter.disconnect(stage)
 

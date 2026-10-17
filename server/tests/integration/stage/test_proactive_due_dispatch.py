@@ -5,11 +5,12 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent.context import ConversationMode
-from src.stage import DueEvent, StageManager
+from src.stage import DueEvent
 from src.web.websocket.service import WebSocketConnection
 
 
@@ -174,14 +175,14 @@ class RecordingAgent:
 
 
 async def connected_manager(provider: DueEvents, agent: RecordingAgent, **stage_config):
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _: agent,
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: ContextFactory(),
         due_event_provider=provider,
         config={"stage": {"proactive_idle_seconds": 0.01, **stage_config}},
     )
-    stage = await manager.connect(
+    stage = await manager._chat_output_sink.open(
         WebSocketConnection(Socket(), "user", "用户"),
         "luotianyi",
     )

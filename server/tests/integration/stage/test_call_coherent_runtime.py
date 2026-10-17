@@ -14,6 +14,7 @@ from support.call_coherent_runtime import (
     runtime_config,
 )
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_manager import make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
 import src.domain.agent as d
@@ -30,7 +31,7 @@ from src.infrastructure.models.realtime_speech import (
 )
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
-from src.stage import CallStage, StageManager
+from src.stage import CallStage
 from src.stage._finalization import CallFinalizationSink
 from src.stage.call_settlement import CallSettlement
 
@@ -96,7 +97,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         media_resolver=NoopMediaResolver(),
     )
     adapter = WebSocketAdapter()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=runtime.get_agent,
         adapter=adapter,
         get_context_factory=lambda character_id: runtime.context_factories[character_id],

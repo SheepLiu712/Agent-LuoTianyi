@@ -185,7 +185,8 @@ class ServerRuntime:
             )
             runtime.stage_manager = StageManager(
                 get_agent=agent_runtime.get_agent,
-                adapter=runtime.chat_adapter,
+                chat_output_sink=runtime.chat_adapter,
+                detach_stage_binding=runtime.chat_adapter.disconnect,
                 get_context_factory=agent_runtime.context_factories.__getitem__,
                 due_event_provider=EventStoreDueEventProvider(event_store),
                 call_sessions=database_manager.call_sessions,
@@ -197,6 +198,7 @@ class ServerRuntime:
                 user_reset_fence=reset_fence,
                 config=config.get("stage_manager", {}),
             )
+            runtime.chat_adapter.initialize(runtime.stage_manager)
             runtime.call_adapter = CallWebSocketAdapter(
                 manager=runtime.stage_manager,
                 user_reset_fence=reset_fence,

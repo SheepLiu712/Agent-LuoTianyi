@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
@@ -15,7 +16,7 @@ from src.agent.context import ConversationMode
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.domain.stage import StageState
-from src.stage import ChatStage, StageManager
+from src.stage import ChatStage
 from src.web.websocket import WSMessage
 from src.web.websocket.service import WebSocketConnection
 
@@ -205,7 +206,7 @@ async def setup(agent=None, config=None):
         user_id="user",
         character_id="luotianyi",
         agent=agent,
-        adapter=adapter,
+        output_sink=adapter,
         config={"response_wait": 0.02, **(config or {})},
         context_factory=StageContextFactory(),
     )
@@ -359,19 +360,19 @@ async def test_input_capacity_identity_and_inactive_output_rejection():
 @pytest.mark.asyncio
 async def test_manager_reconnect_old_disconnect_and_offline_expiry():
     adapter, agent = WebSocketAdapter(), RecordingAgent()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_context_factory=StageContextFactory,
         get_agent=lambda _: agent,
         adapter=adapter,
         config={"offline_timeout": 0.15},
     )
     old = WebSocketConnection(Socket(), "user", "用户")
-    stage = await manager.connect(old, "luotianyi")
-    other = await manager.connect(old, "miku")
-    await manager.disconnect(old)
+    stage = await manager._chat_output_sink.open(old, "luotianyi")
+    other = await manager._chat_output_sink.open(old, "miku")
+    await manager._chat_output_sink.close_connection(old)
     new = WebSocketConnection(Socket(), "user", "用户")
-    assert await manager.connect(new, "luotianyi") is stage
-    await manager.disconnect(old)
+    assert await manager._chat_output_sink.open(new, "luotianyi") is stage
+    await manager._chat_output_sink.close_connection(old)
     assert stage.state is StageState.ONLINE
     ending = await take(agent.requests)
     assert ending.interaction.interaction_id == other.interaction_id
@@ -398,21 +399,21 @@ async def test_reconnect_during_ending_is_rejected_until_finalization_finishes()
         return report(request)
 
     adapter = WebSocketAdapter()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_context_factory=StageContextFactory,
         get_agent=lambda _: RecordingAgent(handle),
         adapter=adapter,
         config={"offline_timeout": 0},
     )
     old = WebSocketConnection(Socket(), "user", "用户")
-    stage = await manager.connect(old, "luotianyi")
-    await manager.disconnect(old)
+    stage = await manager._chat_output_sink.open(old, "luotianyi")
+    await manager._chat_output_sink.close_connection(old)
     await asyncio.wait_for(ending_started.wait(), 1)
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
-        await manager.connect(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
+        await manager._chat_output_sink.open(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
     gate.set()
     await manager._finalizations.close()
-    new = await manager.connect(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
+    new = await manager._chat_output_sink.open(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
     assert new is not stage and new.interaction_id != stage.interaction_id
     await manager.close()
     assert stage.state is new.state is StageState.TERMINATED
@@ -455,7 +456,7 @@ async def test_stage_releases_context_after_ending_handler():
         ),
     )
     stage = await ChatStage.create(
-        user_id="user", character_id="luotianyi", agent=agent, adapter=adapter, context_factory=factory
+        user_id="user", character_id="luotianyi", agent=agent, output_sink=adapter, context_factory=factory
     )
     termination = asyncio.create_task(stage.terminate(d.InteractionEndingReason.USER_LEFT))
     await entered.wait()
@@ -597,7 +598,7 @@ async def test_stage_construction_failure_closes_created_context():
             user_id="user",
             character_id="luotianyi",
             agent=RecordingAgent(),
-            adapter=WebSocketAdapter(),
+            output_sink=WebSocketAdapter(),
             context_factory=factory,
             config={"max_stimuli": 0},
         )

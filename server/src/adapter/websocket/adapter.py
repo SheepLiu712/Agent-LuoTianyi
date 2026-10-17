@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -23,6 +24,7 @@ from .voice_upload import VoiceUploadAck, VoiceUploadAssembler, VoiceUploadError
 
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
+    from src.stage.stage_manager import StageManager
     from src.web.websocket import WebSocketConnection
 
 logger = get_logger(__name__)
@@ -33,6 +35,25 @@ class _Binding:
     stage: ChatStage
     connection: WebSocketConnection
     controls: set[asyncio.Task[None]] = field(default_factory=set)
+    accepting: bool = True
+
+
+class _BoundInputSink:
+    """异步上传只能向发起该次投递的有效绑定提交刺激。"""
+
+    def __init__(self, binding: _Binding) -> None:
+        self._binding = binding
+
+    def can_accept(self, stimulus: d.Stimulus) -> bool:
+        binding = self._binding
+        return (
+            binding.accepting
+            and not binding.connection.is_closed
+            and binding.stage.stimulus_input_sink.can_accept(stimulus)
+        )
+
+    def submit(self, stimulus: d.Stimulus) -> bool:
+        return self.can_accept(stimulus) and self._binding.stage.stimulus_input_sink.submit(stimulus)
 
 
 class ChatEventAcceptance(str, Enum):
@@ -88,14 +109,94 @@ class WebSocketAdapter:
         self._recent_client_messages: OrderedDict[str, float] = OrderedDict()
         self._recent_client_msg_ttl_seconds = 600.0
         self._recent_client_msg_limit = 4096
-        self._suspended_connections: dict[WebSocketConnection, str] = {}
+        self._stage_manager: StageManager | None = None
+        self._admission_lock = asyncio.Lock()
+
+    def initialize(self, stage_manager: StageManager) -> None:
+        if self._stage_manager is not None and self._stage_manager is not stage_manager:
+            raise RuntimeError("adapter already initialized")
+        self._stage_manager = stage_manager
+
+    async def open(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
+        return await complete_owned(self._open(connection, character_id))
+
+    async def _open(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
+        if self._stage_manager is None:
+            raise RuntimeError("adapter is not initialized")
+        async with self._admission_lock:
+            stage = await self._stage_manager.try_to_get_stage(
+                user_id=connection.user_uuid,
+                character_id=character_id,
+                connection=connection,
+            )
+            try:
+                await self.bind(stage, connection)
+            except BaseException:
+                await self._stage_manager.disconnect(connection)
+                raise
+            return stage
+
+    async def close_connection(self, connection: WebSocketConnection) -> None:
+        await complete_owned(self._close_connection(connection))
+
+    async def _close_connection(self, connection: WebSocketConnection) -> None:
+        connection.mark_disconnected()
+        for binding in tuple(self._routes.values()):
+            if binding.connection is connection:
+                await self.disconnect(binding.stage, connection)
+        if self._stage_manager is not None:
+            await self._stage_manager.disconnect(connection)
+
+    async def receive(
+        self, connection: WebSocketConnection, event: WSMessage
+    ) -> ChatEventAcceptance | EventRejection | VoiceUploadAck | dict[str, str]:
+        """统一接收普通刺激、语音上传阶段与切换命令；返回协议应答所需结果。"""
+        if event.event_type == "call.switch_prepare":
+            return await self._prepare_call_switch(connection, event)
+        if event.event_type == "user_voice":
+            try:
+                return await self._process_voice_event(connection, event)
+            except VoiceUploadError as error:
+                return EventRejection(error.code, error.message, error.retryable)
+            except (TypeError, ValueError):
+                return ChatEventAcceptance.BAD_MESSAGE
+        return await self._try_accept_event(connection, event)
+
+    async def _prepare_call_switch(
+        self, connection: WebSocketConnection, event: WSMessage
+    ) -> EventRejection | dict[str, str]:
+        from .call_v1 import ControlProtocolError, decode_control_text
+
+        try:
+            message = decode_control_text(
+                json.dumps(event.raw_event, ensure_ascii=False), sender="client", transport="chat_ws"
+            )
+            if self._stage_manager is None:
+                raise ValueError("adapter is not initialized")
+            await self._stage_manager.prepare_call_transition(
+                connection,
+                character_id=str(message["character_id"]),
+                client_request_id=str(message["client_request_id"]),
+            )
+            return {
+                "protocol": "call.v1",
+                "type": "call.switch_ready",
+                "client_request_id": str(message["client_request_id"]),
+                "character_id": str(message["character_id"]),
+            }
+        except (ControlProtocolError, ValueError) as error:
+            code = error.code if isinstance(error, ControlProtocolError) else "CALL_SWITCH_REJECTED"
+            return EventRejection(code, "call transition is not available")
+
+    def _input_suspended(self, connection: WebSocketConnection) -> bool:
+        return any(b.stage.input_suspended for b in self._routes.values() if b.connection is connection)
 
     @staticmethod
     def supports_input(event: WSMessage) -> bool:
         """返回该协议适配器是否认识此业务输入类型。"""
         return event.event_type in _INPUT_EVENTS
 
-    async def try_accept_event(
+    async def _try_accept_event(
         self,
         connection: WebSocketConnection,
         event: WSMessage,
@@ -105,7 +206,7 @@ class WebSocketAdapter:
             return ChatEventAcceptance.UNSUPPORTED
         if connection.is_closed or not connection.user_uuid or not self._has_valid_client_message_id(event):
             return ChatEventAcceptance.BAD_MESSAGE
-        if connection in self._suspended_connections:
+        if self._input_suspended(connection):
             return EventRejection(
                 code="CALL_SWITCH_PENDING",
                 message="chat input is suspended while call switching is pending",
@@ -128,11 +229,11 @@ class WebSocketAdapter:
         self._mark_client_message_accepted(connection, event)
         return ChatEventAcceptance.ACCEPTED
 
-    async def process_voice_event(self, connection: WebSocketConnection, event: WSMessage) -> VoiceUploadAck:
+    async def _process_voice_event(self, connection: WebSocketConnection, event: WSMessage) -> VoiceUploadAck:
         """把一个语音上传阶段交给 assembler；阶段幂等不经过普通消息去重表。"""
         if connection.is_closed or not connection.user_uuid:
             raise ValueError("authenticated live connection required")
-        if connection in self._suspended_connections:
+        if self._input_suspended(connection):
             raise VoiceUploadError(
                 code="CALL_SWITCH_PENDING",
                 message="chat input is suspended while call switching is pending",
@@ -161,7 +262,7 @@ class WebSocketAdapter:
             event=event,
             user_id=connection.user_uuid,
             character_id=character_id,
-            sink=stage.stimulus_input_sink,
+            sink=_BoundInputSink(self._routes[stage.interaction_id]),
         )
 
     def _is_duplicate_client_message(self, connection: WebSocketConnection, event: WSMessage) -> bool:
@@ -248,21 +349,23 @@ class WebSocketAdapter:
             self._media_store,
         )
         stimulus = candidate.stimulus
-        stages = {
-            binding.stage.character_id: binding.stage
+        bindings = {
+            binding.stage.character_id: binding
             for binding in self._routes.values()
-            if binding.connection is connection
+            if binding.connection is connection and binding.accepting
         }
-        if any(target not in stages for target in stimulus.target_character_ids):
+        if any(target not in bindings for target in stimulus.target_character_ids):
             raise ValueError("target character is not bound to connection")
-        sinks = [stages[target].stimulus_input_sink for target in stimulus.target_character_ids]
-        # 同一事件循环内检查与入队之间无 await，避免多角色部分接收。
+        sinks = [_BoundInputSink(bindings[target]) for target in stimulus.target_character_ids]
+        # 先检查容量，避免为已拒绝的输入落盘；异步转换后还需复查。
         if not all(sink.can_accept(stimulus) for sink in sinks):
             return False
         if candidate.image_base64 is not None:
             if self._media_store is None:
                 raise ValueError("media store is not configured")
             await asyncio.to_thread(materialize_image, candidate, self._media_store)
+        if not all(sink.can_accept(stimulus) for sink in sinks):
+            return False
         for sink in sinks:
             sink.submit(stimulus)
         return True
@@ -270,23 +373,6 @@ class WebSocketAdapter:
     async def bind(self, stage: ChatStage, connection: WebSocketConnection) -> None:
         """将 stage 绑定到同用户 connection；重绑先停止旧执行，完成旧连接收尾后通知 Stage 上线。"""
         await complete_owned(self._bind(stage, connection))
-
-    def suspend_business_input(self, connection: WebSocketConnection, *, interaction_id: str) -> None:
-        if connection.is_closed or not interaction_id:
-            raise ValueError("live connection and interaction_id are required")
-        current = self._suspended_connections.get(connection)
-        if current is not None and current != interaction_id:
-            raise ValueError("connection is suspended for another interaction")
-        self._suspended_connections[connection] = interaction_id
-
-    def resume_business_input(self, connection: WebSocketConnection, *, interaction_id: str) -> bool:
-        if self._suspended_connections.get(connection) != interaction_id:
-            return False
-        self._suspended_connections.pop(connection, None)
-        return True
-
-    def is_business_input_suspended(self, connection: WebSocketConnection) -> bool:
-        return connection in self._suspended_connections
 
     async def disconnect(self, stage: ChatStage, connection: WebSocketConnection | None = None) -> None:
         """拆开 stage 的绑定并完成任务清理；给出 connection 时仅拆除该连接，避免旧断线通知影响重连。"""
@@ -352,7 +438,7 @@ class WebSocketAdapter:
 
     async def _disconnect(self, binding: _Binding) -> None:
         stage, connection = binding.stage, binding.connection
-        self._suspended_connections.pop(connection, None)
+        binding.accepting = False
         delivery = self._connections[connection]
         # 先阻止 Stage 继续产出，Stage 可在此过程中通过原绑定提交取消命令。
         await stage.connection_changed(d.ConnectionState.DISCONNECTED)

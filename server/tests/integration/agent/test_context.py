@@ -437,7 +437,7 @@ async def test_real_stage_owns_and_closes_loaded_context(database):
         user_id="u",
         character_id="luotianyi",
         agent=agent,
-        adapter=WebSocketAdapter(),
+        output_sink=WebSocketAdapter(),
         context_factory=factory(database),
     )
     context = stage.context

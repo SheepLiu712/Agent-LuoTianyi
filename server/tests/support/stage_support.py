@@ -170,7 +170,7 @@ async def setup(agent=None, config=None):
         user_id="user",
         character_id="luotianyi",
         agent=agent,
-        adapter=adapter,
+        output_sink=adapter,
         config={"response_wait": 0.02, **(config or {})},
         context_factory=StageContextFactory(),
     )

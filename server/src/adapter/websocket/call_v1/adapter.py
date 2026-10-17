@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from src.domain.call import CallEndReason, CallState
 from src.stage.stage_manager import (
     CallControl,
-    CallIdentity,
-    CallOpenRequest,
     CallStartFailed,
     InteractionFinalizing,
     StageManager,
@@ -122,7 +120,18 @@ class _PreparedTransport(CallStageBinding):
         self._resume_pending = None
         self._resume_pending_bytes = 0
 
-    async def prepare(self, identity: CallIdentity) -> None:
+    def _require_stage(self):
+        return self._control.stage
+
+    async def accept(self, frame, receipt) -> bool:
+        if frame.control is not None and frame.control["type"] == "call.hangup":
+            await self._control.terminate()
+            return True
+        return await super().accept(frame, receipt)
+
+    async def prepare(self, control: CallControl) -> None:
+        self._control = control
+        identity = control.identity
         self.call_id = identity.call_id
         session = CallTransportSession(
             call_id=identity.call_id,
@@ -174,6 +183,7 @@ class CallWebSocketAdapter:
         supports_character=None,
     ) -> None:
         self._manager = manager
+        self._start_locks: dict[str, tuple[asyncio.Lock, int]] = {}
         self._call_metrics = call_metrics
         self._hub = CallTransportHub(user_reset_fence=user_reset_fence)
         self._connections: dict[object, _ConnectionState] = {}
@@ -253,8 +263,25 @@ class CallWebSocketAdapter:
             return
         await self.disconnect(connection)
 
+    async def _open_start(self, message, *, raw, user_id, connection_id, cancelled):
+        # Only identical requests serialize identity publication and protocol registration.
+        key = str(message["client_request_id"])
+        lock, users = self._start_locks.get(key, (asyncio.Lock(), 0))
+        self._start_locks[key] = (lock, users + 1)
+        try:
+            async with lock:
+                return await self._open_start_owned(
+                    message, raw=raw, user_id=user_id, connection_id=connection_id, cancelled=cancelled
+                )
+        finally:
+            _, users = self._start_locks[key]
+            if users == 1:
+                self._start_locks.pop(key)
+            else:
+                self._start_locks[key] = (lock, users - 1)
+
     # ruff: noqa: C901
-    async def _open_start(
+    async def _open_start_owned(
         self, message, *, raw: str, user_id: str, connection_id: object, cancelled: asyncio.Event
     ) -> CallConnection:
         if int(message["seq"]) != 1:
@@ -264,15 +291,17 @@ class CallWebSocketAdapter:
         request_seq = int(message["seq"])
         if not self.supports_call_character(character_id):
             raise self._start_error("CALL_CHARACTER_UNAVAILABLE", request_id, request_seq, close_code=1008)
+        prepared_here = False
         try:
-            request = CallOpenRequest(
+            transport = _PreparedTransport(self, user_id=user_id, connection_id=connection_id)
+            control = await self._manager.try_to_get_stage(
+                stage_type="call",
                 user_id=user_id,
                 character_id=character_id,
                 client_request_id=request_id,
+                transport=transport,
             )
-            transport = _PreparedTransport(self, user_id=user_id, connection_id=connection_id)
-            control = await self._manager.open_call(request, transport)
-            if transport.binding is None:
+            if self._hub.session_for(control.identity.call_id) is not None:
                 try:
                     return await self._attach_existing_start(control, raw, user_id, connection_id)
                 except CallTransportError as error:
@@ -282,6 +311,8 @@ class CallWebSocketAdapter:
                         request_seq,
                         close_code=error.close_code,
                     ) from error
+            prepared_here = True
+            await transport.prepare(control)
             if cancelled.is_set():
                 raise asyncio.CancelledError
             await self._enqueue(transport.outputs, await transport.binding.session.receive_start(raw))
@@ -289,11 +320,11 @@ class CallWebSocketAdapter:
             control.release()
             return self._register_connection(transport.binding, control, transport.outputs)
         except CallTransportError as error:
-            if "control" in locals() and "transport" in locals() and transport.binding is not None:
+            if prepared_here:
                 await complete_owned(self._abort_unacknowledged_open(control, transport, error))
             raise
         except BaseException as error:
-            if "control" in locals() and "transport" in locals() and transport.binding is not None:
+            if prepared_here:
                 await complete_owned(self._abort_unacknowledged_open(control, transport, error))
             if isinstance(error, asyncio.CancelledError):
                 raise
@@ -334,8 +365,11 @@ class CallWebSocketAdapter:
             if cursor > candidate.session.last_server_seq:
                 raise CallTransportError("INVALID_RESUME_CURSOR")
             outputs = candidate.session.preview_resume(cursor)
-            control = await self._manager.resume_call(
-                candidate.session.call_id, user_id=user_id, character_id=candidate.session.character_id
+            control = await self._manager.try_to_get_stage(
+                stage_type="call",
+                call_id=candidate.session.call_id,
+                user_id=user_id,
+                character_id=candidate.session.character_id,
             )
         except BaseException as error:
             await self._hub.release_resume(candidate)

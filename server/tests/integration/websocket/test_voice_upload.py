@@ -14,6 +14,7 @@ from support.audio_samples import recorded_aac_bytes
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
+from src.web.websocket import WSMessage
 from src.web.websocket.endpoint import _receive_events
 from src.web.websocket.service import WebSocketConnection, WebSocketService
 
@@ -57,6 +58,8 @@ class Socket:
 
 
 class Stage:
+    input_suspended = False
+
     def __init__(self, user_id="user-1"):
         self.interaction_id = str(uuid4())
         self.user_id = user_id
@@ -66,7 +69,7 @@ class Stage:
         self.available = True
 
     def can_accept(self, stimulus):
-        return self.available
+        return self.available and not self.input_suspended
 
     def submit(self, stimulus):
         if not self.available:
@@ -76,6 +79,45 @@ class Stage:
 
     async def connection_changed(self, state):
         pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["suspend", "disconnect", "rebind"])
+async def test_voice_finalize_rechecks_original_binding_and_stage_admission(tmp_path, monkeypatch, change):
+    adapter = WebSocketAdapter({"media_store": {"root": str(tmp_path)}})
+    connection = WebSocketConnection(Socket([]), "user", "user")
+    stage = Stage("user")
+    await adapter.bind(stage, connection)
+    _, events = upload_events(m4a_bytes())
+    messages = [WSMessage(event_type=e["type"], client_msg_id=e["client_msg_id"], payload=e["payload"]) for e in events]
+    for message in messages[:-1]:
+        await adapter.receive(connection, message)
+    entered, release = asyncio.Event(), asyncio.Event()
+    persist = adapter._voice_uploads._validate_and_persist
+
+    async def blocked(*args):
+        result = await persist(*args)
+        entered.set()
+        await release.wait()
+        return result
+
+    monkeypatch.setattr(adapter._voice_uploads, "_validate_and_persist", blocked)
+    receiving = asyncio.create_task(adapter.receive(connection, messages[-1]))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        if change == "suspend":
+            stage.input_suspended = True
+        elif change == "disconnect":
+            await adapter.disconnect(stage)
+        else:
+            await adapter.bind(stage, WebSocketConnection(Socket([]), "user", "replacement"))
+        release.set()
+        assert (await receiving).code == "OVERLOADED"
+        assert not any(isinstance(item, d.VoiceMessage) for item in stage.stimuli)
+    finally:
+        release.set()
+        await asyncio.gather(receiving, return_exceptions=True)
+        await adapter.disconnect(stage)
 
 
 def event(phase, upload_id, payload=None):
@@ -330,7 +372,7 @@ async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path, monkeypatch):
         [event("begin", second, {**begin_payload, "byte_length": 48 * 1024 + 1}), oversized_chunk],
         adapter=adapter,
     )
-    assert any(isinstance(item, d.VoiceUploadFailed) and item.reason == "expired" for item in stage.stimuli)
+    assert not any(isinstance(item, d.VoiceUploadFailed) for item in stage.stimuli)  # old binding is detached
     assert sent[-1]["payload"]["code"] == "VOICE_TOO_LARGE"
     assert not any(isinstance(item, d.VoiceMessage) for item in next_stage.stimuli)
 

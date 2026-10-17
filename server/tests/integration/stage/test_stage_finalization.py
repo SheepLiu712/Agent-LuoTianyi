@@ -5,13 +5,13 @@ import threading
 
 import pytest
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
-from src.stage import StageManager
 from src.stage.call_settlement import CallSettlementConsumerImpl
 from src.web.websocket.service import WebSocketConnection
 
@@ -34,7 +34,7 @@ def call_setup(tmp_path):
 
 async def assert_finalizing(manager, user="user"):
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
-        await manager.connect(WebSocketConnection(Socket(), user, user), "luotianyi")
+        await manager._chat_output_sink.open(WebSocketConnection(Socket(), user, user), "luotianyi")
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
         await manager._claim_call(
             user_id=user,
@@ -68,7 +68,7 @@ async def test_chat_finalization_rejects_conflicts_and_failure_releases_admissio
     with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
         await stages.begin_user_data_reset("user")
     assert not connection.is_closed
-    await stages.disconnect(connection)
+    await stages._chat_output_sink.close_connection(connection)
     await asyncio.wait_for(entered.wait(), 1)
     try:
         await assert_finalizing(stages)
@@ -125,7 +125,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
                 raise
 
     monkeypatch.setattr(CallSettlementConsumerImpl, "settle", Consumer.settle)
-    stages = StageManager(
+    stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
@@ -214,7 +214,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
     call_setup,
 ):
     repository, _, _, clock = call_setup
-    stages = StageManager(
+    stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
@@ -313,7 +313,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
             created_contexts.append(context)
             return context
 
-    stages = StageManager(
+    stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: SlowFactory(),
@@ -337,6 +337,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
             character_id="luotianyi",
             client_request_id="terminate-start",
             transport=transport,
+            stage_created=transport.bind_stage,
             speech_factory=speech_factory,
         )
     )
@@ -427,7 +428,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
     context_factory = _RecordingContextFactory(contexts)
     speech_factory = _BlockingSpeechFactory(blocked_phase, entered, release, providers)
     transport = _CapturingTransport()
-    stages = StageManager(
+    stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: context_factory,
@@ -452,6 +453,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
             character_id="luotianyi",
             client_request_id=blocked_phase,
             transport=transport,
+            stage_created=transport.bind_stage,
             speech_factory=speech_factory,
         )
     )
@@ -493,7 +495,7 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
             await complete_owned(asyncio.to_thread(write))
 
     monkeypatch.setattr(CallSettlementConsumerImpl, "settle", Consumer.settle)
-    stages = StageManager(
+    stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
@@ -566,7 +568,7 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         async def settle(self, _snapshot, *, context=None):
             pass
 
-    stages = StageManager(
+    stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: context_factory,

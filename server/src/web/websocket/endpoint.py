@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from src.adapter.websocket import ChatEventAcceptance, EventRejection, VoiceUploadError
-from src.adapter.websocket.call_v1 import ControlProtocolError, decode_control_text, encode_control_message
+from src.adapter.websocket import ChatEventAcceptance, EventRejection, VoiceUploadAck
 from src.application.admin import get_admin_shell
 from src.stage import InteractionFinalizing
 from src.stage.stage_manager import InteractionOwnedByCallAdmission
@@ -56,7 +54,7 @@ async def chat_ws(websocket: WebSocket) -> None:
         if stage_manager is None:
             raise RuntimeError("StageManager is required for production chat connections")
         character_id = server_runtime.agent_runtime.default_character_id
-        stage = await stage_manager.connect(connection, character_id)
+        stage = await server_runtime.chat_adapter.open(connection, character_id)
         await websocket_service.send_chat_ready_event(
             connection,
             character_id=character_id,
@@ -73,7 +71,7 @@ async def chat_ws(websocket: WebSocket) -> None:
         logger.error("Error in /chat_ws: %s", exc)
     finally:
         if stage_manager is not None:
-            await stage_manager.disconnect(connection)
+            await server_runtime.chat_adapter.close_connection(connection)
 
 
 async def _reject_call_owned_chat_admission(
@@ -115,76 +113,17 @@ async def _receive_events(server_runtime: "ServerRuntime", connection: WebSocket
             continue
         if await _handle_transport_event(server_runtime, connection, event):
             continue
-        if event.event_type == WSEventType.USER_VOICE.value:
-            try:
-                result = await server_runtime.chat_adapter.process_voice_event(connection, event)
-            except VoiceUploadError as error:
-                await websocket_service.send_nack_event(
-                    connection,
-                    event,
-                    code=error.code,
-                    message=error.message,
-                    retryable=error.retryable,
-                )
-            except (TypeError, ValueError):
-                await websocket_service.send_nack_event(
-                    connection,
-                    event,
-                    code="BAD_MESSAGE",
-                    message="chat event payload is invalid",
-                    retryable=False,
-                )
-            else:
-                await websocket_service.send_ack_event(
-                    connection,
-                    event,
-                    payload=result.payload,
-                    duplicate=result.duplicate,
-                )
+        result = await server_runtime.chat_adapter.receive(connection, event)
+        if result is ChatEventAcceptance.UNSUPPORTED:
             continue
-        if server_runtime.chat_adapter.supports_input(event):
-            acceptance = await server_runtime.chat_adapter.try_accept_event(connection, event)
-            if await _handle_rejected_event(websocket_service, connection, event, acceptance):
-                continue
+        if isinstance(result, VoiceUploadAck):
+            await websocket_service.send_ack_event(
+                connection, event, payload=result.payload, duplicate=result.duplicate
+            )
+        elif isinstance(result, dict):
+            await connection.websocket.send_json(result)
+        elif not await _handle_rejected_event(websocket_service, connection, event, result):
             await websocket_service.send_ack_event(connection, event)
-
-
-async def _handle_call_switch_prepare(
-    server_runtime: "ServerRuntime", connection: WebSocketConnection, event: WSMessage
-) -> None:
-    raw = event.raw_event
-    try:
-        if not isinstance(raw, dict):
-            raise ControlProtocolError("BAD_MESSAGE", "$")
-        message = decode_control_text(
-            json.dumps(raw, ensure_ascii=False, separators=(",", ":")),
-            sender="client",
-            transport="chat_ws",
-        )
-        if message["type"] != "call.switch_prepare":
-            raise ControlProtocolError("UNEXPECTED_CONTROL", "$.type")
-        stage_manager = server_runtime.stage_manager
-        if stage_manager is None:
-            raise RuntimeError("StageManager is required for call transition")
-        await stage_manager.prepare_call_transition(
-            connection,
-            character_id=str(message["character_id"]),
-            client_request_id=str(message["client_request_id"]),
-        )
-        response = {
-            "protocol": "call.v1",
-            "type": "call.switch_ready",
-            "client_request_id": str(message["client_request_id"]),
-            "character_id": str(message["character_id"]),
-        }
-        await connection.websocket.send_json(
-            json.loads(encode_control_message(response, sender="server", transport="chat_ws"))
-        )
-    except (ControlProtocolError, ValueError) as error:
-        code = error.code if isinstance(error, ControlProtocolError) else "CALL_SWITCH_REJECTED"
-        await server_runtime.websocket_service.send_nack_event(
-            connection, event, code=code, message="call transition is not available", retryable=False
-        )
 
 
 async def _handle_transport_event(
@@ -198,9 +137,6 @@ async def _handle_transport_event(
         return True
     if event.event_type == WSEventType.LLM_RESPONSE.value:
         server_runtime.client_llm_executor.on_llm_response(event.payload)
-        return True
-    if event.event_type == "call.switch_prepare":
-        await _handle_call_switch_prepare(server_runtime, connection, event)
         return True
     if event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value):
         _update_client_model_types(connection, event.payload)

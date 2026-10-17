@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from src.agent.context import ContextFactory
@@ -16,6 +16,7 @@ from src.domain.agent import InteractionEndingReason
 from src.domain.call import CallEndReason, CallState
 from src.domain.stage import StageState
 from src.domain.stage.due_events import DueEventProvider
+from src.domain.stage.transport import StageOutputSink
 from src.infrastructure.persistence.call_sessions import (
     BEIJING_TIMEZONE,
     CallSessionRecord,
@@ -45,7 +46,6 @@ from .interaction_lease import (
 )
 
 if TYPE_CHECKING:
-    from src.adapter.websocket import WebSocketAdapter
     from src.agent.facade import Agent
     from src.infrastructure.models.realtime_speech import RealtimeSpeechSessionFactory
     from src.infrastructure.observability.call_metrics import CallMetrics
@@ -124,14 +124,6 @@ class CallIdentity:
     state: CallState
 
 
-class CallOpenTransport(Protocol):
-    async def prepare(self, identity: CallIdentity) -> None: ...
-
-    async def abort_prepare(self) -> None: ...
-
-    def bind_stage(self, stage: CallStage) -> None: ...
-
-
 class CallControl:
     """Finite business control for one accepted call; transport internals stay hidden."""
 
@@ -139,7 +131,7 @@ class CallControl:
         self,
         manager: StageManager,
         request: CallOpenRequest,
-        transport: CallOpenTransport,
+        transport: CallTransportSink,
     ) -> None:
         self._manager = manager
         self._request = request
@@ -165,6 +157,13 @@ class CallControl:
         if self._identity is None:
             raise RuntimeError("call identity is not prepared")
         return self._identity
+
+    @property
+    def stage(self) -> CallStage:
+        """取得已发布的交互；协议绑定由 Adapter 自己管理。"""
+        if self._stage is None:
+            raise RuntimeError("call stage is not available")
+        return self._stage
 
     async def disconnect(self) -> None:
         self._connected = False
@@ -230,7 +229,8 @@ class StageManager:
         self,
         *,
         get_agent: Callable[[str], Agent],
-        adapter: WebSocketAdapter,
+        chat_output_sink: StageOutputSink,
+        detach_stage_binding: Callable[[ChatStage, WebSocketConnection | None], Awaitable[None]],
         get_context_factory: Callable[[str], ContextFactory],
         due_event_provider: DueEventProvider | None = None,
         lease_registry: InteractionLeaseRegistry | None = None,
@@ -252,7 +252,9 @@ class StageManager:
         config = {} if config is None else config
         self._config = _ManagerConfig.from_dict(config)
         self._stage_config = config.get("stage", {})
-        self._get_agent, self._adapter = get_agent, adapter
+        self._get_agent = get_agent
+        self._chat_output_sink = chat_output_sink
+        self._detach_stage_binding = detach_stage_binding
         self._get_context_factory = get_context_factory
         self._due_event_provider = due_event_provider
         self._lease_registry = lease_registry or InteractionLeaseRegistry()
@@ -359,7 +361,7 @@ class StageManager:
     async def _await_initialization(task: asyncio.Task[None]) -> None:
         await asyncio.shield(task)
 
-    async def open_call(self, request: CallOpenRequest, transport: CallOpenTransport) -> CallControl:
+    async def _get_call_control(self, request: CallOpenRequest, transport: CallTransportSink) -> CallControl:
         """Accept one call identity and retain its background establishment operation."""
         if not self.call_business_ready:
             raise RuntimeError("CALL_INGRESS_UNAVAILABLE")
@@ -389,7 +391,7 @@ class StageManager:
             raise ValueError("client_request_id is already starting another call")
         return control
 
-    async def _open_call(self, request: CallOpenRequest, transport: CallOpenTransport) -> CallControl:
+    async def _open_call(self, request: CallOpenRequest, transport: CallTransportSink) -> CallControl:
         if self._realtime_speech_factory is None:
             raise RuntimeError("realtime speech factory is not bound")
         control = CallControl(self, request, transport)
@@ -414,12 +416,6 @@ class StageManager:
             )
             control._identity = identity
             self._call_controls[identity.call_id] = control
-            try:
-                await transport.prepare(identity)
-            except BaseException as error:
-                await transport.abort_prepare()
-                await self._fail_pending_call_claim(claim, error)
-                raise
             control._claim = claim
             return control
         except BaseException:
@@ -437,7 +433,7 @@ class StageManager:
         if error is not None:
             get_logger(__name__).error("Call open failed request=%s type=%s", request_id, type(error).__name__)
 
-    async def resume_call(self, call_id: str, *, user_id: str, character_id: str) -> CallControl:
+    async def _resume_call_control(self, call_id: str, *, user_id: str, character_id: str) -> CallControl:
         control = self._call_controls.get(call_id)
         if control is None:
             raise RuntimeError("CALL_NOT_FOUND")
@@ -647,12 +643,33 @@ class StageManager:
                 await stage.propose_relationship(relationship)
             return len(stages)
 
-    async def connect(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
-        """取得或创建 connection 用户与 character_id 的 Stage，完成绑定后返回；保留期内复用原实例。"""
+    async def try_to_get_stage(
+        self,
+        *,
+        user_id: str,
+        character_id: str,
+        stage_type: str = "chat",
+        connection: WebSocketConnection | None = None,
+        call_id: str | None = None,
+        client_request_id: str | None = None,
+        source_interaction_id: str | None = None,
+        transport: CallTransportSink | None = None,
+    ) -> ChatStage | CallControl:
+        """按交互规则复用、恢复或创建；拒绝通过具名异常表达。"""
+        if stage_type == "call":
+            if call_id is not None:
+                return await self._resume_call_control(call_id, user_id=user_id, character_id=character_id)
+            if not client_request_id or transport is None:
+                raise ValueError("call start requires request identity and transport")
+            return await self._get_call_control(
+                CallOpenRequest(user_id, character_id, client_request_id, source_interaction_id), transport
+            )
+        if stage_type != "chat" or connection is None or connection.user_uuid != user_id:
+            raise ValueError("chat admission requires its authenticated connection")
         return await complete_owned(self._connect(connection, character_id))
 
     async def disconnect(self, connection: WebSocketConnection) -> None:
-        """处理 connection 断线，解除其仍有效的绑定并启动离线保留期；旧连接通知不影响重连。"""
+        """接收 Adapter 已解绑的断线通知并启动离线保留期；旧连接通知不影响重连。"""
         await complete_owned(self._disconnect(connection))
 
     async def close(self) -> None:
@@ -690,7 +707,7 @@ class StageManager:
                     user_id=key[0],
                     character_id=key[1],
                     agent=self._get_agent(character_id),
-                    adapter=self._adapter,
+                    output_sink=self._chat_output_sink,
                     config=self._stage_config,
                     context_factory=self._get_context_factory(character_id),
                     due_event_provider=self._due_event_provider,
@@ -699,15 +716,10 @@ class StageManager:
             timer = self._expiry.pop(stage, None)
             if timer is not None:
                 timer.cancel()
-            try:
-                await self._adapter.bind(stage, connection)
-            except BaseException:
-                self._schedule_expiry(stage)
-                raise
             self._connections[stage] = connection
             lease = InteractionLease(key[0], key[1], stage.interaction_id, InteractionSource.CHAT)
             if not self._lease_registry.claim(lease):
-                await self._adapter.disconnect(stage, connection)
+                await self._detach_stage_binding(stage, connection)
                 self._connections.pop(stage, None)
                 raise ValueError("interaction is already owned")
             if key in self._pending_first_logins:
@@ -760,13 +772,13 @@ class StageManager:
                 InteractionSource.CHAT,
             )
             intent = self._lease_registry.prepare_call_transition(lease=lease, client_request_id=client_request_id)
-            self._adapter.suspend_business_input(connection, interaction_id=stage.interaction_id)
+            stage.set_input_suspended(True)
             key = (stage.user_id, stage.character_id)
             old = self._intent_expiry.pop(key, None)
             if old is not None:
                 old.cancel()
             self._intent_expiry[key] = asyncio.create_task(
-                self._expire_call_intent(connection, stage, intent),
+                self._expire_call_intent(stage, intent),
                 name="call-intent-expiry",
             )
             return intent
@@ -874,7 +886,7 @@ class StageManager:
         try:
             record = await self._repository_call(self._call_sessions.create_if_absent, record)
         except BaseException:
-            await self._rollback_preledger_handoff(stage, connection, ownership)
+            await self._rollback_preledger_handoff(stage, ownership)
             raise
         if record.user_id != user_id or record.character_id != character_id:
             self._release_transition(ownership)
@@ -884,7 +896,7 @@ class StageManager:
             if stage is not None:
                 await self._commit_chat_handoff(stage, user_id=user_id, character_id=character_id)
                 if connection is not None:
-                    await self._adapter.disconnect(stage, connection)
+                    await self._detach_stage_binding(stage, connection)
                 await self._terminate_for_call(stage, deadline)
             self._require_setup_time(deadline)
             async with self._lock:
@@ -1166,9 +1178,6 @@ class StageManager:
                 config=config,
                 connection_available=connection_available,
             )
-            bind_stage = getattr(transport, "bind_stage", None)
-            if bind_stage is not None:
-                bind_stage(stage)
             if stage_created is not None:
                 stage_created(stage)
             await stage.start()
@@ -1296,7 +1305,6 @@ class StageManager:
     async def _rollback_preledger_handoff(
         self,
         stage: ChatStage | None,
-        connection: WebSocketConnection | None,
         ownership: CallTransitionOwnership | InteractionLease,
     ) -> None:
         if isinstance(ownership, CallTransitionOwnership):
@@ -1308,12 +1316,7 @@ class StageManager:
                 )
                 if reusable:
                     self._lease_registry.rollback_call_transition(ownership)
-                    if (
-                        self._connections.get(stage) is connection
-                        and connection is not None
-                        and not connection.is_closed
-                    ):
-                        self._adapter.resume_business_input(connection, interaction_id=stage.interaction_id)
+                    stage.set_input_suspended(False)
                     return
             self._lease_registry.abandon_call_transition(ownership)
         else:
@@ -1321,7 +1324,6 @@ class StageManager:
 
     async def _expire_call_intent(
         self,
-        connection: WebSocketConnection,
         stage: ChatStage,
         intent: CallTransitionIntent,
     ) -> None:
@@ -1333,7 +1335,7 @@ class StageManager:
             self._intent_expiry.pop(key, None)
             current = self._lease_registry.current(*key)
             if current is not None and current.source is InteractionSource.CHAT:
-                self._adapter.resume_business_input(connection, interaction_id=stage.interaction_id)
+                stage.set_input_suspended(False)
 
     async def _new_call_record(self, user_id: str, character_id: str, client_request_id: str) -> CallSessionRecord:
         now = await self._next_call_timestamp()
@@ -1395,7 +1397,6 @@ class StageManager:
             connection.mark_disconnected()
             for stage, current in list(self._connections.items()):
                 if current is connection:
-                    await self._adapter.disconnect(stage, connection)
                     self._connections.pop(stage, None)
                     self._schedule_expiry(stage)
 
@@ -1485,7 +1486,7 @@ class StageManager:
                 type(error).__name__,
             )
         finally:
-            await self._adapter.disconnect(stage)
+            await self._detach_stage_binding(stage, None)
             self._connections.pop(stage, None)
             self._lease_registry.release(
                 InteractionLease(

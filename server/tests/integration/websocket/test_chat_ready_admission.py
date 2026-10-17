@@ -3,10 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
+from support.stage_manager import make_stage_manager
 
+from src.adapter.websocket import WebSocketAdapter
 from src.stage import InteractionFinalizing
 from src.stage.interaction_lease import InteractionLease, InteractionLeaseRegistry, InteractionSource
-from src.stage.stage_manager import InteractionOwnedByCallAdmission, StageManager
+from src.stage.stage_manager import InteractionOwnedByCallAdmission
 from src.web.websocket import endpoint
 from src.web.websocket.service import WebSocketConnection, WebSocketService
 
@@ -55,6 +57,7 @@ def _runtime(manager):
         websocket_service=WebSocketService(),
         database_manager=SimpleNamespace(),
         stage_manager=manager,
+        chat_adapter=SimpleNamespace(open=manager.connect, close_connection=manager.disconnect),
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         client_llm_executor=SimpleNamespace(clear_user=lambda *_args: None),
     )
@@ -114,16 +117,16 @@ async def test_stage_manager_rejects_call_ownership_before_chat_stage_creation()
     registry = InteractionLeaseRegistry()
     assert registry.claim(InteractionLease("owner", "luotianyi", "call-id", InteractionSource.CALL))
     created = []
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _character_id: created.append(True),
         get_context_factory=lambda _character_id: None,
-        adapter=SimpleNamespace(),
+        adapter=WebSocketAdapter(),
         lease_registry=registry,
     )
     connection = WebSocketConnection(Socket(), "owner", "alice")
 
     with pytest.raises(InteractionOwnedByCallAdmission) as error:
-        await manager.connect(connection, "luotianyi")
+        await manager._chat_output_sink.open(connection, "luotianyi")
 
     assert error.value.source is InteractionSource.CALL
     assert created == []

@@ -477,7 +477,7 @@ async def maintain(
 
 ### 当前基线
 
-- 服务端现有 `/chat_ws` 与独立 `/call_ws`；`CallWebSocketAdapter` 封装 call.v1 接入、恢复与传输，`StageManager.open_call` 封装完整业务建立，`CallStage` 已进入正式装配。
+- 服务端现有 `/chat_ws` 与独立 `/call_ws`；`CallWebSocketAdapter` 封装 call.v1 接入、恢复与传输，`StageManager.try_to_get_stage` 封装交互获取与业务建立，`CallStage` 已进入正式装配。
 - 聊天继续使用 `adapter.websocket.WebSocketAdapter`；通话使用并列的 `adapter.websocket.call_v1.CallWebSocketAdapter`。Web 只负责鉴权与物理收发，不直连 CallStage，也不构造 Hub/Session/Binding。
 - Android 聊天页目前没有电话入口；现有 WebView 音频链路面向普通聊天播放。
 - 现有 Conversation 内容类型没有通话内容。
@@ -881,3 +881,32 @@ CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知
 - 实现时同步更新代码地图、数据库迁移说明、客户端与服务端协议测试夹具。
 - `CognitiveMaintenanceSkill` 是跨聊天与通话的迁移，必须先用现有 ChatStage 回归测试锁定行为，再接入 CallStage。
 - AgentJev-0.6B 是社区候选，其公开模型卡和仓库可用于调研起点，但不得把它表述为官方 Jev 的本地权重或未经验证的生产依赖。
+
+
+## Adapter 与交互侧的接入及切换契约
+
+聊天与通话保留独立 Adapter。Adapter 负责信道协议转换、去重、上传装配、输出投递，以及连接与交互的 binding；通话 Hub、Session、Binding 均为 CallWebSocketAdapter 内部实现。Web 负责鉴权和物理连接，不解析业务切换命令。普通聊天消息、语音上传各阶段及切换命令统一进入聊天 Adapter 的 `receive`；上传分片 ACK 与最终刺激接纳 ACK 保持各自的含义和幂等性。
+
+Adapter 通过 StageManager 的多参数 `try_to_get_stage` 获取交互：参数明确用户、角色、交互类型、连接和已有交互或请求身份，不专门创建接入 Request 类型。Manager 按内部规则复用、恢复、创建或给出明确拒绝；通话建立返回可先完成身份握手的控制句柄，Stage 尚未建立时不伪造已接通状态。恢复指定 call_id 只能恢复该交互，不能隐式新建。通话身份返回后，由 Adapter 自行注册协议会话并排入 PREPARING 与首 ACK，再释放业务建立；Manager 不调用传输对象的 prepare 或 bind_stage。相同建立请求的身份发布与协议注册串行化，不阻塞其他请求。绑定建立后，普通刺激直接投递 Stage；生命周期请求交给 Manager，PCM、播放确认和实时打断保持投递通话交互。两类 Adapter 不强求相同的协议方法或共同基类。
+
+输入准入属于交互侧。binding 有效只代表连接仍关联该 Stage，不代表 Stage 此刻允许业务输入。切换准备期间由 Stage 的输入门禁拒绝普通消息、语音以及迟到的异步媒体投递；Adapter 不复制暂停业务状态。异步转换完成后必须重新验证原 binding 仍有效和 Stage 仍准入，然后才能接纳刺激。先前已经接纳的工作保持既有执行语义，不因为准备切换新增取消行为。
+
+StageManager 不持有具体 Adapter，也不调用其绑定、暂停、恢复方法。组合根只注入按 Stage 身份撤销绑定的操作；Stage 输出通过窄输出 sink 交付。解绑须幂等，不能误删同一用户角色的新 Stage 或新连接；阻止新输入后，完成必要的输出取消和投递清理。解绑不等于关闭物理 WebSocket，也不得递归生成第二次断线生命周期通知。
+
+切换时序及失败处理：
+
+| 时点或结果 | binding 与输入 | 责任及后续 |
+| --- | --- | --- |
+| prepare 被拒绝 | 保持原状 | Manager 校验当前连接、占用和请求身份，Adapter 返回拒绝 |
+| prepare 成功 | 保留聊天 binding，交互侧关闭新业务输入 | Manager 登记一次性 intent 并管理其 10 秒期限；Adapter 返回 switch_ready |
+| intent 到期且尚未消费 | 保留仍有效的 binding，恢复交互输入门禁 | Manager 的到期任务恢复准入；消费 intent 时也独立检查期限，不能依赖定时任务是否已调度 |
+| 匹配 intent 已消费，但持久化通话账本失败 | 保留尚存的旧 binding，恢复 CHAT 占用及门禁 | Manager 回滚；intent 已消费，重试需重新 prepare。断开的连接不自动重绑 |
+| 账本已创建，确认提交切换 | 撤销旧聊天 binding，旧 ChatStage 进入收尾 | Manager 调用注入解绑操作；提交点不推迟到 CallStage ACTIVE |
+| 提交后通话初始化失败或建立超时 | 不恢复旧聊天 binding 或已退出的 ChatStage | Manager 记录通话失败并释放业务占用；相关收尾完成后才可重新接入新聊天 |
+| 错误请求身份或不匹配的 start | 不取消其他请求的有效 intent | 请求方收到明确拒绝，原 intent 按原期限处理 |
+
+intent 的 10 秒期限与 call.start 的 10 秒建立期限分别计算。接通前断线保留原建立操作到原截止时间、同请求重绑、首 ACK 后才能开始业务建立等既有契约保持不变。
+
+用户断开连接或 WebSocket 断线时由 Adapter 解除该连接的 binding，并把断线通知交互侧。交互侧按聊天和通话各自的保留期决定恢复或收尾；重连接入获得新 binding，保留期内可复用原 Stage，收尾期间拒绝接入，收尾完成后新的有效建立请求才创建新 Stage。明确结束通话的命令仍按挂断处理，不改成意外断线保留。
+
+验收须覆盖：统一入口的普通与语音输入、准备拒绝、准备期拒绝输入但保留 binding、intent 超时恢复、账本前失败回滚、提交后失败不复活旧交互、旧连接迟到断线不影响新连接、绑定失败补偿，以及图片/语音异步处理跨越暂停或解绑时不能迟到投递。

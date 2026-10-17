@@ -5,11 +5,11 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent.context import ConversationMode
-from src.stage import StageManager
 from src.web.websocket.service import WebSocketConnection
 
 
@@ -79,7 +79,7 @@ async def wait_for_count(values: list, count: int) -> None:
 async def test_one_login_dispatches_once_to_each_character():
     # Given: one user's first login is recorded for two enabled characters, including duplicate notifications.
     agents = {character_id: RecordingAgent(character_id) for character_id in ("luotianyi", "miku")}
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=agents.__getitem__,
         adapter=WebSocketAdapter(),
         get_context_factory=ContextFactory,
@@ -92,13 +92,13 @@ async def test_one_login_dispatches_once_to_each_character():
     # When: both character stages become ready for the same login.
     connection = WebSocketConnection(Socket(), "user", "用户")
     for character_id in agents:
-        await manager.connect(connection, character_id)
+        await manager._chat_output_sink.open(connection, character_id)
     await asyncio.wait_for(
         asyncio.gather(*(wait_for_count(agent.first_logins, 1) for agent in agents.values())),
         1,
     )
     for character_id in agents:
-        await manager.connect(connection, character_id)
+        await manager._chat_output_sink.open(connection, character_id)
     await asyncio.sleep(0.02)
 
     # Then: each character receives one character-scoped fact and reconnect does not replay it.
@@ -114,14 +114,14 @@ async def test_first_login_waits_for_handle_capacity_then_dispatches():
     # Given: a ready Stage has its only handle slot occupied when first-login becomes due.
     typing_gate = asyncio.Event()
     agent = RecordingAgent("luotianyi", typing_gate)
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _: agent,
         adapter=WebSocketAdapter(),
         get_context_factory=ContextFactory,
         config={"stage": {"first_login_wait": 0.03, "max_stimuli": 1}},
     )
     manager.record_login("user", "luotianyi", elapsed_from_last_login=None)
-    stage = await manager.connect(
+    stage = await manager._chat_output_sink.open(
         WebSocketConnection(Socket(), "user", "用户"),
         "luotianyi",
     )

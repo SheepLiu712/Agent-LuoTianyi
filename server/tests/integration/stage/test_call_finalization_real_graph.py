@@ -16,6 +16,7 @@ from support.call_coherent_runtime import (
     runtime_config,
 )
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_manager import make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
 from src.adapter.websocket import WebSocketAdapter
@@ -31,7 +32,6 @@ from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallEndReason, CallReplyStatus, CallState
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
-from src.stage import StageManager
 from src.stage._finalization import InteractionFinalizing
 from src.stage.call_stage import _Turn
 
@@ -124,7 +124,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
 
     monkeypatch.setattr(factory, "create", observed_create)
     clock = _StrictClock()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=runtime.get_agent,
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character_id: factory,
@@ -193,6 +193,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
             client_request_id="real-handoff",
             speech_factory=manager._realtime_speech_factory,
             transport=transport,
+            stage_created=transport.bind_stage,
         )
         await _eventually(lambda: stage.state is CallState.ACTIVE)
         assert len(created) == 1

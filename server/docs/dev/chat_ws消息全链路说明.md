@@ -6,7 +6,7 @@
 
 1. `server_main.py` 接收并认证 WebSocket 消息。
 2. `WebSocketService.try_accept_stimulus_event` 完成消息 ID 校验、去重和接收状态映射。
-3. `WebSocketAdapter.try_accept_event` 统一校验与去重，再通过内部 `_receive_event` 校验协议载荷，把消息转换为 `src.domain.agent.Stimulus`，并投递给目标 `ChatStage`。
+3. `WebSocketAdapter.receive` 统一校验与去重，再通过内部 `_receive_event` 校验协议载荷，把消息转换为 `src.domain.agent.Stimulus`，并投递给目标 `ChatStage`。
 4. `ChatStage` 持有 pending、调度、取消和交互修订；到期时只调用 `Agent.handle_stimulus`。
 5. `StimulusRouter` 把强类型刺激路由到对应 handler。文本/图片等输入先预处理；回复到期由 `ChatReplyHandler` 处理。
 

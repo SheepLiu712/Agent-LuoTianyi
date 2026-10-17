@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.call_session_repository import InMemoryCallSessionRepository
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
@@ -15,11 +16,10 @@ from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallEndReason, CallState
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage import StageManager
 from src.stage.interaction_lease import InteractionLeaseRegistry, InteractionSource
 from src.web.websocket.service import WebSocketConnection
 
-from .test_chat_stage import RecordingAgent, Socket, StageContextFactory
+from .test_chat_stage import RecordingAgent, Socket, StageContextFactory, stimulus
 
 
 def manager(
@@ -34,7 +34,7 @@ def manager(
     adapter = WebSocketAdapter()
     repository = repository or InMemoryCallSessionRepository()
     factory = StageContextFactory()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _character: agent or RecordingAgent(),
         adapter=adapter,
         get_context_factory=lambda _character: factory,
@@ -49,7 +49,7 @@ def manager(
 
 async def connected(manager, user="user"):
     connection = WebSocketConnection(Socket(), user, user)
-    stage = await manager.connect(connection, "luotianyi")
+    stage = await manager._chat_output_sink.open(connection, "luotianyi")
     return connection, stage
 
 
@@ -96,16 +96,65 @@ async def test_prepare_suspends_business_input_and_expiry_restores_it():
         client_request_id="request-1",
     )
 
-    assert stage_manager._adapter.is_business_input_suspended(connection)
-    acceptance = await stage_manager._adapter.try_accept_event(
+    assert stage.input_suspended
+    assert not stage.stimulus_input_sink.can_accept(stimulus())
+    assert not stage.stimulus_input_sink.submit(stimulus())
+    acceptance = await stage_manager._chat_output_sink.receive(
         connection,
         SimpleNamespace(event_type="user_text", payload={}, client_msg_id="msg-1"),
     )
     assert acceptance.code == "CALL_SWITCH_PENDING"
     assert acceptance.retryable is True
     await asyncio.sleep(max(0.0, intent.expires_at - asyncio.get_running_loop().time()) + 0.01)
-    assert not stage_manager._adapter.is_business_input_suspended(connection)
+    assert not stage.input_suspended
     assert stage.state.value == "online"
+
+
+@pytest.mark.asyncio
+async def test_adapter_routes_switch_prepare_and_keeps_binding_until_commit():
+    stage_manager, _, _ = manager()
+    connection, stage = await connected(stage_manager)
+    adapter = stage_manager._chat_output_sink
+    raw = {
+        "protocol": "call.v1",
+        "type": "call.switch_prepare",
+        "client_request_id": "request-1",
+        "character_id": "luotianyi",
+    }
+    event = SimpleNamespace(event_type="call.switch_prepare", raw_event=raw)
+    try:
+        result = await adapter.receive(connection, event)
+        assert result["type"] == "call.switch_ready"
+        assert stage.input_suspended
+        assert adapter._routes[stage.interaction_id].connection is connection
+        claim = await stage_manager._claim_call(
+            user_id="user",
+            character_id="luotianyi",
+            source_interaction_id=stage.interaction_id,
+            client_request_id="request-1",
+        )
+        assert claim.record.call_id
+        assert stage.interaction_id not in adapter._routes
+    finally:
+        await stage_manager.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_adapter_bind_releases_connection_and_expires_stage(monkeypatch):
+    stage_manager, _, _ = manager(config={"offline_timeout": 0})
+    adapter = stage_manager._chat_output_sink
+    connection = WebSocketConnection(Socket(), "user", "user")
+
+    async def fail_bind(*args):
+        raise RuntimeError("bind failed")
+
+    monkeypatch.setattr(adapter, "bind", fail_bind)
+    with pytest.raises(RuntimeError, match="bind failed"):
+        await adapter.open(connection, "luotianyi")
+    assert not stage_manager._connections
+    await asyncio.sleep(0)
+    await stage_manager.close()
+    assert not adapter._routes
 
 
 @pytest.mark.asyncio
@@ -340,7 +389,7 @@ async def test_ledger_create_failure_restores_chat_and_requires_reprepare():
 
     assert stage.state.value == "online"
     assert stage.context.closed is False
-    assert not stage_manager._adapter.is_business_input_suspended(connection)
+    assert not stage.input_suspended
     with pytest.raises(ValueError, match="matching call transition"):
         await stage_manager._claim_call(
             user_id="user",
@@ -417,9 +466,9 @@ async def test_normal_disconnect_keeps_chat_for_60_second_reconnect():
     stage_manager, _, _ = manager(config={"offline_timeout": 60.0})
     connection, stage = await connected(stage_manager)
 
-    await stage_manager.disconnect(connection)
+    await stage_manager._chat_output_sink.close_connection(connection)
     replacement = WebSocketConnection(Socket(), "user", "replacement")
-    reconnected = await stage_manager.connect(replacement, "luotianyi")
+    reconnected = await stage_manager._chat_output_sink.open(replacement, "luotianyi")
 
     assert reconnected is stage
     assert stage.context.closed is False
@@ -444,7 +493,7 @@ async def test_direct_start_without_chat_claims_empty_slot_and_persists_ledger()
 async def test_direct_start_cannot_steal_offline_retained_chat():
     stage_manager, repository, _ = manager(config={"offline_timeout": 60.0})
     connection, stage = await connected(stage_manager)
-    await stage_manager.disconnect(connection)
+    await stage_manager._chat_output_sink.close_connection(connection)
 
     with pytest.raises(ValueError, match="already owned"):
         await stage_manager._claim_call(
@@ -713,7 +762,7 @@ async def test_setup_timeout_waits_for_owned_termination_before_releasing_transi
             client_request_id="request-direct",
         )
     with pytest.raises(RuntimeError) as error:
-        await stage_manager.connect(WebSocketConnection(Socket(), "user", "replacement"), "luotianyi")
+        await stage_manager._chat_output_sink.open(WebSocketConnection(Socket(), "user", "replacement"), "luotianyi")
     assert str(error.value) == "INTERACTION_FINALIZING"
 
     await asyncio.sleep(0.25)
@@ -893,7 +942,7 @@ async def test_user_reset_waits_creation_after_claim_take_and_fence_is_registry_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_seam", ["constructor", "bind"])
+@pytest.mark.parametrize("failure_seam", ["constructor", "publication"])
 async def test_postclaim_setup_failure_emits_once_and_releases_ownership(monkeypatch, failure_seam):
     from src.stage import call_stage as call_stage_module
 
@@ -909,9 +958,9 @@ async def test_postclaim_setup_failure_emits_once_and_releases_ownership(monkeyp
         def __init__(self):
             self.failures = []
 
-        def bind_stage(self, _stage):
-            if failure_seam == "bind":
-                raise RuntimeError("BIND_FAILED")
+        def stage_created(self, _stage):
+            if failure_seam == "publication":
+                raise RuntimeError("PUBLICATION_FAILED")
 
         async def send_failed(self, reason):
             self.failures.append(reason)
@@ -934,6 +983,7 @@ async def test_postclaim_setup_failure_emits_once_and_releases_ownership(monkeyp
                 client_request_id=failure_seam,
                 speech_factory=SimpleNamespace(),
                 transport=transport,
+                stage_created=transport.stage_created,
             )
     finally:
         if failure_seam == "constructor":

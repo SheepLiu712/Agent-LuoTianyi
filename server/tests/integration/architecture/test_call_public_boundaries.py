@@ -26,7 +26,7 @@ def test_stage_manager_does_not_reexport_transitional_call_steps():
         "current_call_stage",
         "release_call",
     }.isdisjoint(public)
-    assert {"initialize", "open_call", "resume_call", "commit_call_resume", "close"} <= public
+    assert {"initialize", "try_to_get_stage", "commit_call_resume", "close"} <= public
     assert "start_call" not in public
 
 
@@ -76,3 +76,11 @@ def test_call_adapter_uses_only_the_complete_manager_open_facade():
     assert "infer_call_source_interaction" not in source
     assert "find_call_by_request" not in source
     assert "start_call" not in source
+
+
+def test_stage_manager_does_not_control_adapter_binding_or_protocol_preparation():
+    source = (SERVER_ROOT / "src/stage/stage_manager.py").read_text(encoding="utf-8")
+    assert "src.adapter" not in source
+    assert "transport.prepare(" not in source
+    assert 'getattr(transport, "bind_stage"' not in source
+    assert "self._adapter" not in source

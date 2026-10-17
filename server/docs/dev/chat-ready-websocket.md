@@ -2,7 +2,7 @@
 
 `/chat_ws` 保留原有 `system_ready`、认证和 `auth_ok` 握手。`auth_ok` 只代表凭据校验成功，不能代表聊天已可用。
 
-只有 `StageManager.connect` 完成真实 `ChatStage` 绑定后，服务端才发送：
+只有 `WebSocketAdapter.open`（内部通过 `StageManager.try_to_get_stage` 获取交互） 完成真实 `ChatStage` 绑定后，服务端才发送：
 
 ```json
 {

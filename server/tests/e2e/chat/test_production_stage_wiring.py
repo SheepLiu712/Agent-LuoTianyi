@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent.context import ConversationMode, RecalledMemoryContext
-from src.stage import StageManager
 from src.web.websocket import WSMessage
 from src.web.websocket.service import (
     WebSocketConnection,
@@ -153,7 +153,7 @@ async def test_production_chat_reconnect_reuses_stage_after_stimulus_output(
 
     agent = ReplyingAgent()
     adapter = WebSocketAdapter()
-    stage_manager = StageManager(
+    stage_manager = make_stage_manager(
         get_agent=lambda _: agent,
         adapter=adapter,
         get_context_factory=lambda _: ContextFactory(),

@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_manager import make_stage_manager
 
 from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.call_v1 import CallTransportError, CallWebSocketAdapter
@@ -14,7 +15,6 @@ from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage import StageManager
 from src.web.websocket import call_endpoint
 from tests.integration.stage.test_call_stage import _ContextDatabase
 from tests.integration.stage.test_chat_stage import RecordingAgent
@@ -79,7 +79,7 @@ async def test_physical_send_failure_cancels_receive_disconnects_and_allows_resu
     Base.metadata.create_all(engine)
     repository = SqlCallSessionRepository(sessionmaker(bind=engine))
     speech = FakeRealtimeSpeechSessionFactory()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _character: RecordingAgent(),
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
