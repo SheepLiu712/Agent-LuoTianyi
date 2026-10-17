@@ -376,7 +376,7 @@ async def test_manager_reconnect_old_disconnect_and_offline_expiry():
     ending = await take(agent.requests)
     assert ending.interaction.interaction_id == other.interaction_id
     assert isinstance(ending.stimulus, d.InteractionEnding)
-    assert await adapter.receive_event(
+    assert await adapter._receive_event(
         new, WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"})
     )
     await take(agent.requests)
@@ -573,7 +573,7 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
         ),
     )
     stage, _, adapter, connection, socket = await setup(agent)
-    assert await adapter.receive_event(
+    assert await adapter._receive_event(
         connection, WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"})
     )
 

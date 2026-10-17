@@ -103,7 +103,7 @@ class WebSocketAdapter:
         """Validate, deduplicate, translate, and submit one authenticated channel event."""
         if not self.supports_input(event):
             return ChatEventAcceptance.UNSUPPORTED
-        if connection.is_closed or not connection.user_uuid or not self.has_valid_client_message_id(event):
+        if connection.is_closed or not connection.user_uuid or not self._has_valid_client_message_id(event):
             return ChatEventAcceptance.BAD_MESSAGE
         if connection in self._suspended_connections:
             return EventRejection(
@@ -112,9 +112,9 @@ class WebSocketAdapter:
                 retryable=True,
             )
         try:
-            if self.is_duplicate_client_message(connection, event):
+            if self._is_duplicate_client_message(connection, event):
                 return ChatEventAcceptance.DUPLICATE
-            accepted = await self.receive_event(connection, event)
+            accepted = await self._receive_event(connection, event)
         except MediaResolutionError as error:
             code = error.code.value if isinstance(error.code, MediaResolutionErrorCode) else str(error.code)
             return EventRejection(
@@ -125,7 +125,7 @@ class WebSocketAdapter:
             return ChatEventAcceptance.BAD_MESSAGE
         if not accepted:
             return ChatEventAcceptance.OVERLOADED
-        self.mark_client_message_accepted(connection, event)
+        self._mark_client_message_accepted(connection, event)
         return ChatEventAcceptance.ACCEPTED
 
     async def process_voice_event(self, connection: WebSocketConnection, event: WSMessage) -> VoiceUploadAck:
@@ -164,7 +164,7 @@ class WebSocketAdapter:
             sink=stage.stimulus_input_sink,
         )
 
-    def is_duplicate_client_message(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+    def _is_duplicate_client_message(self, connection: WebSocketConnection, event: WSMessage) -> bool:
         """Check accepted messages without marking a new event as accepted."""
         key = self._client_message_key(connection, event)
         if key is None:
@@ -173,7 +173,7 @@ class WebSocketAdapter:
         self._prune_recent_client_messages(now)
         return key in self._recent_client_messages
 
-    def mark_client_message_accepted(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+    def _mark_client_message_accepted(self, connection: WebSocketConnection, event: WSMessage) -> bool:
         """Record idempotency only after every target Stage accepted the event."""
         key = self._client_message_key(connection, event)
         if key is None:
@@ -187,11 +187,11 @@ class WebSocketAdapter:
         return True
 
     @staticmethod
-    def has_valid_client_message_id(event: WSMessage) -> bool:
+    def _has_valid_client_message_id(event: WSMessage) -> bool:
         return isinstance(event.client_msg_id, str) and 0 < len(event.client_msg_id) <= 128
 
     def _client_message_key(self, connection: WebSocketConnection, event: WSMessage) -> str | None:
-        if not self.has_valid_client_message_id(event):
+        if not self._has_valid_client_message_id(event):
             return None
         owner = connection.user_uuid or connection.user_name or "anonymous"
         if event.event_type in {"user_voice_recording_started", "user_voice_recording_cancelled"}:
@@ -237,7 +237,7 @@ class WebSocketAdapter:
             raise d.SinkRejectedError("unsupported output", code=d.SinkRejectionCode.UNSUPPORTED_OUTPUT)
         return delivery.submit(output)
 
-    async def receive_event(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+    async def _receive_event(self, connection: WebSocketConnection, event: WSMessage) -> bool:
         """将已认证业务 event 转为刺激并交给已绑定 Stage；全部目标可接收才投递，否则返回 False。"""
         if connection.is_closed or not connection.user_uuid:
             raise ValueError("authenticated live connection required")

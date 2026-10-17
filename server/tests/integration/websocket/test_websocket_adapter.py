@@ -416,15 +416,15 @@ async def test_input_targets_are_atomic_and_use_authenticated_identity():
         payload={"text": "你好", "target_character_ids": ["luotianyi", "miku"], "user_id": "forged"},
     )
     other.available = False
-    assert not await adapter.receive_event(connection, event)
+    assert not await adapter._receive_event(connection, event)
     assert not stage.stimuli and not other.stimuli
     other.available = True
-    assert await adapter.receive_event(connection, event)
+    assert await adapter._receive_event(connection, event)
     assert stage.stimuli[0] is other.stimuli[0]
     assert stage.stimuli[0].user_id == "user"
     assert stage.stimuli[0].occurred_at.tzinfo is not None
     with pytest.raises(ValueError):
-        await adapter.receive_event(
+        await adapter._receive_event(
             connection,
             WSMessage(
                 event_type="user_text", client_msg_id="bad", payload={"text": "hi", "target_character_ids": ["missing"]}
@@ -453,7 +453,7 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
         },
     )
 
-    assert await adapter.receive_event(connection, event)
+    assert await adapter._receive_event(connection, event)
 
     stimulus = stage.stimuli[0]
     assert isinstance(stimulus, d.ImageMessage)
@@ -463,7 +463,7 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
     metadata = json.loads((media_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["mime_type"] == "image/png"
     assert metadata["owner_user_id"] == "user"
-    assert await adapter.receive_event(connection, event)
+    assert await adapter._receive_event(connection, event)
     assert stage.stimuli[1].media_ref == stimulus.media_ref
     await adapter.disconnect(stage)
 
@@ -492,9 +492,9 @@ async def test_image_persistence_conflict_prevents_stimulus_delivery(tmp_path):
         payload={**common, "image_base64": base64.b64encode(other_image.getvalue()).decode("ascii")},
     )
 
-    assert await adapter.receive_event(connection, first)
+    assert await adapter._receive_event(connection, first)
     with pytest.raises(ValueError, match="content conflict"):
-        await adapter.receive_event(connection, conflict)
+        await adapter._receive_event(connection, conflict)
     assert len(stage.stimuli) == 1
     await adapter.disconnect(stage)
 
@@ -520,7 +520,7 @@ async def test_image_is_not_materialized_when_target_is_missing_or_overloaded(tm
         },
     )
     with pytest.raises(ValueError, match="not bound"):
-        await adapter.receive_event(connection, missing)
+        await adapter._receive_event(connection, missing)
     stage.available = False
     overloaded = WSMessage(
         event_type="user_image",
@@ -530,7 +530,7 @@ async def test_image_is_not_materialized_when_target_is_missing_or_overloaded(tm
             "mime_type": "image/png",
         },
     )
-    assert not await adapter.receive_event(connection, overloaded)
+    assert not await adapter._receive_event(connection, overloaded)
     assert not list(root.iterdir())
     await adapter.disconnect(stage)
 
@@ -554,7 +554,7 @@ async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_p
         },
     )
     with pytest.raises(MediaResolutionError) as too_large:
-        await adapter.receive_event(connection, oversize)
+        await adapter._receive_event(connection, oversize)
     assert too_large.value.code is MediaResolutionErrorCode.TOO_LARGE
     invalid = WSMessage(
         event_type="user_image",
@@ -565,7 +565,7 @@ async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_p
         },
     )
     with pytest.raises(MediaResolutionError) as invalid_image:
-        await adapter.receive_event(connection, invalid)
+        await adapter._receive_event(connection, invalid)
     assert invalid_image.value.code is MediaResolutionErrorCode.UNKNOWN
     assert not list(root.iterdir())
     await adapter.disconnect(stage)
@@ -590,7 +590,7 @@ async def test_image_mime_is_detected_persisted_and_resolved(tmp_path, declarati
         client_msg_id="detected",
         payload={"image_base64": prefix + base64.b64encode(image).decode("ascii"), **declaration},
     )
-    assert await adapter.receive_event(connection, event)
+    assert await adapter._receive_event(connection, event)
     media_ref = stage.stimuli[0].media_ref
     metadata = json.loads((root / media_ref.media_id / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["mime_type"] == "image/png"
@@ -599,7 +599,7 @@ async def test_image_mime_is_detected_persisted_and_resolved(tmp_path, declarati
     assert resolved.data == image
     # Changing only the declaration must not create a replay content conflict.
     event.payload["mime_type"] = "image/gif"
-    assert await adapter.receive_event(connection, event)
+    assert await adapter._receive_event(connection, event)
     assert stage.stimuli[1].media_ref == media_ref
     await adapter.disconnect(stage)
 
@@ -631,7 +631,7 @@ async def test_image_persistence_runs_off_event_loop_thread(tmp_path, monkeypatc
         },
     )
 
-    assert await adapter.receive_event(connection, event)
+    assert await adapter._receive_event(connection, event)
 
     assert observed_threads and observed_threads[0] != event_loop_thread
     await adapter.disconnect(stage)
@@ -668,7 +668,7 @@ async def test_adapter_business_suspension_rejects_without_dedup_or_stage_delive
     assert rejection.code == "CALL_SWITCH_PENDING"
     assert rejection.retryable is True
     assert stage.stimuli == []
-    assert not adapter.is_duplicate_client_message(connection, event)
+    assert not adapter._is_duplicate_client_message(connection, event)
     assert adapter.resume_business_input(connection, interaction_id=stage.interaction_id)
     assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.ACCEPTED
     await adapter.disconnect(stage)
@@ -770,7 +770,7 @@ def test_real_fastapi_websocket_prepared_say(tmp_path):
         await adapter.bind(stage, connection)
         try:
             event = WSMessage(**await websocket.receive_json())
-            assert await adapter.receive_event(connection, event)
+            assert await adapter._receive_event(connection, event)
             assert stage.stimuli[0].text == "你好"
             port = OutputPort(adapter)
             context = d.ExecutionContext(

@@ -1,16 +1,8 @@
-import sys
-from pathlib import Path
-
 import pytest
 
-
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
+from src.adapter.websocket import WebSocketAdapter
 from src.web.websocket import WSEventType, WSMessage
 from src.web.websocket.service import WebSocketConnection, WebSocketService
-from src.adapter.websocket import WebSocketAdapter
 
 
 class FakeWebSocket:
@@ -33,11 +25,11 @@ def test_websocket_adapter_deduplicates_recent_client_message_per_user():
     adapter = WebSocketAdapter()
     connection = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
 
-    assert adapter.is_duplicate_client_message(connection, _message("msg-1")) is False
-    assert adapter.is_duplicate_client_message(connection, _message("msg-1")) is False
-    assert adapter.mark_client_message_accepted(connection, _message("msg-1")) is True
-    assert adapter.is_duplicate_client_message(connection, _message("msg-1")) is True
-    assert adapter.is_duplicate_client_message(connection, _message("msg-2")) is False
+    assert adapter._is_duplicate_client_message(connection, _message("msg-1")) is False
+    assert adapter._is_duplicate_client_message(connection, _message("msg-1")) is False
+    assert adapter._mark_client_message_accepted(connection, _message("msg-1")) is True
+    assert adapter._is_duplicate_client_message(connection, _message("msg-1")) is True
+    assert adapter._is_duplicate_client_message(connection, _message("msg-2")) is False
 
 
 def test_websocket_adapter_dedup_cache_is_scoped_by_user():
@@ -45,10 +37,10 @@ def test_websocket_adapter_dedup_cache_is_scoped_by_user():
     user_a = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
     user_b = WebSocketConnection(FakeWebSocket(), user_uuid="user-b", user_name="bob")
 
-    assert adapter.mark_client_message_accepted(user_a, _message("same-id")) is True
-    assert adapter.mark_client_message_accepted(user_b, _message("same-id")) is True
-    assert adapter.is_duplicate_client_message(user_a, _message("same-id")) is True
-    assert adapter.is_duplicate_client_message(user_b, _message("same-id")) is True
+    assert adapter._mark_client_message_accepted(user_a, _message("same-id")) is True
+    assert adapter._mark_client_message_accepted(user_b, _message("same-id")) is True
+    assert adapter._is_duplicate_client_message(user_a, _message("same-id")) is True
+    assert adapter._is_duplicate_client_message(user_b, _message("same-id")) is True
 
 
 @pytest.mark.asyncio
