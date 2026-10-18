@@ -955,7 +955,7 @@ Web 在认证后只交付 ASGI 已重组的完整 text/bytes 消息，检查 rec
 
 ### 聊天业务输入处理结果与 ACK
 
-聊天 `_input._process_input` 统一处理普通输入与语音上传，返回普通 tuple `(stimulus_or_none, status)`，不创建结果包装类。第一个元素是领域刺激或 `None`；第二个元素是普通字典，`state` 的协议如下：
+聊天 `_input.process_input` 统一处理普通输入与语音上传，返回普通 tuple `(stimulus_or_none, status)`，不创建结果包装类。第一个元素是领域刺激或 `None`；第二个元素是普通字典，`state` 的协议如下：
 
 | state | stimulus | Adapter 后续动作 |
 | --- | --- | --- |
@@ -971,3 +971,19 @@ Web 在认证后只交付 ASGI 已重组的完整 text/bytes 消息，检查 rec
 Adapter 在一次输入处理事务内串行完成解析、准入、投递及 helper 的提交或丢弃。语音 finalize 的候选结果不构成完成记录；Stage 拒绝时保留上传和分块，允许再次 finalize。submit 成功后先登记内存完成记录，再持久化回执；回执写入失败保留原有内存幂等和重试写入行为。所有投递必须检查 submit 返回值，不能只依据 can_accept 发 ACK。
 
 校验失败和过期产生的后台协调通知由 helper 暂存，Adapter 取出后仅向仍有效的原绑定投递；它们不是对应业务请求的成功 ACK。断线、暂停或重新绑定发生在媒体异步处理期间时，不得把候选刺激投递到失效绑定或替换连接。
+
+
+### 聊天下行协议编码与连接状态
+
+
+聊天下行的事件信封（`type / ts / payload / reply_to`）构造与 wire JSON 序列化统一由 `chat/_protocol_translate.py` 完成。`encode_event` 构造并编码聊天事件，`encode_message` 编码已经成形的协议消息（例如切换就绪响应），避免重复套信封。`_binding.py` 的 `Binding` 统一持有连接身份、协商状态、就绪门控、唯一 Stage 及绑定有效状态、控制任务及发送队列；协议编码仍调用 `_protocol_translate.py`。
+
+业务输出与客户端模型请求先编码，再调用 `binding.send(str | bytes)`；该方法等待业务就绪并等待 Outbox 的网络完成结果。`chat.ready`、ACK/NACK 和心跳等即时协议消息由 `_protocol_translate` 编码后调用 `Binding.enqueue` 入队，不等待业务就绪门控。保持 `chat.ready` 先入队再释放业务门控的顺序，避免循环等待。入队、出队、网络发送完成、客户端确认及播放完成仍是不同事实；等待者取消不撤回已入队的报文。
+
+`_delivery.py` 继续管理业务消息分组、顺序、取消与终包；`_binding.py` 内部的私有 Outbox 管理已编码报文的容量、在途状态和发送完成反馈，外部不直接操作队列。投递器由 Binding 持有，Adapter 不再另行管理其生命周期。业务身份生成与持久化中的 JSON 使用不属于 wire 序列化，不受此次归属调整影响。
+
+### 聊天连接 Binding 的归属
+
+Adapter 维护连接句柄到 Binding 的集合，以及用于 Stage 输出路由的交互索引。创建、撤销 Stage 绑定和网络收发反馈均通过 Binding 操作，不再维护独立的 Peer、Outbox 或连接投递器集合。`_BoundInputSink` 已删除，Binding 自行检查权限并提交刺激。
+
+一条连接只绑定一个 Stage，Binding 直接持有该 Stage、输入权限及输出收尾状态，不再设置 Stage 集合或额外绑定记录。解绑永久撤销业务投递权限，取消业务输出并等待控制任务；WebSocket 仍可发送协议控制响应，真正断线才关闭发送队列。重连接入创建新的 Binding，异步媒体转换及语音上传持有的旧 Binding 始终失效。

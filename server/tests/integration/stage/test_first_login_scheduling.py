@@ -90,15 +90,15 @@ async def test_one_login_dispatches_once_to_each_character():
         manager.record_login("user", character_id, elapsed_from_last_login=None)
 
     # When: both character stages become ready for the same login.
-    connection = StubChatConnection(Socket(), "user", "用户")
+    connections = {character_id: StubChatConnection(Socket(), "user", "用户") for character_id in agents}
     for character_id in agents:
-        await manager._test_chat_adapter._open(connection, character_id)
+        await manager._test_chat_adapter._open(connections[character_id], character_id)
     await asyncio.wait_for(
         asyncio.gather(*(wait_for_count(agent.first_logins, 1) for agent in agents.values())),
         1,
     )
     for character_id in agents:
-        await manager._test_chat_adapter._open(connection, character_id)
+        await manager._test_chat_adapter._open(connections[character_id], character_id)
     await asyncio.sleep(0.02)
 
     # Then: each character receives one character-scoped fact and reconnect does not replay it.

@@ -1,4 +1,4 @@
-"""Wire-level WebSocket event and payload types."""
+"""聊天 Adapter 内部使用的入站消息与下行内容契约。"""
 
 from dataclasses import dataclass
 from typing import Any
@@ -24,7 +24,9 @@ _BUSINESS_INPUT_EVENTS = frozenset(
 )
 
 
-class _ChatResponse(BaseModel):
+class ChatResponse(BaseModel):
+    """聊天下行消息内容，承载文字、音频、表情及终包标记。"""
+
     uuid: str
     text: str
     audio: str | None = None
@@ -38,7 +40,9 @@ class _ChatResponse(BaseModel):
 
 
 @dataclass
-class _WSMessage:
+class WSMessage:
+    """解析后的聊天入站消息，保留原始报文以供大小和协议校验。"""
+
     event_type: str
     payload: dict[str, Any]
     client_msg_id: str | None = None

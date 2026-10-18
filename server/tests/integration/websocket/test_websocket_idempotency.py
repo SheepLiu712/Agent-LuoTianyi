@@ -4,7 +4,7 @@ import pytest
 from support.chat_connection import StubChatConnection
 
 from src.adapter.websocket.chat import WebSocketAdapter
-from src.adapter.websocket.chat._messages import _WSMessage
+from src.adapter.websocket.chat._messages import WSMessage
 
 
 class FakeWebSocket:
@@ -15,8 +15,8 @@ class FakeWebSocket:
         self.sent.append(event)
 
 
-def _message(client_msg_id: str) -> _WSMessage:
-    return _WSMessage(
+def _message(client_msg_id: str) -> WSMessage:
+    return WSMessage(
         event_type="user_text",
         payload={"text": "你好"},
         client_msg_id=client_msg_id,

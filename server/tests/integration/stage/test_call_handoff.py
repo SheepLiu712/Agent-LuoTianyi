@@ -127,7 +127,7 @@ async def test_adapter_routes_switch_prepare_and_keeps_binding_until_commit():
         result = await adapter._receive(connection, event)
         assert result["type"] == "call.switch_ready"
         assert stage.input_suspended
-        assert adapter._routes[stage.interaction_id].connection is connection
+        assert adapter._routes[stage.interaction_id] is connection
         claim = await stage_manager._claim_call(
             user_id="user",
             character_id="luotianyi",

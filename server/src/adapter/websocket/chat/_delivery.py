@@ -1,4 +1,4 @@
-"""按真实连接串行投递完整消息；跨消息保持播放终止位置。"""
+"""按逻辑连接串行调度完整业务消息，保持消息顺序和取消终包位置。"""
 
 from __future__ import annotations
 
@@ -6,24 +6,30 @@ import asyncio
 import json
 from collections import deque
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid5
 
 import src.domain.agent as d
 from src.utils.logger import get_logger
 
-from ._messages import _ChatResponse
-from ._peer import _ChatPeer
-from ._protocol import _payloads
+from ._messages import ChatResponse
+from ._protocol_translate import encode_event, payloads
+
+if TYPE_CHECKING:
+    from ._binding import Binding
 
 
 @dataclass(frozen=True)
-class _DeliveryConfig:
+class DeliveryConfig:
+    """定义单连接业务输出数量、字节数和逻辑消息数的容量上限。"""
+
     max_outputs: int = 256
     max_bytes: int = 16 * 1024 * 1024
     max_messages: int = 64
 
     @classmethod
-    def from_dict(cls, config: dict) -> _DeliveryConfig:
+    def from_dict(cls, config: dict) -> DeliveryConfig:
+        """读取并校验投递容量配置；各上限必须为正整数。"""
         if not isinstance(config, dict):
             raise TypeError("adapter config must be a dictionary")
         values = {
@@ -35,14 +41,15 @@ class _DeliveryConfig:
         return cls(**values)
 
 
-def _completion(label: str) -> asyncio.Future[None]:
+def create_completion(label: str) -> asyncio.Future[None]:
+    """创建投递完成 Future，并记录未成功完成的投递异常。"""
     future = asyncio.get_running_loop().create_future()
 
-    def observe(result: asyncio.Future[None]) -> None:
+    def _observe(result: asyncio.Future[None]) -> None:
         if not result.cancelled() and result.exception() is not None:
             get_logger(__name__).error("WebSocket delivery failed %s: %s", label, result.exception())
 
-    future.add_done_callback(observe)
+    future.add_done_callback(_observe)
     return future
 
 
@@ -68,8 +75,10 @@ class _Message:
     current: _Item | None = None
 
 
-class _ConnectionDelivery:
-    def __init__(self, connection: _ChatPeer, config: _DeliveryConfig) -> None:
+class ConnectionDelivery:
+    """按逻辑消息串行调度业务输出，管理容量、取消、包序号和终包。"""
+
+    def __init__(self, connection: Binding, config: DeliveryConfig) -> None:
         self.connection, self.config = connection, config
         self.messages: deque[_Message] = deque()
         self.by_key: dict[tuple[str, str, str], _Message] = {}
@@ -80,6 +89,7 @@ class _ConnectionDelivery:
         self.closed = False
 
     def submit(self, output: d.AgentOutput) -> asyncio.Future[None]:
+        """接纳一个业务输出并返回其网络完成 Future；身份冲突、关闭或容量不足时拒绝。"""
         if self.closed or self.connection.is_closed:
             raise d.SinkRejectedError("connection is closed", code=d.SinkRejectionCode.SINK_CLOSED)
         key = (output.interaction_id, output.execution_id, output.action_id)
@@ -98,10 +108,10 @@ class _ConnectionDelivery:
         ):
             raise d.SinkRejectedError("connection output queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
         if message is None:
-            message = _Message(key, output.delivery, _completion(f"message={key}"), output.message_id)
+            message = _Message(key, output.delivery, create_completion(f"message={key}"), output.message_id)
             self.messages.append(message)
             self.by_key[key] = message
-        future = _completion(f"interaction={key[0]} execution={key[1]} sequence={output.sequence_no}")
+        future = create_completion(f"interaction={key[0]} execution={key[1]} sequence={output.sequence_no}")
         message.items.append(_Item(output, future, size))
         message.accepted_end = isinstance(output, d.MessageEndOutput)
         self.pending_outputs += 1
@@ -112,6 +122,7 @@ class _ConnectionDelivery:
         return future
 
     def cancel(self, interaction_id: str, execution_id: str | None = None) -> list[asyncio.Future[None]]:
+        """取消匹配交互或执行的未发送输出，返回各消息完成取消收尾的等待对象。"""
         done = []
         for message in list(self.messages):
             if message.key[0] != interaction_id or (execution_id is not None and message.key[1] != execution_id):
@@ -131,6 +142,7 @@ class _ConnectionDelivery:
         return done
 
     def disconnect(self) -> None:
+        """终止该连接的业务投递，使所有未完成消息失败。"""
         self.closed = True
         self.connection.mark_disconnected()
         error = ConnectionError("WebSocket connection disconnected")
@@ -163,7 +175,7 @@ class _ConnectionDelivery:
                 message.done.set_result(None)
 
     async def _send(self, message: _Message, values: dict[str, object]) -> None:
-        packet = _ChatResponse(
+        packet = ChatResponse(
             uuid=message.message_id or str(uuid5(NAMESPACE_URL, json.dumps(["agent-message", *message.key]))),
             text="",
             audio="",
@@ -174,7 +186,7 @@ class _ConnectionDelivery:
             packet_sequence=message.sequence,
         ).model_dump()
         packet.update(values)
-        await self.connection.send_event("agent_message", packet)
+        await self.connection.send(encode_event("agent_message", packet))
         message.started = True
         message.sequence += 1
         message.ended = bool(packet["is_final_package"])
@@ -213,7 +225,7 @@ class _ConnectionDelivery:
     async def _deliver_item(self, message: _Message, item: _Item) -> None:
         message.current = item
         try:
-            for values in _payloads(item.output):
+            for values in payloads(item.output):
                 if message.cancelled or self.closed:
                     break
                 await self._send(message, values)

@@ -27,6 +27,8 @@ from src.infrastructure.models.client_execution import (
 )
 from src.utils.logger import get_logger
 
+from ._protocol_translate import encode_event
+
 __all__ = [
     "ClientLLMError",
     "ClientLLMExecutionError",
@@ -82,12 +84,7 @@ class ClientLLMExecutor:
         if ws_connection is None:
             return
         try:
-            event = {
-                "type": "error",
-                "ts": int(time.time() * 1000),
-                "payload": {"code": "LLM_CLIENT_ERROR", "message": message},
-            }
-            await ws_connection.send_json(event)
+            await ws_connection.send(encode_event("error", {"code": "LLM_CLIENT_ERROR", "message": message}))
         except Exception as exc:
             self.logger.debug(f"Failed to notify user {user_id}: {exc}")
 
@@ -142,11 +139,7 @@ class ClientLLMExecutor:
         if image_base64:
             payload["image_base64"] = image_base64
 
-        event = {
-            "type": "llm_request",
-            "ts": int(time.time() * 1000),
-            "payload": payload,
-        }
+        event = encode_event("llm_request", payload)
 
         started = time.perf_counter()
         await self._send_request(ws_connection, request_id, event, future)
@@ -179,7 +172,7 @@ class ClientLLMExecutor:
 
     async def _send_request(self, ws_connection, request_id, event, future) -> None:
         try:
-            await ws_connection.send_json(event)
+            await ws_connection.send(event)
         except BaseException as exc:
             self._pending.pop(request_id, None)
             future.cancel()

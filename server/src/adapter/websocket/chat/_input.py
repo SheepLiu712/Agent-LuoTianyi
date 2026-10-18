@@ -15,36 +15,34 @@ from src.infrastructure.media import (
     PermanentMediaStore,
 )
 
-from ._messages import _BUSINESS_INPUT_EVENTS, _WSMessage
-from ._voice_upload_helper import _VoiceUploadAssembler, _VoiceUploadError
+from ._messages import _BUSINESS_INPUT_EVENTS, WSMessage
+from ._voice_upload_helper import VoiceUploadAssembler, VoiceUploadError
 
 
-async def _process_input(
-    event: _WSMessage,
+async def process_input(
+    event: WSMessage,
     user_id: str,
     default_character_id: str,
     media_store: PermanentMediaStore | None,
-    voice_uploads: _VoiceUploadAssembler,
+    voice_uploads: VoiceUploadAssembler,
 ) -> tuple[d.Stimulus | None, dict]:
-    """Return (stimulus, status), without admitting or delivering to any Stage.
+    """统一处理普通输入和语音上传，返回 (领域刺激或 None, 状态字典)，不执行 Stage 准入或投递。
 
-    status.state: complete (deliver stimulus before ACK), partial (frame accepted,
-    no complete stimulus), duplicate (already accepted; do not redeliver), or
-    error (status.error contains the validation exception). ack_payload and
-    duplicate, when present, describe the response only, never Stage admission.
-    The Adapter serializes this operation through commit/discard of voice state.
-    """
+    状态 state 为 complete、partial、duplicate 或 error；complete 仍须由 Adapter 实际投递成功后确认。
+    ack_payload 和 duplicate 是可选应答元数据；error 保存处理异常。语音取消可携带原绑定标识。
+    调用方须串行完成处理、准入及上传候选状态的提交或丢弃。"""
     try:
         if event.event_type == "user_voice":
-            targets = _input_targets(event, default_character_id)
+            targets = input_targets(event, default_character_id)
             return await voice_uploads.process(event=event, user_id=user_id, character_id=targets[0])
         candidate = _prepare_input(event, user_id, default_character_id, media_store)
         return candidate.stimulus, {"state": "complete"}
-    except (MediaResolutionError, _VoiceUploadError, KeyError, TypeError, ValueError) as error:
+    except (MediaResolutionError, VoiceUploadError, KeyError, TypeError, ValueError) as error:
         return None, {"state": "error", "error": error}
 
 
-def _input_targets(event: _WSMessage, default_character_id: str) -> tuple[str, ...]:
+def input_targets(event: WSMessage, default_character_id: str) -> tuple[str, ...]:
+    """校验业务消息信封并取得目标角色；语音上传只允许一个目标角色。"""
     payload = _validate_envelope(event)
     targets = _target_characters(payload, default_character_id)
     if event.event_type == "user_voice" and len(targets) != 1:
@@ -52,8 +50,8 @@ def _input_targets(event: _WSMessage, default_character_id: str) -> tuple[str, .
     return targets
 
 
-def _materialize_input(event: _WSMessage, stimulus: d.Stimulus, media_store: PermanentMediaStore | None) -> None:
-    """Finish image storage after preliminary admission; does not deliver the stimulus."""
+def materialize_input(event: WSMessage, stimulus: d.Stimulus, media_store: PermanentMediaStore | None) -> None:
+    """在初步准入后完成图片解码和存储；其它刺激无需处理，投递仍由 Adapter 执行。"""
     if not isinstance(stimulus, d.ImageMessage):
         return
     if media_store is None:
@@ -89,7 +87,7 @@ class _PreparedInput:
 
 
 def _prepare_input(
-    event: _WSMessage,
+    event: WSMessage,
     user_id: str,
     default_character_id: str,
     media_store: PermanentMediaStore | None = None,
@@ -125,7 +123,7 @@ def _prepare_input(
     return _prepare_text(event, payload, values)
 
 
-def _validate_envelope(event: _WSMessage) -> dict:
+def _validate_envelope(event: WSMessage) -> dict:
     if event.event_type not in _INPUT_EVENTS:
         raise ValueError("unsupported business event")
     if not isinstance(event.payload, dict):
@@ -149,7 +147,7 @@ def _target_characters(payload: dict, default_character_id: str) -> tuple[str, .
 
 
 def _stimulus_values(
-    event: _WSMessage,
+    event: WSMessage,
     user_id: str,
     targets: tuple[str, ...],
     *,
@@ -215,7 +213,7 @@ def _prepare_touch(payload: dict, values: dict) -> _PreparedInput:
 
 
 def _prepare_image(
-    event: _WSMessage,
+    event: WSMessage,
     payload: dict,
     values: dict,
     user_id: str,
@@ -246,7 +244,7 @@ def _prepare_image(
     return _PreparedInput(stimulus, image_base64.strip(), mime_type.strip().lower() if mime_type else None)
 
 
-def _prepare_text(event: _WSMessage, payload: dict, values: dict) -> _PreparedInput:
+def _prepare_text(event: WSMessage, payload: dict, values: dict) -> _PreparedInput:
     text = next(
         (
             payload[key].strip()
@@ -307,7 +305,7 @@ def _materialize_image(candidate: _PreparedInput, media_store: PermanentMediaSto
     )
 
 
-def _convert_input(event: _WSMessage, user_id: str, default_character_id: str) -> d.Stimulus:
+def _convert_input(event: WSMessage, user_id: str, default_character_id: str) -> d.Stimulus:
     """兼容文本与打字的同步转换；图片必须经 Adapter 的异步物化路径。"""
     return _prepare_input(event, user_id, default_character_id).stimulus
 

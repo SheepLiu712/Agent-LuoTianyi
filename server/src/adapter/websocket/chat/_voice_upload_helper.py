@@ -21,7 +21,7 @@ from src.infrastructure.media import (
 )
 from src.utils.logger import get_logger
 
-from ._messages import _WSMessage
+from ._messages import WSMessage
 
 MAX_CHUNK_BYTES = 48 * 1024
 MAX_TOTAL_BYTES = 1024 * 1024
@@ -29,14 +29,18 @@ MAX_CHUNKS = 32
 
 
 @dataclass(frozen=True)
-class _VoiceUploadError(Exception):
+class VoiceUploadError(Exception):
+    """语音上传处理错误，包含稳定错误码、说明及可重试性。"""
+
     code: str
     message: str
     retryable: bool = False
 
 
 @dataclass(frozen=True)
-class _VoiceUploadAck:
+class VoiceUploadAck:
+    """语音上传步骤的应答内容及重复标记，本身不代表 Stage 已接纳刺激。"""
+
     payload: dict[str, object] = field(default_factory=dict)
     duplicate: bool = False
 
@@ -66,8 +70,8 @@ class _Completed:
     persisted: bool = False
 
 
-class _VoiceUploadAssembler:
-    """Prepare upload stimuli; only the Adapter may admit them and commit progress."""
+class VoiceUploadAssembler:
+    """维护语音上传组装、媒体校验与幂等记录；仅准备刺激，由 Adapter 准入和提交进度。"""
 
     def __init__(
         self,
@@ -91,11 +95,11 @@ class _VoiceUploadAssembler:
     async def process(
         self,
         *,
-        event: _WSMessage,
+        event: WSMessage,
         user_id: str,
         character_id: str,
     ) -> tuple[d.Stimulus | None, dict]:
-        """Prepare one frame; caller serializes processing through admission/commit."""
+        """处理一帧上传消息并返回候选刺激和状态；调用方须将本操作与准入、提交串行执行。"""
         self._prepared = None
         self._cleanup_expired(time.monotonic())
         payload = _payload(event)
@@ -111,7 +115,7 @@ class _VoiceUploadAssembler:
         elif phase == "abort":
             result = self._abort(event, payload, user_id, upload_id)
         else:
-            raise _VoiceUploadError("BAD_MESSAGE", "invalid voice upload phase")
+            raise VoiceUploadError("BAD_MESSAGE", "invalid voice upload phase")
         if isinstance(result, tuple):
             return result
         return None, {
@@ -121,7 +125,7 @@ class _VoiceUploadAssembler:
         }
 
     async def commit(self, binding: object) -> None:
-        """Record completion only after the Adapter reports successful Stage admission."""
+        """仅在 Adapter 确认 Stage 接纳后提交候选状态，先登记内存完成记录再持久化回执。"""
         prepared, self._prepared = self._prepared, None
         if prepared is None:
             return
@@ -132,15 +136,17 @@ class _VoiceUploadAssembler:
             value.binding = binding
             self._uploads[key] = value
         else:
-            # Keep the receipt in memory before the first await: retries must not redeliver.
+            # 首次异步等待前保存内存回执，防止重试导致重复投递。
             self._completed[key] = value
             del self._uploads[key]
             await self._persist_completion(key)
 
     def discard_prepared(self) -> None:
+        """丢弃尚未提交的候选状态，保留此前已接收的上传数据供重试。"""
         self._prepared = None
 
     def take_notifications(self) -> list[tuple[object, d.Stimulus]]:
+        """取出并清空失败或过期通知，由 Adapter 向仍有效的原绑定投递。"""
         notifications, self._notifications = self._notifications, []
         return notifications
 
@@ -149,7 +155,7 @@ class _VoiceUploadAssembler:
         existing = self._completed.get(key)
         if existing is not None:
             if existing.parameters[0] != character_id:
-                raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload target changed")
+                raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload target changed")
             if not existing.persisted:
                 await self._persist_completion(key)
             return
@@ -185,7 +191,7 @@ class _VoiceUploadAssembler:
                 raise ValueError("invalid voice receipt")
             self._completed[key] = _Completed(parameters, digests, message_uuid, duration, time.monotonic(), True)
         except (OSError, ValueError, KeyError, TypeError) as error:
-            raise _VoiceUploadError("OVERLOADED", "voice completion receipt unavailable", retryable=True) from error
+            raise VoiceUploadError("OVERLOADED", "voice completion receipt unavailable", retryable=True) from error
 
     async def _persist_completion(self, key: tuple[str, str]) -> None:
         completed = self._completed[key]
@@ -205,7 +211,7 @@ class _VoiceUploadAssembler:
                 receipt=receipt,
             )
         except (OSError, ValueError):
-            # Admission already happened: retain the small in-memory receipt beyond TTL and retry its write.
+            # 刺激已接纳：保留内存回执直至持久化成功，不因过期而失去幂等保护。
             get_logger(__name__).exception(
                 "Voice admission receipt persistence failed message=%s", completed.message_uuid
             )
@@ -214,28 +220,28 @@ class _VoiceUploadAssembler:
 
     def _begin(
         self,
-        event: _WSMessage,
+        event: WSMessage,
         payload: dict,
         user_id: str,
         character_id: str,
         upload_id: str,
-    ) -> _VoiceUploadAck | tuple[d.Stimulus, dict]:
+    ) -> VoiceUploadAck | tuple[d.Stimulus, dict]:
         mime_type = _string_field(payload, "mime_type")
         container = _string_field(payload, "container")
         codec = _string_field(payload, "codec")
         byte_length = _int_field(payload, "byte_length", minimum=1)
         total_chunks = _int_field(payload, "total_chunks", minimum=1)
         if byte_length > MAX_TOTAL_BYTES or total_chunks > MAX_CHUNKS:
-            raise _VoiceUploadError("VOICE_TOO_LARGE", "voice upload exceeds size or chunk limits")
+            raise VoiceUploadError("VOICE_TOO_LARGE", "voice upload exceeds size or chunk limits")
         if (mime_type, container, codec) != ("audio/mp4", "m4a", "aac_lc"):
-            raise _VoiceUploadError("VOICE_UNSUPPORTED_MEDIA", "voice media declaration is unsupported")
+            raise VoiceUploadError("VOICE_UNSUPPORTED_MEDIA", "voice media declaration is unsupported")
         key = (user_id, upload_id)
         parameters = (character_id, mime_type, container, codec, byte_length, total_chunks)
         completed = self._completed.get(key)
         if completed is not None:
             if completed.parameters != parameters:
-                raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload identity conflicts with completed media")
-            return _VoiceUploadAck(duplicate=True)
+                raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload identity conflicts with completed media")
+            return VoiceUploadAck(duplicate=True)
         existing = self._uploads.get(key)
         if existing is not None:
             existing_parameters = (
@@ -247,15 +253,15 @@ class _VoiceUploadAssembler:
                 existing.total_chunks,
             )
             if existing_parameters != parameters:
-                raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload parameters changed")
-            return _VoiceUploadAck(duplicate=True)
+                raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload parameters changed")
+            return VoiceUploadAck(duplicate=True)
         if any(upload.user_id == user_id for upload in self._uploads.values()):
-            raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "user already has an incomplete voice upload")
+            raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "user already has an incomplete voice upload")
         if (
             len(self._uploads) >= self._max_incomplete
             or sum(not item.persisted for item in self._completed.values()) >= self._max_incomplete
         ):
-            raise _VoiceUploadError("OVERLOADED", "voice upload capacity is full", retryable=True)
+            raise VoiceUploadError("OVERLOADED", "voice upload capacity is full", retryable=True)
         stimulus = d.VoiceRecordingCommitted(
             **_stimulus_fields(event, user_id, character_id, ephemeral=True),
             upload_id=upload_id,
@@ -275,7 +281,7 @@ class _VoiceUploadAssembler:
         self._prepared = (key, upload)
         return stimulus, {"state": "complete", "ack_payload": {}}
 
-    def _chunk(self, payload: dict, user_id: str, upload_id: str) -> _VoiceUploadAck:
+    def _chunk(self, payload: dict, user_id: str, upload_id: str) -> VoiceUploadAck:
         chunk_index = _int_field(payload, "chunk_index", minimum=0)
         encoded = _string_field(payload, "audio_base64", allow_blank=True)
         key = (user_id, upload_id)
@@ -283,66 +289,66 @@ class _VoiceUploadAssembler:
         if upload is None:
             return self._replay_completed_chunk(key, chunk_index, encoded)
         if chunk_index >= upload.total_chunks:
-            raise _VoiceUploadError("BAD_MESSAGE", "voice chunk index is out of range")
+            raise VoiceUploadError("BAD_MESSAGE", "voice chunk index is out of range")
         try:
             decoded = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as error:
-            raise _VoiceUploadError("BAD_MESSAGE", "voice chunk is not valid base64") from error
+            raise VoiceUploadError("BAD_MESSAGE", "voice chunk is not valid base64") from error
         if len(decoded) > MAX_CHUNK_BYTES:
-            raise _VoiceUploadError("VOICE_TOO_LARGE", "voice chunk exceeds the size limit")
+            raise VoiceUploadError("VOICE_TOO_LARGE", "voice chunk exceeds the size limit")
         existing = upload.chunks.get(chunk_index)
         if existing is not None:
             if existing != decoded:
-                raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice chunk content changed")
-            return _VoiceUploadAck(duplicate=True)
+                raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice chunk content changed")
+            return VoiceUploadAck(duplicate=True)
         upload.chunks[chunk_index] = decoded
-        return _VoiceUploadAck()
+        return VoiceUploadAck()
 
     def _replay_completed_chunk(
         self,
         key: tuple[str, str],
         chunk_index: int,
         encoded: str,
-    ) -> _VoiceUploadAck:
+    ) -> VoiceUploadAck:
         completed = self._completed.get(key)
         if completed is None:
-            raise _VoiceUploadError("VOICE_UPLOAD_NOT_FOUND", "voice upload session was not found", retryable=True)
+            raise VoiceUploadError("VOICE_UPLOAD_NOT_FOUND", "voice upload session was not found", retryable=True)
         if chunk_index >= len(completed.chunk_digests):
-            raise _VoiceUploadError("BAD_MESSAGE", "voice chunk index is out of range")
+            raise VoiceUploadError("BAD_MESSAGE", "voice chunk index is out of range")
         try:
             decoded = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as error:
-            raise _VoiceUploadError("BAD_MESSAGE", "voice chunk is not valid base64") from error
+            raise VoiceUploadError("BAD_MESSAGE", "voice chunk is not valid base64") from error
         if len(decoded) > MAX_CHUNK_BYTES:
-            raise _VoiceUploadError("VOICE_TOO_LARGE", "voice chunk exceeds the size limit")
+            raise VoiceUploadError("VOICE_TOO_LARGE", "voice chunk exceeds the size limit")
         if completed.chunk_digests[chunk_index] != sha256(decoded).digest():
-            raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice chunk content changed")
-        return _VoiceUploadAck(duplicate=True)
+            raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice chunk content changed")
+        return VoiceUploadAck(duplicate=True)
 
     async def _finalize(
         self,
-        event: _WSMessage,
+        event: WSMessage,
         payload: dict,
         user_id: str,
         character_id: str,
         upload_id: str,
-    ) -> _VoiceUploadAck | tuple[d.Stimulus, dict]:
+    ) -> VoiceUploadAck | tuple[d.Stimulus, dict]:
         if set(payload) - {"phase", "upload_id", "target_character_ids", "target_character_id", "character_id"}:
-            raise _VoiceUploadError("BAD_MESSAGE", "finalize contains unsupported fields")
+            raise VoiceUploadError("BAD_MESSAGE", "finalize contains unsupported fields")
         key = (user_id, upload_id)
         completed = self._completed.get(key)
         if completed is not None:
-            return _VoiceUploadAck(
+            return VoiceUploadAck(
                 {"message_uuid": completed.message_uuid, "duration_ms": completed.duration_ms},
                 duplicate=True,
             )
         upload = self._uploads.get(key)
         if upload is None:
-            raise _VoiceUploadError("VOICE_UPLOAD_NOT_FOUND", "voice upload session was not found", retryable=True)
+            raise VoiceUploadError("VOICE_UPLOAD_NOT_FOUND", "voice upload session was not found", retryable=True)
         if character_id != upload.character_id:
-            raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload target changed")
+            raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload target changed")
         if set(upload.chunks) != set(range(upload.total_chunks)):
-            raise _VoiceUploadError("VOICE_MISSING_CHUNKS", "voice upload has missing chunks", retryable=True)
+            raise VoiceUploadError("VOICE_MISSING_CHUNKS", "voice upload has missing chunks", retryable=True)
         _, media_ref, duration_ms = await self._validate_and_persist(key, event, upload)
         message_uuid = _message_uuid(user_id, character_id, upload_id)
         stimulus = d.VoiceMessage(
@@ -377,15 +383,15 @@ class _VoiceUploadAssembler:
     async def _validate_and_persist(
         self,
         key: tuple[str, str],
-        event: _WSMessage,
+        event: WSMessage,
         upload: _Upload,
     ) -> tuple[bytes, d.MediaRef, int]:
         data = b"".join(upload.chunks[index] for index in range(upload.total_chunks))
         if len(data) != upload.byte_length:
             self._fail_upload(key, event, "size_mismatch")
-            raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice byte length does not match declaration")
+            raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice byte length does not match declaration")
         if self._media_store is None:
-            raise _VoiceUploadError("OVERLOADED", "media store is not configured", retryable=True)
+            raise VoiceUploadError("OVERLOADED", "media store is not configured", retryable=True)
         message_uuid = _message_uuid(upload.user_id, upload.character_id, upload.upload_id)
         media_ref = self._media_store.mint_ref(user_id=upload.user_id, client_msg_id=message_uuid)
         try:
@@ -393,11 +399,11 @@ class _VoiceUploadAssembler:
         except MediaResolutionError as error:
             self._fail_upload(key, event, "invalid_media")
             if error.code is MediaResolutionErrorCode.INVALID_DURATION:
-                raise _VoiceUploadError("VOICE_INVALID_DURATION", "voice duration is invalid") from error
-            raise _VoiceUploadError("VOICE_UNSUPPORTED_MEDIA", "voice media content is unsupported") from error
+                raise VoiceUploadError("VOICE_INVALID_DURATION", "voice duration is invalid") from error
+            raise VoiceUploadError("VOICE_UNSUPPORTED_MEDIA", "voice media content is unsupported") from error
         if not 500 <= parsed.duration_ms <= 30_500:
             self._fail_upload(key, event, "invalid_duration")
-            raise _VoiceUploadError("VOICE_INVALID_DURATION", "voice duration is outside the allowed range")
+            raise VoiceUploadError("VOICE_INVALID_DURATION", "voice duration is outside the allowed range")
         try:
             await asyncio.to_thread(
                 self._media_store.persist_audio,
@@ -409,17 +415,17 @@ class _VoiceUploadAssembler:
             )
         except ValueError as error:
             self._fail_upload(key, event, "content_conflict")
-            raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice media identity conflicts") from error
+            raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice media identity conflicts") from error
         return data, media_ref, parsed.duration_ms
 
     def _abort(
-        self, event: _WSMessage, payload: dict, user_id: str, upload_id: str
-    ) -> _VoiceUploadAck | tuple[d.Stimulus, dict]:
+        self, event: WSMessage, payload: dict, user_id: str, upload_id: str
+    ) -> VoiceUploadAck | tuple[d.Stimulus, dict]:
         if set(payload) - {"phase", "upload_id"}:
-            raise _VoiceUploadError("BAD_MESSAGE", "abort contains unsupported fields")
+            raise VoiceUploadError("BAD_MESSAGE", "abort contains unsupported fields")
         key = (user_id, upload_id)
         if key in self._completed:
-            raise _VoiceUploadError("VOICE_UPLOAD_CONFLICT", "finalized voice upload cannot be aborted")
+            raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "finalized voice upload cannot be aborted")
         upload = self._uploads.get(key)
         if upload is not None:
             stimulus = d.VoiceUploadFailed(
@@ -429,9 +435,9 @@ class _VoiceUploadAssembler:
             )
             self._prepared = (key, None)
             return stimulus, {"state": "complete", "ack_payload": {}, "binding": upload.binding}
-        return _VoiceUploadAck()
+        return VoiceUploadAck()
 
-    def _fail_upload(self, key: tuple[str, str], event: _WSMessage, reason: str) -> None:
+    def _fail_upload(self, key: tuple[str, str], event: WSMessage, reason: str) -> None:
         upload = self._uploads.pop(key, None)
         if upload is None:
             return
@@ -446,7 +452,7 @@ class _VoiceUploadAssembler:
         expired = [key for key, upload in self._uploads.items() if now - upload.created_at >= self._ttl_seconds]
         for key in expired:
             upload = self._uploads.pop(key)
-            event = _WSMessage(event_type="user_voice", payload={}, client_msg_id=f"{upload.upload_id}:ttl")
+            event = WSMessage(event_type="user_voice", payload={}, client_msg_id=f"{upload.upload_id}:ttl")
             stimulus = d.VoiceUploadFailed(
                 **_stimulus_fields(event, upload.user_id, upload.character_id, ephemeral=True),
                 upload_id=upload.upload_id,
@@ -462,20 +468,20 @@ class _VoiceUploadAssembler:
             del self._completed[key]
 
 
-def _payload(event: _WSMessage) -> dict:
+def _payload(event: WSMessage) -> dict:
     if not isinstance(event.payload, dict):
-        raise _VoiceUploadError("BAD_MESSAGE", "voice payload must be an object")
+        raise VoiceUploadError("BAD_MESSAGE", "voice payload must be an object")
     if not isinstance(event.client_msg_id, str) or not 0 < len(event.client_msg_id) <= 128:
-        raise _VoiceUploadError("BAD_MESSAGE", "invalid client_msg_id")
+        raise VoiceUploadError("BAD_MESSAGE", "invalid client_msg_id")
     if event.ts is not None and (type(event.ts) is not int or event.ts < 0):
-        raise _VoiceUploadError("BAD_MESSAGE", "invalid timestamp")
+        raise VoiceUploadError("BAD_MESSAGE", "invalid timestamp")
     return event.payload
 
 
 def _string_field(payload: dict, name: str, *, allow_blank: bool = False) -> str:
     value = payload.get(name)
     if not isinstance(value, str) or (not allow_blank and not value.strip()):
-        raise _VoiceUploadError("BAD_MESSAGE", f"invalid {name}")
+        raise VoiceUploadError("BAD_MESSAGE", f"invalid {name}")
     return value
 
 
@@ -484,14 +490,14 @@ def _uuid_field(payload: dict, name: str) -> str:
     try:
         UUID(value)
     except ValueError as error:
-        raise _VoiceUploadError("BAD_MESSAGE", f"invalid {name}") from error
+        raise VoiceUploadError("BAD_MESSAGE", f"invalid {name}") from error
     return value
 
 
 def _int_field(payload: dict, name: str, *, minimum: int) -> int:
     value = payload.get(name)
     if type(value) is not int or value < minimum:
-        raise _VoiceUploadError("BAD_MESSAGE", f"invalid {name}")
+        raise VoiceUploadError("BAD_MESSAGE", f"invalid {name}")
     return value
 
 
@@ -505,7 +511,7 @@ def _message_uuid(user_id: str, character_id: str, upload_id: str) -> str:
 
 
 def _stimulus_fields(
-    event: _WSMessage,
+    event: WSMessage,
     user_id: str,
     character_id: str,
     *,
@@ -516,7 +522,7 @@ def _stimulus_fields(
         try:
             occurred_at = datetime.fromtimestamp(event.ts / 1000, timezone.utc)
         except (OverflowError, OSError, ValueError) as error:
-            raise _VoiceUploadError("BAD_MESSAGE", "invalid timestamp") from error
+            raise VoiceUploadError("BAD_MESSAGE", "invalid timestamp") from error
     return {
         "stimulus_id": str(uuid5(NAMESPACE_URL, json.dumps(["websocket-input", user_id, event.client_msg_id]))),
         "schema_version": 1,

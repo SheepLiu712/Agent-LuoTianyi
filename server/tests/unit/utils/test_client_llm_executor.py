@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -24,8 +25,8 @@ class FakeWebSocket:
     def __init__(self):
         self.sent_events = []
 
-    async def send_json(self, event):
-        self.sent_events.append(event)
+    async def send(self, message):
+        self.sent_events.append(json.loads(message))
 
 
 class FakeStream:
@@ -53,7 +54,7 @@ class FakeStream:
             return websocket
         return SimpleNamespace(
             websocket=websocket,
-            send_json=websocket.send_json,
+            send=websocket.send,
             client_mode=dict(client_mode or {"types": []}),
         )
 
@@ -249,7 +250,7 @@ async def test_delegate_timeout(executor, fake_ws):
 @pytest.mark.asyncio
 async def test_delegate_send_failure_raises_unavailable(executor):
     class BrokenWebSocket:
-        async def send_json(self, event):
+        async def send(self, message):
             raise RuntimeError("socket closed")
 
     executor.bind(FakeStreamManager(FakeStream(BrokenWebSocket(), client_mode={"types": ["对话模型"]})))

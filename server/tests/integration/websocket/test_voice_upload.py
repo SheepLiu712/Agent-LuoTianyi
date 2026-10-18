@@ -16,7 +16,7 @@ from support.chat_connection import StubChatConnection
 
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
-from src.adapter.websocket.chat._messages import _WSMessage
+from src.adapter.websocket.chat._messages import WSMessage
 from src.web.websocket.service import WebSocketService
 
 
@@ -91,7 +91,7 @@ async def test_voice_finalize_rechecks_original_binding_and_stage_admission(tmp_
     await adapter._bind(stage, connection)
     _, events = upload_events(m4a_bytes())
     messages = [
-        _WSMessage(event_type=e["type"], client_msg_id=e["client_msg_id"], payload=e["payload"]) for e in events
+        WSMessage(event_type=e["type"], client_msg_id=e["client_msg_id"], payload=e["payload"]) for e in events
     ]
     for message in messages[:-1]:
         await adapter._receive(connection, message)
@@ -434,38 +434,38 @@ async def test_rebuilt_receipt_rejects_changed_chunk(tmp_path):
 
 @pytest.mark.asyncio
 async def test_saved_media_without_stage_admission_is_not_completed(tmp_path):
-    from src.adapter.websocket.chat._messages import _WSMessage
-    from src.adapter.websocket.chat._voice_upload_helper import _VoiceUploadAssembler, _VoiceUploadError
+    from src.adapter.websocket.chat._messages import WSMessage
+    from src.adapter.websocket.chat._voice_upload_helper import VoiceUploadAssembler, VoiceUploadError
     from src.infrastructure.media import PermanentMediaStore
 
     store = PermanentMediaStore({"root": str(tmp_path / "media")})
-    assembler = _VoiceUploadAssembler(store)
+    assembler = VoiceUploadAssembler(store)
     sink = Stage()
     _, events = upload_events(m4a_bytes())
 
     async def send(assembler, value):
         stimulus, status = await assembler.process(
-            event=_WSMessage(event_type=value["type"], payload=value["payload"], client_msg_id=value["client_msg_id"]),
+            event=WSMessage(event_type=value["type"], payload=value["payload"], client_msg_id=value["client_msg_id"]),
             user_id=sink.user_id,
             character_id=sink.character_id,
         )
         if stimulus is not None:
             if not sink.can_accept(stimulus) or not sink.submit(stimulus):
                 assembler.discard_prepared()
-                raise _VoiceUploadError("OVERLOADED", "stage rejected", True)
+                raise VoiceUploadError("OVERLOADED", "stage rejected", True)
             await assembler.commit(sink)
         return status
 
     for value in events[:-1]:
         await send(assembler, value)
     sink.available = False
-    with pytest.raises(_VoiceUploadError) as error:
+    with pytest.raises(VoiceUploadError) as error:
         await send(assembler, events[-1])
     assert error.value.code == "OVERLOADED"
     assert len(list((tmp_path / "media").glob("*/content.bin"))) == 1
     assert not list((tmp_path / "media").glob("*/ingress_receipt.json"))
     sink.available = True
-    rebuilt = _VoiceUploadAssembler(store)
+    rebuilt = VoiceUploadAssembler(store)
     for value in events:
         await send(rebuilt, value)
     assert sum(isinstance(item, d.VoiceMessage) for item in sink.stimuli) == 1
@@ -507,8 +507,8 @@ async def test_receipt_write_failure_keeps_live_deduplication_past_ttl(tmp_path,
 async def test_expired_and_rebuilt_upload_does_not_repeat_chat_preprocessing_or_reply(tmp_path, monkeypatch):
     from support.stage_support import RecordingAgent, cleanup, report, setup
 
-    from src.adapter.websocket.chat._messages import _WSMessage
-    from src.adapter.websocket.chat._voice_upload_helper import _VoiceUploadAssembler
+    from src.adapter.websocket.chat._messages import WSMessage
+    from src.adapter.websocket.chat._voice_upload_helper import VoiceUploadAssembler
     from src.infrastructure.media import PermanentMediaStore
 
     calls = {"preprocess": 0, "reply": 0}
@@ -527,13 +527,13 @@ async def test_expired_and_rebuilt_upload_does_not_repeat_chat_preprocessing_or_
 
     stage, _, adapter, _, _ = await setup(RecordingAgent(handle))
     store = PermanentMediaStore({"root": str(tmp_path / "media")})
-    assembler = _VoiceUploadAssembler(store)
+    assembler = VoiceUploadAssembler(store)
     _, events = upload_events(m4a_bytes())
 
     async def send_batch(target):
         for value in events:
             stimulus, status = await target.process(
-                event=_WSMessage(
+                event=WSMessage(
                     event_type=value["type"], payload=value["payload"], client_msg_id=value["client_msg_id"]
                 ),
                 user_id=stage.user_id,
@@ -553,7 +553,7 @@ async def test_expired_and_rebuilt_upload_does_not_repeat_chat_preprocessing_or_
         assert calls == {"preprocess": 1, "reply": 1}
         clock[0] += 601
         await send_batch(assembler)
-        await send_batch(_VoiceUploadAssembler(store))
+        await send_batch(VoiceUploadAssembler(store))
         assert not stage._pending and not stage._handles
         assert calls == {"preprocess": 1, "reply": 1}
     finally:

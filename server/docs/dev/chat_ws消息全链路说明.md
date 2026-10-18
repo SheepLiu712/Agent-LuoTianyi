@@ -52,6 +52,22 @@ python scripts/check_architecture_boundaries.py
 
 ## 统一业务输入处理
 
-`_input._process_input` 返回 `(stimulus_or_none, status)`，status 为普通字典：`complete` 要求投递完整刺激，`partial` 只确认上传步骤，`duplicate` 重放幂等应答，`error` 携带处理错误。文字、图片、录音协调和语音上传从同一入口进入。图片仍在初步准入后物化，并在异步物化后复查绑定。
+`_input.process_input` 返回 `(stimulus_or_none, status)`，status 为普通字典：`complete` 要求投递完整刺激，`partial` 只确认上传步骤，`duplicate` 重放幂等应答，`error` 携带处理错误。文字、图片、录音协调和语音上传从同一入口进入。图片仍在初步准入后物化，并在异步物化后复查绑定。
 
 `_voice_upload_helper.py` 不持有可调用的输入 sink，不做准入和投递。begin/finalize/有效 abort 返回的刺激由 Adapter 提交；只有 submit 成功才提交 helper 的候选状态并发送成功 ACK。分块 ACK 不代表完整语音进入 Stage。校验失败和过期通知暂存在 helper，由 Adapter 取出并向有效的原绑定投递。
+
+
+### 聊天下行协议编码与连接状态
+
+
+聊天下行的事件信封（`type / ts / payload / reply_to`）构造与 wire JSON 序列化统一由 `chat/_protocol_translate.py` 完成。`encode_event` 构造并编码聊天事件，`encode_message` 编码已经成形的协议消息（例如切换就绪响应），避免重复套信封。`_binding.py` 的 `Binding` 统一持有连接身份、协商状态、就绪门控、唯一 Stage 及绑定有效状态、控制任务及发送队列；协议编码仍调用 `_protocol_translate.py`。
+
+业务输出与客户端模型请求先编码，再调用 `binding.send(str | bytes)`；该方法等待业务就绪并等待 Outbox 的网络完成结果。`chat.ready`、ACK/NACK 和心跳等即时协议消息由 `_protocol_translate` 编码后调用 `Binding.enqueue` 入队，不等待业务就绪门控。保持 `chat.ready` 先入队再释放业务门控的顺序，避免循环等待。入队、出队、网络发送完成、客户端确认及播放完成仍是不同事实；等待者取消不撤回已入队的报文。
+
+`_delivery.py` 继续管理业务消息分组、顺序、取消与终包；`_binding.py` 内部的私有 Outbox 管理已编码报文的容量、在途状态和发送完成反馈，外部不直接操作队列。投递器由 Binding 持有，Adapter 不再另行管理其生命周期。业务身份生成与持久化中的 JSON 使用不属于 wire 序列化，不受此次归属调整影响。
+
+### 聊天连接 Binding 的归属
+
+Adapter 维护连接句柄到 Binding 的集合，以及用于 Stage 输出路由的交互索引。创建、撤销 Stage 绑定和网络收发反馈均通过 Binding 操作，不再维护独立的 Peer、Outbox 或连接投递器集合。`_BoundInputSink` 已删除，Binding 自行检查权限并提交刺激。
+
+一条连接只绑定一个 Stage，Binding 直接持有该 Stage、输入权限及输出收尾状态，不再设置 Stage 集合或额外绑定记录。解绑永久撤销业务投递权限，取消业务输出并等待控制任务；WebSocket 仍可发送协议控制响应，真正断线才关闭发送队列。重连接入创建新的 Binding，异步媒体转换及语音上传持有的旧 Binding 始终失效。

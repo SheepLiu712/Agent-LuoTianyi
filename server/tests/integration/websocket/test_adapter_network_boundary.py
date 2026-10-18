@@ -337,3 +337,38 @@ async def test_client_model_request_and_response_use_the_adapter_channel():
         request.cancel()
         await asyncio.gather(request, return_exceptions=True)
         await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_binding_has_one_stage_and_detach_preserves_control_responses():
+    adapter, handle, stages = await _chat()
+    binding = adapter._bindings[handle]
+    stage = stages.stage
+    try:
+        with pytest.raises(ValueError, match="already assigned"):
+            await adapter._bind(Endpoint("second", "user", "another"), binding)
+        assert binding.stage is stage
+        await adapter.detach_stage_binding(stage, binding)
+        assert not binding.is_closed
+        assert not binding.submit(object())
+        with pytest.raises(ValueError, match="already assigned"):
+            await adapter._bind(stage, binding)
+        # 解绑后原 WebSocket 仍能发送协议应答，但业务输入不得再交给 Stage。
+        await adapter.receive(handle, '{"type":"user_text","client_msg_id":"late","payload":{"message":"hello"}}')
+        rejection = await adapter.next_output(handle)
+        assert json.loads(rejection.message)["payload"]["ok"] is False
+        adapter.complete_output(handle, rejection.delivery_id)
+        assert not stage.stimuli
+        completion = binding.enqueue('{"type":"control"}')
+        delivery = await adapter.next_output(handle)
+        assert json.loads(delivery.message)["type"] == "control"
+        assert not completion.done()
+        adapter.complete_output(handle, delivery.delivery_id)
+        await completion
+        # 重连接入创建新 Binding，旧对象始终保持失效。
+        new_handle = await adapter.open(user_id="user", connection_id=object())
+        assert adapter._bindings[new_handle] is not binding
+        assert not binding.submit(object())
+    finally:
+        await adapter.close()
+    assert binding.is_closed

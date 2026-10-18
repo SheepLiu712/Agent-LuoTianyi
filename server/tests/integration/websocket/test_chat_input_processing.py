@@ -8,9 +8,9 @@ import pytest
 
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
-from src.adapter.websocket.chat._input import _process_input
-from src.adapter.websocket.chat._messages import _WSMessage
-from src.adapter.websocket.chat._voice_upload_helper import _VoiceUploadAssembler
+from src.adapter.websocket.chat._input import process_input
+from src.adapter.websocket.chat._messages import WSMessage
+from src.adapter.websocket.chat._voice_upload_helper import VoiceUploadAssembler
 from src.infrastructure.media import PermanentMediaStore
 from tests.integration.websocket.test_adapter_network_boundary import _chat
 from tests.integration.websocket.test_voice_upload import Stage, event, m4a_bytes, upload_events
@@ -21,7 +21,7 @@ async def test_concurrent_retry_cannot_pass_dedup_before_first_admission(monkeyp
     from src.adapter.websocket.chat import adapter as module
 
     adapter, handle, manager = await _chat()
-    process = module._process_input
+    process = module.process_input
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def blocked(*args):
@@ -29,7 +29,7 @@ async def test_concurrent_retry_cannot_pass_dedup_before_first_admission(monkeyp
         await release.wait()
         return await process(*args)
 
-    monkeypatch.setattr(module, "_process_input", blocked)
+    monkeypatch.setattr(module, "process_input", blocked)
     raw = json.dumps({"type": "user_text", "client_msg_id": "same", "payload": {"text": "hello"}})
     first = asyncio.create_task(adapter.receive(handle, raw))
     second = None
@@ -55,11 +55,11 @@ async def test_concurrent_retry_cannot_pass_dedup_before_first_admission(monkeyp
 @pytest.mark.asyncio
 async def test_input_returns_stimulus_and_status_without_delivering(tmp_path):
     store = PermanentMediaStore({"root": str(tmp_path / "media")})
-    helper = _VoiceUploadAssembler(store)
+    helper = VoiceUploadAssembler(store)
 
     async def process(value):
-        message = _WSMessage(value["type"], value["payload"], value["client_msg_id"])
-        return await _process_input(message, "user", "luotianyi", store, helper)
+        message = WSMessage(value["type"], value["payload"], value["client_msg_id"])
+        return await process_input(message, "user", "luotianyi", store, helper)
 
     stimulus, status = await process({"type": "user_text", "client_msg_id": "text", "payload": {"text": "hello"}})
     assert isinstance(stimulus, d.TextMessage) and status["state"] == "complete"

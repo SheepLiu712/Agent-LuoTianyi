@@ -12,7 +12,7 @@ from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
-from src.adapter.websocket.chat._messages import _WSMessage
+from src.adapter.websocket.chat._messages import WSMessage
 from src.agent import Agent
 from src.agent.context import ConversationMode
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
@@ -368,7 +368,9 @@ async def test_manager_reconnect_old_disconnect_and_offline_expiry():
     )
     old = StubChatConnection(Socket(), "user", "用户")
     stage = await manager._test_chat_adapter._open(old, "luotianyi")
-    other = await manager._test_chat_adapter._open(old, "miku")
+    other_connection = StubChatConnection(Socket(), "user", "用户")
+    other = await manager._test_chat_adapter._open(other_connection, "miku")
+    await manager._test_chat_adapter._close_connection(other_connection)
     await manager._test_chat_adapter._close_connection(old)
     new = StubChatConnection(Socket(), "user", "用户")
     assert await manager._test_chat_adapter._open(new, "luotianyi") is stage
@@ -378,7 +380,7 @@ async def test_manager_reconnect_old_disconnect_and_offline_expiry():
     assert ending.interaction.interaction_id == other.interaction_id
     assert isinstance(ending.stimulus, d.InteractionEnding)
     assert await adapter._receive_event(
-        new, _WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"})
+        new, WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"})
     )
     await take(agent.requests)
     await manager.close()
@@ -575,7 +577,7 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
     )
     stage, _, adapter, connection, socket = await setup(agent)
     assert await adapter._receive_event(
-        connection, _WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"})
+        connection, WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"})
     )
 
     async def terminal():

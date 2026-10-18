@@ -1,12 +1,16 @@
 """In-memory peer for Stage/Adapter unit fixtures; production network paths use adapter handles."""
 
 import asyncio
-import time
-from typing import Any
+import json
 
 
-class StubChatConnection:
-    def __init__(self, websocket, user_uuid: str | None, user_name: str | None):
+from src.adapter.websocket.chat._binding import Binding
+from src.adapter.websocket.chat._delivery import DeliveryConfig
+
+
+class StubChatConnection(Binding):
+    def __init__(self, websocket, user_uuid: str | None, user_name: str | None, *, config=None):
+        super().__init__(user_uuid, object(), (), config or DeliveryConfig())
         self.websocket = websocket
         self.user_uuid = user_uuid
         self.user_name = user_name
@@ -14,37 +18,17 @@ class StubChatConnection:
         self.client_mode: dict = {"types": []}
         self.capabilities: set[str] = set()
         self._send_lock = asyncio.Lock()
-        self._closed = False
+        self.is_closed = False
 
-    @property
-    def is_closed(self) -> bool:
-        """返回本连接是否已断开或发送失败；旧连接不会自动关联到重连后的 socket。"""
-        return self._closed
-
-    async def send_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        """将 event_type 和 payload 封装为事件并串行发送；单包限时十秒，失败抛出且不重试。"""
+    async def send(self, message: str) -> None:
         async with self._send_lock:
-            if self._closed:
-                raise ConnectionError("WebSocket connection is closed")
+            if self.is_closed:
+                raise ConnectionError("connection is closed")
             try:
-                await asyncio.wait_for(
-                    self.websocket.send_json(
-                        {
-                            "type": event_type,
-                            "ts": int(time.time() * 1000),
-                            "payload": payload,
-                        }
-                    ),
-                    timeout=10.0,
-                )
+                await asyncio.wait_for(self.websocket.send_json(json.loads(message)), timeout=10.0)
             except BaseException:
-                # 发送被中断时交付结果也不确定，禁止继续使用这条连接发送。
-                self._closed = True
+                self.is_closed = True
                 raise
-
-    def mark_disconnected(self) -> None:
-        """由连接接入层标记断开，使旧连接上的业务输出立即失效。"""
-        self._closed = True
 
     def set_user(self, user_uuid: str, user_name: str):
         self.user_uuid = user_uuid
