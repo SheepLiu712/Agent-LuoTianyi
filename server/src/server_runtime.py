@@ -4,9 +4,9 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Final
 
-from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.call_v1 import CallCapabilityStatus, CallWebSocketAdapter, parse_call_transport_enabled
-from src.adapter.websocket.client_model_executor import ClientLLMExecutor
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.application.host_context import ServerHostContext
@@ -185,8 +185,8 @@ class ServerRuntime:
             )
             runtime.stage_manager = StageManager(
                 get_agent=agent_runtime.get_agent,
-                chat_output_sink=runtime.chat_adapter,
-                detach_stage_binding=runtime.chat_adapter.disconnect,
+                chat_output_sink=runtime.chat_adapter.output_sink,
+                detach_stage_binding=runtime.chat_adapter.detach_stage_binding,
                 get_context_factory=agent_runtime.context_factories.__getitem__,
                 due_event_provider=EventStoreDueEventProvider(event_store),
                 call_sessions=database_manager.call_sessions,
@@ -198,7 +198,7 @@ class ServerRuntime:
                 user_reset_fence=reset_fence,
                 config=config.get("stage_manager", {}),
             )
-            runtime.chat_adapter.initialize(runtime.stage_manager)
+            runtime.chat_adapter.initialize(runtime.stage_manager, client_executor=runtime.client_llm_executor)
             runtime.call_adapter = CallWebSocketAdapter(
                 manager=runtime.stage_manager,
                 user_reset_fence=reset_fence,
@@ -345,6 +345,7 @@ class ServerRuntime:
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
             ("world stages", runtime.close_world_stages if runtime is not None else None),
+            ("chat adapter", runtime.chat_adapter.close if runtime is not None else None),
             (
                 "chat stages",
                 runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None,
@@ -405,6 +406,7 @@ class ServerRuntime:
             shutdown_steps = (
                 ("world runtime", self.world.stop_background_services),
                 ("world stages", self.close_world_stages),
+                ("chat adapter", self.chat_adapter.close),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
                 ("call adapter", self.call_adapter.close if self.call_adapter is not None else None),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),

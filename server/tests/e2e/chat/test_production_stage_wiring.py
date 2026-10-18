@@ -1,16 +1,15 @@
 """生产 WebSocket 入口与 adapter、Stage 的完整聊天生命周期。"""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
-from fastapi import WebSocketDisconnect
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode, RecalledMemoryContext
-from src.web.websocket import WSMessage
 from src.web.websocket.service import (
     WebSocketConnection,
     WebSocketService,
@@ -22,6 +21,7 @@ class Socket:
         self.client_msg_id = client_msg_id
         self.events: list[dict] = []
         self.output_finished = asyncio.Event()
+        self.received = False
 
     async def accept(self) -> None:
         return None
@@ -30,6 +30,25 @@ class Socket:
         self.events.append(event)
         if sum(item.get("type") == "agent_message" for item in self.events) >= 2:
             self.output_finished.set()
+
+    async def send_text(self, raw: str) -> None:
+        await self.send_json(json.loads(raw))
+
+    async def receive(self) -> dict:
+        if not self.received:
+            self.received = True
+            return {
+                "type": "websocket.receive",
+                "text": json.dumps(
+                    {
+                        "type": "user_text",
+                        "client_msg_id": self.client_msg_id,
+                        "payload": {"text": "你好"},
+                    }
+                ),
+            }
+        await asyncio.wait_for(self.output_finished.wait(), 2)
+        return {"type": "websocket.disconnect", "code": 1000}
 
 
 class ContextFactory:
@@ -178,23 +197,7 @@ async def test_production_chat_reconnect_reuses_stage_after_stimulus_output(
         connection.set_user("user", "用户")
         return True
 
-    received: set[str] = set()
-
-    async def receive(connection: WebSocketConnection) -> WSMessage:
-        socket = connection.websocket
-        if socket.client_msg_id not in received:
-            received.add(socket.client_msg_id)
-            return WSMessage(
-                event_type="user_text",
-                client_msg_id=socket.client_msg_id,
-                payload={"text": "你好"},
-            )
-        await asyncio.wait_for(socket.output_finished.wait(), 2)
-        await asyncio.sleep(0)
-        raise WebSocketDisconnect
-
     monkeypatch.setattr(WebSocketConnection, "auth", authenticate)
-    monkeypatch.setattr(service, "try_recv_client_msg", receive)
 
     # When: one authenticated connection chats, disconnects, then reconnects and chats again.
     first = Socket("first")

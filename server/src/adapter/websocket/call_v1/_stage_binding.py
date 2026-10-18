@@ -9,12 +9,12 @@ import src.domain.agent as d
 from src.domain.call import CallEndReason, CallFinalSnapshot, CallState
 from src.stage.call_stage import CallIngressReceipt, CallOutput, CallReplyFailed, CallStage, CallStateChanged
 
-from .audio_codec import CALL_ROUTE, FINAL_FLAG, VERSION, BinaryAudioFrameCodec, WireAudioFrame
-from .control import ControlMessage
-from .transport import CallAcceptanceReceipt, CallBusinessAcceptanceSink, CallTransportSession, InboundCallFrame
+from ._audio_codec import CALL_ROUTE, FINAL_FLAG, VERSION, _BinaryAudioFrameCodec, _WireAudioFrame
+from ._control import _ControlMessage
+from ._transport import _CallAcceptanceReceipt, _CallBusinessAcceptanceSink, _CallTransportSession, _InboundCallFrame
 
 
-class CallStageBinding(CallBusinessAcceptanceSink):
+class _CallStageBinding(_CallBusinessAcceptanceSink):
     """Translate ordered wire frames and Stage output through one transport session."""
 
     def __init__(
@@ -27,17 +27,17 @@ class CallStageBinding(CallBusinessAcceptanceSink):
         self.call_id = call_id
         self._deliver = deliver
         self._stage: CallStage | None = None
-        self._session: CallTransportSession | None = None
-        self._codec = BinaryAudioFrameCodec()
+        self._session: _CallTransportSession | None = None
+        self._codec = _BinaryAudioFrameCodec()
         self._terminal_sent = False
-        self._terminal_delivered = asyncio.Event()
+        self._terminal_enqueued = asyncio.Event()
         self.output_queue = output_queue
 
-    def bind(self, *, stage: CallStage, session: CallTransportSession) -> None:
+    def bind(self, *, stage: CallStage, session: _CallTransportSession) -> None:
         self.bind_session(session)
         self.bind_stage(stage)
 
-    def bind_session(self, session: CallTransportSession) -> None:
+    def bind_session(self, session: _CallTransportSession) -> None:
         if session.call_id != self.call_id:
             raise ValueError("call binding identity is unavailable")
         if self._session is not None:
@@ -50,10 +50,10 @@ class CallStageBinding(CallBusinessAcceptanceSink):
         self._stage = stage
 
     @property
-    def terminal_delivered(self) -> asyncio.Event:
-        return self._terminal_delivered
+    def terminal_enqueued(self) -> asyncio.Event:
+        return self._terminal_enqueued
 
-    async def accept(self, frame: InboundCallFrame, receipt: CallAcceptanceReceipt) -> bool:
+    async def accept(self, frame: _InboundCallFrame, receipt: _CallAcceptanceReceipt) -> bool:
         stage = self._require_stage()
         if frame.audio is not None:
             return stage.accept_pcm(
@@ -102,7 +102,7 @@ class CallStageBinding(CallBusinessAcceptanceSink):
             raise TypeError("unsupported CallStage state output")
         if item.state not in {CallState.PREPARING, CallState.RINGING, CallState.ACTIVE}:
             return
-        message: ControlMessage = {
+        message: _ControlMessage = {
             "protocol": "call.v1",
             "type": "call.state",
             "seq": session.next_server_seq,
@@ -130,7 +130,7 @@ class CallStageBinding(CallBusinessAcceptanceSink):
             raise ValueError("terminal snapshot does not match binding")
         session = self._require_session()
         terminal = snapshot.terminal
-        message: ControlMessage = {
+        message: _ControlMessage = {
             "protocol": "call.v1",
             "type": "call.ended",
             "seq": session.next_server_seq,
@@ -141,12 +141,12 @@ class CallStageBinding(CallBusinessAcceptanceSink):
         }
         await self._deliver(session.send_control(message))
         self._terminal_sent = True
-        self._terminal_delivered.set()
+        self._terminal_enqueued.set()
 
     async def send_failed(self, reason: CallEndReason) -> None:
         if self._terminal_sent:
             return
-        message: ControlMessage = {
+        message: _ControlMessage = {
             "protocol": "call.v1",
             "type": "error",
             "code": "CALL_SETUP_FAILED",
@@ -156,11 +156,11 @@ class CallStageBinding(CallBusinessAcceptanceSink):
         }
         await self._deliver(self._require_session().send_control(message))
         self._terminal_sent = True
-        self._terminal_delivered.set()
+        self._terminal_enqueued.set()
 
     async def start_stream(self, response_id: str, stream_id: int, audio_format: d.AudioFormat) -> None:
         session = self._require_session()
-        message: ControlMessage = {
+        message: _ControlMessage = {
             "protocol": "call.v1",
             "type": "audio.stream_started",
             "seq": session.next_server_seq,
@@ -176,7 +176,7 @@ class CallStageBinding(CallBusinessAcceptanceSink):
 
     async def send_pcm(self, response_id: str, stream_id: int, payload: bytes, *, final: bool) -> None:
         session = self._require_session()
-        frame = WireAudioFrame(
+        frame = _WireAudioFrame(
             VERSION,
             CALL_ROUTE,
             FINAL_FLAG if final else 0,
@@ -192,7 +192,7 @@ class CallStageBinding(CallBusinessAcceptanceSink):
         session = self._require_session()
         for stream_id in stream_ids:
             start, through = session.response_server_range(response_id, stream_id)
-            message: ControlMessage = {
+            message: _ControlMessage = {
                 "protocol": "call.v1",
                 "type": "playback.stop",
                 "seq": session.next_server_seq,
@@ -209,7 +209,7 @@ class CallStageBinding(CallBusinessAcceptanceSink):
             raise RuntimeError("CallStage is not bound")
         return self._stage
 
-    def _require_session(self) -> CallTransportSession:
+    def _require_session(self) -> _CallTransportSession:
         if self._session is None:
-            raise RuntimeError("CallTransportSession is not bound")
+            raise RuntimeError("_CallTransportSession is not bound")
         return self._session

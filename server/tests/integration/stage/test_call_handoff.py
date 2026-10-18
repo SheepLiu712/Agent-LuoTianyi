@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import time
 from datetime import datetime, timezone
@@ -8,16 +9,16 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.call_session_repository import InMemoryCallSessionRepository
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallEndReason, CallState
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
 from src.stage.interaction_lease import InteractionLeaseRegistry, InteractionSource
-from src.web.websocket.service import WebSocketConnection
 
 from .test_chat_stage import RecordingAgent, Socket, StageContextFactory, stimulus
 
@@ -48,8 +49,8 @@ def manager(
 
 
 async def connected(manager, user="user"):
-    connection = WebSocketConnection(Socket(), user, user)
-    stage = await manager._chat_output_sink.open(connection, "luotianyi")
+    connection = StubChatConnection(Socket(), user, user)
+    stage = await manager._test_chat_adapter._open(connection, "luotianyi")
     return connection, stage
 
 
@@ -57,7 +58,7 @@ async def connected(manager, user="user"):
 async def test_prepare_requires_current_bound_connection_and_is_one_shot():
     stage_manager, _, _ = manager()
     connection, stage = await connected(stage_manager)
-    other = WebSocketConnection(Socket(), "user", "other-device")
+    other = StubChatConnection(Socket(), "user", "other-device")
 
     intent = await stage_manager.prepare_call_transition(
         connection,
@@ -99,7 +100,7 @@ async def test_prepare_suspends_business_input_and_expiry_restores_it():
     assert stage.input_suspended
     assert not stage.stimulus_input_sink.can_accept(stimulus())
     assert not stage.stimulus_input_sink.submit(stimulus())
-    acceptance = await stage_manager._chat_output_sink.receive(
+    acceptance = await stage_manager._test_chat_adapter._receive(
         connection,
         SimpleNamespace(event_type="user_text", payload={}, client_msg_id="msg-1"),
     )
@@ -114,16 +115,16 @@ async def test_prepare_suspends_business_input_and_expiry_restores_it():
 async def test_adapter_routes_switch_prepare_and_keeps_binding_until_commit():
     stage_manager, _, _ = manager()
     connection, stage = await connected(stage_manager)
-    adapter = stage_manager._chat_output_sink
+    adapter = stage_manager._test_chat_adapter
     raw = {
         "protocol": "call.v1",
         "type": "call.switch_prepare",
         "client_request_id": "request-1",
         "character_id": "luotianyi",
     }
-    event = SimpleNamespace(event_type="call.switch_prepare", raw_event=raw)
+    event = SimpleNamespace(event_type="call.switch_prepare", raw_event=raw, raw_text=json.dumps(raw))
     try:
-        result = await adapter.receive(connection, event)
+        result = await adapter._receive(connection, event)
         assert result["type"] == "call.switch_ready"
         assert stage.input_suspended
         assert adapter._routes[stage.interaction_id].connection is connection
@@ -142,15 +143,15 @@ async def test_adapter_routes_switch_prepare_and_keeps_binding_until_commit():
 @pytest.mark.asyncio
 async def test_failed_adapter_bind_releases_connection_and_expires_stage(monkeypatch):
     stage_manager, _, _ = manager(config={"offline_timeout": 0})
-    adapter = stage_manager._chat_output_sink
-    connection = WebSocketConnection(Socket(), "user", "user")
+    adapter = stage_manager._test_chat_adapter
+    connection = StubChatConnection(Socket(), "user", "user")
 
     async def fail_bind(*args):
         raise RuntimeError("bind failed")
 
-    monkeypatch.setattr(adapter, "bind", fail_bind)
+    monkeypatch.setattr(adapter, "_bind", fail_bind)
     with pytest.raises(RuntimeError, match="bind failed"):
-        await adapter.open(connection, "luotianyi")
+        await adapter._open(connection, "luotianyi")
     assert not stage_manager._connections
     await asyncio.sleep(0)
     await stage_manager.close()
@@ -466,9 +467,9 @@ async def test_normal_disconnect_keeps_chat_for_60_second_reconnect():
     stage_manager, _, _ = manager(config={"offline_timeout": 60.0})
     connection, stage = await connected(stage_manager)
 
-    await stage_manager._chat_output_sink.close_connection(connection)
-    replacement = WebSocketConnection(Socket(), "user", "replacement")
-    reconnected = await stage_manager._chat_output_sink.open(replacement, "luotianyi")
+    await stage_manager._test_chat_adapter._close_connection(connection)
+    replacement = StubChatConnection(Socket(), "user", "replacement")
+    reconnected = await stage_manager._test_chat_adapter._open(replacement, "luotianyi")
 
     assert reconnected is stage
     assert stage.context.closed is False
@@ -493,7 +494,7 @@ async def test_direct_start_without_chat_claims_empty_slot_and_persists_ledger()
 async def test_direct_start_cannot_steal_offline_retained_chat():
     stage_manager, repository, _ = manager(config={"offline_timeout": 60.0})
     connection, stage = await connected(stage_manager)
-    await stage_manager._chat_output_sink.close_connection(connection)
+    await stage_manager._test_chat_adapter._close_connection(connection)
 
     with pytest.raises(ValueError, match="already owned"):
         await stage_manager._claim_call(
@@ -762,7 +763,7 @@ async def test_setup_timeout_waits_for_owned_termination_before_releasing_transi
             client_request_id="request-direct",
         )
     with pytest.raises(RuntimeError) as error:
-        await stage_manager._chat_output_sink.open(WebSocketConnection(Socket(), "user", "replacement"), "luotianyi")
+        await stage_manager._test_chat_adapter._open(StubChatConnection(Socket(), "user", "replacement"), "luotianyi")
     assert str(error.value) == "INTERACTION_FINALIZING"
 
     await asyncio.sleep(0.25)

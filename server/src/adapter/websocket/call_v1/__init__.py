@@ -1,47 +1,6 @@
-"""Stable ``call.v1`` WebSocket facade and wire codec contracts."""
+"""Stable call adapter facade; protocol sessions and codecs remain internal."""
 
-from .adapter import CallCapabilityStatus, CallConnection, CallWebSocketAdapter
-from .audio_codec import (
-    AudioFrameCodec,
-    AudioFrameCodecError,
-    BinaryAudioFrameCodec,
-    WireAudioFrame,
-)
-from .control import (
-    ControlMessage,
-    ControlProtocolError,
-    ControlSender,
-    ControlTransport,
-    decode_control_text,
-    encode_control_message,
-)
-from .transport import (
-    CALL_CLOSE_POLICY_VIOLATION,
-    CALL_CLOSE_PROTOCOL_ERROR,
-    CALL_CLOSE_TOO_LARGE,
-    CALL_CLOSE_TRY_AGAIN_LATER,
-    CallTransportError,
-    parse_call_transport_enabled,
-)
+from ._transport import CallTransportError, parse_call_transport_enabled
+from .adapter import CallCapabilityStatus, CallWebSocketAdapter
 
-__all__ = [
-    "AudioFrameCodec",
-    "AudioFrameCodecError",
-    "BinaryAudioFrameCodec",
-    "WireAudioFrame",
-    "CallConnection",
-    "CallCapabilityStatus",
-    "CallWebSocketAdapter",
-    "ControlMessage",
-    "ControlProtocolError",
-    "ControlSender",
-    "ControlTransport",
-    "decode_control_text",
-    "encode_control_message",
-    "CALL_CLOSE_POLICY_VIOLATION",
-    "CALL_CLOSE_PROTOCOL_ERROR",
-    "CALL_CLOSE_TOO_LARGE",
-    "CALL_CLOSE_TRY_AGAIN_LATER",
-    "CallTransportError",
-    "parse_call_transport_enabled",
-]
+__all__ = ["CallCapabilityStatus", "CallWebSocketAdapter", "CallTransportError", "parse_call_transport_enabled"]

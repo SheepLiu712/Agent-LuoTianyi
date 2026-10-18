@@ -19,7 +19,7 @@ from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 from support.stage_manager import make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import (
     ConversationCompaction,
     ConversationEntry,

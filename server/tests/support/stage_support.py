@@ -6,10 +6,10 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode, ConversationSnapshot, RecalledMemoryContext, UserContextSnapshot
 from src.stage import ChatStage
-from src.web.websocket.service import WebSocketConnection
+from support.chat_connection import StubChatConnection
 
 
 class Socket:
@@ -163,21 +163,21 @@ class StageContextFactory:
 
 async def setup(agent=None, config=None):
     socket = Socket()
-    connection = WebSocketConnection(socket, "user", "用户")
+    connection = StubChatConnection(socket, "user", "用户")
     adapter = WebSocketAdapter()
     agent = agent or RecordingAgent()
     stage = await ChatStage.create(
         user_id="user",
         character_id="luotianyi",
         agent=agent,
-        output_sink=adapter,
+        output_sink=adapter.output_sink,
         config={"response_wait": 0.02, **(config or {})},
         context_factory=StageContextFactory(),
     )
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     return stage, agent, adapter, connection, socket
 
 
 async def cleanup(stage, adapter):
     await stage.terminate(d.InteractionEndingReason.SHUTDOWN)
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)

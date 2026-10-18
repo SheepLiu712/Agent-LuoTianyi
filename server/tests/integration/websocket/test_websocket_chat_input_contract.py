@@ -7,12 +7,12 @@ from types import SimpleNamespace
 import pytest
 from fastapi import WebSocketDisconnect
 from PIL import Image
+from support.adapter_connection import receive_events as _receive_events
+from support.chat_connection import StubChatConnection
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
-from src.web.websocket import WSEventType
-from src.web.websocket.endpoint import _receive_events
-from src.web.websocket.service import WebSocketConnection, WebSocketService
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.web.websocket.service import WebSocketService
 
 
 class Socket:
@@ -56,12 +56,12 @@ def event(event_type, payload, client_msg_id="chat-1"):
 
 async def run_ingress(events, *, negative_ack=True, adapter_config=None):
     socket = Socket(events)
-    connection = WebSocketConnection(socket, "user-1", "alice")
+    connection = StubChatConnection(socket, "user-1", "alice")
     if negative_ack:
         connection.capabilities.add("negative_ack_v1")
     adapter = WebSocketAdapter(adapter_config)
     stage = Stage()
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     runtime = SimpleNamespace(
         websocket_service=WebSocketService(),
         chat_adapter=adapter,
@@ -72,7 +72,7 @@ async def run_ingress(events, *, negative_ack=True, adapter_config=None):
             await _receive_events(runtime, connection)
         return socket.sent, stage.stimuli
     finally:
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -113,7 +113,7 @@ async def test_invalid_cli_signal_reports_bad_message(event_type, payload, negat
 
     assert stimuli == []
     assert len(sent) == 1
-    assert sent[0]["type"] == (WSEventType.SERVER_ACK.value if negative_ack else WSEventType.SERVER_ERROR.value)
+    assert sent[0]["type"] == ("server_ack" if negative_ack else "error")
     assert sent[0]["reply_to"] == "chat-1"
     assert sent[0]["payload"]["code"] == "BAD_MESSAGE"
     assert sent[0]["payload"]["received_event_type"] == event_type
@@ -177,7 +177,7 @@ async def test_unsupported_image_format_is_rejected(tmp_path, negative_ack, imag
 
     assert stimuli == []
     assert len(sent) == 1
-    assert sent[0]["type"] == (WSEventType.SERVER_ACK.value if negative_ack else WSEventType.SERVER_ERROR.value)
+    assert sent[0]["type"] == ("server_ack" if negative_ack else "error")
     assert sent[0]["payload"]["code"] == code
     assert sent[0]["payload"]["message"] == message
     assert sent[0]["payload"]["retryable"] is False

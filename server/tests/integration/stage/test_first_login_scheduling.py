@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode
-from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:
@@ -90,15 +90,15 @@ async def test_one_login_dispatches_once_to_each_character():
         manager.record_login("user", character_id, elapsed_from_last_login=None)
 
     # When: both character stages become ready for the same login.
-    connection = WebSocketConnection(Socket(), "user", "用户")
+    connection = StubChatConnection(Socket(), "user", "用户")
     for character_id in agents:
-        await manager._chat_output_sink.open(connection, character_id)
+        await manager._test_chat_adapter._open(connection, character_id)
     await asyncio.wait_for(
         asyncio.gather(*(wait_for_count(agent.first_logins, 1) for agent in agents.values())),
         1,
     )
     for character_id in agents:
-        await manager._chat_output_sink.open(connection, character_id)
+        await manager._test_chat_adapter._open(connection, character_id)
     await asyncio.sleep(0.02)
 
     # Then: each character receives one character-scoped fact and reconnect does not replay it.
@@ -121,8 +121,8 @@ async def test_first_login_waits_for_handle_capacity_then_dispatches():
         config={"stage": {"first_login_wait": 0.03, "max_stimuli": 1}},
     )
     manager.record_login("user", "luotianyi", elapsed_from_last_login=None)
-    stage = await manager._chat_output_sink.open(
-        WebSocketConnection(Socket(), "user", "用户"),
+    stage = await manager._test_chat_adapter._open(
+        StubChatConnection(Socket(), "user", "用户"),
         "luotianyi",
     )
     typing = d.UserTyping(

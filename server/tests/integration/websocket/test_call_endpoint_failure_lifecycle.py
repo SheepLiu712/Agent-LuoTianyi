@@ -9,8 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 from support.stage_manager import make_stage_manager
 
-from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.call_v1 import CallTransportError, CallWebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
@@ -93,8 +93,8 @@ async def test_physical_send_failure_cancels_receive_disconnects_and_allows_resu
         enabled=True,
         supports_character=lambda _character: True,
     )
-    call = await adapter.open(raw=_start_message(), user_id="user", connection_id=object())
-    preparing = json.loads((await adapter.next_output(call)).text)
+    call = await adapter.open(initial_message=_start_message(), user_id="user", connection_id=object())
+    preparing = json.loads((await adapter.next_output(call)).message)
     call_id = preparing["call_id"]
     socket = _PhysicalSendFailureSocket()
 
@@ -110,8 +110,8 @@ async def test_physical_send_failure_cancels_receive_disconnects_and_allows_resu
         with pytest.raises(CallTransportError, match="STALE_CALL_CONNECTION"):
             await adapter.next_output(call)
 
-        resumed = await adapter.open(raw=_resume_message(call_id), user_id="user", connection_id=object())
-        resumed_frame = json.loads((await adapter.next_output(resumed)).text)
+        resumed = await adapter.open(initial_message=_resume_message(call_id), user_id="user", connection_id=object())
+        resumed_frame = json.loads((await adapter.next_output(resumed)).message)
         assert resumed_frame["type"] == "call.resumed"
         assert resumed_frame["call_id"] == call_id
         await adapter.disconnect(resumed)

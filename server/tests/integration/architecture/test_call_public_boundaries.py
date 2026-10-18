@@ -4,6 +4,17 @@ from pathlib import Path
 SERVER_ROOT = Path(__file__).resolve().parents[3]
 
 
+def test_websocket_root_contains_only_shared_contracts_and_chat_uses_public_call_protocol():
+    root = SERVER_ROOT / "src/adapter/websocket"
+    assert {p.name for p in root.glob("*.py")} == {"__init__.py", "connection.py"}
+    for path in (root / "chat").glob("*.py"):
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(module):
+            if isinstance(node, ast.ImportFrom) and "call_v1" in (node.module or ""):
+                assert node.module == "src.adapter.websocket.call_v1.chat_switch"
+                assert all(not item.name.startswith("_") for item in node.names)
+
+
 def _public_methods(path: Path, class_name: str) -> set[str]:
     module = ast.parse(path.read_text(encoding="utf-8"))
     target = next(node for node in module.body if isinstance(node, ast.ClassDef) and node.name == class_name)
@@ -42,26 +53,26 @@ def test_call_v1_package_exports_only_stable_facade_and_wire_contracts():
     exports = set(ast.literal_eval(assignment.value))
 
     assert {
-        "CallTransportHub",
-        "CallTransportSession",
-        "CallTransportBinding",
-        "CallStageBinding",
-        "CallAcceptanceReceipt",
-        "CallBusinessAcceptanceSink",
-        "CallTransportConfig",
-        "CallWireOutput",
-        "InboundCallFrame",
+        "_CallTransportHub",
+        "_CallTransportSession",
+        "_CallTransportBinding",
+        "_CallStageBinding",
+        "_CallAcceptanceReceipt",
+        "_CallBusinessAcceptanceSink",
+        "_CallTransportConfig",
+        "_CallWireOutput",
+        "_InboundCallFrame",
     }.isdisjoint(exports)
-    assert {"CallWebSocketAdapter", "CallConnection", "CallCapabilityStatus", "CallTransportError"} <= exports
+    assert {"CallWebSocketAdapter", "CallCapabilityStatus", "CallTransportError"} <= exports
 
 
 def test_web_call_entry_does_not_assemble_call_internals():
     source = (SERVER_ROOT / "src/web/websocket/call_endpoint.py").read_text(encoding="utf-8")
 
     for forbidden in (
-        "CallTransportHub",
-        "CallTransportSession",
-        "CallStageBinding",
+        "_CallTransportHub",
+        "_CallTransportSession",
+        "_CallStageBinding",
         "CallStartClaim",
         "create_call_stage",
         "take_call_claim",
@@ -84,3 +95,17 @@ def test_stage_manager_does_not_control_adapter_binding_or_protocol_preparation(
     assert "transport.prepare(" not in source
     assert 'getattr(transport, "bind_stage"' not in source
     assert "self._adapter" not in source
+
+
+def test_chat_and_call_have_the_same_network_operations_and_keep_protocol_internals_private():
+    chat = _public_methods(SERVER_ROOT / "src/adapter/websocket/chat/adapter.py", "WebSocketAdapter")
+    call = _public_methods(SERVER_ROOT / "src/adapter/websocket/call_v1/adapter.py", "CallWebSocketAdapter")
+    network = {"open", "receive", "next_output", "complete_output", "disconnect", "close"}
+    assert network <= chat & call
+    assert chat - network == {"initialize", "output_sink", "detach_stage_binding"}
+    assert call - network == {"capability_status", "supports_call_character"}
+    for name in ("adapter.py", "_delivery.py", "_input.py", "_voice_upload_helper.py"):
+        assert "src.web" not in (SERVER_ROOT / "src/adapter/websocket/chat" / name).read_text(encoding="utf-8")
+    for name in ("transport", "control", "audio_codec", "stage_binding"):
+        assert not (SERVER_ROOT / f"src/adapter/websocket/call_v1/{name}.py").exists()
+        assert (SERVER_ROOT / f"src/adapter/websocket/call_v1/_{name}.py").is_file()

@@ -2,18 +2,11 @@
 
 import asyncio
 import inspect
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-# 添加项目根目录
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
-from src.adapter.websocket.client_model_executor import (
+from src.adapter.websocket.chat.client_model_executor import (
     ClientLLMError,
     ClientLLMExecutor,
     ClientLLMTimeout,
@@ -56,14 +49,11 @@ class FakeStream:
     @staticmethod
     def _as_connection(websocket, client_mode=None):
         if hasattr(websocket, "websocket"):
-            websocket.client_mode = dict(
-                client_mode
-                or getattr(websocket, "client_mode", None)
-                or {"types": []}
-            )
+            websocket.client_mode = dict(client_mode or getattr(websocket, "client_mode", None) or {"types": []})
             return websocket
         return SimpleNamespace(
             websocket=websocket,
+            send_json=websocket.send_json,
             client_mode=dict(client_mode or {"types": []}),
         )
 
@@ -72,8 +62,8 @@ class FakeStreamManager:
     def __init__(self, stream=None):
         self.stream = stream
 
-    def get_stream_by_user_uuid(self, user_id):
-        return self.stream
+    def __call__(self, user_id):
+        return None if self.stream is None else self.stream.ws_connection
 
 
 class FakeDelegateExecutor:
@@ -170,25 +160,17 @@ def test_error_classification():
 @pytest.mark.asyncio
 async def test_delegate_returns_none_when_not_configured_or_disabled(executor, fake_ws):
     executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": []})))
-    assert await executor.delegate(
-        "u1", module="m", model_type="", prompt="p", params=None
-    ) is None
-    assert await executor.delegate(
-        "u1", module="m", model_type="对话模型", prompt="p", params=None
-    ) is None
+    assert await executor.delegate("u1", module="m", model_type="", prompt="p", params=None) is None
+    assert await executor.delegate("u1", module="m", model_type="对话模型", prompt="p", params=None) is None
 
     executor.bind(FakeStreamManager(None))
-    assert await executor.delegate(
-        "u1", module="m", model_type="对话模型", prompt="p", params=None
-    ) is None
+    assert await executor.delegate("u1", module="m", model_type="对话模型", prompt="p", params=None) is None
     assert fake_ws.sent_events == []
 
 
 @pytest.mark.asyncio
 async def test_delegate_sends_type_payload_without_provider(executor, fake_ws):
-    executor.bind(
-        FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]}))
-    )
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]})))
     task = asyncio.create_task(
         executor.delegate(
             "u1",
@@ -216,18 +198,14 @@ async def test_delegate_sends_type_payload_without_provider(executor, fake_ws):
     assert "image_base64" not in payload
 
     request_id = payload["request_id"]
-    executor.on_llm_response(
-        {"request_id": request_id, "content": "ok", "usage": None}
-    )
+    executor.on_llm_response({"request_id": request_id, "content": "ok", "usage": None})
     result = await task
     assert result["content"] == "ok"
 
 
 @pytest.mark.asyncio
 async def test_delegate_includes_image_base64(executor, fake_ws):
-    executor.bind(
-        FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["图片理解模型"]}))
-    )
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["图片理解模型"]})))
     task = asyncio.create_task(
         executor.delegate(
             "u1",
@@ -245,23 +223,15 @@ async def test_delegate_includes_image_base64(executor, fake_ws):
     assert payload["model_kind"] == "vlm"
     assert payload["image_base64"] == "data:image/png;base64,AAA"
     request_id = payload["request_id"]
-    executor.on_llm_response(
-        {"request_id": request_id, "content": "desc", "usage": None}
-    )
+    executor.on_llm_response({"request_id": request_id, "content": "desc", "usage": None})
     result = await task
     assert result["content"] == "desc"
 
 
 @pytest.mark.asyncio
 async def test_delegate_error_raises_without_fallback(executor, fake_ws):
-    executor.bind(
-        FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]}))
-    )
-    task = asyncio.create_task(
-        executor.delegate(
-            "u1", module="m", model_type="对话模型", prompt="p", params=None
-        )
-    )
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]})))
+    task = asyncio.create_task(executor.delegate("u1", module="m", model_type="对话模型", prompt="p", params=None))
     await asyncio.sleep(0)
     request_id = fake_ws.sent_events[0]["payload"]["request_id"]
     executor.on_llm_response({"request_id": request_id, "error": "HTTP 401 bad key"})
@@ -271,13 +241,9 @@ async def test_delegate_error_raises_without_fallback(executor, fake_ws):
 
 @pytest.mark.asyncio
 async def test_delegate_timeout(executor, fake_ws):
-    executor.bind(
-        FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]}))
-    )
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]})))
     with pytest.raises(ClientLLMTimeout):
-        await executor.delegate(
-            "u1", module="m", model_type="对话模型", prompt="p", params=None
-        )
+        await executor.delegate("u1", module="m", model_type="对话模型", prompt="p", params=None)
 
 
 @pytest.mark.asyncio
@@ -286,24 +252,16 @@ async def test_delegate_send_failure_raises_unavailable(executor):
         async def send_json(self, event):
             raise RuntimeError("socket closed")
 
-    executor.bind(
-        FakeStreamManager(FakeStream(BrokenWebSocket(), client_mode={"types": ["对话模型"]}))
-    )
+    executor.bind(FakeStreamManager(FakeStream(BrokenWebSocket(), client_mode={"types": ["对话模型"]})))
     with pytest.raises(ClientLLMUnavailable):
-        await executor.delegate(
-            "u1", module="m", model_type="对话模型", prompt="p", params=None
-        )
+        await executor.delegate("u1", module="m", model_type="对话模型", prompt="p", params=None)
 
 
 @pytest.mark.asyncio
 async def test_clear_user_fails_pending(executor, fake_ws):
     stream = FakeStream(fake_ws, client_mode={"types": ["对话模型"]})
     executor.bind(FakeStreamManager(stream))
-    task = asyncio.create_task(
-        executor.delegate(
-            "u1", module="m", model_type="对话模型", prompt="p", params=None
-        )
-    )
+    task = asyncio.create_task(executor.delegate("u1", module="m", model_type="对话模型", prompt="p", params=None))
     await asyncio.sleep(0)
     executor.clear_user("u1", stream.ws_connection)
     with pytest.raises(ClientLLMUnavailable):

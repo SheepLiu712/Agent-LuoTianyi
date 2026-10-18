@@ -14,7 +14,7 @@ import uvicorn
 from fastapi import FastAPI
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler

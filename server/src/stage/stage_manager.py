@@ -47,6 +47,7 @@ from .interaction_lease import (
 
 if TYPE_CHECKING:
     from src.agent.facade import Agent
+    from src.domain.stage.connection import InteractionConnection
     from src.infrastructure.models.realtime_speech import RealtimeSpeechSessionFactory
     from src.infrastructure.observability.call_metrics import CallMetrics
     from src.infrastructure.persistence.call_maintenance import (
@@ -56,7 +57,6 @@ if TYPE_CHECKING:
         ConversationService,
     )
     from src.stage.call_stage import CallStage, CallTransportSink
-    from src.web.websocket.service import WebSocketConnection
 
 
 @dataclass(frozen=True)
@@ -230,7 +230,7 @@ class StageManager:
         *,
         get_agent: Callable[[str], Agent],
         chat_output_sink: StageOutputSink,
-        detach_stage_binding: Callable[[ChatStage, WebSocketConnection | None], Awaitable[None]],
+        detach_stage_binding: Callable[[ChatStage, InteractionConnection | None], Awaitable[None]],
         get_context_factory: Callable[[str], ContextFactory],
         due_event_provider: DueEventProvider | None = None,
         lease_registry: InteractionLeaseRegistry | None = None,
@@ -279,7 +279,7 @@ class StageManager:
         self._last_call_timestamp: datetime | None = None
         self._time_lock = asyncio.Lock()
         self._stages: dict[tuple[str, str], ChatStage] = {}
-        self._connections: dict[ChatStage, WebSocketConnection] = {}
+        self._connections: dict[ChatStage, InteractionConnection] = {}
         self._expiry: dict[ChatStage, asyncio.Task[None]] = {}
         self._finalizations = FinalizationTasks()
         self._call_settlement = (
@@ -649,7 +649,7 @@ class StageManager:
         user_id: str,
         character_id: str,
         stage_type: str = "chat",
-        connection: WebSocketConnection | None = None,
+        connection: InteractionConnection | None = None,
         call_id: str | None = None,
         client_request_id: str | None = None,
         source_interaction_id: str | None = None,
@@ -668,7 +668,7 @@ class StageManager:
             raise ValueError("chat admission requires its authenticated connection")
         return await complete_owned(self._connect(connection, character_id))
 
-    async def disconnect(self, connection: WebSocketConnection) -> None:
+    async def disconnect(self, connection: InteractionConnection) -> None:
         """接收 Adapter 已解绑的断线通知并启动离线保留期；旧连接通知不影响重连。"""
         await complete_owned(self._disconnect(connection))
 
@@ -681,7 +681,7 @@ class StageManager:
     def is_closed(self) -> bool:
         return self._closed
 
-    async def _connect(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
+    async def _connect(self, connection: InteractionConnection, character_id: str) -> ChatStage:
         async with self._lock:
             if self._user_reset_fence is not None:
                 await self._user_reset_fence.track_current(connection.user_uuid)
@@ -754,7 +754,7 @@ class StageManager:
 
     async def prepare_call_transition(
         self,
-        connection: WebSocketConnection,
+        connection: InteractionConnection,
         *,
         character_id: str,
         client_request_id: str,
@@ -1271,7 +1271,7 @@ class StageManager:
         client_request_id: str,
     ) -> tuple[
         ChatStage | None,
-        WebSocketConnection | None,
+        InteractionConnection | None,
         CallTransitionOwnership | InteractionLease,
     ]:
         async with self._lock:
@@ -1382,7 +1382,7 @@ class StageManager:
             record=failed,
         )
 
-    def _bound_stage(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
+    def _bound_stage(self, connection: InteractionConnection, character_id: str) -> ChatStage:
         matches = [
             stage
             for stage, current in self._connections.items()
@@ -1392,9 +1392,8 @@ class StageManager:
             raise ValueError("current chat connection is not bound to the character")
         return matches[0]
 
-    async def _disconnect(self, connection: WebSocketConnection) -> None:
+    async def _disconnect(self, connection: InteractionConnection) -> None:
         async with self._lock:
-            connection.mark_disconnected()
             for stage, current in list(self._connections.items()):
                 if current is connection:
                     self._connections.pop(stage, None)

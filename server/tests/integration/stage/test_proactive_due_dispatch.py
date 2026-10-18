@@ -5,13 +5,13 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode
 from src.stage import DueEvent
-from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:
@@ -182,8 +182,8 @@ async def connected_manager(provider: DueEvents, agent: RecordingAgent, **stage_
         due_event_provider=provider,
         config={"stage": {"proactive_idle_seconds": 0.01, **stage_config}},
     )
-    stage = await manager._chat_output_sink.open(
-        WebSocketConnection(Socket(), "user", "用户"),
+    stage = await manager._test_chat_adapter._open(
+        StubChatConnection(Socket(), "user", "用户"),
         "luotianyi",
     )
     return manager, stage

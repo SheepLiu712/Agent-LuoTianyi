@@ -1,8 +1,10 @@
-import pytest
+import json
 
-from src.adapter.websocket import WebSocketAdapter
-from src.web.websocket import WSEventType, WSMessage
-from src.web.websocket.service import WebSocketConnection, WebSocketService
+import pytest
+from support.chat_connection import StubChatConnection
+
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat._messages import _WSMessage
 
 
 class FakeWebSocket:
@@ -13,9 +15,9 @@ class FakeWebSocket:
         self.sent.append(event)
 
 
-def _message(client_msg_id: str) -> WSMessage:
-    return WSMessage(
-        event_type=WSEventType.USER_TEXT.value,
+def _message(client_msg_id: str) -> _WSMessage:
+    return _WSMessage(
+        event_type="user_text",
         payload={"text": "你好"},
         client_msg_id=client_msg_id,
     )
@@ -23,7 +25,7 @@ def _message(client_msg_id: str) -> WSMessage:
 
 def test_websocket_adapter_deduplicates_recent_client_message_per_user():
     adapter = WebSocketAdapter()
-    connection = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
+    connection = StubChatConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
 
     assert adapter._is_duplicate_client_message(connection, _message("msg-1")) is False
     assert adapter._is_duplicate_client_message(connection, _message("msg-1")) is False
@@ -34,8 +36,8 @@ def test_websocket_adapter_deduplicates_recent_client_message_per_user():
 
 def test_websocket_adapter_dedup_cache_is_scoped_by_user():
     adapter = WebSocketAdapter()
-    user_a = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
-    user_b = WebSocketConnection(FakeWebSocket(), user_uuid="user-b", user_name="bob")
+    user_a = StubChatConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
+    user_b = StubChatConnection(FakeWebSocket(), user_uuid="user-b", user_name="bob")
 
     assert adapter._mark_client_message_accepted(user_a, _message("same-id")) is True
     assert adapter._mark_client_message_accepted(user_b, _message("same-id")) is True
@@ -45,21 +47,21 @@ def test_websocket_adapter_dedup_cache_is_scoped_by_user():
 
 @pytest.mark.asyncio
 async def test_duplicate_ack_marks_duplicate_payload():
-    service = WebSocketService()
-    websocket = FakeWebSocket()
-    connection = WebSocketConnection(websocket, user_uuid="user-a", user_name="alice")
+    from tests.integration.websocket.test_adapter_network_boundary import _chat
 
-    await service.send_duplicate_ack_event(connection, _message("msg-1"))
-
-    assert websocket.sent == [
-        {
-            "type": WSEventType.SERVER_ACK.value,
-            "ts": websocket.sent[0]["ts"],
-            "payload": {
-                "ok": True,
-                "received_event_type": WSEventType.USER_TEXT.value,
-                "duplicate": True,
-            },
-            "reply_to": "msg-1",
+    adapter, connection, stages = await _chat()
+    raw = json.dumps({"type": "user_text", "client_msg_id": "one", "payload": {"message": "hello"}})
+    try:
+        await adapter.receive(connection, raw)
+        original = await adapter.next_output(connection)
+        adapter.complete_output(connection, original.delivery_id)
+        await adapter.receive(connection, raw)
+        duplicate = await adapter.next_output(connection)
+        assert json.loads(duplicate.message)["payload"] == {
+            "ok": True,
+            "received_event_type": "user_text",
+            "duplicate": True,
         }
-    ]
+        assert len(stages.stage.stimuli) == 1
+    finally:
+        await adapter.close()

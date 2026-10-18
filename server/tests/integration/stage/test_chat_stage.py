@@ -7,18 +7,18 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat._messages import _WSMessage
 from src.agent import Agent
 from src.agent.context import ConversationMode
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.domain.stage import StageState
 from src.stage import ChatStage
-from src.web.websocket import WSMessage
-from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:
@@ -199,24 +199,24 @@ class StageContextFactory:
 
 async def setup(agent=None, config=None):
     socket = Socket()
-    connection = WebSocketConnection(socket, "user", "用户")
+    connection = StubChatConnection(socket, "user", "用户")
     adapter = WebSocketAdapter()
     agent = agent or RecordingAgent()
     stage = await ChatStage.create(
         user_id="user",
         character_id="luotianyi",
         agent=agent,
-        output_sink=adapter,
+        output_sink=adapter.output_sink,
         config={"response_wait": 0.02, **(config or {})},
         context_factory=StageContextFactory(),
     )
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     return stage, agent, adapter, connection, socket
 
 
 async def cleanup(stage, adapter):
     await stage.terminate(d.InteractionEndingReason.SHUTDOWN)
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -242,14 +242,14 @@ async def test_disconnect_waits_agent_cleanup_and_reconnect_reuses_sink():
     owned_context = stage.context
     stage.stimulus_input_sink.submit(stimulus())
     _, context, _ = await take(agent.executions)
-    disconnect = asyncio.create_task(adapter.disconnect(stage, old))
+    disconnect = asyncio.create_task(adapter.detach_stage_binding(stage, old))
     await cleanup_entered.wait()
     assert not disconnect.done() and context.cancellation.reason is d.CancellationReason.NO_LONGER_NEEDED
     cleanup_gate.set()
     await disconnect
     assert stage.state is StageState.OFFLINE
     assert not stage.stimulus_input_sink.submit(stimulus())
-    await adapter.bind(stage, WebSocketConnection(Socket(), "user", "用户"))
+    await adapter._bind(stage, StubChatConnection(Socket(), "user", "用户"))
     assert stage.agent_output_sink is sink and stage.state is StageState.ONLINE
     assert stage.context is owned_context and not owned_context.closed
     await cleanup(stage, adapter)
@@ -271,8 +271,8 @@ async def test_ending_fresh_token_and_rejection_after_termination():
     assert await stage.terminate(d.InteractionEndingReason.SHUTDOWN) is result
     assert not stage.stimulus_input_sink.submit(stimulus())
     with pytest.raises(ValueError):
-        await adapter.bind(stage, WebSocketConnection(Socket(), "user", "用户"))
-    await adapter.disconnect(stage)
+        await adapter._bind(stage, StubChatConnection(Socket(), "user", "用户"))
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -284,7 +284,7 @@ async def test_ending_timeout_releases_stage():
     result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
     assert result.error == "interaction ending timed out"
     assert stage.state is StageState.TERMINATED and stage.context.closed
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -298,7 +298,7 @@ async def test_ending_maintenance_failure_is_reported_and_context_closes():
     assert result.error == "interaction ending maintenance failed"
     assert stage.state is StageState.TERMINATED
     assert stage.context.closed
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -334,7 +334,7 @@ async def test_termination_drops_old_plan_and_realizes_only_ending_maintenance()
     assert isinstance(executed[-1].actions[0], d.CognitiveMaintenance)
     assert sum(isinstance(value.actions[0], d.CognitiveMaintenance) for value in executed) == 1
     assert stage.context.closed
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -366,19 +366,19 @@ async def test_manager_reconnect_old_disconnect_and_offline_expiry():
         adapter=adapter,
         config={"offline_timeout": 0.15},
     )
-    old = WebSocketConnection(Socket(), "user", "用户")
-    stage = await manager._chat_output_sink.open(old, "luotianyi")
-    other = await manager._chat_output_sink.open(old, "miku")
-    await manager._chat_output_sink.close_connection(old)
-    new = WebSocketConnection(Socket(), "user", "用户")
-    assert await manager._chat_output_sink.open(new, "luotianyi") is stage
-    await manager._chat_output_sink.close_connection(old)
+    old = StubChatConnection(Socket(), "user", "用户")
+    stage = await manager._test_chat_adapter._open(old, "luotianyi")
+    other = await manager._test_chat_adapter._open(old, "miku")
+    await manager._test_chat_adapter._close_connection(old)
+    new = StubChatConnection(Socket(), "user", "用户")
+    assert await manager._test_chat_adapter._open(new, "luotianyi") is stage
+    await manager._test_chat_adapter._close_connection(old)
     assert stage.state is StageState.ONLINE
     ending = await take(agent.requests)
     assert ending.interaction.interaction_id == other.interaction_id
     assert isinstance(ending.stimulus, d.InteractionEnding)
     assert await adapter._receive_event(
-        new, WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"})
+        new, _WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"})
     )
     await take(agent.requests)
     await manager.close()
@@ -405,15 +405,15 @@ async def test_reconnect_during_ending_is_rejected_until_finalization_finishes()
         adapter=adapter,
         config={"offline_timeout": 0},
     )
-    old = WebSocketConnection(Socket(), "user", "用户")
-    stage = await manager._chat_output_sink.open(old, "luotianyi")
-    await manager._chat_output_sink.close_connection(old)
+    old = StubChatConnection(Socket(), "user", "用户")
+    stage = await manager._test_chat_adapter._open(old, "luotianyi")
+    await manager._test_chat_adapter._close_connection(old)
     await asyncio.wait_for(ending_started.wait(), 1)
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
-        await manager._chat_output_sink.open(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
+        await manager._test_chat_adapter._open(StubChatConnection(Socket(), "user", "用户"), "luotianyi")
     gate.set()
     await manager._finalizations.close()
-    new = await manager._chat_output_sink.open(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
+    new = await manager._test_chat_adapter._open(StubChatConnection(Socket(), "user", "用户"), "luotianyi")
     assert new is not stage and new.interaction_id != stage.interaction_id
     await manager.close()
     assert stage.state is new.state is StageState.TERMINATED
@@ -456,7 +456,7 @@ async def test_stage_releases_context_after_ending_handler():
         ),
     )
     stage = await ChatStage.create(
-        user_id="user", character_id="luotianyi", agent=agent, output_sink=adapter, context_factory=factory
+        user_id="user", character_id="luotianyi", agent=agent, output_sink=adapter.output_sink, context_factory=factory
     )
     termination = asyncio.create_task(stage.terminate(d.InteractionEndingReason.USER_LEFT))
     await entered.wait()
@@ -575,7 +575,7 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
     )
     stage, _, adapter, connection, socket = await setup(agent)
     assert await adapter._receive_event(
-        connection, WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"})
+        connection, _WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"})
     )
 
     async def terminal():

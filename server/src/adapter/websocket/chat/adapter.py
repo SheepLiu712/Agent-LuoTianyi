@@ -13,19 +13,23 @@ from typing import TYPE_CHECKING
 
 import src.domain.agent as d
 from src.domain.stage import AgentPresentationChanged, CancelDelivery, StageOutput
+from src.domain.stage.connection import InteractionConnection
+from src.domain.stage.transport import StageOutputSink
 from src.infrastructure.media import MediaResolutionError, MediaResolutionErrorCode, PermanentMediaStore
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
-from src.web.websocket import WSMessage
 
-from ._delivery import _ConnectionDelivery, _DeliveryConfig, completion
-from ._input import _INPUT_EVENTS, materialize_image, prepare_input
-from .voice_upload import VoiceUploadAck, VoiceUploadAssembler, VoiceUploadError
+from ..connection import AdapterConnection, AdapterConnectionError, OutboundDelivery
+from ._delivery import _completion, _ConnectionDelivery, _DeliveryConfig
+from ._input import _INPUT_EVENTS, _input_targets, _materialize_input, _process_input
+from ._messages import _WSMessage
+from ._peer import _ChatPeer
+from ._protocol import _ack, _heartbeat, _parse, _reject, _update_model_types
+from ._voice_upload_helper import _VoiceUploadAck, _VoiceUploadAssembler, _VoiceUploadError
 
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
     from src.stage.stage_manager import StageManager
-    from src.web.websocket import WebSocketConnection
 
 logger = get_logger(__name__)
 
@@ -33,7 +37,7 @@ logger = get_logger(__name__)
 @dataclass
 class _Binding:
     stage: ChatStage
-    connection: WebSocketConnection
+    connection: _ChatPeer
     controls: set[asyncio.Task[None]] = field(default_factory=set)
     accepting: bool = True
 
@@ -56,7 +60,7 @@ class _BoundInputSink:
         return self.can_accept(stimulus) and self._binding.stage.stimulus_input_sink.submit(stimulus)
 
 
-class ChatEventAcceptance(str, Enum):
+class _ChatEventAcceptance(str, Enum):
     """Result of translating and submitting one authenticated chat event."""
 
     ACCEPTED = "accepted"
@@ -67,7 +71,7 @@ class ChatEventAcceptance(str, Enum):
 
 
 @dataclass(frozen=True)
-class EventRejection:
+class _EventRejection:
     """Stable negative acknowledgement details for a rejected event."""
 
     code: str
@@ -80,6 +84,14 @@ _MEDIA_REJECTION_MESSAGES = {
     MediaResolutionErrorCode.UNSUPPORTED_TYPE.value: "不支持的图片格式",
     MediaResolutionErrorCode.NOT_CONFIGURED.value: "服务端未配置媒体存储",
 }
+
+
+class _ChatOutputSink:
+    def __init__(self, adapter):
+        self._adapter = adapter
+
+    def submit_output(self, output: StageOutput) -> asyncio.Future[None]:
+        return asyncio.shield(self._adapter._submit_output(output))
 
 
 class WebSocketAdapter:
@@ -98,29 +110,163 @@ class WebSocketAdapter:
         voice_config = (config or {}).get("voice_upload", {})
         if not isinstance(voice_config, dict):
             raise TypeError("voice_upload config must be a dictionary")
-        self._voice_uploads = VoiceUploadAssembler(
+        self._input_lock = asyncio.Lock()
+        self._voice_uploads = _VoiceUploadAssembler(
             self._media_store,
             max_incomplete=voice_config.get("max_incomplete", 128),
             ttl_seconds=voice_config.get("ttl_seconds", 600.0),
         )
         self._routes: dict[str, _Binding] = {}
-        self._connections: dict[WebSocketConnection, _ConnectionDelivery] = {}
+        self._connections: dict[_ChatPeer, _ConnectionDelivery] = {}
         self._binding_lock = asyncio.Lock()
         self._recent_client_messages: OrderedDict[str, float] = OrderedDict()
         self._recent_client_msg_ttl_seconds = 600.0
         self._recent_client_msg_limit = 4096
         self._stage_manager: StageManager | None = None
         self._admission_lock = asyncio.Lock()
+        self._peers: dict[AdapterConnection, _ChatPeer] = {}
+        self._output_sink = _ChatOutputSink(self)
+        self._client_executor = None
+        self._closed = False
+        self._max_inbound_bytes = (config or {}).get("max_inbound_frame_bytes", 128 * 1024)
+        self._max_image_bytes = (config or {}).get("max_image_frame_bytes", 8 * 1024 * 1024 + 128 * 1024)
 
-    def initialize(self, stage_manager: StageManager) -> None:
+    def initialize(self, stage_manager: StageManager, *, client_executor=None) -> None:
         if self._stage_manager is not None and self._stage_manager is not stage_manager:
             raise RuntimeError("adapter already initialized")
         self._stage_manager = stage_manager
+        self._client_executor = client_executor
+        if client_executor is not None:
+            client_executor.bind(self._live_peer)
 
-    async def open(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
-        return await complete_owned(self._open(connection, character_id))
+    @property
+    def output_sink(self) -> StageOutputSink:
+        return self._output_sink
 
-    async def _open(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
+    def _live_peer(self, user_id):
+        return next(
+            (
+                b.connection
+                for b in self._routes.values()
+                if b.connection.user_uuid == user_id and not b.connection.is_closed
+            ),
+            None,
+        )
+
+    async def open(
+        self,
+        *,
+        user_id: str,
+        connection_id: object,
+        character_id: str | None = None,
+        initial_message: str | bytes | None = None,
+        capabilities: frozenset[str] = frozenset(),
+    ) -> AdapterConnection:
+        from src.stage.stage_manager import InteractionFinalizing, InteractionOwnedByCallAdmission
+
+        if self._closed:
+            raise ConnectionError("adapter is closed")
+        handle = AdapterConnection()
+        peer = _ChatPeer(user_id, connection_id, capabilities, self._config)
+        self._peers[handle] = peer
+        try:
+            stage = await complete_owned(self._open(peer, character_id or self._default_character_id))
+            peer.enqueue_event(
+                "chat.ready",
+                {"character_id": stage.character_id, "interaction_id": stage.interaction_id, "schema_version": 1},
+            )
+            peer._release_business_outputs()
+            if initial_message is not None:
+                await self.receive(handle, initial_message)
+            return handle
+        except BaseException as error:
+            await self.disconnect(handle)
+            if isinstance(error, (InteractionFinalizing, InteractionOwnedByCallAdmission)):
+                raise AdapterConnectionError(
+                    str(error),
+                    close_code=1013,
+                    initial_message=json.dumps(
+                        {
+                            "type": "error",
+                            "ts": int(time.time() * 1000),
+                            "payload": {
+                                "code": str(error),
+                                "message": "interaction is temporarily unavailable",
+                                "retryable": True,
+                            },
+                        }
+                    ),
+                ) from error
+            raise
+
+    async def next_output(self, connection: AdapterConnection) -> OutboundDelivery:
+        return await self._peer(connection).outbox.next()
+
+    def complete_output(
+        self, connection: AdapterConnection, delivery_id: str, *, error: Exception | None = None
+    ) -> None:
+        peer = self._peers.get(connection)
+        if peer is not None:
+            peer.outbox.complete(delivery_id, error)
+            if error is not None:
+                peer.mark_disconnected()
+
+    def _peer(self, connection: AdapterConnection) -> _ChatPeer:
+        peer = self._peers.get(connection)
+        if peer is None or peer.is_closed:
+            raise ConnectionError("connection is closed")
+        return peer
+
+    async def receive(self, connection: AdapterConnection, message: str | bytes) -> None:
+        peer = self._peer(connection)
+        event = _parse(peer, message, max_bytes=self._max_inbound_bytes, max_image_bytes=self._max_image_bytes)
+        if event is None:
+            return
+        if event.event_type == "hb_ping":
+            _heartbeat(peer, event)
+            return
+        if event.event_type == "llm_response":
+            if self._client_executor is not None:
+                self._client_executor.on_llm_response(event.payload, connection=peer)
+            return
+        if event.event_type in {"user_text", "user_image"}:
+            _update_model_types(peer, event.payload)
+        result = await self._receive(peer, event)
+        self._respond(peer, event, result)
+
+    @staticmethod
+    def _respond(peer, event, result):
+        if result is _ChatEventAcceptance.UNSUPPORTED:
+            return
+        if isinstance(result, _VoiceUploadAck):
+            _ack(peer, event, payload=result.payload, duplicate=result.duplicate)
+        elif isinstance(result, dict):
+            peer.outbox.enqueue(json.dumps(result, ensure_ascii=False))
+        elif isinstance(result, _EventRejection):
+            _reject(peer, event, result.code, result.message, result.retryable)
+        elif result in {_ChatEventAcceptance.ACCEPTED, _ChatEventAcceptance.DUPLICATE}:
+            _ack(peer, event, duplicate=result is _ChatEventAcceptance.DUPLICATE)
+        elif result is _ChatEventAcceptance.BAD_MESSAGE:
+            _reject(peer, event, "BAD_MESSAGE", "chat event payload is invalid", False)
+        else:
+            _reject(peer, event, "OVERLOADED", "chat ingress queue is full", True)
+
+    async def disconnect(self, connection: AdapterConnection) -> None:
+        peer = self._peers.pop(connection, None)
+        if peer is not None:
+            if self._client_executor is not None:
+                self._client_executor.clear_user(peer.user_uuid, peer)
+            await complete_owned(self._close_connection(peer))
+
+    async def close(self) -> None:
+        await complete_owned(self._close())
+
+    async def _close(self) -> None:
+        self._closed = True
+        for connection in tuple(self._peers):
+            await self.disconnect(connection)
+
+    async def _open(self, connection: _ChatPeer, character_id: str) -> ChatStage:
         if self._stage_manager is None:
             raise RuntimeError("adapter is not initialized")
         async with self._admission_lock:
@@ -130,142 +276,96 @@ class WebSocketAdapter:
                 connection=connection,
             )
             try:
-                await self.bind(stage, connection)
+                await complete_owned(self._bind(stage, connection))
             except BaseException:
                 await self._stage_manager.disconnect(connection)
                 raise
             return stage
 
-    async def close_connection(self, connection: WebSocketConnection) -> None:
-        await complete_owned(self._close_connection(connection))
-
-    async def _close_connection(self, connection: WebSocketConnection) -> None:
+    async def _close_connection(self, connection: _ChatPeer) -> None:
         connection.mark_disconnected()
         for binding in tuple(self._routes.values()):
             if binding.connection is connection:
-                await self.disconnect(binding.stage, connection)
+                await self.detach_stage_binding(binding.stage, connection)
         if self._stage_manager is not None:
             await self._stage_manager.disconnect(connection)
 
-    async def receive(
-        self, connection: WebSocketConnection, event: WSMessage
-    ) -> ChatEventAcceptance | EventRejection | VoiceUploadAck | dict[str, str]:
+    async def _receive(
+        self, connection: _ChatPeer, event: _WSMessage
+    ) -> _ChatEventAcceptance | _EventRejection | _VoiceUploadAck | dict[str, str]:
         """统一接收普通刺激、语音上传阶段与切换命令；返回协议应答所需结果。"""
         if event.event_type == "call.switch_prepare":
             return await self._prepare_call_switch(connection, event)
-        if event.event_type == "user_voice":
-            try:
-                return await self._process_voice_event(connection, event)
-            except VoiceUploadError as error:
-                return EventRejection(error.code, error.message, error.retryable)
-            except (TypeError, ValueError):
-                return ChatEventAcceptance.BAD_MESSAGE
-        return await self._try_accept_event(connection, event)
+        async with self._input_lock:
+            return await self._try_accept_event(connection, event)
 
-    async def _prepare_call_switch(
-        self, connection: WebSocketConnection, event: WSMessage
-    ) -> EventRejection | dict[str, str]:
-        from .call_v1 import ControlProtocolError, decode_control_text
+    async def _prepare_call_switch(self, connection: _ChatPeer, event: _WSMessage) -> _EventRejection | dict[str, str]:
+        from src.adapter.websocket.call_v1.chat_switch import (
+            CallSwitchProtocolError,
+            make_switch_ready,
+            parse_switch_prepare,
+        )
 
         try:
-            message = decode_control_text(
-                json.dumps(event.raw_event, ensure_ascii=False), sender="client", transport="chat_ws"
-            )
+            character_id, client_request_id = parse_switch_prepare(event.raw_text)
             if self._stage_manager is None:
                 raise ValueError("adapter is not initialized")
             await self._stage_manager.prepare_call_transition(
                 connection,
-                character_id=str(message["character_id"]),
-                client_request_id=str(message["client_request_id"]),
+                character_id=character_id,
+                client_request_id=client_request_id,
             )
-            return {
-                "protocol": "call.v1",
-                "type": "call.switch_ready",
-                "client_request_id": str(message["client_request_id"]),
-                "character_id": str(message["character_id"]),
-            }
-        except (ControlProtocolError, ValueError) as error:
-            code = error.code if isinstance(error, ControlProtocolError) else "CALL_SWITCH_REJECTED"
-            return EventRejection(code, "call transition is not available")
+            return make_switch_ready(character_id=character_id, client_request_id=client_request_id)
+        except (CallSwitchProtocolError, ValueError) as error:
+            code = error.code if isinstance(error, CallSwitchProtocolError) else "CALL_SWITCH_REJECTED"
+            return _EventRejection(code, "call transition is not available")
 
-    def _input_suspended(self, connection: WebSocketConnection) -> bool:
+    def _input_suspended(self, connection: _ChatPeer) -> bool:
         return any(b.stage.input_suspended for b in self._routes.values() if b.connection is connection)
 
     @staticmethod
-    def supports_input(event: WSMessage) -> bool:
+    def _supports_input(event: _WSMessage) -> bool:
         """返回该协议适配器是否认识此业务输入类型。"""
         return event.event_type in _INPUT_EVENTS
 
     async def _try_accept_event(
         self,
-        connection: WebSocketConnection,
-        event: WSMessage,
-    ) -> ChatEventAcceptance | EventRejection:
+        connection: _ChatPeer,
+        event: _WSMessage,
+    ) -> _ChatEventAcceptance | _EventRejection | _VoiceUploadAck:
         """Validate, deduplicate, translate, and submit one authenticated channel event."""
-        if not self.supports_input(event):
-            return ChatEventAcceptance.UNSUPPORTED
+        if not self._supports_input(event):
+            return _ChatEventAcceptance.UNSUPPORTED
         if connection.is_closed or not connection.user_uuid or not self._has_valid_client_message_id(event):
-            return ChatEventAcceptance.BAD_MESSAGE
+            return _ChatEventAcceptance.BAD_MESSAGE
         if self._input_suspended(connection):
-            return EventRejection(
+            return _EventRejection(
                 code="CALL_SWITCH_PENDING",
                 message="chat input is suspended while call switching is pending",
                 retryable=True,
             )
         try:
-            if self._is_duplicate_client_message(connection, event):
-                return ChatEventAcceptance.DUPLICATE
+            if event.event_type != "user_voice" and self._is_duplicate_client_message(connection, event):
+                return _ChatEventAcceptance.DUPLICATE
             accepted = await self._receive_event(connection, event)
+        except _VoiceUploadError as error:
+            return _EventRejection(error.code, error.message, error.retryable)
         except MediaResolutionError as error:
             code = error.code.value if isinstance(error.code, MediaResolutionErrorCode) else str(error.code)
-            return EventRejection(
+            return _EventRejection(
                 code=code,
                 message=_MEDIA_REJECTION_MESSAGES.get(code, "图片无法读取或已损坏"),
             )
         except (KeyError, TypeError, ValueError):
-            return ChatEventAcceptance.BAD_MESSAGE
+            return _ChatEventAcceptance.BAD_MESSAGE
+        if isinstance(accepted, _VoiceUploadAck):
+            return accepted
         if not accepted:
-            return ChatEventAcceptance.OVERLOADED
+            return _ChatEventAcceptance.OVERLOADED
         self._mark_client_message_accepted(connection, event)
-        return ChatEventAcceptance.ACCEPTED
+        return _ChatEventAcceptance.ACCEPTED
 
-    async def _process_voice_event(self, connection: WebSocketConnection, event: WSMessage) -> VoiceUploadAck:
-        """把一个语音上传阶段交给 assembler；阶段幂等不经过普通消息去重表。"""
-        if connection.is_closed or not connection.user_uuid:
-            raise ValueError("authenticated live connection required")
-        if self._input_suspended(connection):
-            raise VoiceUploadError(
-                code="CALL_SWITCH_PENDING",
-                message="chat input is suspended while call switching is pending",
-                retryable=True,
-            )
-        payload = event.payload if isinstance(event.payload, dict) else {}
-        character_id = payload.get("target_character_id", payload.get("character_id", self._default_character_id))
-        raw_targets = payload.get("target_character_ids")
-        if raw_targets is not None:
-            if not isinstance(raw_targets, list) or len(raw_targets) != 1:
-                raise ValueError("voice upload requires exactly one target character")
-            character_id = raw_targets[0]
-        if not isinstance(character_id, str) or not character_id.strip():
-            raise ValueError("invalid target character")
-        stage = next(
-            (
-                binding.stage
-                for binding in self._routes.values()
-                if binding.connection is connection and binding.stage.character_id == character_id
-            ),
-            None,
-        )
-        if stage is None:
-            raise ValueError("target character is not bound to connection")
-        return await self._voice_uploads.process(
-            event=event,
-            user_id=connection.user_uuid,
-            character_id=character_id,
-            sink=_BoundInputSink(self._routes[stage.interaction_id]),
-        )
-
-    def _is_duplicate_client_message(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+    def _is_duplicate_client_message(self, connection: _ChatPeer, event: _WSMessage) -> bool:
         """Check accepted messages without marking a new event as accepted."""
         key = self._client_message_key(connection, event)
         if key is None:
@@ -274,7 +374,7 @@ class WebSocketAdapter:
         self._prune_recent_client_messages(now)
         return key in self._recent_client_messages
 
-    def _mark_client_message_accepted(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+    def _mark_client_message_accepted(self, connection: _ChatPeer, event: _WSMessage) -> bool:
         """Record idempotency only after every target Stage accepted the event."""
         key = self._client_message_key(connection, event)
         if key is None:
@@ -288,13 +388,13 @@ class WebSocketAdapter:
         return True
 
     @staticmethod
-    def _has_valid_client_message_id(event: WSMessage) -> bool:
+    def _has_valid_client_message_id(event: _WSMessage) -> bool:
         return isinstance(event.client_msg_id, str) and 0 < len(event.client_msg_id) <= 128
 
-    def _client_message_key(self, connection: WebSocketConnection, event: WSMessage) -> str | None:
+    def _client_message_key(self, connection: _ChatPeer, event: _WSMessage) -> str | None:
         if not self._has_valid_client_message_id(event):
             return None
-        owner = connection.user_uuid or connection.user_name or "anonymous"
+        owner = connection.user_uuid or "anonymous"
         if event.event_type in {"user_voice_recording_started", "user_voice_recording_cancelled"}:
             payload = event.payload if isinstance(event.payload, dict) else {}
             recording_id = payload.get("recording_id")
@@ -310,7 +410,7 @@ class WebSocketAdapter:
                 break
             self._recent_client_messages.popitem(last=False)
 
-    def submit_output(self, output: StageOutput) -> asyncio.Future[None]:
+    def _submit_output(self, output: StageOutput) -> asyncio.Future[None]:
         """接收业务输出或控制信号，返回实际投递结果 Future；无绑定或容量不足立即抛 SinkRejectedError。"""
         binding = self._routes.get(output.interaction_id)
         if binding is None or binding.connection.is_closed:
@@ -338,47 +438,73 @@ class WebSocketAdapter:
             raise d.SinkRejectedError("unsupported output", code=d.SinkRejectionCode.UNSUPPORTED_OUTPUT)
         return delivery.submit(output)
 
-    async def _receive_event(self, connection: WebSocketConnection, event: WSMessage) -> bool:
-        """将已认证业务 event 转为刺激并交给已绑定 Stage；全部目标可接收才投递，否则返回 False。"""
+    async def _receive_event(self, connection: _ChatPeer, event: _WSMessage) -> bool | _VoiceUploadAck:
+        """Process all business inputs, admit complete stimuli, then commit receipts."""
+        try:
+            return await self._process_and_deliver(connection, event)
+        finally:
+            self._voice_uploads.discard_prepared()
+            # Failure/expiry belongs to the original upload binding, never a replacement.
+            for binding, stimulus in self._voice_uploads.take_notifications():
+                sink = _BoundInputSink(binding)
+                if sink.can_accept(stimulus):
+                    sink.submit(stimulus)
+
+    async def _process_and_deliver(self, connection: _ChatPeer, event: _WSMessage) -> bool | _VoiceUploadAck:
         if connection.is_closed or not connection.user_uuid:
             raise ValueError("authenticated live connection required")
-        candidate = prepare_input(
-            event,
-            connection.user_uuid,
-            self._default_character_id,
-            self._media_store,
-        )
-        stimulus = candidate.stimulus
         bindings = {
             binding.stage.character_id: binding
             for binding in self._routes.values()
             if binding.connection is connection and binding.accepting
         }
-        if any(target not in bindings for target in stimulus.target_character_ids):
+        targets = _input_targets(event, self._default_character_id)
+        if any(target not in bindings for target in targets):
             raise ValueError("target character is not bound to connection")
-        sinks = [_BoundInputSink(bindings[target]) for target in stimulus.target_character_ids]
-        # 先检查容量，避免为已拒绝的输入落盘；异步转换后还需复查。
-        if not all(sink.can_accept(stimulus) for sink in sinks):
-            return False
-        if candidate.image_base64 is not None:
-            if self._media_store is None:
-                raise ValueError("media store is not configured")
-            await asyncio.to_thread(materialize_image, candidate, self._media_store)
-        if not all(sink.can_accept(stimulus) for sink in sinks):
-            return False
-        for sink in sinks:
-            sink.submit(stimulus)
+        # Capture binding identity before media awaits: rebinds must not retarget this input.
+        sinks = [_BoundInputSink(bindings[target]) for target in targets]
+        stimulus, status = await _process_input(
+            event,
+            connection.user_uuid,
+            self._default_character_id,
+            self._media_store,
+            self._voice_uploads,
+        )
+        if status["state"] == "error":
+            raise status["error"]
+        if status["state"] == "complete":
+            if "binding" in status:
+                sinks = [_BoundInputSink(status["binding"])]
+            if not await self._admit_input(event, stimulus, sinks):
+                return self._reject_input_admission(event)
+            if event.event_type == "user_voice":
+                await self._voice_uploads.commit(bindings[targets[0]])
+        elif status["state"] not in {"partial", "duplicate"}:
+            raise RuntimeError("unknown input processing state")
+        if event.event_type == "user_voice":
+            return _VoiceUploadAck(status.get("ack_payload", {}), status.get("duplicate", False))
         return True
 
-    async def bind(self, stage: ChatStage, connection: WebSocketConnection) -> None:
-        """将 stage 绑定到同用户 connection；重绑先停止旧执行，完成旧连接收尾后通知 Stage 上线。"""
-        await complete_owned(self._bind(stage, connection))
+    async def _admit_input(self, event: _WSMessage, stimulus: d.Stimulus, sinks: list[_BoundInputSink]) -> bool:
+        if not all(sink.can_accept(stimulus) for sink in sinks):
+            return False
+        if isinstance(stimulus, d.ImageMessage):
+            await asyncio.to_thread(_materialize_input, event, stimulus, self._media_store)
+        if not all(sink.can_accept(stimulus) for sink in sinks):
+            return False
+        return all(sink.submit(stimulus) for sink in sinks)
 
-    async def disconnect(self, stage: ChatStage, connection: WebSocketConnection | None = None) -> None:
-        """拆开 stage 的绑定并完成任务清理；给出 connection 时仅拆除该连接，避免旧断线通知影响重连。"""
+    @staticmethod
+    def _reject_input_admission(event: _WSMessage) -> bool:
+        if event.event_type == "user_voice":
+            raise _VoiceUploadError("OVERLOADED", "chat ingress queue is full", retryable=True)
+        return False
+
+    async def detach_stage_binding(self, stage: ChatStage, connection: InteractionConnection | None = None) -> None:
+        """Revoke only the matching Stage attachment; leave its physical socket open."""
         await complete_owned(self._unbind(stage, connection))
 
-    async def _bind(self, stage: ChatStage, connection: WebSocketConnection) -> None:
+    async def _bind(self, stage: ChatStage, connection: _ChatPeer) -> None:
         async with self._binding_lock:
             if connection.is_closed or not connection.user_uuid or connection.user_uuid != stage.user_id:
                 raise ValueError("connection user does not own stage")
@@ -405,7 +531,7 @@ class WebSocketAdapter:
                 await self._disconnect(self._routes[stage.interaction_id])
                 raise
 
-    async def _unbind(self, stage: ChatStage, connection: WebSocketConnection | None) -> None:
+    async def _unbind(self, stage: ChatStage, connection: _ChatPeer | None) -> None:
         async with self._binding_lock:
             binding = self._routes.get(stage.interaction_id)
             if (
@@ -416,7 +542,7 @@ class WebSocketAdapter:
                 await self._disconnect(binding)
 
     def _control(self, binding: _Binding, operation: Callable[[], Awaitable[None]]) -> asyncio.Future[None]:
-        result = completion(f"control interaction={binding.stage.interaction_id}")
+        result = _completion(f"control interaction={binding.stage.interaction_id}")
 
         async def run() -> None:
             try:

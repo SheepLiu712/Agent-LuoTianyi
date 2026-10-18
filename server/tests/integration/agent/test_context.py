@@ -411,7 +411,7 @@ def test_recall_duplicate_batch_is_rejected_without_partial_append():
 @pytest.mark.asyncio
 async def test_real_stage_owns_and_closes_loaded_context(database):
     import src.domain.agent as d
-    from src.adapter.websocket import WebSocketAdapter
+    from src.adapter.websocket.chat import WebSocketAdapter
     from src.agent import Agent
     from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.stimulus.interaction import InteractionEndingHandler

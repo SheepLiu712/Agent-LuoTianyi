@@ -12,9 +12,9 @@ from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.call_v1 import CallTransportError, CallWebSocketAdapter
-from src.adapter.websocket.call_v1.transport import CallTransportBackpressure
+from src.adapter.websocket.call_v1._transport import _CallTransportBackpressure
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
@@ -115,7 +115,7 @@ async def test_unavailable_character_is_rejected_before_business_claim():
     raw = start_message().replace('"luotianyi"', '"other"')
 
     with pytest.raises(CallTransportError) as rejected:
-        await adapter.open(raw=raw, user_id="user", connection_id=object())
+        await adapter.open(initial_message=raw, user_id="user", connection_id=object())
 
     assert rejected.value.code == "CALL_CHARACTER_UNAVAILABLE"
     assert rejected.value.request_id == "request-1"
@@ -140,7 +140,7 @@ async def test_call_start_during_finalization_returns_retryable_public_error(
 
     monkeypatch.setattr(stages, "_get_call_control", reject_finalizing)
     with pytest.raises(CallTransportError) as rejected:
-        await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+        await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
 
     assert rejected.value.code == "INTERACTION_FINALIZING"
     assert rejected.value.retryable is True
@@ -156,9 +156,11 @@ async def test_open_orders_preparing_before_ack_and_repeated_start_keeps_identit
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    first = await asyncio.wait_for(adapter.open(raw=start_message(), user_id="user", connection_id=object()), 2)
-    preparing = json.loads((await adapter.next_output(first)).text)
-    ack = json.loads((await adapter.next_output(first)).text)
+    first = await asyncio.wait_for(
+        adapter.open(initial_message=start_message(), user_id="user", connection_id=object()), 2
+    )
+    preparing = json.loads((await adapter.next_output(first)).message)
+    ack = json.loads((await adapter.next_output(first)).message)
     call_id = preparing["call_id"]
     deadline = stages._call_setup_deadlines["request-1"]
     assert preparing["type"] == "call.state" and preparing["state"] == "preparing"
@@ -170,8 +172,8 @@ async def test_open_orders_preparing_before_ack_and_repeated_start_keeps_identit
     }
     await adapter.disconnect(first)
 
-    second = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    second_ack = json.loads((await adapter.next_output(second)).text)
+    second = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    second_ack = json.loads((await adapter.next_output(second)).message)
     assert second_ack["call_id"] == call_id
     assert stages._call_setup_deadlines["request-1"] == deadline
     assert repository.find_by_request("request-1").call_id == uuid4().__class__(call_id)
@@ -185,7 +187,7 @@ async def test_initialization_hangup_uses_same_control_and_does_not_create_secon
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
     await adapter.next_output(connection)
     await adapter.next_output(connection)
     await asyncio.wait_for(speech.entered.wait(), 1)
@@ -199,7 +201,7 @@ async def test_initialization_hangup_uses_same_control_and_does_not_create_secon
             "reason": "user_hangup",
         }
     )
-    receiving = asyncio.create_task(adapter.receive_text(connection, hangup))
+    receiving = asyncio.create_task(adapter.receive(connection, hangup))
     await asyncio.sleep(0)
     assert not receiving.done()
     speech.release.set()
@@ -215,11 +217,11 @@ async def test_unknown_resume_and_active_connection_takeover_are_rejected_withou
     stages, repository = manager(speech_factory=speech)
     adapter = call_adapter(stages)
     with pytest.raises(CallTransportError, match="CALL_NOT_FOUND"):
-        await adapter.open(raw=resume_message(str(uuid4())), user_id="user", connection_id=object())
+        await adapter.open(initial_message=resume_message(str(uuid4())), user_id="user", connection_id=object())
     assert repository.find_by_request("missing") is None
-    await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+    await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
     with pytest.raises(CallTransportError, match="CALL_CONNECTION_ACTIVE"):
-        await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+        await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
     speech.release.set()
     await adapter.close()
     await stages.close()
@@ -241,7 +243,7 @@ async def test_cancelled_open_after_prepare_has_no_session_lease_or_request_task
         return binding
 
     adapter._hub.register_and_attach_start = blocked_register
-    opening = asyncio.create_task(adapter.open(raw=start_message(), user_id="user", connection_id=object()))
+    opening = asyncio.create_task(adapter.open(initial_message=start_message(), user_id="user", connection_id=object()))
     await asyncio.wait_for(registered.wait(), 1)
     opening.cancel()
     release.set()
@@ -257,7 +259,7 @@ async def test_cancelled_open_after_prepare_has_no_session_lease_or_request_task
     record = repository.find_by_request("request-1")
     assert record is not None and record.state is CallState.FAILED
     with pytest.raises(CallTransportError) as duplicate:
-        await adapter.open(raw=start_message(), user_id="user", connection_id=object())
+        await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
     assert duplicate.value.code == "CALL_START_FAILED"
     assert duplicate.value.call_id == str(record.call_id)
     await adapter.close()
@@ -270,8 +272,8 @@ async def test_concurrent_same_request_uses_one_transport_and_rejects_second_con
     stages, repository = manager(speech_factory=speech)
     adapter = call_adapter(stages)
     first, second = await asyncio.gather(
-        adapter.open(raw=start_message(), user_id="user", connection_id=object()),
-        adapter.open(raw=start_message(), user_id="user", connection_id=object()),
+        adapter.open(initial_message=start_message(), user_id="user", connection_id=object()),
+        adapter.open(initial_message=start_message(), user_id="user", connection_id=object()),
         return_exceptions=True,
     )
     connections = [result for result in (first, second) if not isinstance(result, BaseException)]
@@ -291,11 +293,11 @@ async def test_cross_identity_request_conflict_is_normalized_without_call_detail
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user-a", connection_id=object())
+    connection = await adapter.open(initial_message=start_message(), user_id="user-a", connection_id=object())
     await adapter.next_output(connection)
     await adapter.next_output(connection)
     with pytest.raises(CallTransportError) as rejected:
-        await adapter.open(raw=start_message(), user_id="user-b", connection_id=object())
+        await adapter.open(initial_message=start_message(), user_id="user-b", connection_id=object())
     assert rejected.value.code == "CALL_START_REJECTED"
     assert rejected.value.request_id == "request-1"
     assert rejected.value.request_seq == 1
@@ -322,7 +324,7 @@ async def test_adapter_close_waits_for_cancelled_open_compensation_before_closin
         return binding
 
     adapter._hub.register_and_attach_start = blocked_register
-    opening = asyncio.create_task(adapter.open(raw=start_message(), user_id="user", connection_id=object()))
+    opening = asyncio.create_task(adapter.open(initial_message=start_message(), user_id="user", connection_id=object()))
     await asyncio.wait_for(registered.wait(), 1)
     closing = asyncio.create_task(adapter.close())
     await asyncio.sleep(0)
@@ -359,8 +361,8 @@ async def test_stage_created_after_disconnect_stays_ringing_until_resume():
 
     stages, _ = manager(speech_factory=Speech())
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     await adapter.disconnect(connection)
     control = stages.current_call_control(call_id)
@@ -369,8 +371,8 @@ async def test_stage_created_after_disconnect_stays_ringing_until_resume():
             break
         await asyncio.sleep(0)
     assert control._stage.state is not CallState.ACTIVE
-    resumed = await adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object())
-    assert json.loads((await adapter.next_output(resumed)).text)["type"] == "call.resumed"
+    resumed = await adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
+    assert json.loads((await adapter.next_output(resumed)).message)["type"] == "call.resumed"
     await adapter.close()
     await stages.close()
 
@@ -380,8 +382,8 @@ async def test_failed_business_resume_keeps_cursor_and_allows_later_resume(monke
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     await adapter.disconnect(connection)
     session = adapter._hub.session_for(call_id)
@@ -392,11 +394,11 @@ async def test_failed_business_resume_keeps_cursor_and_allows_later_resume(monke
 
     monkeypatch.setattr(stages, "_resume_call_control", fail_resume)
     with pytest.raises(CallTransportError, match="CALL_RESUME_UNAVAILABLE"):
-        await adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object())
+        await adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
     assert session.server_ack_cursor == before
     monkeypatch.undo()
-    valid = await adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object())
-    assert json.loads((await adapter.next_output(valid)).text)["type"] == "call.resumed"
+    valid = await adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
+    assert json.loads((await adapter.next_output(valid)).message)["type"] == "call.resumed"
     speech.release.set()
     await adapter.close()
     await stages.close()
@@ -409,8 +411,8 @@ async def test_resume_buffers_stage_output_without_blocking_and_flushes_after_re
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     await adapter.disconnect(connection)
     session = adapter._hub.session_for(call_id)
@@ -423,11 +425,11 @@ async def test_resume_buffers_stage_output_without_blocking_and_flushes_after_re
 
     monkeypatch.setattr(stages, "commit_call_resume", emitting_commit)
     resumed = await asyncio.wait_for(
-        adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()),
+        adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object()),
         1,
     )
-    first = json.loads((await adapter.next_output(resumed)).text)
-    second = json.loads((await adapter.next_output(resumed)).text)
+    first = json.loads((await adapter.next_output(resumed)).message)
+    second = json.loads((await adapter.next_output(resumed)).message)
     assert first["type"] == "call.resumed"
     assert second["type"] == "call.state"
     speech.release.set()
@@ -449,8 +451,8 @@ async def test_stage_none_resume_precheck_is_read_only():
         return await original_create(*args, **kwargs)
 
     stages._create_call_stage = delayed_create
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     await create_entered.wait()
     control = stages.current_call_control(call_id)
@@ -469,16 +471,16 @@ async def test_concurrent_resume_reservation_has_one_winner_without_cursor_side_
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     await adapter.disconnect(connection)
     session = adapter._hub.session_for(call_id)
     before = session.server_ack_cursor
 
     first, second = await asyncio.gather(
-        adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()),
-        adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()),
+        adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object()),
+        adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object()),
         return_exceptions=True,
     )
     winners = [item for item in (first, second) if not isinstance(item, BaseException)]
@@ -500,8 +502,8 @@ async def test_real_stage_resume_pending_overflow_terminates_after_business_comm
     clock = _IncrementingClock()
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     control = stages.current_call_control(call_id)
     await asyncio.wait_for(control._stage_available.wait(), 1)
@@ -523,8 +525,8 @@ async def test_real_stage_resume_pending_overflow_terminates_after_business_comm
     session = adapter._hub.session_for(call_id)
     bridge = session.business_sink
     bridge._MAX_RESUME_PENDING_FRAMES = 0
-    with pytest.raises(CallTransportBackpressure, match="RESUME_OUTPUT_BUFFER_FULL"):
-        await adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object())
+    with pytest.raises(_CallTransportBackpressure, match="RESUME_OUTPUT_BUFFER_FULL"):
+        await adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
     await asyncio.wait_for(control.wait_realtime_stopped(), 2)
     record = repository.find_by_id(call_id)
     assert record.state is CallState.ENDED
@@ -552,8 +554,8 @@ async def test_resume_commit_failure_after_active_uses_sqlite_stage_termination(
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
     adapter = call_adapter(stages)
 
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     control = stages.current_call_control(call_id)
     await asyncio.wait_for(control._stage_available.wait(), 1)
@@ -584,7 +586,7 @@ async def test_resume_commit_failure_after_active_uses_sqlite_stage_termination(
     monkeypatch.setattr(session, "commit_resume", fail_cursor_commit)
     with pytest.raises(RuntimeError, match="cursor commit fault"):
         await asyncio.wait_for(
-            adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()),
+            adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object()),
             1,
         )
 
@@ -615,8 +617,8 @@ async def test_resume_post_business_output_failure_terminates_real_sqlite_stage(
     clock = _IncrementingClock()
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     control = stages.current_call_control(call_id)
     await asyncio.wait_for(control._stage_available.wait(), 1)
@@ -648,11 +650,11 @@ async def test_resume_post_business_output_failure_terminates_real_sqlite_stage(
         async def fail_flush(bridge):
             raise RuntimeError("resume flush fault")
 
-        monkeypatch.setattr(type(bridge), "commit_resume_outputs", fail_flush)
+        monkeypatch.setattr(type(bridge), "_commit_resume_outputs", fail_flush)
 
     with pytest.raises(RuntimeError, match="resume (enqueue|flush) fault"):
         await asyncio.wait_for(
-            adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()),
+            adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object()),
             1,
         )
     await asyncio.wait_for(control.wait_realtime_stopped(), 2)
@@ -680,8 +682,8 @@ async def test_cancelled_resume_after_business_commit_terminates_and_releases_ow
     clock = _IncrementingClock()
     stages, _ = manager(speech_factory=speech, repository=repository, wall_clock=clock)
     adapter = call_adapter(stages)
-    connection = await adapter.open(raw=start_message(), user_id="user", connection_id=object())
-    call_id = json.loads((await adapter.next_output(connection)).text)["call_id"]
+    connection = await adapter.open(initial_message=start_message(), user_id="user", connection_id=object())
+    call_id = json.loads((await adapter.next_output(connection)).message)["call_id"]
     await adapter.next_output(connection)
     control = stages.current_call_control(call_id)
     await asyncio.wait_for(control._stage_available.wait(), 1)
@@ -708,7 +710,9 @@ async def test_cancelled_resume_after_business_commit_terminates_and_releases_ow
         await original_enqueue(queue, outputs)
 
     monkeypatch.setattr(adapter, "_enqueue", blocked_enqueue)
-    opening = asyncio.create_task(adapter.open(raw=resume_message(call_id), user_id="user", connection_id=object()))
+    opening = asyncio.create_task(
+        adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
+    )
     await asyncio.wait_for(entered.wait(), 1)
     assert control._stage.state is CallState.ACTIVE
     opening.cancel()
@@ -741,6 +745,10 @@ async def test_second_cancel_preserves_resume_error_and_logs_owned_termination_f
         call_id = "call"
 
         @staticmethod
+        def preview_resume(_cursor):
+            return []
+
+        @staticmethod
         def commit_resume(_cursor):
             raise RuntimeError("original cursor fault")
 
@@ -770,14 +778,14 @@ async def test_second_cancel_preserves_resume_error_and_logs_owned_termination_f
             self.pending = False
             self.aborted = False
 
-        def begin_resume_outputs(self):
+        def _begin_resume_outputs(self):
             self.pending = True
 
-        def abort_resume_outputs(self):
+        def _abort_resume_outputs(self):
             self.pending = False
             self.aborted = True
 
-        async def commit_resume_outputs(self):
+        async def _commit_resume_outputs(self):
             pass
 
     class Manager:
@@ -804,7 +812,7 @@ async def test_second_cancel_preserves_resume_error_and_logs_owned_termination_f
     adapter._hub = Hub(session)
     cleanup_logs = []
     monkeypatch.setattr(adapter, "_log_resume_cleanup_failure", lambda *args: cleanup_logs.append(args))
-    operation = asyncio.create_task(adapter._commit_resume(Candidate(session), bridge, control, 0, [], asyncio.Event()))
+    operation = asyncio.create_task(adapter._commit_resume(Candidate(session), bridge, control, 0, asyncio.Event()))
 
     await asyncio.wait_for(control.entered.wait(), 1)
     operation.cancel()
@@ -832,6 +840,10 @@ async def test_logger_failure_cannot_replace_resume_error_or_skip_unregister(mon
         call_id = "call"
 
         @staticmethod
+        def preview_resume(_cursor):
+            return []
+
+        @staticmethod
         def commit_resume(_cursor):
             raise RuntimeError("original cursor fault")
 
@@ -861,14 +873,14 @@ async def test_logger_failure_cannot_replace_resume_error_or_skip_unregister(mon
             self.pending = False
             self.aborted = False
 
-        def begin_resume_outputs(self):
+        def _begin_resume_outputs(self):
             self.pending = True
 
-        def abort_resume_outputs(self):
+        def _abort_resume_outputs(self):
             self.pending = False
             self.aborted = True
 
-        async def commit_resume_outputs(self):
+        async def _commit_resume_outputs(self):
             pass
 
     class Manager:
@@ -905,7 +917,7 @@ async def test_logger_failure_cannot_replace_resume_error_or_skip_unregister(mon
         )
     try:
         with pytest.raises(RuntimeError, match="original cursor fault"):
-            await adapter._commit_resume(Candidate(session), bridge, control, 0, [], asyncio.Event())
+            await adapter._commit_resume(Candidate(session), bridge, control, 0, asyncio.Event())
     finally:
         if handler is not None:
             get_logger("src.adapter.websocket.call_v1.adapter").removeHandler(handler)

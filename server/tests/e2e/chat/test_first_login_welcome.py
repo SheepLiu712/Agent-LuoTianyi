@@ -9,10 +9,11 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent import Agent
 from src.agent.context import ConversationMode
 from src.agent.handlers.action.router import ActionRouter
@@ -21,7 +22,6 @@ from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
-from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:
@@ -125,11 +125,11 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
     assert factory.context is None
 
     socket = Socket()
-    connection = WebSocketConnection(socket, "user", "用户")
+    connection = StubChatConnection(socket, "user", "用户")
     started_at = asyncio.get_running_loop().time()
 
     # When: the real manager establishes and binds the ChatStage.
-    await manager._chat_output_sink.open(connection, "luotianyi")
+    await manager._test_chat_adapter._open(connection, "luotianyi")
     await asyncio.sleep(0.015)
     assert socket.events == []
 
@@ -204,7 +204,7 @@ async def test_return_login_remains_disabled_after_stage_connection():
     manager.record_login("user", "luotianyi", elapsed_from_last_login=5 * 24 * 60 * 60)
 
     # When: the Stage becomes ready and more than the welcome delay elapses.
-    await manager._chat_output_sink.open(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
+    await manager._test_chat_adapter._open(StubChatConnection(Socket(), "user", "用户"), "luotianyi")
     await asyncio.sleep(0.04)
 
     # Then: no proactive stimulus is dispatched; RETURN_LOGIN stays disabled.

@@ -20,7 +20,7 @@ UINT32_MAX = (1 << 32) - 1
 MAX_PAYLOAD_BYTES = 16_384
 
 
-class AudioFrameCodecError(ValueError):
+class _AudioFrameCodecError(ValueError):
     """A codec validation failure with a stable cross-client error code."""
 
     def __init__(self, code: str, message: str | None = None) -> None:
@@ -30,7 +30,7 @@ class AudioFrameCodecError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class WireAudioFrame:
+class _WireAudioFrame:
     """The adapter-layer representation of one PCM16 mono audio frame."""
 
     version: int
@@ -42,22 +42,22 @@ class WireAudioFrame:
 
 
 @runtime_checkable
-class AudioFrameCodec(Protocol):
+class _AudioFrameCodec(Protocol):
     """A replaceable encoding for a single call audio frame."""
 
-    def encode(self, frame: WireAudioFrame) -> bytes:
+    def encode(self, frame: _WireAudioFrame) -> bytes:
         """Encode one wire frame."""
 
-    def decode(self, encoded: bytes) -> WireAudioFrame:
+    def decode(self, encoded: bytes) -> _WireAudioFrame:
         """Decode one wire frame."""
 
 
-class BinaryAudioFrameCodec:
+class _BinaryAudioFrameCodec:
     """Strict codec for the fixed-layout ``call.v1`` binary audio frame."""
 
-    def encode(self, frame: WireAudioFrame) -> bytes:
-        if not isinstance(frame, WireAudioFrame):
-            raise AudioFrameCodecError("INVALID_FIELD_TYPE")
+    def encode(self, frame: _WireAudioFrame) -> bytes:
+        if not isinstance(frame, _WireAudioFrame):
+            raise _AudioFrameCodecError("INVALID_FIELD_TYPE")
 
         self._validate_frame(frame)
         payload_length = len(frame.payload)
@@ -71,11 +71,11 @@ class BinaryAudioFrameCodec:
             )
         )
 
-    def decode(self, encoded: bytes) -> WireAudioFrame:
+    def decode(self, encoded: bytes) -> _WireAudioFrame:
         if type(encoded) is not bytes:
-            raise AudioFrameCodecError("INVALID_FIELD_TYPE")
+            raise _AudioFrameCodecError("INVALID_FIELD_TYPE")
         if len(encoded) < HEADER_SIZE:
-            raise AudioFrameCodecError("HEADER_TRUNCATED")
+            raise _AudioFrameCodecError("HEADER_TRUNCATED")
 
         version = encoded[0]
         route = encoded[1]
@@ -86,21 +86,21 @@ class BinaryAudioFrameCodec:
         actual_payload_length = len(encoded) - HEADER_SIZE
 
         if version != VERSION:
-            raise AudioFrameCodecError("UNSUPPORTED_VERSION")
+            raise _AudioFrameCodecError("UNSUPPORTED_VERSION")
         if route not in (CHAT_ROUTE, CALL_ROUTE):
-            raise AudioFrameCodecError("INVALID_ROUTE")
+            raise _AudioFrameCodecError("INVALID_ROUTE")
         if flags & ~ALLOWED_FLAGS_MASK:
-            raise AudioFrameCodecError("UNSUPPORTED_FLAGS")
+            raise _AudioFrameCodecError("UNSUPPORTED_FLAGS")
         if seq == 0:
-            raise AudioFrameCodecError("INVALID_SEQ")
+            raise _AudioFrameCodecError("INVALID_SEQ")
         if payload_length != actual_payload_length:
-            raise AudioFrameCodecError("PAYLOAD_LENGTH_MISMATCH")
+            raise _AudioFrameCodecError("PAYLOAD_LENGTH_MISMATCH")
         self._validate_payload_length(actual_payload_length)
         payload = self._copy_payload(encoded)
-        return WireAudioFrame(version, route, flags, stream_id, seq, payload)
+        return _WireAudioFrame(version, route, flags, stream_id, seq, payload)
 
     @staticmethod
-    def _validate_frame(frame: WireAudioFrame) -> None:
+    def _validate_frame(frame: _WireAudioFrame) -> None:
         if (
             any(
                 type(value) is not int
@@ -108,33 +108,33 @@ class BinaryAudioFrameCodec:
             )
             or type(frame.payload) is not bytes
         ):
-            raise AudioFrameCodecError("INVALID_FIELD_TYPE")
+            raise _AudioFrameCodecError("INVALID_FIELD_TYPE")
         if not 0 <= frame.version <= 0xFF or not 0 <= frame.route <= 0xFF or not 0 <= frame.flags <= 0xFF:
-            raise AudioFrameCodecError("FIELD_OUT_OF_RANGE")
+            raise _AudioFrameCodecError("FIELD_OUT_OF_RANGE")
         if not 0 <= frame.stream_id <= UINT32_MAX or not 0 <= frame.seq <= UINT32_MAX:
-            raise AudioFrameCodecError("FIELD_OUT_OF_RANGE")
+            raise _AudioFrameCodecError("FIELD_OUT_OF_RANGE")
         if frame.version != VERSION:
-            raise AudioFrameCodecError("UNSUPPORTED_VERSION")
+            raise _AudioFrameCodecError("UNSUPPORTED_VERSION")
         if frame.route not in (CHAT_ROUTE, CALL_ROUTE):
-            raise AudioFrameCodecError("INVALID_ROUTE")
+            raise _AudioFrameCodecError("INVALID_ROUTE")
         if frame.flags & ~ALLOWED_FLAGS_MASK:
-            raise AudioFrameCodecError("UNSUPPORTED_FLAGS")
+            raise _AudioFrameCodecError("UNSUPPORTED_FLAGS")
         if frame.seq == 0:
-            raise AudioFrameCodecError("INVALID_SEQ")
-        BinaryAudioFrameCodec._validate_payload(frame.payload)
+            raise _AudioFrameCodecError("INVALID_SEQ")
+        _BinaryAudioFrameCodec._validate_payload(frame.payload)
 
     @staticmethod
     def _validate_payload(payload: bytes) -> None:
-        BinaryAudioFrameCodec._validate_payload_length(len(payload))
+        _BinaryAudioFrameCodec._validate_payload_length(len(payload))
 
     @staticmethod
     def _validate_payload_length(payload_length: int) -> None:
         if payload_length > MAX_PAYLOAD_BYTES:
-            raise AudioFrameCodecError("PAYLOAD_TOO_LARGE")
+            raise _AudioFrameCodecError("PAYLOAD_TOO_LARGE")
         if payload_length == 0:
-            raise AudioFrameCodecError("EMPTY_PAYLOAD")
+            raise _AudioFrameCodecError("EMPTY_PAYLOAD")
         if payload_length % 2:
-            raise AudioFrameCodecError("PCM_ALIGNMENT_ERROR")
+            raise _AudioFrameCodecError("PCM_ALIGNMENT_ERROR")
 
     @staticmethod
     def _copy_payload(encoded: bytes) -> bytes:

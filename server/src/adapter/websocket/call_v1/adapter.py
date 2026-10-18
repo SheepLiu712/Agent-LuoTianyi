@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from uuid import uuid4
 
 from src.domain.call import CallEndReason, CallState
 from src.stage.stage_manager import (
@@ -15,25 +16,17 @@ from src.stage.stage_manager import (
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
-from .control import ControlProtocolError, decode_control_text
-from .stage_binding import CallStageBinding
-from .transport import (
-    CallTransportBackpressure,
-    CallTransportBinding,
+from ..connection import AdapterConnection, OutboundDelivery
+from ._control import _ControlProtocolError, _decode_control_text, _encode_control_message
+from ._stage_binding import _CallStageBinding
+from ._transport import (
     CallTransportError,
-    CallTransportHub,
-    CallTransportSession,
-    CallWireOutput,
+    _CallTransportBackpressure,
+    _CallTransportBinding,
+    _CallTransportHub,
+    _CallTransportSession,
+    _CallWireOutput,
 )
-
-
-class CallConnection:
-    """Opaque connection handle; only CallWebSocketAdapter can resolve it."""
-
-    __slots__ = ("_token",)
-
-    def __init__(self, token: object) -> None:
-        self._token = token
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,9 +61,12 @@ class CallCapabilityStatus:
 class _ConnectionState:
     def __init__(self, binding, control, outputs) -> None:
         self.binding, self.control, self.outputs = binding, control, outputs
+        self.inflight: set[str] = set()
+        self.closed = asyncio.Event()
+        self.taking: set[asyncio.Task] = set()
 
 
-class _PreparedTransport(CallStageBinding):
+class _PreparedTransport(_CallStageBinding):
     _MAX_RESUME_PENDING_FRAMES = 256
     _MAX_RESUME_PENDING_BYTES = 4 * 1024 * 1024
 
@@ -78,16 +74,16 @@ class _PreparedTransport(CallStageBinding):
         self._adapter = adapter
         self._user_id = user_id
         self._connection_id = connection_id
-        self.outputs: asyncio.Queue[CallWireOutput] = asyncio.Queue()
-        self.binding: CallTransportBinding | None = None
+        self.outputs: asyncio.Queue[_CallWireOutput] = asyncio.Queue(maxsize=512)
+        self.binding: _CallTransportBinding | None = None
         self._preparing = True
         self._business_outputs_released = asyncio.Event()
-        self._resume_pending: list[CallWireOutput] | None = None
+        self._resume_pending: list[_CallWireOutput] | None = None
         self._resume_pending_bytes = 0
         super().__init__(call_id="pending", deliver=self._deliver, output_queue=self.outputs)
 
     async def _deliver(self, output: object) -> None:
-        if not isinstance(output, CallWireOutput):
+        if not isinstance(output, _CallWireOutput):
             raise TypeError("call binding emitted an invalid wire output")
         if not self._preparing:
             await self._business_outputs_released.wait()
@@ -97,26 +93,26 @@ class _PreparedTransport(CallStageBinding):
                 len(self._resume_pending) >= self._MAX_RESUME_PENDING_FRAMES
                 or self._resume_pending_bytes + len(payload) > self._MAX_RESUME_PENDING_BYTES
             ):
-                raise CallTransportBackpressure("RESUME_OUTPUT_BUFFER_FULL")
+                raise _CallTransportBackpressure("RESUME_OUTPUT_BUFFER_FULL")
             self._resume_pending.append(output)
             self._resume_pending_bytes += len(payload)
             return
-        await self.outputs.put(output)
+        self.outputs.put_nowait(output)
 
-    def begin_resume_outputs(self) -> None:
+    def _begin_resume_outputs(self) -> None:
         if self._resume_pending is not None:
             raise CallTransportError("CALL_CONNECTION_ACTIVE", close_code=1008)
         self._resume_pending = []
         self._resume_pending_bytes = 0
 
-    async def commit_resume_outputs(self) -> None:
+    async def _commit_resume_outputs(self) -> None:
         pending = self._resume_pending or []
         self._resume_pending = None
         self._resume_pending_bytes = 0
         for output in pending:
-            await self.outputs.put(output)
+            self.outputs.put_nowait(output)
 
-    def abort_resume_outputs(self) -> None:
+    def _abort_resume_outputs(self) -> None:
         self._resume_pending = None
         self._resume_pending_bytes = 0
 
@@ -129,11 +125,11 @@ class _PreparedTransport(CallStageBinding):
             return True
         return await super().accept(frame, receipt)
 
-    async def prepare(self, control: CallControl) -> None:
+    async def _prepare(self, control: CallControl) -> None:
         self._control = control
         identity = control.identity
         self.call_id = identity.call_id
-        session = CallTransportSession(
+        session = _CallTransportSession(
             call_id=identity.call_id,
             user_id=self._user_id,
             character_id=identity.character_id,
@@ -158,7 +154,7 @@ class _PreparedTransport(CallStageBinding):
         )
         self._preparing = False
 
-    async def abort_prepare(self) -> None:
+    async def _abort_prepare(self) -> None:
         if self._session is not None:
             await self._adapter._hub.unregister(self.call_id, expected_session=self._session)
         while not self.outputs.empty():
@@ -185,7 +181,7 @@ class CallWebSocketAdapter:
         self._manager = manager
         self._start_locks: dict[str, tuple[asyncio.Lock, int]] = {}
         self._call_metrics = call_metrics
-        self._hub = CallTransportHub(user_reset_fence=user_reset_fence)
+        self._hub = _CallTransportHub(user_reset_fence=user_reset_fence)
         self._connections: dict[object, _ConnectionState] = {}
         self._open_tasks: set[asyncio.Task] = set()
         self._open_cancellations: dict[asyncio.Task, asyncio.Event] = {}
@@ -223,12 +219,23 @@ class CallWebSocketAdapter:
             return status.available and self._supports_character(character_id)
         return status.available and character_id in status.character_ids
 
-    async def open(self, *, raw: str, user_id: str, connection_id: object) -> CallConnection:
+    async def open(
+        self,
+        *,
+        user_id: str,
+        connection_id: object,
+        character_id: str | None = None,
+        initial_message: str | bytes | None = None,
+        capabilities: frozenset[str] = frozenset(),
+    ) -> AdapterConnection:
+        raw = initial_message
+        if not isinstance(raw, str):
+            raise CallTransportError("CALL_START_REQUIRED", close_code=1002)
         if self._closed or self._manager.is_closed() or not self.capability_status.available:
             raise CallTransportError("CALL_INGRESS_UNAVAILABLE", close_code=1013)
         try:
-            message = decode_control_text(raw, sender="client", transport="call_ws")
-        except ControlProtocolError as error:
+            message = _decode_control_text(raw, sender="client", transport="call_ws")
+        except _ControlProtocolError as error:
             raise CallTransportError(error.code) from error
         if message["type"] == "call.start":
             cancelled = asyncio.Event()
@@ -256,7 +263,7 @@ class CallWebSocketAdapter:
             await complete_owned(self._discard_cancelled_open(task))
             raise
 
-    async def _discard_cancelled_open(self, task: asyncio.Task[CallConnection]) -> None:
+    async def _discard_cancelled_open(self, task: asyncio.Task[AdapterConnection]) -> None:
         try:
             connection = await asyncio.shield(task)
         except BaseException:
@@ -283,7 +290,7 @@ class CallWebSocketAdapter:
     # ruff: noqa: C901
     async def _open_start_owned(
         self, message, *, raw: str, user_id: str, connection_id: object, cancelled: asyncio.Event
-    ) -> CallConnection:
+    ) -> AdapterConnection:
         if int(message["seq"]) != 1:
             raise CallTransportError("CALL_START_REQUIRED", close_code=1002)
         character_id = str(message["character_id"])
@@ -312,7 +319,7 @@ class CallWebSocketAdapter:
                         close_code=error.close_code,
                     ) from error
             prepared_here = True
-            await transport.prepare(control)
+            await transport._prepare(control)
             if cancelled.is_set():
                 raise asyncio.CancelledError
             await self._enqueue(transport.outputs, await transport.binding.session.receive_start(raw))
@@ -334,13 +341,13 @@ class CallWebSocketAdapter:
         self, control: CallControl, transport: _PreparedTransport, error: BaseException
     ) -> None:
         try:
-            await transport.abort_prepare()
+            await transport._abort_prepare()
         finally:
             await self._manager.abort_open_call(control, error)
 
     async def _attach_existing_start(
         self, control: CallControl, raw: str, user_id: str, connection_id: object
-    ) -> CallConnection:
+    ) -> AdapterConnection:
         session = self._hub.session_for(control.identity.call_id)
         if session is None:
             raise CallTransportError("CALL_NOT_FOUND", close_code=1008)
@@ -348,23 +355,25 @@ class CallWebSocketAdapter:
         bridge = session.business_sink
         if not isinstance(bridge, _PreparedTransport):
             raise CallTransportError("CALL_BINDING_UNAVAILABLE", close_code=1013)
+        self._replace_attempts(session, bridge.outputs)
         await self._enqueue(bridge.outputs, await session.receive_start(raw))
+        await self._enqueue(bridge.outputs, session.replay_after(session.server_ack_cursor))
         bridge._business_outputs_released.set()
         return self._register_connection(binding, control, bridge.outputs)
 
     async def _open_resume(
         self, raw: str, *, user_id: str, connection_id: object, cancelled: asyncio.Event
-    ) -> CallConnection:
+    ) -> AdapterConnection:
         candidate = await self._hub.reserve_resume(raw, user_id=user_id, connection_id=connection_id)
         try:
             bridge = candidate.session.business_sink
             if not isinstance(bridge, _PreparedTransport):
                 raise CallTransportError("CALL_RESUME_UNAVAILABLE", close_code=1008)
-            message = decode_control_text(raw, sender="client", transport="call_ws")
+            message = _decode_control_text(raw, sender="client", transport="call_ws")
             cursor = int(message["last_contiguous_server_seq"])
             if cursor > candidate.session.last_server_seq:
                 raise CallTransportError("INVALID_RESUME_CURSOR")
-            outputs = candidate.session.preview_resume(cursor)
+            candidate.session.preview_resume(cursor)  # Validate before business admission; snapshot again at commit.
             control = await self._manager.try_to_get_stage(
                 stage_type="call",
                 call_id=candidate.session.call_id,
@@ -374,15 +383,17 @@ class CallWebSocketAdapter:
         except BaseException as error:
             await self._hub.release_resume(candidate)
             raise CallTransportError(str(error), close_code=1008) from error
-        binding = await complete_owned(self._commit_resume(candidate, bridge, control, cursor, outputs, cancelled))
+        binding = await complete_owned(self._commit_resume(candidate, bridge, control, cursor, cancelled))
         return self._register_connection(binding, control, bridge.outputs)
 
-    async def _commit_resume(self, candidate, bridge, control, cursor, outputs, cancelled) -> CallTransportBinding:
+    async def _commit_resume(self, candidate, bridge, control, cursor, cancelled) -> _CallTransportBinding:
         binding = None
         business_started = False
-        bridge.begin_resume_outputs()
+        bridge._begin_resume_outputs()
         try:
+            outputs = candidate.session.preview_resume(cursor)
             binding = await self._hub.commit_resume(candidate)
+            self._replace_attempts(binding.session, bridge.outputs)
             # Manager commit may publish ACTIVE before returning, so the flag must
             # be set before the await and covers every post-binding failure.
             business_started = True
@@ -392,11 +403,11 @@ class CallWebSocketAdapter:
             self._raise_if_resume_cancelled(cancelled)
             await self._enqueue(bridge.outputs, outputs)
             self._raise_if_resume_cancelled(cancelled)
-            await bridge.commit_resume_outputs()
+            await bridge._commit_resume_outputs()
             self._raise_if_resume_cancelled(cancelled)
             return binding
         except BaseException as error:
-            bridge.abort_resume_outputs()
+            bridge._abort_resume_outputs()
             if binding is None:
                 await self._hub.release_resume(candidate)
             else:
@@ -477,54 +488,120 @@ class CallWebSocketAdapter:
         except Exception:
             pass
 
-    async def receive_text(self, connection: CallConnection, raw: str) -> None:
+    async def receive(self, connection: AdapterConnection, message: str | bytes) -> None:
         state = self._state(connection)
         self._hub.require_current(state.binding)
-        message = decode_control_text(raw, sender="client", transport="call_ws")
-        if message["type"] == "ack":
-            self._hub.acknowledge_bound(state.binding, int(message["ack_seq"]))
-            return
-        await self._enqueue(state.outputs, await state.binding.session.receive_text(raw))
+        if isinstance(message, bytes):
+            outputs = await state.binding.session.receive_binary(message)
+        elif isinstance(message, str):
+            try:
+                control = _decode_control_text(message, sender="client", transport="call_ws")
+            except _ControlProtocolError as error:
+                raise CallTransportError(error.code) from error
+            if control["type"] == "ack":
+                self._hub.acknowledge_bound(state.binding, int(control["ack_seq"]))
+                return
+            outputs = await state.binding.session.receive_text(message)
+        else:
+            raise CallTransportError("INVALID_WEBSOCKET_FRAME")
+        await self._enqueue(state.outputs, outputs)
 
-    async def receive_binary(self, connection: CallConnection, raw: bytes) -> None:
+    async def next_output(self, connection: AdapterConnection) -> OutboundDelivery:
         state = self._state(connection)
         self._hub.require_current(state.binding)
-        await self._enqueue(state.outputs, await state.binding.session.receive_binary(raw))
+        output = await self._take_output(state)
+        delivery_id = uuid4().hex
+        state.inflight.add(delivery_id)
+        return OutboundDelivery(delivery_id, output.text if output.text is not None else output.binary)
 
-    async def next_output(self, connection: CallConnection) -> CallWireOutput:
-        state = self._state(connection)
-        self._hub.require_current(state.binding)
-        output = await state.outputs.get()
-        state.outputs.task_done()
+    @staticmethod
+    async def _take_output(state):
+        taking = asyncio.create_task(state.outputs.get())
+        closing = asyncio.create_task(state.closed.wait())
+        state.taking.add(taking)
+        try:
+            try:
+                await asyncio.wait((taking, closing), return_when=asyncio.FIRST_COMPLETED)
+                if state.closed.is_set():
+                    raise ConnectionError("call connection is closed")
+                output = taking.result()
+            finally:
+                taking.cancel()
+                closing.cancel()
+                await asyncio.gather(taking, closing, return_exceptions=True)
+                state.taking.discard(taking)
+        except BaseException:
+            if not taking.cancelled() and taking.done() and taking.exception() is None:
+                state.outputs.task_done()
+            raise
         return output
 
-    async def disconnect(self, connection: CallConnection) -> None:
-        state = self._connections.pop(connection._token, None)
-        if state is None or not self._hub.is_current(state.binding):
+    def complete_output(
+        self, connection: AdapterConnection, delivery_id: str, *, error: Exception | None = None
+    ) -> None:
+        state = self._connections.get(connection._token)
+        if state is None or delivery_id not in state.inflight:
             return
-        await self._hub.detach_after_disconnect(state.binding, state.control.disconnect)
+        state.inflight.remove(delivery_id)
+        state.outputs.task_done()
+        if error is not None:
+            self._fail_attempts(state)
+
+    async def disconnect(self, connection: AdapterConnection) -> None:
+        state = self._connections.pop(connection._token, None)
+        if state is None:
+            return
+        self._fail_attempts(state)
+        if self._hub.is_current(state.binding):
+            await self._hub.detach_after_disconnect(state.binding, state.control.disconnect)
+
+    @staticmethod
+    def _fail_attempts(state) -> None:
+        state.closed.set()
+        for taking in state.taking:
+            taking.cancel()
+        for _ in state.inflight:
+            state.outputs.task_done()
+        state.inflight.clear()
+        while not state.outputs.empty():
+            state.outputs.get_nowait()
+            state.outputs.task_done()
+
+    def _replace_attempts(self, session, outputs) -> None:
+        for token, state in tuple(self._connections.items()):
+            if state.binding.session is session:
+                self._fail_attempts(state)
+                self._connections.pop(token, None)
+        while not outputs.empty():
+            outputs.get_nowait()
+            outputs.task_done()
 
     async def close(self) -> None:
+        await complete_owned(self._close())
+
+    async def _close(self) -> None:
         self._closed = True
         open_tasks = tuple(self._open_tasks)
         for task in open_tasks:
             self._open_cancellations[task].set()
         if open_tasks:
             await asyncio.gather(*open_tasks, return_exceptions=True)
+        for state in tuple(self._connections.values()):
+            self._fail_attempts(state)
         await self._hub.close()
         self._connections.clear()
 
-    def _register_connection(self, binding, control, outputs) -> CallConnection:
-        token = object()
-        connection = CallConnection(token)
+    def _register_connection(self, binding, control, outputs) -> AdapterConnection:
+        connection = AdapterConnection()
+        token = connection._token
         state = _ConnectionState(binding, control, outputs)
         self._connections[token] = state
         self._own_release(state)
         return connection
 
-    def _state(self, connection: CallConnection) -> _ConnectionState:
+    def _state(self, connection: AdapterConnection) -> _ConnectionState:
         state = self._connections.get(connection._token)
-        if state is None:
+        if state is None or state.closed.is_set():
             raise CallTransportError("STALE_CALL_CONNECTION", close_code=1008)
         return state
 
@@ -540,9 +617,9 @@ class CallWebSocketAdapter:
         await connection.control.wait_realtime_stopped()
         bridge = session.business_sink
         try:
-            if isinstance(bridge, CallStageBinding):
+            if isinstance(bridge, _CallStageBinding):
                 try:
-                    await asyncio.wait_for(bridge.terminal_delivered.wait(), timeout=2.0)
+                    await asyncio.wait_for(bridge.terminal_enqueued.wait(), timeout=2.0)
                 except TimeoutError:
                     pass
             try:
@@ -553,9 +630,9 @@ class CallWebSocketAdapter:
             await self._hub.unregister(session.call_id, expected_session=session)
 
     @staticmethod
-    async def _enqueue(queue: asyncio.Queue[CallWireOutput], outputs: list[CallWireOutput]) -> None:
+    async def _enqueue(queue: asyncio.Queue[_CallWireOutput], outputs: list[_CallWireOutput]) -> None:
         for output in outputs:
-            await queue.put(output)
+            queue.put_nowait(output)
 
     @staticmethod
     def _start_error(
@@ -572,6 +649,21 @@ class CallWebSocketAdapter:
         error.request_seq = request_seq
         error.retryable = retryable
         error.call_id = call_id
+        error.initial_message = _encode_control_message(
+            {
+                "protocol": "call.v1",
+                "type": "error",
+                "code": error.code,
+                "message": "call start was not accepted",
+                "retryable": retryable,
+                "request_type": "call.start",
+                "request_seq": request_seq,
+                "client_request_id": request_id,
+                **({} if call_id is None else {"call_id": call_id}),
+            },
+            sender="server",
+            transport="call_ws",
+        )
         return error
 
     @classmethod

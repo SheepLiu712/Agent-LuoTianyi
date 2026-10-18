@@ -14,10 +14,62 @@ from src.infrastructure.media import (
     MediaResolutionErrorCode,
     PermanentMediaStore,
 )
-from src.web.websocket import BUSINESS_INPUT_EVENTS, WSMessage
+
+from ._messages import _BUSINESS_INPUT_EVENTS, _WSMessage
+from ._voice_upload_helper import _VoiceUploadAssembler, _VoiceUploadError
+
+
+async def _process_input(
+    event: _WSMessage,
+    user_id: str,
+    default_character_id: str,
+    media_store: PermanentMediaStore | None,
+    voice_uploads: _VoiceUploadAssembler,
+) -> tuple[d.Stimulus | None, dict]:
+    """Return (stimulus, status), without admitting or delivering to any Stage.
+
+    status.state: complete (deliver stimulus before ACK), partial (frame accepted,
+    no complete stimulus), duplicate (already accepted; do not redeliver), or
+    error (status.error contains the validation exception). ack_payload and
+    duplicate, when present, describe the response only, never Stage admission.
+    The Adapter serializes this operation through commit/discard of voice state.
+    """
+    try:
+        if event.event_type == "user_voice":
+            targets = _input_targets(event, default_character_id)
+            return await voice_uploads.process(event=event, user_id=user_id, character_id=targets[0])
+        candidate = _prepare_input(event, user_id, default_character_id, media_store)
+        return candidate.stimulus, {"state": "complete"}
+    except (MediaResolutionError, _VoiceUploadError, KeyError, TypeError, ValueError) as error:
+        return None, {"state": "error", "error": error}
+
+
+def _input_targets(event: _WSMessage, default_character_id: str) -> tuple[str, ...]:
+    payload = _validate_envelope(event)
+    targets = _target_characters(payload, default_character_id)
+    if event.event_type == "user_voice" and len(targets) != 1:
+        raise ValueError("voice upload requires exactly one target character")
+    return targets
+
+
+def _materialize_input(event: _WSMessage, stimulus: d.Stimulus, media_store: PermanentMediaStore | None) -> None:
+    """Finish image storage after preliminary admission; does not deliver the stimulus."""
+    if not isinstance(stimulus, d.ImageMessage):
+        return
+    if media_store is None:
+        raise ValueError("media store is not configured")
+    payload = event.payload
+    mime_type = payload.get("mime_type")
+    candidate = _PreparedInput(
+        stimulus,
+        payload["image_base64"].strip(),
+        mime_type.strip().lower() if mime_type else None,
+    )
+    _materialize_image(candidate, media_store)
+
 
 _TEXT_EVENTS = frozenset({"user_text", "user_message", "message", "chat_message", "chat"})
-_INPUT_EVENTS = BUSINESS_INPUT_EVENTS
+_INPUT_EVENTS = _BUSINESS_INPUT_EVENTS
 _TARGET_KEYS = (
     "target_character_ids",
     "target_characters",
@@ -28,7 +80,7 @@ _TARGET_KEYS = (
 
 
 @dataclass(frozen=True)
-class PreparedInput:
+class _PreparedInput:
     """无需媒体物化即可完成准入判断的候选刺激。"""
 
     stimulus: d.Stimulus
@@ -36,12 +88,12 @@ class PreparedInput:
     mime_type: str | None = None
 
 
-def prepare_input(
-    event: WSMessage,
+def _prepare_input(
+    event: _WSMessage,
     user_id: str,
     default_character_id: str,
     media_store: PermanentMediaStore | None = None,
-) -> PreparedInput:
+) -> _PreparedInput:
     """校验输入信封并创建准入候选；不解码或写入图片。"""
     payload = _validate_envelope(event)
     targets = _target_characters(payload, default_character_id)
@@ -61,19 +113,19 @@ def prepare_input(
     if event.event_type == "user_touch":
         return _prepare_touch(payload, values)
     if event.event_type == "user_image_selecting":
-        return PreparedInput(d.ImageSelectionOpened(**values))
+        return _PreparedInput(d.ImageSelectionOpened(**values))
     if event.event_type == "user_image_selecting_cancel":
-        return PreparedInput(d.ImageSelectionClosed(**values))
+        return _PreparedInput(d.ImageSelectionClosed(**values))
     if event.event_type == "user_voice_recording_started":
-        return PreparedInput(d.VoiceRecordingStarted(**values, recording_id=_recording_id(payload)))
+        return _PreparedInput(d.VoiceRecordingStarted(**values, recording_id=_recording_id(payload)))
     if event.event_type == "user_voice_recording_cancelled":
-        return PreparedInput(d.VoiceRecordingCancelled(**values, recording_id=_recording_id(payload)))
+        return _PreparedInput(d.VoiceRecordingCancelled(**values, recording_id=_recording_id(payload)))
     if event.event_type == "user_voice":
         raise ValueError("user_voice protocol is not implemented")
     return _prepare_text(event, payload, values)
 
 
-def _validate_envelope(event: WSMessage) -> dict:
+def _validate_envelope(event: _WSMessage) -> dict:
     if event.event_type not in _INPUT_EVENTS:
         raise ValueError("unsupported business event")
     if not isinstance(event.payload, dict):
@@ -97,7 +149,7 @@ def _target_characters(payload: dict, default_character_id: str) -> tuple[str, .
 
 
 def _stimulus_values(
-    event: WSMessage,
+    event: _WSMessage,
     user_id: str,
     targets: tuple[str, ...],
     *,
@@ -119,11 +171,11 @@ def _stimulus_values(
     }
 
 
-def _prepare_typing(payload: dict, values: dict) -> PreparedInput:
+def _prepare_typing(payload: dict, values: dict) -> _PreparedInput:
     length = payload.get("text_length")
     if type(length) is not int or not 0 <= length <= 100_000:
         raise ValueError("invalid text_length")
-    return PreparedInput(d.UserTyping(**values, text_length=length))
+    return _PreparedInput(d.UserTyping(**values, text_length=length))
 
 
 def _recording_id(payload: dict) -> str:
@@ -133,7 +185,7 @@ def _recording_id(payload: dict) -> str:
     return recording_id
 
 
-def _prepare_touch(payload: dict, values: dict) -> PreparedInput:
+def _prepare_touch(payload: dict, values: dict) -> _PreparedInput:
     raw_regions = payload.get("touch_area", payload.get("touchArea"))
     if isinstance(raw_regions, str):
         raw_regions = [raw_regions]
@@ -153,7 +205,7 @@ def _prepare_touch(payload: dict, values: dict) -> PreparedInput:
         if type(count_10s) is not int or type(count_30s) is not int:
             raise ValueError("invalid click frequency")
         click_frequency = d.TouchClickFrequency(count_10s=count_10s, count_30s=count_30s)
-    return PreparedInput(
+    return _PreparedInput(
         d.TouchInteraction(
             **values,
             body_regions=body_regions,
@@ -163,12 +215,12 @@ def _prepare_touch(payload: dict, values: dict) -> PreparedInput:
 
 
 def _prepare_image(
-    event: WSMessage,
+    event: _WSMessage,
     payload: dict,
     values: dict,
     user_id: str,
     media_store: PermanentMediaStore | None,
-) -> PreparedInput:
+) -> _PreparedInput:
     if media_store is None:
         raise MediaResolutionError(
             code=MediaResolutionErrorCode.NOT_CONFIGURED,
@@ -191,10 +243,10 @@ def _prepare_image(
         media_ref=media_ref,
         client_msg_id=event.client_msg_id,
     )
-    return PreparedInput(stimulus, image_base64.strip(), mime_type.strip().lower() if mime_type else None)
+    return _PreparedInput(stimulus, image_base64.strip(), mime_type.strip().lower() if mime_type else None)
 
 
-def _prepare_text(event: WSMessage, payload: dict, values: dict) -> PreparedInput:
+def _prepare_text(event: _WSMessage, payload: dict, values: dict) -> _PreparedInput:
     text = next(
         (
             payload[key].strip()
@@ -207,7 +259,7 @@ def _prepare_text(event: WSMessage, payload: dict, values: dict) -> PreparedInpu
         raise ValueError("invalid text")
     if "is_proactive" in payload and type(payload["is_proactive"]) is not bool:
         raise ValueError("invalid is_proactive")
-    return PreparedInput(
+    return _PreparedInput(
         d.TextMessage(
             **values,
             text=text,
@@ -216,7 +268,7 @@ def _prepare_text(event: WSMessage, payload: dict, values: dict) -> PreparedInpu
     )
 
 
-def materialize_image(candidate: PreparedInput, media_store: PermanentMediaStore) -> None:
+def _materialize_image(candidate: _PreparedInput, media_store: PermanentMediaStore) -> None:
     """解码、校验并永久写入已通过 Stage 准入的图片。"""
     if candidate.image_base64 is None:
         return
@@ -255,9 +307,9 @@ def materialize_image(candidate: PreparedInput, media_store: PermanentMediaStore
     )
 
 
-def convert_input(event: WSMessage, user_id: str, default_character_id: str) -> d.Stimulus:
+def _convert_input(event: _WSMessage, user_id: str, default_character_id: str) -> d.Stimulus:
     """兼容文本与打字的同步转换；图片必须经 Adapter 的异步物化路径。"""
-    return prepare_input(event, user_id, default_character_id).stimulus
+    return _prepare_input(event, user_id, default_character_id).stimulus
 
 
 def _occurred_at(timestamp: int | None) -> datetime:

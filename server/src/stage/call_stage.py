@@ -60,7 +60,11 @@ if TYPE_CHECKING:
 
 
 class CallTransportSink(Protocol):
-    """Awaitable response-stream transport owned by the call adapter."""
+    """Typed output admission; completion is not this frame's network send/ACK/playback.
+
+    Capacity waits may depend on older frames being acknowledged.
+    The adapter owns wire encoding, replay registration, and network feedback.
+    """
 
     async def send_state(self, item: object) -> None: ...
 

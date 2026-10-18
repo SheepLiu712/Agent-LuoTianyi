@@ -478,7 +478,7 @@ async def maintain(
 ### 当前基线
 
 - 服务端现有 `/chat_ws` 与独立 `/call_ws`；`CallWebSocketAdapter` 封装 call.v1 接入、恢复与传输，`StageManager.try_to_get_stage` 封装交互获取与业务建立，`CallStage` 已进入正式装配。
-- 聊天继续使用 `adapter.websocket.WebSocketAdapter`；通话使用并列的 `adapter.websocket.call_v1.CallWebSocketAdapter`。Web 只负责鉴权与物理收发，不直连 CallStage，也不构造 Hub/Session/Binding。
+- 聊天继续使用 `adapter.websocket.chat.WebSocketAdapter`；通话使用并列的 `adapter.websocket.call_v1.CallWebSocketAdapter`。Web 只负责鉴权与物理收发，不直连 CallStage，也不构造 Hub/Session/Binding。
 - Android 聊天页目前没有电话入口；现有 WebView 音频链路面向普通聊天播放。
 - 现有 Conversation 内容类型没有通话内容。
 - 现有反思流程会在普通聊天回复后频繁执行记忆、压缩和画像更新，本功能要求迁移为统一认知维护边界。
@@ -887,7 +887,7 @@ CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知
 
 聊天与通话保留独立 Adapter。Adapter 负责信道协议转换、去重、上传装配、输出投递，以及连接与交互的 binding；通话 Hub、Session、Binding 均为 CallWebSocketAdapter 内部实现。Web 负责鉴权和物理连接，不解析业务切换命令。普通聊天消息、语音上传各阶段及切换命令统一进入聊天 Adapter 的 `receive`；上传分片 ACK 与最终刺激接纳 ACK 保持各自的含义和幂等性。
 
-Adapter 通过 StageManager 的多参数 `try_to_get_stage` 获取交互：参数明确用户、角色、交互类型、连接和已有交互或请求身份，不专门创建接入 Request 类型。Manager 按内部规则复用、恢复、创建或给出明确拒绝；通话建立返回可先完成身份握手的控制句柄，Stage 尚未建立时不伪造已接通状态。恢复指定 call_id 只能恢复该交互，不能隐式新建。通话身份返回后，由 Adapter 自行注册协议会话并排入 PREPARING 与首 ACK，再释放业务建立；Manager 不调用传输对象的 prepare 或 bind_stage。相同建立请求的身份发布与协议注册串行化，不阻塞其他请求。绑定建立后，普通刺激直接投递 Stage；生命周期请求交给 Manager，PCM、播放确认和实时打断保持投递通话交互。两类 Adapter 不强求相同的协议方法或共同基类。
+Adapter 通过 StageManager 的多参数 `try_to_get_stage` 获取交互：参数明确用户、角色、交互类型、连接和已有交互或请求身份，不专门创建接入 Request 类型。Manager 按内部规则复用、恢复、创建或给出明确拒绝；通话建立返回可先完成身份握手的控制句柄，Stage 尚未建立时不伪造已接通状态。恢复指定 call_id 只能恢复该交互，不能隐式新建。通话身份返回后，由 Adapter 自行注册协议会话并排入 PREPARING 与首 ACK，再释放业务建立；Manager 不调用传输对象的 prepare 或 bind_stage。相同建立请求的身份发布与协议注册串行化，不阻塞其他请求。绑定建立后，普通刺激直接投递 Stage；生命周期请求交给 Manager，PCM、播放确认和实时打断保持投递通话交互。两类 Adapter 统一网络接口；业务输出 sink 保持类型化，不要求相同业务协议或共同基类。
 
 输入准入属于交互侧。binding 有效只代表连接仍关联该 Stage，不代表 Stage 此刻允许业务输入。切换准备期间由 Stage 的输入门禁拒绝普通消息、语音以及迟到的异步媒体投递；Adapter 不复制暂停业务状态。异步转换完成后必须重新验证原 binding 仍有效和 Stage 仍准入，然后才能接纳刺激。先前已经接纳的工作保持既有执行语义，不因为准备切换新增取消行为。
 
@@ -910,3 +910,64 @@ intent 的 10 秒期限与 call.start 的 10 秒建立期限分别计算。接�
 用户断开连接或 WebSocket 断线时由 Adapter 解除该连接的 binding，并把断线通知交互侧。交互侧按聊天和通话各自的保留期决定恢复或收尾；重连接入获得新 binding，保留期内可复用原 Stage，收尾期间拒绝接入，收尾完成后新的有效建立请求才创建新 Stage。明确结束通话的命令仍按挂断处理，不改成意外断线保留。
 
 验收须覆盖：统一入口的普通与语音输入、准备拒绝、准备期拒绝输入但保留 binding、intent 超时恢复、账本前失败回滚、提交后失败不复活旧交互、旧连接迟到断线不影响新连接、绑定失败补偿，以及图片/语音异步处理跨越暂停或解绑时不能迟到投递。
+
+
+### 两类 Adapter 的网络边界与交付语义
+
+Chat 与 Call 均提供 `open`、`receive`、`next_output`、`complete_output`、`disconnect`、`close`。`open` 以用户、连接身份、可选角色、初始消息和认证能力等显式参数返回不透明 `AdapterConnection`；不向 Web 暴露 Stage、Hub、Session 或 Binding。Call 的首条 start/resume 作为 initial_message 交给 open。聊天绑定成功的 chat.ready 由 Adapter 排入输出，并先于绑定期间产生的业务输出。
+
+Web 在认证后只交付 ASGI 已重组的完整 text/bytes 消息，检查 receive/disconnect、文本与二进制二选一以及 16 MiB 通用传输大小上限；不先解析 JSON 或构造 WSMessage。JSON、重复键、字段、消息类型、业务大小限制、协议时序及 ACK/NACK 都由 Adapter 判断。心跳、客户端模型响应和上传分片也进入 receive。连接的发送与接收并行运行，任一结束都取消并回收另一任务，最后 disconnect；发送取消属于交付结果不确定的失败。
+
+`next_output` 返回带独立 delivery_id 的原始文本或二进制 `OutboundDelivery`。Web 只按类型发送，发送成功或失败后调用 complete_output。取出队列不等于发送完成。每次发送尝试都有新 delivery_id；重放保留协议 seq，但不复用投递身份。旧连接的迟到完成反馈不得完成新连接的输出。
+
+| 完成层次 | 精确含义 |
+| --- | --- |
+| 输出接纳 | Adapter 验证并接管输出；容量不足立即拒绝，不承诺网络已发送 |
+| 网络发送完成 | WebSocket send 返回，complete_output 报告成功；不证明客户端收到或播放 |
+| 客户端确认 | call.v1 连续 ACK 推进重放游标；回收已确认帧；协议会话销毁时的缓存清理不计为客户端确认 |
+| 播放完成 | playback.completed 等业务反馈；独立于发送完成及协议 ACK |
+
+聊天 StageOutputSink 的 submit_output 返回网络投递完成等待对象；取消等待者不撤回已接纳输出，撤回使用 CancelDelivery。通话类型化 sink 的异步方法完成表示输出已接纳（包含重放登记及入队），不以本帧发送、客户端 ACK 或播放结束为完成条件；背压等待可以依赖已有帧的 ACK 释放容量。Web 的 complete_output 与客户端 ACK 互不替代。输入 server_ack 表示输入接纳，也不能解释为输出已到客户端。
+
+物理断线使该连接所有待发送和发送中的交付尝试失败；通话协议可重放内容继续由协议会话保留，恢复时建立新投递尝试。解绑禁止新的业务输入，必要的结束/取消输出按序处理。StageManager 只使用注入的 detach_stage_binding，不调用 Adapter 的网络入口或操作具体协议状态；用户身份和连接存活状态只读，断线标记由 Adapter 更新。
+
+验收补充：两类入口的原始帧校验、普通/语音/切换共用 receive、输出取出后尚未完成、发送成功/失败/取消、等待者取消、断线清理、旧连接迟到反馈、首 ACK 在业务输出前、通话恢复重放及客户端 ACK 与网络完成彼此独立。内部实现完成迁移后统一以下划线命名文件、类和非契约方法，包仅导出外部真正使用的接口。
+
+建立操作被拒绝时，Adapter 抛出携带关闭码及可选已编码报文的 `AdapterConnectionError`（通话错误可用其专用子类）；没有连接句柄的拒绝应答由 Web 直接发送。Web 不识别 StageManager 的业务异常或自行编码其协议错误。相同 call.start 重绑时先应答建立请求，再重放尚未确认的状态；恢复提交在暂停新输出入队后刷新重放快照，保证接入检查期间产生的状态不会丢失。
+
+建立操作被拒绝时，Adapter 抛出携带关闭码及可选已编码报文的 `AdapterConnectionError`（通话错误可用其专用子类）；没有连接句柄的拒绝应答由 Web 直接发送。Web 不识别 StageManager 的业务异常或自行编码其协议错误。相同 call.start 重绑时先应答建立请求，再重放尚未确认的状态；恢复提交在暂停新输出入队后刷新重放快照，保证接入检查期间产生的状态不会丢失。
+
+建立操作被拒绝时，Adapter 抛出携带关闭码及可选已编码报文的 `AdapterConnectionError`（通话错误可用其专用子类）；没有连接句柄的拒绝应答由 Web 直接发送。Web 不识别 StageManager 的业务异常或自行编码其协议错误。相同 call.start 重绑时先应答建立请求，再重放尚未确认的状态；恢复提交在暂停新输出入队后刷新重放快照，保证接入检查期间产生的状态不会丢失。
+
+建立操作被拒绝时，Adapter 抛出携带关闭码及可选已编码报文的 `AdapterConnectionError`（通话错误可用其专用子类）；没有连接句柄的拒绝应答由 Web 直接发送。Web 不识别 StageManager 的业务异常或自行编码其协议错误。相同 call.start 重绑时先应答建立请求，再重放尚未确认的状态；恢复提交在暂停新输出入队后刷新重放快照，保证接入检查期间产生的状态不会丢失。
+
+建立操作被拒绝时，Adapter 抛出携带关闭码及可选已编码报文的 `AdapterConnectionError`（通话错误可用其专用子类）；没有连接句柄的拒绝应答由 Web 直接发送。Web 不识别 StageManager 的业务异常或自行编码其协议错误。相同 call.start 重绑时先应答建立请求，再重放尚未确认的状态；恢复提交在暂停新输出入队后刷新重放快照，保证接入检查期间产生的状态不会丢失。
+
+
+### Adapter 实现目录与聊天切换协议入口
+
+- `server/src/adapter/websocket/connection.py` 持有两个 Adapter 共用的网络契约；根包只导出这些契约，不重新导出聊天实现。
+- 聊天实现统一位于 `chat/`，包括协议解析、消息类型、输入转换、语音消息上传、输出调度、连接状态、发送队列和客户端模型委托；通话实现位于 `call_v1/`。旧聊天路径不保留兼容转发文件。
+- 聊天收到 `call.switch_prepare` 时，调用公开的 `call_v1.chat_switch.parse_switch_prepare(raw)`，使用原始报文完成 call.v1 大小、信道、方向和字段校验，取得角色 ID 与请求 ID，再调用 StageManager 的切换准备操作。协议错误通过 `CallSwitchProtocolError.code` 返回原有错误码。
+- 只有 StageManager 接受准备操作后，才通过 `make_switch_ready(character_id=..., client_request_id=...)` 生成 `call.switch_ready`。该响应表示切换准备被接受，不表示通话已创建或接通；切换失败、超时和解绑仍遵循既定生命周期契约。
+- `chat_switch.py` 只提供聊天信道上的通话握手协议，不拥有交互状态。聊天不得引用 `call_v1` 的私有控制解析器、Hub、Session 或 Binding；完整控制协议校验器继续作为通话模块私有实现，避免复制校验规则。
+
+
+### 聊天业务输入处理结果与 ACK
+
+聊天 `_input._process_input` 统一处理普通输入与语音上传，返回普通 tuple `(stimulus_or_none, status)`，不创建结果包装类。第一个元素是领域刺激或 `None`；第二个元素是普通字典，`state` 的协议如下：
+
+| state | stimulus | Adapter 后续动作 |
+| --- | --- | --- |
+| `complete` | 完整领域刺激 | 检查原绑定和 Stage 准入，完成必要的图片物化，再次检查并调用 submit；仅在 submit 成功后确认输入 |
+| `partial` | `None` | 当前上传步骤已接收但没有完整刺激，发送该步骤 ACK；不表示整条语音消息已被 Stage 接纳 |
+| `duplicate` | `None` | 返回原步骤的幂等 ACK，不再次投递；完整语音的重复完成回执只能来自已接纳的上传 |
+| `error` | `None` | 从 status.error 取得处理错误，生成原有错误应答，不发送成功 ACK |
+
+`status.ack_payload` 和 `status.duplicate` 是可选应答元数据。语音取消产生协调刺激时，status 可携带原上传的内部 binding 标识，由 Adapter 向原绑定投递，不能迁移到替换后的 Stage。输入模块不调用 Stage 或输入 sink。
+
+`_voice_upload_helper.py` 只维护上传组装、校验、媒体存储和幂等记录。begin 生成 `VoiceRecordingCommitted`；finalize 生成 `VoiceMessage`；取消尚未结束的上传生成 `VoiceUploadFailed`。这些完整刺激都须由 Adapter 实际提交成功后才能发成功 ACK。begin 的 ACK 不代表完整音频已上传，chunk 的 ACK 仅确认该分块，finalize 的成功 ACK 才确认完整语音刺激已经接纳。无剩余上传的重复 abort 不产生新刺激，可直接确认。
+
+Adapter 在一次输入处理事务内串行完成解析、准入、投递及 helper 的提交或丢弃。语音 finalize 的候选结果不构成完成记录；Stage 拒绝时保留上传和分块，允许再次 finalize。submit 成功后先登记内存完成记录，再持久化回执；回执写入失败保留原有内存幂等和重试写入行为。所有投递必须检查 submit 返回值，不能只依据 can_accept 发 ACK。
+
+校验失败和过期产生的后台协调通知由 helper 暂存，Adapter 取出后仅向仍有效的原绑定投递；它们不是对应业务请求的成功 ACK。断线、暂停或重新绑定发生在媒体异步处理期间时，不得把候选刺激投递到失效绑定或替换连接。

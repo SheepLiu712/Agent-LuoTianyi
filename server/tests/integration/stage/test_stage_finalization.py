@@ -4,16 +4,16 @@ import asyncio
 import threading
 
 import pytest
+from support.chat_connection import StubChatConnection
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
 from src.stage.call_settlement import CallSettlementConsumerImpl
-from src.web.websocket.service import WebSocketConnection
 
 from . import test_call_stage
 from .test_call_handoff import connected, manager
@@ -34,7 +34,7 @@ def call_setup(tmp_path):
 
 async def assert_finalizing(manager, user="user"):
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
-        await manager._chat_output_sink.open(WebSocketConnection(Socket(), user, user), "luotianyi")
+        await manager._test_chat_adapter._open(StubChatConnection(Socket(), user, user), "luotianyi")
     with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
         await manager._claim_call(
             user_id=user,
@@ -68,7 +68,7 @@ async def test_chat_finalization_rejects_conflicts_and_failure_releases_admissio
     with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
         await stages.begin_user_data_reset("user")
     assert not connection.is_closed
-    await stages._chat_output_sink.close_connection(connection)
+    await stages._test_chat_adapter._close_connection(connection)
     await asyncio.wait_for(entered.wait(), 1)
     try:
         await assert_finalizing(stages)

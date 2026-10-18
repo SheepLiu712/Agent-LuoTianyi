@@ -3,19 +3,16 @@ import json
 
 import pytest
 
-from src.adapter.websocket.call_v1 import (
+from src.adapter.websocket.call_v1._audio_codec import _BinaryAudioFrameCodec, _WireAudioFrame
+from src.adapter.websocket.call_v1._transport import (
     CALL_CLOSE_TRY_AGAIN_LATER,
-    BinaryAudioFrameCodec,
     CallTransportError,
-    WireAudioFrame,
-)
-from src.adapter.websocket.call_v1.transport import (
-    CallAcceptanceReceipt,
-    CallTransportBackpressure,
-    CallTransportConfig,
-    CallTransportHub,
-    CallTransportSession,
-    InboundCallFrame,
+    _CallAcceptanceReceipt,
+    _CallTransportBackpressure,
+    _CallTransportConfig,
+    _CallTransportHub,
+    _CallTransportSession,
+    _InboundCallFrame,
 )
 
 CALL_ID = "606ec5e6-a330-4e6c-b07a-8432a5716c8f"
@@ -24,23 +21,23 @@ CALL_ID = "606ec5e6-a330-4e6c-b07a-8432a5716c8f"
 class AcceptanceSink:
     def __init__(self, *, accept: bool = True) -> None:
         self.accept_result = accept
-        self.frames: list[InboundCallFrame] = []
-        self.receipts: list[CallAcceptanceReceipt] = []
+        self.frames: list[_InboundCallFrame] = []
+        self.receipts: list[_CallAcceptanceReceipt] = []
 
-    async def accept(self, frame: InboundCallFrame, receipt: CallAcceptanceReceipt) -> bool:
+    async def accept(self, frame: _InboundCallFrame, receipt: _CallAcceptanceReceipt) -> bool:
         if self.accept_result:
             self.frames.append(frame)
             self.receipts.append(receipt)
         return self.accept_result
 
 
-def session(sink: AcceptanceSink | None = None, **config) -> CallTransportSession:
-    return CallTransportSession(
+def session(sink: AcceptanceSink | None = None, **config) -> _CallTransportSession:
+    return _CallTransportSession(
         call_id=CALL_ID,
         user_id="user-1",
         character_id="luotianyi",
         sink=sink or AcceptanceSink(),
-        config=CallTransportConfig(**config),
+        config=_CallTransportConfig(**config),
     )
 
 
@@ -58,7 +55,7 @@ def hangup(seq: int, reason: str = "user_hangup") -> str:
 
 
 def audio(seq: int, payload: bytes = b"\x00\x01") -> bytes:
-    return BinaryAudioFrameCodec().encode(WireAudioFrame(1, 2, 0, 0, seq, payload))
+    return _BinaryAudioFrameCodec().encode(_WireAudioFrame(1, 2, 0, 0, seq, payload))
 
 
 def message(output) -> dict:
@@ -72,7 +69,7 @@ def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields() -> No
         def record(self, metric):
             captured.append(metric)
 
-    transport = CallTransportSession(
+    transport = _CallTransportSession(
         call_id=CALL_ID,
         user_id="user-1",
         character_id="luotianyi",
@@ -93,7 +90,7 @@ def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields() -> No
             "channels": 1,
         }
     )
-    transport.send_audio(WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
+    transport.send_audio(_WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
     transport.acknowledge_server(2)
     with pytest.raises(CallTransportError, match="REPLAY_NOT_AVAILABLE"):
         transport.replay_missing(2)
@@ -109,14 +106,14 @@ def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields() -> No
 
 @pytest.mark.asyncio
 async def test_hub_user_reset_closes_only_owned_replay_sessions() -> None:
-    hub = CallTransportHub()
-    owner = CallTransportSession(
+    hub = _CallTransportHub()
+    owner = _CallTransportSession(
         call_id=CALL_ID,
         user_id="owner",
         character_id="luotianyi",
         sink=AcceptanceSink(),
     )
-    other = CallTransportSession(
+    other = _CallTransportSession(
         call_id="706ec5e6-a330-4e6c-b07a-8432a5716c8f",
         user_id="other",
         character_id="luotianyi",
@@ -144,8 +141,8 @@ async def test_hub_checks_user_admission_before_resume() -> None:
     async def reject(_user_id: str) -> None:
         raise RuntimeError("USER_DATA_RESET_IN_PROGRESS")
 
-    hub = CallTransportHub(require_user_admission=reject)
-    session = CallTransportSession(
+    hub = _CallTransportHub(require_user_admission=reject)
+    session = _CallTransportSession(
         call_id=CALL_ID,
         user_id="owner",
         character_id="luotianyi",
@@ -171,8 +168,8 @@ async def test_hub_rejected_start_is_not_registered_during_reset() -> None:
     async def reject(_user_id: str) -> None:
         raise RuntimeError("USER_DATA_RESET_IN_PROGRESS")
 
-    hub = CallTransportHub(require_user_admission=reject)
-    session = CallTransportSession(
+    hub = _CallTransportHub(require_user_admission=reject)
+    session = _CallTransportSession(
         call_id=CALL_ID,
         user_id="owner",
         character_id="luotianyi",
@@ -189,8 +186,8 @@ async def test_hub_reset_race_invalidates_session_registered_after_admission() -
     from src.application.user import UserResetFence
 
     fence = UserResetFence()
-    hub = CallTransportHub(user_reset_fence=fence)
-    session = CallTransportSession(
+    hub = _CallTransportHub(user_reset_fence=fence)
+    session = _CallTransportSession(
         call_id=CALL_ID,
         user_id="owner",
         character_id="luotianyi",
@@ -253,7 +250,7 @@ async def test_receive_start_requires_seq_one_is_idempotent_and_conflict_safe() 
 
 @pytest.mark.asyncio
 async def test_hub_shutdown_owns_cancels_and_observes_release_tasks() -> None:
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     entered = asyncio.Event()
     cancelled = asyncio.Event()
 
@@ -279,8 +276,8 @@ async def test_cancelled_registration_waits_for_late_owned_completion_and_leaves
     from src.application.user import UserResetFence
 
     fence = UserResetFence()
-    hub = CallTransportHub(user_reset_fence=fence)
-    session = CallTransportSession(
+    hub = _CallTransportHub(user_reset_fence=fence)
+    session = _CallTransportSession(
         call_id=CALL_ID,
         user_id="owner",
         character_id="luotianyi",
@@ -310,7 +307,7 @@ async def test_cancelled_registration_waits_for_late_owned_completion_and_leaves
 
 @pytest.mark.asyncio
 async def test_old_disconnect_cannot_detach_new_resume_generation() -> None:
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     transport = session()
     hub.register(transport)
     old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -358,7 +355,7 @@ def resume_raw(*, character_id: str = "luotianyi") -> str:
 
 @pytest.mark.asyncio
 async def test_resume_waits_for_the_observed_connection_to_release() -> None:
-    hub = CallTransportHub(resume_release_timeout=0.2)
+    hub = _CallTransportHub(resume_release_timeout=0.2)
     transport = session()
     hub.register(transport)
     old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -376,7 +373,7 @@ async def test_resume_waits_for_the_observed_connection_to_release() -> None:
 
 @pytest.mark.asyncio
 async def test_resume_does_not_take_over_a_live_connection_after_release_timeout() -> None:
-    hub = CallTransportHub(resume_release_timeout=0.01)
+    hub = _CallTransportHub(resume_release_timeout=0.01)
     transport = session()
     hub.register(transport)
     old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -390,7 +387,7 @@ async def test_resume_does_not_take_over_a_live_connection_after_release_timeout
 
 @pytest.mark.asyncio
 async def test_only_one_concurrent_resume_owns_the_released_generation() -> None:
-    hub = CallTransportHub(resume_release_timeout=0.2)
+    hub = _CallTransportHub(resume_release_timeout=0.2)
     transport = session()
     hub.register(transport)
     old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -412,7 +409,7 @@ async def test_only_one_concurrent_resume_owns_the_released_generation() -> None
 
 @pytest.mark.asyncio
 async def test_wrong_resume_identity_is_rejected_without_waiting_for_release() -> None:
-    hub = CallTransportHub(resume_release_timeout=10.0)
+    hub = _CallTransportHub(resume_release_timeout=10.0)
     transport = session()
     hub.register(transport)
     old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -436,7 +433,7 @@ async def test_wrong_resume_identity_is_rejected_without_waiting_for_release() -
 async def test_resume_waiter_is_woken_when_session_can_no_longer_bind(
     release: str,
 ) -> None:
-    hub = CallTransportHub(resume_release_timeout=10.0)
+    hub = _CallTransportHub(resume_release_timeout=10.0)
     transport = session()
     hub.register(transport)
     await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -457,7 +454,7 @@ async def test_resume_waiter_is_woken_when_session_can_no_longer_bind(
 
 @pytest.mark.asyncio
 async def test_cancelled_resume_waiter_does_not_leave_an_owned_task() -> None:
-    hub = CallTransportHub(resume_release_timeout=10.0)
+    hub = _CallTransportHub(resume_release_timeout=10.0)
     transport = session()
     hub.register(transport)
     await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -473,7 +470,7 @@ async def test_cancelled_resume_waiter_does_not_leave_an_owned_task() -> None:
 
 @pytest.mark.asyncio
 async def test_late_old_disconnect_cannot_release_the_resumed_generation() -> None:
-    hub = CallTransportHub(resume_release_timeout=0.2)
+    hub = _CallTransportHub(resume_release_timeout=0.2)
     transport = session()
     hub.register(transport)
     old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -494,7 +491,7 @@ async def test_resume_rechecks_user_admission_after_waiting_for_release() -> Non
         if not admitted:
             raise RuntimeError("USER_DATA_RESET_IN_PROGRESS")
 
-    hub = CallTransportHub(require_user_admission=require_user_admission, resume_release_timeout=0.2)
+    hub = _CallTransportHub(require_user_admission=require_user_admission, resume_release_timeout=0.2)
     transport = session()
     hub.register(transport)
     old = await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -510,7 +507,7 @@ async def test_resume_rechecks_user_admission_after_waiting_for_release() -> Non
 
 @pytest.mark.asyncio
 async def test_resume_release_budget_is_bounded_below_the_stage_recovery_window() -> None:
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     transport = session()
     hub.register(transport)
     await hub.attach_start(transport, user_id="user-1", connection_id=object())
@@ -526,11 +523,11 @@ async def test_resume_release_budget_is_bounded_below_the_stage_recovery_window(
 
 @pytest.mark.asyncio
 async def test_terminal_timeout_unregisters_only_expected_session_and_shutdown_leaves_no_tasks():
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     old = session()
     hub.register(old)
     waiter = hub.own_task(asyncio.Event().wait(), name="call-transport-release")
-    replacement = CallTransportSession(
+    replacement = _CallTransportSession(
         call_id="706ec5e6-a330-4e6c-b07a-8432a5716c8f",
         user_id="user-1",
         character_id="luotianyi",
@@ -625,7 +622,7 @@ def test_server_replay_preserves_original_text_and_binary_bytes() -> None:
             "channels": 1,
         }
     )
-    pcm = transport.send_audio(WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
+    pcm = transport.send_audio(_WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
 
     replay = transport.replay_after(0)
 
@@ -672,7 +669,7 @@ def test_retired_audio_payload_is_not_replayed_and_nack_replays_stop() -> None:
             "channels": 1,
         }
     )
-    transport.send_audio(WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
+    transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
     stop = transport.send_control(
         {
             "protocol": "call.v1",
@@ -693,7 +690,7 @@ def test_retired_audio_payload_is_not_replayed_and_nack_replays_stop() -> None:
 def test_stop_uses_net_replay_capacity_atomically() -> None:
     probe = session()
     started = start_stream(probe)
-    audio_output = probe.send_audio(WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01" * 80))
+    audio_output = probe.send_audio(_WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01" * 80))
     stop_message = {
         "protocol": "call.v1",
         "type": "playback.stop",
@@ -708,7 +705,7 @@ def test_stop_uses_net_replay_capacity_atomically() -> None:
     current_bytes = len(started.text.encode("utf-8")) + len(audio_output.binary)
     transport = session(max_replay_bytes=max(current_bytes, stop_bytes))
     start_stream(transport)
-    transport.send_audio(WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01" * 80))
+    transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01" * 80))
 
     stop = transport.send_control(stop_message)
 
@@ -721,7 +718,7 @@ def test_retirement_releases_response_audio_budget() -> None:
     start_stream(transport)
     payload = b"\x00\x01" * 8_000
     for seq in range(2, 92):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, seq, payload))
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, seq, payload))
     stop = transport.send_control(
         {
             "protocol": "call.v1",
@@ -762,17 +759,17 @@ def test_stop_net_capacity_failure_has_no_partial_state() -> None:
         "reason": "user_interrupted",
     }
     probe_started = start_stream(probe, seq=2)
-    probe_audio = probe.send_audio(WireAudioFrame(1, 2, 0, 1, 3, b"\x00\x01"))
+    probe_audio = probe.send_audio(_WireAudioFrame(1, 2, 0, 1, 3, b"\x00\x01"))
     stop_bytes = len(json.dumps(message_data, separators=(",", ":")).encode("utf-8"))
     unrelated_bytes = len(unrelated.text.encode("utf-8"))
     current_bytes = unrelated_bytes + len(probe_started.text.encode("utf-8")) + len(probe_audio.binary)
     transport = session(max_replay_bytes=current_bytes)
     transport.send_control(json.loads(unrelated.text))
     start_stream(transport, seq=2)
-    transport.send_audio(WireAudioFrame(1, 2, 0, 1, 3, b"\x00\x01"))
+    transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 3, b"\x00\x01"))
     object.__setattr__(transport._config, "max_replay_bytes", unrelated_bytes + stop_bytes - 1)
 
-    with pytest.raises(CallTransportBackpressure, match="REPLAY_BUFFER_FULL"):
+    with pytest.raises(_CallTransportBackpressure, match="REPLAY_BUFFER_FULL"):
         transport.send_control(message_data)
     assert transport.last_server_seq == 3
     replay = transport.replay_after(0)
@@ -787,7 +784,7 @@ async def test_playback_stopped_metadata_survives_ack_and_is_idempotent() -> Non
     sink = AcceptanceSink()
     transport = session(sink)
     start_stream(transport)
-    transport.send_audio(WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
+    transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
     transport.send_control(
         {
             "protocol": "call.v1",
@@ -823,7 +820,7 @@ async def test_playback_stopped_before_ack_remains_valid_after_ack() -> None:
     sink = AcceptanceSink()
     transport = session(sink)
     start_stream(transport)
-    transport.send_audio(WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
+    transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
     transport.send_control(
         {
             "protocol": "call.v1",
@@ -858,7 +855,7 @@ async def test_playback_stopped_before_ack_remains_valid_after_ack() -> None:
 async def test_playback_stopped_rejects_unknown_stop_and_wrong_response() -> None:
     transport = session()
     start_stream(transport)
-    transport.send_audio(WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
+    transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
     transport.send_control(
         {
             "protocol": "call.v1",
@@ -917,7 +914,7 @@ def test_retirement_cannot_cover_unrelated_control_or_other_stream(acknowledged,
     )
 
     if tail_audio:
-        transport.send_audio(WireAudioFrame(1, 2, 1, 1, 3, b"\x00\x01"))
+        transport.send_audio(_WireAudioFrame(1, 2, 1, 1, 3, b"\x00\x01"))
     last_seq = 3 if tail_audio else 2
     if acknowledged:
         transport.acknowledge_server(last_seq)
@@ -951,7 +948,7 @@ def test_replay_buffer_stops_producer_instead_of_evicting_unacked_oldest() -> No
             "state": "preparing",
         }
     )
-    with pytest.raises(CallTransportBackpressure) as raised:
+    with pytest.raises(_CallTransportBackpressure) as raised:
         transport.send_control(
             {
                 "protocol": "call.v1",
@@ -989,7 +986,7 @@ async def test_replay_backpressure_waits_for_ack_and_retries_same_next_seq() -> 
         "client_request_id": "request-2",
         "state": "ringing",
     }
-    with pytest.raises(CallTransportBackpressure):
+    with pytest.raises(_CallTransportBackpressure):
         transport.send_control(candidate)
     waiter = asyncio.create_task(transport.wait_for_replay_capacity(150))
     await asyncio.sleep(0)
@@ -1006,7 +1003,7 @@ async def test_replay_backpressure_waits_for_ack_and_retries_same_next_seq() -> 
 def test_stream_registration_is_not_published_when_replay_storage_rejects_start() -> None:
     transport = session(max_replay_bytes=1)
 
-    with pytest.raises(CallTransportBackpressure, match="REPLAY_BUFFER_FULL"):
+    with pytest.raises(_CallTransportBackpressure, match="REPLAY_BUFFER_FULL"):
         transport.send_control(
             {
                 "protocol": "call.v1",
@@ -1022,7 +1019,7 @@ def test_stream_registration_is_not_published_when_replay_storage_rejects_start(
             }
         )
     with pytest.raises(CallTransportError, match="UNREGISTERED_STREAM"):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, 1, b"\x00\x01"))
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 1, b"\x00\x01"))
 
 
 def test_resume_handshake_is_unsequenced_and_replays_after_cursor() -> None:
@@ -1116,9 +1113,9 @@ def test_response_audio_retention_has_exact_30_second_boundary() -> None:
     payload = b"\x00\x01" * 8_000
 
     for seq in range(2, 92):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, seq, payload))
-    with pytest.raises(CallTransportBackpressure, match="RESPONSE_AUDIO_BUFFER_FULL"):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, 92, b"\x00\x01"))
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, seq, payload))
+    with pytest.raises(_CallTransportBackpressure, match="RESPONSE_AUDIO_BUFFER_FULL"):
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 92, b"\x00\x01"))
 
     assert transport.last_server_seq == 91
 
@@ -1127,7 +1124,7 @@ def test_small_audio_is_not_rejected_by_wall_clock_age() -> None:
     transport = session()
     start_stream(transport)
 
-    output = transport.send_audio(WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
+    output = transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 2, b"\x00\x01"))
 
     assert output.binary is not None
 
@@ -1137,15 +1134,15 @@ def test_audio_ack_releases_response_budget_and_other_response_is_isolated() -> 
     start_stream(transport)
     payload = b"\x00\x01" * 8_000
     for seq in range(2, 92):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, seq, payload))
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, seq, payload))
     start_stream(transport, seq=92, stream_id=2, response_id="response-2")
     for seq in range(93, 183):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 2, seq, payload))
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 2, seq, payload))
 
-    with pytest.raises(CallTransportBackpressure, match="RESPONSE_AUDIO_BUFFER_FULL"):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, 183, b"\x00\x01"))
+    with pytest.raises(_CallTransportBackpressure, match="RESPONSE_AUDIO_BUFFER_FULL"):
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 183, b"\x00\x01"))
     transport.acknowledge_server(2)
-    output = transport.send_audio(WireAudioFrame(1, 2, 0, 1, 183, b"\x00\x01"))
+    output = transport.send_audio(_WireAudioFrame(1, 2, 0, 1, 183, b"\x00\x01"))
 
     assert output.binary is not None
 
@@ -1156,9 +1153,9 @@ async def test_audio_capacity_waits_for_target_response_ack_and_sends_same_next_
     start_stream(transport)
     payload = b"\x00\x01" * 8_000
     for seq in range(2, 92):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, seq, payload))
-    frame = WireAudioFrame(1, 2, 0, 1, 92, b"\x00\x01")
-    wire_bytes = len(BinaryAudioFrameCodec().encode(frame))
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, seq, payload))
+    frame = _WireAudioFrame(1, 2, 0, 1, 92, b"\x00\x01")
+    wire_bytes = len(_BinaryAudioFrameCodec().encode(frame))
     waiter = asyncio.create_task(transport.wait_for_audio_capacity("response-1", wire_bytes, 2))
     await asyncio.sleep(0)
     assert not waiter.done()
@@ -1177,10 +1174,10 @@ async def test_audio_capacity_retirement_wakes_waiter() -> None:
     start_stream(transport)
     payload = b"\x00\x01" * 8_000
     for seq in range(2, 92):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, seq, payload))
-    frame = WireAudioFrame(1, 2, 0, 1, 93, b"\x00\x01")
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, seq, payload))
+    frame = _WireAudioFrame(1, 2, 0, 1, 93, b"\x00\x01")
     waiter = asyncio.create_task(
-        transport.wait_for_audio_capacity("response-1", len(BinaryAudioFrameCodec().encode(frame)), 2)
+        transport.wait_for_audio_capacity("response-1", len(_BinaryAudioFrameCodec().encode(frame)), 2)
     )
     await asyncio.sleep(0)
 
@@ -1204,14 +1201,14 @@ async def test_audio_capacity_retirement_wakes_waiter() -> None:
 async def test_other_response_ack_only_spuriously_wakes_then_target_wait_continues() -> None:
     transport = session(max_replay_bytes=4_000_000)
     start_stream(transport, stream_id=2, response_id="response-2")
-    transport.send_audio(WireAudioFrame(1, 2, 0, 2, 2, b"\x00\x01"))
+    transport.send_audio(_WireAudioFrame(1, 2, 0, 2, 2, b"\x00\x01"))
     start_stream(transport, seq=3)
     payload = b"\x00\x01" * 8_000
     for seq in range(4, 94):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, seq, payload))
-    frame = WireAudioFrame(1, 2, 0, 1, 94, b"\x00\x01")
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, seq, payload))
+    frame = _WireAudioFrame(1, 2, 0, 1, 94, b"\x00\x01")
     waiter = asyncio.create_task(
-        transport.wait_for_audio_capacity("response-1", len(BinaryAudioFrameCodec().encode(frame)), 2)
+        transport.wait_for_audio_capacity("response-1", len(_BinaryAudioFrameCodec().encode(frame)), 2)
     )
     await asyncio.sleep(0)
 
@@ -1228,7 +1225,7 @@ async def test_audio_capacity_close_wakes_with_transport_closed() -> None:
     start_stream(transport)
     payload = b"\x00\x01" * 8_000
     for seq in range(2, 92):
-        transport.send_audio(WireAudioFrame(1, 2, 0, 1, seq, payload))
+        transport.send_audio(_WireAudioFrame(1, 2, 0, 1, seq, payload))
     waiter = asyncio.create_task(transport.wait_for_audio_capacity("response-1", 17, 2))
     await asyncio.sleep(0)
 
@@ -1265,11 +1262,11 @@ def test_stream_rejects_every_frame_after_final_without_advancing_seq() -> None:
             "channels": 1,
         }
     )
-    final = transport.send_audio(WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
+    final = transport.send_audio(_WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
 
     for flags in (0, 1):
         with pytest.raises(CallTransportError, match="STREAM_ALREADY_FINAL"):
-            transport.send_audio(WireAudioFrame(1, 2, flags, 1, 3, b"\x00\x01"))
+            transport.send_audio(_WireAudioFrame(1, 2, flags, 1, 3, b"\x00\x01"))
 
     assert transport.last_server_seq == 2
     assert transport.replay_after(0)[-1] == final
@@ -1279,7 +1276,7 @@ def test_stream_rejects_every_frame_after_final_without_advancing_seq() -> None:
 async def test_acceptance_finishes_and_commits_before_cancellation_propagates() -> None:
     accepted = asyncio.Event()
     release = asyncio.Event()
-    receipts: list[CallAcceptanceReceipt] = []
+    receipts: list[_CallAcceptanceReceipt] = []
 
     class CancelSink:
         async def accept(self, frame, receipt):

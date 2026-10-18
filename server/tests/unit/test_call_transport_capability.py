@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from support.stage_manager import make_stage_manager
 
-from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.call_v1 import CallWebSocketAdapter, parse_call_transport_enabled
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.stage import StageManager
 from src.stage.call_settlement import CallRecoveryReport
@@ -288,8 +288,8 @@ def test_composition_root_does_not_traverse_call_module_internals():
 
     for forbidden in (
         "agent_runtime.skills",
-        "CallTransportHub",
-        "CallStageBinding",
+        "_CallTransportHub",
+        "_CallStageBinding",
         "StaleCallRecoveryService",
         "stale_call_recovery.reconcile",
     ):

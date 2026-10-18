@@ -8,7 +8,7 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.adapter.websocket.client_model_executor import ClientLLMExecutor  # noqa: E402
+from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor  # noqa: E402
 from src.application.admin import admin_shell as admin_shell_module  # noqa: E402
 from src.application.admin.admin_shell import AdminShell  # noqa: E402
 from src.application.admin.runtime_supervisor import RuntimeSupervisor  # noqa: E402
@@ -65,13 +65,13 @@ async def test_server_runtime_shutdown_is_ordered_idempotent_and_retryable():
 async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks():
     import asyncio
 
-    from src.adapter.websocket.call_v1.transport import CallTransportHub
+    from src.adapter.websocket.call_v1._transport import _CallTransportHub
 
     calls = []
     world = OrderedAsyncService(calls, "world", "stop_background_services")
     agent = OrderedAsyncService(calls, "agent", "shutdown")
     database = OrderedAsyncService(calls, "database", "shutdown")
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     entered = asyncio.Event()
     cancelled = asyncio.Event()
 

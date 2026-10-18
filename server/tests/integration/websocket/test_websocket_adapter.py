@@ -1,4 +1,4 @@
-"""通过 adapter 公共接口验证真实 SAY、协议兼容、隔离和断线收尾。"""
+"""通过输出 sink 与内部绑定夹具验证 SAY、隔离和收尾；原始网络入口另有专项测试。"""
 
 import asyncio
 import base64
@@ -13,9 +13,12 @@ import pytest
 from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from PIL import Image
+from support.chat_connection import StubChatConnection
 
 import src.domain.agent as d
-from src.adapter.websocket import ChatEventAcceptance, WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat._messages import _BUSINESS_INPUT_EVENTS, _WSMessage
+from src.adapter.websocket.chat.adapter import _ChatEventAcceptance
 from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -33,8 +36,6 @@ from src.infrastructure.media import (
     MediaResolutionError,
     MediaResolutionErrorCode,
 )
-from src.web.websocket import BUSINESS_INPUT_EVENTS, WSMessage
-from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:
@@ -78,10 +79,10 @@ class Endpoint:
 
 async def setup_output(adapter=None, interaction_id="interaction", user_id="user"):
     socket = Socket()
-    connection = WebSocketConnection(socket, user_id, "用户")
+    connection = StubChatConnection(socket, user_id, "用户")
     adapter = adapter or WebSocketAdapter()
     stage = Endpoint(interaction_id, user_id)
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     return socket, connection, adapter, stage
 
 
@@ -91,7 +92,7 @@ class OutputPort:
         self.futures = []
 
     async def emit(self, value):
-        self.futures.append(self.adapter.submit_output(value))
+        self.futures.append(self.adapter.output_sink.submit_output(value))
         return d.OutputReceipt(
             execution_id=value.execution_id, sequence_no=value.sequence_no, status=d.OutputAcceptanceStatus.ACCEPTED
         )
@@ -207,21 +208,21 @@ async def test_real_say_protocol(tmp_path, prepared, delivery):
         assert [p["text"] for p in packets if p["text"]] == ([] if ephemeral else ["你好"])
         assert calls == ([] if prepared else ["你好"])
     finally:
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_persisted_message_id_is_used_as_websocket_uuid():
     socket, connection, adapter, stage = await setup_output()
     try:
-        first = adapter.submit_output(output(message_id="history-entry"))
-        tail = adapter.submit_output(end(sequence_no=1, message_id="history-entry"))
+        first = adapter.output_sink.submit_output(output(message_id="history-entry"))
+        tail = adapter.output_sink.submit_output(end(sequence_no=1, message_id="history-entry"))
         await asyncio.gather(first, tail)
 
         packets = [event["payload"] for event in socket.events]
         assert [packet["uuid"] for packet in packets] == ["history-entry", "history-entry"]
     finally:
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -273,42 +274,47 @@ async def test_real_sing_protocol_delivers_lyrics_audio_and_history_identity():
         assert b"".join(base64.b64decode(packet["audio"]) for packet in packets) == expected
         assert packets[-1]["is_final_package"] is True
     finally:
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_whole_messages_are_ordered_and_other_connection_is_independent():
     socket, connection, adapter, stage = await setup_output()
     other = Endpoint("other", character_id="miku")
-    await adapter.bind(other, connection)
+    await adapter._bind(other, connection)
     socket.gate = asyncio.Event()
-    first = adapter.submit_output(output())
+    first = adapter.output_sink.submit_output(output())
     await socket.entered.wait()
-    tail = adapter.submit_output(end())
-    second = adapter.submit_output(output(interaction_id="other", text="second"))
-    last = adapter.submit_output(end(interaction_id="other"))
+    tail = adapter.output_sink.submit_output(end())
+    second = adapter.output_sink.submit_output(output(interaction_id="other", text="second"))
+    last = adapter.output_sink.submit_output(end(interaction_id="other"))
     independent, _, _, third = await setup_output(adapter, "third", "another")
-    await adapter.submit_output(output(interaction_id="third"))
-    await adapter.submit_output(end(interaction_id="third"))
+    await adapter.output_sink.submit_output(output(interaction_id="third"))
+    await adapter.output_sink.submit_output(end(interaction_id="third"))
     assert independent.events and not first.done() and not second.done()
     socket.gate.set()
     await asyncio.gather(first, tail, second, last)
     assert [p["payload"]["is_final_package"] for p in socket.events] == [False, True, False, True]
     for item in (stage, other, third):
-        await adapter.disconnect(item)
+        await adapter.detach_stage_binding(item)
 
 
 @pytest.mark.asyncio
 async def test_cancel_marks_before_return_and_ends_inflight_before_next_message():
     socket, connection, adapter, stage = await setup_output()
     socket.gate = asyncio.Event()
-    first = adapter.submit_output(output(d.AudioChunkOutput, data=b"x" * 100000, framing=d.AudioFraming.COMPLETE_FILE))
-    tail = adapter.submit_output(end())
+    first = adapter.output_sink.submit_output(
+        output(d.AudioChunkOutput, data=b"x" * 100000, framing=d.AudioFraming.COMPLETE_FILE)
+    )
+    tail = adapter.output_sink.submit_output(end())
     await socket.entered.wait()
-    cancelled = adapter.submit_output(CancelDelivery(interaction_id="interaction", execution_id="execution"))
+    cancelled = adapter.output_sink.submit_output(
+        CancelDelivery(interaction_id="interaction", execution_id="execution")
+    )
+    await asyncio.sleep(0)  # shield relays explicit delivery cancellation to waiters
     assert first.cancelled() and tail.cancelled()
-    following = adapter.submit_output(output(execution_id="next"))
-    last = adapter.submit_output(end(execution_id="next"))
+    following = adapter.output_sink.submit_output(output(execution_id="next"))
+    last = adapter.output_sink.submit_output(end(execution_id="next"))
     assert not cancelled.done()
     socket.gate.set()
     await asyncio.gather(cancelled, following, last)
@@ -318,61 +324,61 @@ async def test_cancel_marks_before_return_and_ends_inflight_before_next_message(
     assert packets[1]["is_final_package"] and packets[1]["error_code"] == "TTS_CANCELLED"
     assert packets[1]["text"] == packets[1]["audio"] == packets[1]["expression"] == ""
     assert packets[2]["uuid"] != packets[1]["uuid"]
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_unstarted_cancel_releases_capacity_without_packets():
     socket, _, adapter, stage = await setup_output(WebSocketAdapter({"max_outputs": 1}))
-    first = adapter.submit_output(output())
+    first = adapter.output_sink.submit_output(output())
     with pytest.raises(d.SinkRejectedError) as rejected:
-        adapter.submit_output(end())
+        adapter.output_sink.submit_output(end())
     assert rejected.value.code is d.SinkRejectionCode.BACKPRESSURE_TIMEOUT
-    await adapter.submit_output(CancelDelivery(interaction_id="interaction", execution_id="execution"))
+    await adapter.output_sink.submit_output(CancelDelivery(interaction_id="interaction", execution_id="execution"))
     assert first.cancelled() and not socket.events
-    await adapter.submit_output(output(execution_id="next"))
-    await adapter.submit_output(end(execution_id="next"))
-    await adapter.disconnect(stage)
+    await adapter.output_sink.submit_output(output(execution_id="next"))
+    await adapter.output_sink.submit_output(end(execution_id="next"))
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_disconnect_rebind_and_late_old_disconnect():
     socket, old, adapter, stage = await setup_output()
-    first = adapter.submit_output(output())
+    first = adapter.output_sink.submit_output(output())
     old.mark_disconnected()
-    await adapter.disconnect(stage, old)
+    await adapter.detach_stage_binding(stage, old)
     with pytest.raises(ConnectionError):
         await first
     new_socket = Socket()
-    new = WebSocketConnection(new_socket, "user", "用户")
-    await adapter.bind(stage, new)
-    await adapter.disconnect(stage, old)
-    await adapter.submit_output(output(execution_id="new"))
-    await adapter.submit_output(end(execution_id="new"))
+    new = StubChatConnection(new_socket, "user", "用户")
+    await adapter._bind(stage, new)
+    await adapter.detach_stage_binding(stage, old)
+    await adapter.output_sink.submit_output(output(execution_id="new"))
+    await adapter.output_sink.submit_output(end(execution_id="new"))
     assert len(new_socket.events) == 2
     assert stage.states == [d.ConnectionState.CONNECTED, d.ConnectionState.DISCONNECTED, d.ConnectionState.CONNECTED]
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_network_failure_fails_all_futures_without_retry():
     socket, _, adapter, stage = await setup_output()
     socket.fail = True
-    results = [adapter.submit_output(output()), adapter.submit_output(end())]
+    results = [adapter.output_sink.submit_output(output()), adapter.output_sink.submit_output(end())]
     assert all(isinstance(result, ConnectionError) for result in await asyncio.gather(*results, return_exceptions=True))
     with pytest.raises(d.SinkRejectedError):
-        adapter.submit_output(output(execution_id="new"))
-    await adapter.disconnect(stage)
+        adapter.output_sink.submit_output(output(execution_id="new"))
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_disconnect_waits_for_inflight_send_and_settles_futures():
     socket, connection, adapter, stage = await setup_output()
     socket.gate = asyncio.Event()
-    future = adapter.submit_output(output())
+    future = adapter.output_sink.submit_output(output())
     await socket.entered.wait()
     connection.mark_disconnected()
-    closing = asyncio.create_task(adapter.disconnect(stage, connection))
+    closing = asyncio.create_task(adapter.detach_stage_binding(stage, connection))
     with pytest.raises(ConnectionError):
         await asyncio.wait_for(asyncio.shield(future), 1)
     assert not closing.done()
@@ -385,9 +391,9 @@ async def test_disconnect_waits_for_inflight_send_and_settles_futures():
 async def test_cancelling_disconnect_caller_still_finishes_binding_cleanup():
     socket, connection, adapter, stage = await setup_output()
     socket.gate = asyncio.Event()
-    future = adapter.submit_output(output())
+    future = adapter.output_sink.submit_output(output())
     await socket.entered.wait()
-    closing = asyncio.create_task(adapter.disconnect(stage, connection))
+    closing = asyncio.create_task(adapter.detach_stage_binding(stage, connection))
 
     # 等待解除操作真正开始，再取消调用者。
     async def disconnected():
@@ -401,18 +407,18 @@ async def test_cancelling_disconnect_caller_still_finishes_binding_cleanup():
         await closing
     assert future.cancelled()
     with pytest.raises(d.SinkRejectedError):
-        adapter.submit_output(end())
-    await adapter.bind(stage, WebSocketConnection(Socket(), "user", "用户"))
-    await adapter.submit_output(end(execution_id="new"))
-    await adapter.disconnect(stage)
+        adapter.output_sink.submit_output(end())
+    await adapter._bind(stage, StubChatConnection(Socket(), "user", "用户"))
+    await adapter.output_sink.submit_output(end(execution_id="new"))
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_input_targets_are_atomic_and_use_authenticated_identity():
     _, connection, adapter, stage = await setup_output()
     other = Endpoint("other", character_id="miku")
-    await adapter.bind(other, connection)
-    event = WSMessage(
+    await adapter._bind(other, connection)
+    event = _WSMessage(
         event_type="user_text",
         client_msg_id="one",
         payload={"text": "你好", "target_character_ids": ["luotianyi", "miku"], "user_id": "forged"},
@@ -428,12 +434,12 @@ async def test_input_targets_are_atomic_and_use_authenticated_identity():
     with pytest.raises(ValueError):
         await adapter._receive_event(
             connection,
-            WSMessage(
+            _WSMessage(
                 event_type="user_text", client_msg_id="bad", payload={"text": "hi", "target_character_ids": ["missing"]}
             ),
         )
     for endpoint in (stage, other):
-        await adapter.disconnect(endpoint)
+        await adapter.detach_stage_binding(endpoint)
 
 
 @pytest.mark.asyncio
@@ -446,7 +452,7 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
         )
     )
     image = png_bytes()
-    event = WSMessage(
+    event = _WSMessage(
         event_type="user_image",
         client_msg_id="image-one",
         payload={
@@ -467,7 +473,7 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
     assert metadata["owner_user_id"] == "user"
     assert await adapter._receive_event(connection, event)
     assert stage.stimuli[1].media_ref == stimulus.media_ref
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -483,12 +489,12 @@ async def test_image_persistence_conflict_prevents_stimulus_delivery(tmp_path):
     first_image = png_bytes()
     other_image = BytesIO()
     Image.new("RGB", (2, 1)).save(other_image, format="PNG")
-    first = WSMessage(
+    first = _WSMessage(
         event_type="user_image",
         client_msg_id="same",
         payload={**common, "image_base64": base64.b64encode(first_image).decode("ascii")},
     )
-    conflict = WSMessage(
+    conflict = _WSMessage(
         event_type="user_image",
         client_msg_id="same",
         payload={**common, "image_base64": base64.b64encode(other_image.getvalue()).decode("ascii")},
@@ -498,7 +504,7 @@ async def test_image_persistence_conflict_prevents_stimulus_delivery(tmp_path):
     with pytest.raises(ValueError, match="content conflict"):
         await adapter._receive_event(connection, conflict)
     assert len(stage.stimuli) == 1
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -512,7 +518,7 @@ async def test_image_is_not_materialized_when_target_is_missing_or_overloaded(tm
         )
     )
     encoded = base64.b64encode(png_bytes()).decode("ascii")
-    missing = WSMessage(
+    missing = _WSMessage(
         event_type="user_image",
         client_msg_id="missing",
         payload={
@@ -524,7 +530,7 @@ async def test_image_is_not_materialized_when_target_is_missing_or_overloaded(tm
     with pytest.raises(ValueError, match="not bound"):
         await adapter._receive_event(connection, missing)
     stage.available = False
-    overloaded = WSMessage(
+    overloaded = _WSMessage(
         event_type="user_image",
         client_msg_id="overloaded",
         payload={
@@ -534,7 +540,7 @@ async def test_image_is_not_materialized_when_target_is_missing_or_overloaded(tm
     )
     assert not await adapter._receive_event(connection, overloaded)
     assert not list(root.iterdir())
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -547,7 +553,7 @@ async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_p
             }
         )
     )
-    oversize = WSMessage(
+    oversize = _WSMessage(
         event_type="user_image",
         client_msg_id="large",
         payload={
@@ -558,7 +564,7 @@ async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_p
     with pytest.raises(MediaResolutionError) as too_large:
         await adapter._receive_event(connection, oversize)
     assert too_large.value.code is MediaResolutionErrorCode.TOO_LARGE
-    invalid = WSMessage(
+    invalid = _WSMessage(
         event_type="user_image",
         client_msg_id="invalid",
         payload={
@@ -570,7 +576,7 @@ async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_p
         await adapter._receive_event(connection, invalid)
     assert invalid_image.value.code is MediaResolutionErrorCode.UNKNOWN
     assert not list(root.iterdir())
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -587,7 +593,7 @@ async def test_image_mime_is_detected_persisted_and_resolved(tmp_path, declarati
         WebSocketAdapter({"media_store": {"root": str(root), "max_bytes": 1024}})
     )
     image = png_bytes()
-    event = WSMessage(
+    event = _WSMessage(
         event_type="user_image",
         client_msg_id="detected",
         payload={"image_base64": prefix + base64.b64encode(image).decode("ascii"), **declaration},
@@ -603,7 +609,7 @@ async def test_image_mime_is_detected_persisted_and_resolved(tmp_path, declarati
     event.payload["mime_type"] = "image/gif"
     assert await adapter._receive_event(connection, event)
     assert stage.stimuli[1].media_ref == media_ref
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -624,7 +630,7 @@ async def test_image_persistence_runs_off_event_loop_thread(tmp_path, monkeypatc
         return original(**kwargs)
 
     monkeypatch.setattr(adapter._media_store, "persist_image", record_thread)
-    event = WSMessage(
+    event = _WSMessage(
         event_type="user_image",
         client_msg_id="thread",
         payload={
@@ -636,44 +642,44 @@ async def test_image_persistence_runs_off_event_loop_thread(tmp_path, monkeypatc
     assert await adapter._receive_event(connection, event)
 
     assert observed_threads and observed_threads[0] != event_loop_thread
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_adapter_dedup_overload_typing_and_maintenance_bypass():
     _, connection, adapter, stage = await setup_output()
-    event = WSMessage(event_type="user_typing", client_msg_id="typing", payload={"text_length": 4})
+    event = _WSMessage(event_type="user_typing", client_msg_id="typing", payload={"text_length": 4})
     stage.available = False
-    assert await adapter.receive(connection, event) is ChatEventAcceptance.OVERLOADED
+    assert await adapter._receive(connection, event) is _ChatEventAcceptance.OVERLOADED
     stage.available = True
-    assert await adapter.receive(connection, event) is ChatEventAcceptance.ACCEPTED
-    assert await adapter.receive(connection, event) is ChatEventAcceptance.DUPLICATE
+    assert await adapter._receive(connection, event) is _ChatEventAcceptance.ACCEPTED
+    assert await adapter._receive(connection, event) is _ChatEventAcceptance.DUPLICATE
     assert len(stage.stimuli) == 1 and isinstance(stage.stimuli[0], d.UserTyping)
     assert stage.stimuli[0].text_length == 4
-    bad = WSMessage(event_type="user_typing", client_msg_id="bad", payload={"text_length": True})
-    assert await adapter.receive(connection, bad) is ChatEventAcceptance.BAD_MESSAGE
+    bad = _WSMessage(event_type="user_typing", client_msg_id="bad", payload={"text_length": True})
+    assert await adapter._receive(connection, bad) is _ChatEventAcceptance.BAD_MESSAGE
     assert (
-        await adapter.receive(connection, WSMessage(event_type="heartbeat", payload={}))
-        is ChatEventAcceptance.UNSUPPORTED
+        await adapter._receive(connection, _WSMessage(event_type="heartbeat", payload={}))
+        is _ChatEventAcceptance.UNSUPPORTED
     )
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_adapter_business_suspension_rejects_without_dedup_or_stage_delivery():
     _, connection, adapter, stage = await setup_output()
-    event = WSMessage(event_type="user_typing", client_msg_id="suspended", payload={"text_length": 4})
+    event = _WSMessage(event_type="user_typing", client_msg_id="suspended", payload={"text_length": 4})
     stage.input_suspended = True
 
-    rejection = await adapter.receive(connection, event)
+    rejection = await adapter._receive(connection, event)
 
     assert rejection.code == "CALL_SWITCH_PENDING"
     assert rejection.retryable is True
     assert stage.stimuli == []
     assert not adapter._is_duplicate_client_message(connection, event)
     stage.input_suspended = False
-    assert await adapter.receive(connection, event) is ChatEventAcceptance.ACCEPTED
-    await adapter.disconnect(stage)
+    assert await adapter._receive(connection, event) is _ChatEventAcceptance.ACCEPTED
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -689,32 +695,32 @@ async def test_image_finishing_after_admission_changes_is_not_delivered(tmp_path
         return persist(**kwargs)
 
     monkeypatch.setattr(adapter._media_store, "persist_image", blocked_persist)
-    event = WSMessage(
+    event = _WSMessage(
         event_type="user_image",
         client_msg_id="late-image",
         payload={"image_base64": base64.b64encode(png_bytes()).decode("ascii")},
     )
-    receiving = asyncio.create_task(adapter.receive(connection, event))
+    receiving = asyncio.create_task(adapter._receive(connection, event))
     try:
         assert await asyncio.to_thread(entered.wait, 5)
         if change == "suspend":
             stage.input_suspended = True
         elif change == "disconnect":
-            await adapter.disconnect(stage)
+            await adapter.detach_stage_binding(stage)
         else:
-            await adapter.bind(stage, WebSocketConnection(Socket(), "user", "replacement"))
+            await adapter._bind(stage, StubChatConnection(Socket(), "user", "replacement"))
         release.set()
-        assert await receiving is ChatEventAcceptance.OVERLOADED
+        assert await receiving is _ChatEventAcceptance.OVERLOADED
         assert not stage.stimuli
         assert not adapter._is_duplicate_client_message(connection, event)
     finally:
         release.set()
         await asyncio.gather(receiving, return_exceptions=True)
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 def test_adapter_warns_when_media_store_is_not_configured(caplog, capture_project_log):
-    capture_project_log("src.adapter.websocket.adapter")
+    capture_project_log("src.adapter.websocket.chat.adapter")
 
     WebSocketAdapter()
 
@@ -725,7 +731,7 @@ def test_adapter_warns_when_media_store_is_not_configured(caplog, capture_projec
 async def test_touch_and_image_selection_business_events_become_typed_stimuli():
     _, connection, adapter, stage = await setup_output()
     events = (
-        WSMessage(
+        _WSMessage(
             event_type="user_touch",
             client_msg_id="touch",
             payload={
@@ -733,12 +739,12 @@ async def test_touch_and_image_selection_business_events_become_typed_stimuli():
                 "click_frequency": {"count_10s": 2, "count_30s": 5},
             },
         ),
-        WSMessage(event_type="user_image_selecting", client_msg_id="selecting", payload={}),
-        WSMessage(event_type="user_image_selecting_cancel", client_msg_id="closed", payload={}),
+        _WSMessage(event_type="user_image_selecting", client_msg_id="selecting", payload={}),
+        _WSMessage(event_type="user_image_selecting_cancel", client_msg_id="closed", payload={}),
     )
 
     for event in events:
-        assert await adapter.receive(connection, event) is ChatEventAcceptance.ACCEPTED
+        assert await adapter._receive(connection, event) is _ChatEventAcceptance.ACCEPTED
 
     touch, opened, closed = stage.stimuli
     assert isinstance(touch, d.TouchInteraction)
@@ -747,19 +753,19 @@ async def test_touch_and_image_selection_business_events_become_typed_stimuli():
     assert isinstance(opened, d.ImageSelectionOpened)
     assert isinstance(closed, d.ImageSelectionClosed)
     assert all(stimulus.ephemeral for stimulus in stage.stimuli)
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_malformed_voice_upload_is_rejected_by_unified_entry():
     _, connection, adapter, stage = await setup_output()
-    event = WSMessage(event_type="user_voice", client_msg_id="voice", payload={})
+    event = _WSMessage(event_type="user_voice", client_msg_id="voice", payload={})
 
-    assert "user_voice" in BUSINESS_INPUT_EVENTS
-    assert adapter.supports_input(event)
-    assert (await adapter.receive(connection, event)).code == "BAD_MESSAGE"
+    assert "user_voice" in _BUSINESS_INPUT_EVENTS
+    assert adapter._supports_input(event)
+    assert (await adapter._receive(connection, event)).code == "BAD_MESSAGE"
     assert stage.stimuli == []
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.parametrize(
@@ -774,21 +780,21 @@ async def test_malformed_voice_upload_is_rejected_by_unified_entry():
 @pytest.mark.asyncio
 async def test_terminal_mapping(status, code, expected):
     socket, _, adapter, stage = await setup_output()
-    await adapter.submit_output(output(d.MessageEndOutput, status=status, error_code=code))
+    await adapter.output_sink.submit_output(output(d.MessageEndOutput, status=status, error_code=code))
     assert socket.events[0]["payload"]["error_code"] == expected
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_foreign_binding_rejected_and_state_signal_supported():
     socket, _, adapter, stage = await setup_output()
     with pytest.raises(ValueError):
-        await adapter.bind(stage, WebSocketConnection(Socket(), "other", "其他人"))
-    await adapter.submit_output(
+        await adapter._bind(stage, StubChatConnection(Socket(), "other", "其他人"))
+    await adapter.output_sink.submit_output(
         AgentPresentationChanged(interaction_id="interaction", state=AgentPresentationState.THINKING)
     )
     assert socket.events[0]["payload"] == {"state": "thinking"}
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.parametrize("config", [[], {"max_outputs": 0}, {"max_bytes": True}, {"max_messages": -1}])
@@ -804,11 +810,11 @@ def test_real_fastapi_websocket_prepared_say(tmp_path):
     @app.websocket("/test")
     async def endpoint(websocket: WebSocket):
         await websocket.accept()
-        connection = WebSocketConnection(websocket, "user", "用户")
+        connection = StubChatConnection(websocket, "user", "用户")
         adapter, stage = WebSocketAdapter(), Endpoint()
-        await adapter.bind(stage, connection)
+        await adapter._bind(stage, connection)
         try:
-            event = WSMessage(**await websocket.receive_json())
+            event = _WSMessage(**await websocket.receive_json())
             assert await adapter._receive_event(connection, event)
             assert stage.stimuli[0].text == "你好"
             port = OutputPort(adapter)
@@ -821,7 +827,7 @@ def test_real_fastapi_websocket_prepared_say(tmp_path):
             await agent.realize_action_plan(plan, context, port)
             await asyncio.gather(*port.futures)
         finally:
-            await adapter.disconnect(stage)
+            await adapter.detach_stage_binding(stage)
             await websocket.close()
 
     with TestClient(app) as client, client.websocket_connect("/test") as websocket:

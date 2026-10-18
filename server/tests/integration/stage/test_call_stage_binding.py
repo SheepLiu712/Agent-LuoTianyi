@@ -6,11 +6,11 @@ from uuid import UUID
 
 import pytest
 
-from src.adapter.websocket.call_v1 import BinaryAudioFrameCodec, WireAudioFrame
-from src.adapter.websocket.call_v1.stage_binding import CallStageBinding
-from src.adapter.websocket.call_v1.transport import (
-    CallTransportConfig,
-    CallTransportSession,
+from src.adapter.websocket.call_v1._audio_codec import _BinaryAudioFrameCodec, _WireAudioFrame
+from src.adapter.websocket.call_v1._stage_binding import _CallStageBinding
+from src.adapter.websocket.call_v1._transport import (
+    _CallTransportConfig,
+    _CallTransportSession,
 )
 from src.domain.agent import CALL_PCM_FORMAT
 from src.domain.call import (
@@ -55,8 +55,8 @@ async def test_interrupt_after_partial_or_full_transport_ack_preserves_retiremen
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
     binding.bind(stage=_Stage(), session=session)
     await binding.start_stream("response", 1, CALL_PCM_FORMAT)
     await binding.send_pcm("response", 1, b"\x00\x01", final=False)
@@ -92,8 +92,8 @@ async def test_completion_racing_stop_accepts_both_receipts_and_next_audio():
     async def deliver(output):
         pass
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
     stage = SettlingStage()
     binding.bind(stage=stage, session=session)
     stage._playback.register_stream("response", 1)
@@ -112,7 +112,7 @@ async def test_completion_racing_stop_accepts_both_receipts_and_next_audio():
     assert json.loads((await session.receive_text(completed))[0].text)["ack_seq"] == 1
     assert json.loads((await session.receive_text(stopped))[0].text)["ack_seq"] == 2
     assert json.loads((await session.receive_text(stopped))[0].text)["ack_seq"] == 2
-    raw = BinaryAudioFrameCodec().encode(WireAudioFrame(1, 2, 0, 0, 3, b"\x02\x03"))
+    raw = _BinaryAudioFrameCodec().encode(_WireAudioFrame(1, 2, 0, 0, 3, b"\x02\x03"))
     assert json.loads((await session.receive_binary(raw))[0].text)["ack_seq"] == 3
     assert stage.stopped == [("response", 1)]
     assert len(stage.pcm) == 1
@@ -125,8 +125,8 @@ async def test_real_binding_uses_one_transport_sequence_for_control_and_audio_an
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(
         call_id=binding.call_id,
         user_id="user",
         character_id="luotianyi",
@@ -139,7 +139,7 @@ async def test_real_binding_uses_one_transport_sequence_for_control_and_audio_an
     await binding.send_pcm("response", 1, b"\x00\x01", final=True)
 
     started = json.loads(delivered[0].text)
-    audio = BinaryAudioFrameCodec().decode(delivered[1].binary)
+    audio = _BinaryAudioFrameCodec().decode(delivered[1].binary)
     assert started["seq"] == 1
     assert audio.seq == 2
     assert audio.flags == 1
@@ -155,7 +155,7 @@ async def test_real_binding_uses_one_transport_sequence_for_control_and_audio_an
         }
     )
     await session.receive_text(control)
-    raw = BinaryAudioFrameCodec().encode(WireAudioFrame(1, 2, 0, 0, 2, b"\x02\x03"))
+    raw = _BinaryAudioFrameCodec().encode(_WireAudioFrame(1, 2, 0, 0, 2, b"\x02\x03"))
     await session.receive_binary(raw)
 
     assert stage.completed == [("response", 1)]
@@ -172,13 +172,13 @@ async def test_binding_backpressure_blocks_without_consuming_additional_pcm():
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(
         call_id=binding.call_id,
         user_id="user",
         character_id="luotianyi",
         sink=binding,
-        config=CallTransportConfig(max_replay_bytes=500),
+        config=_CallTransportConfig(max_replay_bytes=500),
     )
     binding.bind(stage=_Stage(), session=session)
     await binding.start_stream("response", 1, CALL_PCM_FORMAT)
@@ -204,8 +204,8 @@ async def test_binding_does_not_encode_internal_or_terminal_states_as_call_state
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(
         call_id=binding.call_id,
         user_id="user",
         character_id="luotianyi",
@@ -226,8 +226,8 @@ async def test_binding_encodes_state_from_public_event_facts_without_stage_inter
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(
         call_id=binding.call_id,
         user_id="user",
         character_id="luotianyi",
@@ -259,8 +259,8 @@ async def test_binding_sends_frozen_terminal_facts_exactly_once(outcome, reason,
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(
         call_id=binding.call_id,
         user_id="user",
         character_id="luotianyi",
@@ -291,8 +291,8 @@ async def test_binding_setup_failure_uses_nonrecordable_error_without_consuming_
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(
         call_id=binding.call_id,
         user_id="user",
         character_id="luotianyi",
@@ -318,8 +318,8 @@ async def test_reply_audio_failure_reports_error_and_keeps_transport_usable():
     async def deliver(output):
         delivered.append(output)
 
-    binding = CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
-    session = CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
+    binding = _CallStageBinding(call_id="606ec5e6-a330-4e6c-b07a-8432a5716c8f", deliver=deliver)
+    session = _CallTransportSession(call_id=binding.call_id, user_id="user", character_id="luotianyi", sink=binding)
     binding.bind(stage=_Stage(), session=session)
 
     await binding.send_state(CallReplyFailed(binding.call_id))
@@ -332,6 +332,6 @@ async def test_reply_audio_failure_reports_error_and_keeps_transport_usable():
         "retryable": False,
         "call_id": binding.call_id,
     }
-    assert not binding.terminal_delivered.is_set()
+    assert not binding.terminal_enqueued.is_set()
     await binding.start_stream("next-response", 1, CALL_PCM_FORMAT)
     assert json.loads(delivered[1].text)["seq"] == 1

@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.adapter.websocket.call_v1.transport import (
-    CallAcceptanceReceipt,
-    CallTransportHub,
-    CallTransportSession,
-    InboundCallFrame,
+from src.adapter.websocket.call_v1._transport import (
+    _CallAcceptanceReceipt,
+    _CallTransportHub,
+    _CallTransportSession,
+    _InboundCallFrame,
 )
 from src.server_runtime import CallCapabilityStatus
 from src.web.websocket import call_endpoint
@@ -19,9 +19,9 @@ CALL_ID = "606ec5e6-a330-4e6c-b07a-8432a5716c8f"
 
 class Sink:
     def __init__(self) -> None:
-        self.frames: list[InboundCallFrame] = []
+        self.frames: list[_InboundCallFrame] = []
 
-    async def accept(self, frame: InboundCallFrame, receipt: CallAcceptanceReceipt) -> bool:
+    async def accept(self, frame: _InboundCallFrame, receipt: _CallAcceptanceReceipt) -> bool:
         del receipt
         self.frames.append(frame)
         return True
@@ -36,9 +36,9 @@ class CredentialService:
 def runtime(*, available: bool):
     from src.web.websocket import WebSocketService
 
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     sink = Sink()
-    session = CallTransportSession(call_id=CALL_ID, user_id="user-1", character_id="luotianyi", sink=sink)
+    session = _CallTransportSession(call_id=CALL_ID, user_id="user-1", character_id="luotianyi", sink=sink)
     hub.register(session)
     return (
         SimpleNamespace(
@@ -117,7 +117,7 @@ def test_call_endpoint_rejects_call_start_without_production_adapter(monkeypatch
 
 def test_hub_rejects_second_active_connection_and_allows_resume_after_detach():
     _, session, _ = runtime(available=True)
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     hub.register(session)
     raw = json.dumps(
         {
@@ -155,9 +155,9 @@ def test_hub_rejects_second_active_connection_and_allows_resume_after_detach():
 
 def test_hub_unregister_requires_expected_session_and_closes_registered_state():
     _, session, _ = runtime(available=True)
-    hub = CallTransportHub()
+    hub = _CallTransportHub()
     hub.register(session)
-    other = CallTransportSession(call_id=CALL_ID, user_id="user-1", character_id="luotianyi", sink=Sink())
+    other = _CallTransportSession(call_id=CALL_ID, user_id="user-1", character_id="luotianyi", sink=Sink())
 
     async def scenario():
         assert await hub.unregister(CALL_ID, expected_session=other) is False

@@ -6,7 +6,7 @@ import pytest
 from support.stage_manager import make_stage_manager
 
 import src.server_runtime as runtime_module
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.infrastructure.persistence.database import vector_store as vector_store_module
@@ -172,6 +172,7 @@ async def test_initialization_rollback_waits_for_stage_manager_before_agent_and_
         stage_manager = SimpleNamespace(
             close=lambda: _record_wait(calls, "stage_manager_started", "stage_manager_stopped", stage_release)
         )
+        chat_adapter = SimpleNamespace(close=lambda: _record(calls, "chat_adapter"))
         call_adapter = SimpleNamespace(close=lambda: _record(calls, "transport"))
 
     world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
@@ -230,6 +231,7 @@ async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_de
     runtime = SimpleNamespace(
         close_world_stages=lambda: _record(calls, "world_stages"),
         stage_manager=manager,
+        chat_adapter=SimpleNamespace(close=lambda: _record(calls, "chat_adapter")),
         call_adapter=SimpleNamespace(close=lambda: _record(calls, "transport")),
     )
     world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
@@ -305,6 +307,7 @@ async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_fail
     runtime = SimpleNamespace(
         close_world_stages=lambda: _record(calls, "world_stages"),
         stage_manager=manager,
+        chat_adapter=SimpleNamespace(close=lambda: _record(calls, "chat_adapter")),
         call_adapter=SimpleNamespace(close=lambda: _record(calls, "transport")),
     )
     rollback = asyncio.create_task(

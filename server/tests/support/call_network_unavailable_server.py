@@ -20,9 +20,9 @@ import uvicorn
 from fastapi import FastAPI
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
-from src.adapter.websocket import WebSocketAdapter
 from src.adapter.websocket.call_v1 import CallWebSocketAdapter
-from src.adapter.websocket.client_model_executor import ClientLLMExecutor
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.application.host_context import ServerHostContext
 from src.infrastructure.observability import CallMetrics, ObservabilityService

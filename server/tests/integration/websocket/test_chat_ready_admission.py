@@ -1,11 +1,13 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.stage import InteractionFinalizing
 from src.stage.interaction_lease import InteractionLease, InteractionLeaseRegistry, InteractionSource
 from src.stage.stage_manager import InteractionOwnedByCallAdmission
@@ -24,7 +26,10 @@ class Socket:
     async def send_json(self, event):
         self.sent.append(event)
 
-    async def close(self, code):
+    async def send_text(self, text):
+        self.sent.append(json.loads(text))
+
+    async def close(self, code, reason=None):
         self.close_codes.append(code)
 
 
@@ -35,13 +40,15 @@ class BoundManager:
         self.connected = []
         self.disconnected = []
 
-    async def connect(self, connection, character_id):
+    async def try_to_get_stage(self, *, connection, character_id, user_id):
         self.connected.append((connection, character_id))
         if self.finalizing:
             raise InteractionFinalizing()
         if self.owned_by_call:
             raise InteractionOwnedByCallAdmission(InteractionSource.CALL)
-        return SimpleNamespace(interaction_id="chat-interaction")
+        from tests.integration.websocket.test_websocket_adapter import Endpoint
+
+        return Endpoint("chat-interaction", user_id, character_id)
 
     async def disconnect(self, connection):
         self.disconnected.append(connection)
@@ -53,11 +60,13 @@ async def _authenticate(self, _service, _database):
 
 
 def _runtime(manager):
+    adapter = WebSocketAdapter()
+    adapter.initialize(manager)
     return SimpleNamespace(
         websocket_service=WebSocketService(),
         database_manager=SimpleNamespace(),
         stage_manager=manager,
-        chat_adapter=SimpleNamespace(open=manager.connect, close_connection=manager.disconnect),
+        chat_adapter=adapter,
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         client_llm_executor=SimpleNamespace(clear_user=lambda *_args: None),
     )
@@ -74,10 +83,13 @@ async def test_chat_ready_is_sent_only_after_stage_binding(monkeypatch):
     )
     monkeypatch.setattr(WebSocketConnection, "auth", _authenticate)
 
-    async def disconnect_after_ready(_runtime, _connection):
+    async def disconnect_after_ready(socket, adapter, connection):
+        output = await adapter.next_output(connection)
+        await socket.send_text(output.message)
+        adapter.complete_output(connection, output.delivery_id)
         raise WebSocketDisconnect()
 
-    monkeypatch.setattr(endpoint, "_receive_events", disconnect_after_ready)
+    monkeypatch.setattr(endpoint, "_serve_adapter", disconnect_after_ready)
     await endpoint.chat_ws(socket)
 
     assert [event["type"] for event in socket.sent] == ["system_ready", "chat.ready"]
@@ -123,10 +135,10 @@ async def test_stage_manager_rejects_call_ownership_before_chat_stage_creation()
         adapter=WebSocketAdapter(),
         lease_registry=registry,
     )
-    connection = WebSocketConnection(Socket(), "owner", "alice")
+    connection = StubChatConnection(Socket(), "owner", "alice")
 
     with pytest.raises(InteractionOwnedByCallAdmission) as error:
-        await manager._chat_output_sink.open(connection, "luotianyi")
+        await manager._test_chat_adapter._open(connection, "luotianyi")
 
     assert error.value.source is InteractionSource.CALL
     assert created == []

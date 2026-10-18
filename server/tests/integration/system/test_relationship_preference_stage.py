@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
@@ -88,8 +88,8 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
     runtime = make_runtime()
     user_interface = UserInterface(runtime.database_manager, create_media_resolver())
     first_connection = Connection()
-    stage = await runtime.stage_manager._chat_output_sink.open(first_connection, "luotianyi")
-    other_stage = await runtime.stage_manager._chat_output_sink.open(Connection(), "miku")
+    stage = await runtime.stage_manager._test_chat_adapter._open(first_connection, "luotianyi")
+    other_stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "miku")
     try:
         assert stage.context.user.read().preferences.relationship == "旧关系"
 
@@ -108,7 +108,7 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
             stage.context.user.read()
         )
 
-        await runtime.stage_manager._chat_output_sink.close_connection(first_connection)
+        await runtime.stage_manager._test_chat_adapter._close_connection(first_connection)
         await user_interface.overwrite_preference(
             PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": "朋友"}),
             runtime,
@@ -118,7 +118,7 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
         await stage.propose_relationship("过时的提议")
         assert stage.context.user.read().preferences.relationship == "朋友"
 
-        restored = await runtime.stage_manager._chat_output_sink.open(Connection(), "luotianyi")
+        restored = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
         assert restored is stage
         assert restored.context.user.read().preferences.relationship == "朋友"
     finally:
@@ -134,7 +134,7 @@ async def test_overwrite_without_stage_is_loaded_by_next_interaction() -> None:
             PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": "朋友"}),
             runtime,
         )
-        stage = await runtime.stage_manager._chat_output_sink.open(Connection(), "luotianyi")
+        stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
         assert stage.context.user.read().preferences.relationship == "朋友"
     finally:
         await runtime.stage_manager.close()
@@ -143,7 +143,7 @@ async def test_overwrite_without_stage_is_loaded_by_next_interaction() -> None:
 @pytest.mark.asyncio
 async def test_refresh_preferences_reads_database_without_writing_stale_snapshot(monkeypatch) -> None:
     runtime = make_runtime()
-    stage = await runtime.stage_manager._chat_output_sink.open(Connection(), "luotianyi")
+    stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
     conversation = runtime.database_manager.conversation_service
     conversation.preferences = {"relationship": "伙伴", "speaking_style": "轻松", "future_field": "保留"}
     monkeypatch.setattr(conversation, "save_user_preferences", lambda *args: pytest.fail("refresh wrote preferences"))
@@ -160,7 +160,7 @@ async def test_refresh_preferences_reads_database_without_writing_stale_snapshot
 @pytest.mark.asyncio
 async def test_failed_preference_save_does_not_dispatch_proposal(monkeypatch) -> None:
     runtime = make_runtime()
-    stage = await runtime.stage_manager._chat_output_sink.open(Connection(), "luotianyi")
+    stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
     conversation = runtime.database_manager.conversation_service
     monkeypatch.setattr(conversation, "save_user_preferences", lambda *args: False)
     try:

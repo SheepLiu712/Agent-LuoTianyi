@@ -98,9 +98,9 @@ async def test_two_concurrent_stop_failures_collapse_to_one_abort(tmp_path):
 async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(
     tmp_path,
 ):
-    from src.adapter.websocket.call_v1 import WireAudioFrame
-    from src.adapter.websocket.call_v1.stage_binding import CallStageBinding
-    from src.adapter.websocket.call_v1.transport import CallTransportSession
+    from src.adapter.websocket.call_v1._audio_codec import _WireAudioFrame
+    from src.adapter.websocket.call_v1._stage_binding import _CallStageBinding
+    from src.adapter.websocket.call_v1._transport import _CallTransportSession
 
     stage, repository, record, _, provider, _, settlement, _ = await create_active_stage(tmp_path)
     stopped = asyncio.Event()
@@ -117,7 +117,7 @@ async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(
                 prefilled = True
                 for _ in range(90):
                     session.send_audio(
-                        WireAudioFrame(
+                        _WireAudioFrame(
                             1,
                             2,
                             0,
@@ -129,8 +129,8 @@ async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(
             if message["type"] == "playback.stop":
                 stopped.set()
 
-    bridge = CallStageBinding(call_id=str(record.call_id), deliver=deliver)
-    session = CallTransportSession(
+    bridge = _CallStageBinding(call_id=str(record.call_id), deliver=deliver)
+    session = _CallTransportSession(
         call_id=str(record.call_id),
         user_id="user",
         character_id="luotianyi",

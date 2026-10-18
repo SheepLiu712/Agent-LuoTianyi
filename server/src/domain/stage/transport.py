@@ -7,4 +7,10 @@ from .output import StageOutput
 
 
 class StageOutputSink(Protocol):
-    def submit_output(self, output: StageOutput) -> asyncio.Future[None]: ...
+    def submit_output(self, output: StageOutput) -> asyncio.Future[None]:
+        """Accept synchronously; await network send completion, not client ACK/playback.
+
+        Cancelling this wait must not cancel accepted output. Use CancelDelivery
+        for explicit withdrawal. Offline/capacity rejection is synchronous.
+        """
+        ...

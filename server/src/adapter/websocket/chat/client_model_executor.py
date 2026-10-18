@@ -45,27 +45,21 @@ class ClientLLMExecutor:
     def __init__(self, timeout_seconds: float = 120.0):
         self.timeout_seconds = float(timeout_seconds)
         self.logger = get_logger(__name__)
-        self._stream_manager: Any = None
+        self._lookup_connection: Any = None
         # request_id -> (user_id, asyncio.Future, 发起请求的连接)
         self._pending: Dict[str, tuple[str, asyncio.Future, Any]] = {}
         # user_id -> 最近一次处理该用户请求的连接（用于把失败通知发回正确的客户端）
         self._user_connections: Dict[str, Any] = {}
 
-    def bind(self, stream_manager: Any) -> None:
+    def bind(self, lookup_connection: Any) -> None:
         """绑定在线连接查询器，用于按 user_id 找到客户端连接。"""
-        self._stream_manager = stream_manager
+        self._lookup_connection = lookup_connection
 
     def _get_live_connection(self, user_id: Optional[str]):
-        """返回该用户活跃连接的 WebSocketConnection；没有则返回 None。"""
-        if not user_id or self._stream_manager is None:
+        """返回该用户 Adapter 连接的内部输出端口；没有则返回 None。"""
+        if not user_id or self._lookup_connection is None:
             return None
-        stream = self._stream_manager.get_stream_by_user_uuid(user_id)
-        if stream is None or stream.is_connection_lost():
-            return None
-        ws_connection = getattr(stream, "ws_connection", None)
-        if ws_connection is None or getattr(ws_connection, "websocket", None) is None:
-            return None
-        return ws_connection
+        return self._lookup_connection(user_id)
 
     def clear_user(self, user_id: Optional[str], ws_connection: Any = None) -> None:
         """用户断开连接时失败其挂起的请求；仅当断开的是发起请求的连接时才执行。"""
@@ -93,7 +87,7 @@ class ClientLLMExecutor:
                 "ts": int(time.time() * 1000),
                 "payload": {"code": "LLM_CLIENT_ERROR", "message": message},
             }
-            await ws_connection.websocket.send_json(event)
+            await ws_connection.send_json(event)
         except Exception as exc:
             self.logger.debug(f"Failed to notify user {user_id}: {exc}")
 
@@ -129,7 +123,6 @@ class ClientLLMExecutor:
             return None
 
         self._user_connections[user_id] = ws_connection
-        websocket = ws_connection.websocket
 
         request_id = f"llm-{uuid.uuid4().hex[:16]}"
         loop = asyncio.get_running_loop()
@@ -149,24 +142,14 @@ class ClientLLMExecutor:
         if image_base64:
             payload["image_base64"] = image_base64
 
-        # 延迟导入：utils/llm 位于 user_interface 依赖链下方，模块加载期导入会成环
-        from src.web.websocket import WSEventType
-
         event = {
-            "type": WSEventType.LLM_REQUEST.value,
+            "type": "llm_request",
             "ts": int(time.time() * 1000),
             "payload": payload,
         }
 
         started = time.perf_counter()
-        try:
-            await websocket.send_json(event)
-        except Exception as exc:
-            self._pending.pop(request_id, None)
-            raise ClientLLMUnavailable(
-                f"failed to send llm_request {request_id}: {exc}",
-                connection=ws_connection,
-            ) from exc
+        await self._send_request(ws_connection, request_id, event, future)
         try:
             result = await asyncio.wait_for(future, timeout=self.timeout_seconds)
         except asyncio.TimeoutError:
@@ -194,7 +177,20 @@ class ClientLLMExecutor:
             "response_time_s": (time.perf_counter() - started),
         }
 
-    def on_llm_response(self, payload: Optional[Dict[str, Any]]) -> None:
+    async def _send_request(self, ws_connection, request_id, event, future) -> None:
+        try:
+            await ws_connection.send_json(event)
+        except BaseException as exc:
+            self._pending.pop(request_id, None)
+            future.cancel()
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            raise ClientLLMUnavailable(
+                f"failed to send llm_request {request_id}: {exc}",
+                connection=ws_connection,
+            ) from exc
+
+    def on_llm_response(self, payload: Optional[Dict[str, Any]], *, connection=None) -> None:
         """由 WS 收包循环调用，按 request_id 解析挂起的请求。"""
         if not isinstance(payload, dict):
             return
@@ -207,6 +203,8 @@ class ClientLLMExecutor:
             self.logger.debug(f"llm_response for unknown request_id: {request_id}")
             return
         _, future, _owner = pending
+        if connection is not None and _owner is not connection:
+            return
         if future.done():
             return
         future.set_result(payload)

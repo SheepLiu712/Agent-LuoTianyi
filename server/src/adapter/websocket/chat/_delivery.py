@@ -10,10 +10,10 @@ from uuid import NAMESPACE_URL, uuid5
 
 import src.domain.agent as d
 from src.utils.logger import get_logger
-from src.web.websocket import ChatResponse
-from src.web.websocket.service import WebSocketConnection
 
-from ._protocol import payloads
+from ._messages import _ChatResponse
+from ._peer import _ChatPeer
+from ._protocol import _payloads
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class _DeliveryConfig:
         return cls(**values)
 
 
-def completion(label: str) -> asyncio.Future[None]:
+def _completion(label: str) -> asyncio.Future[None]:
     future = asyncio.get_running_loop().create_future()
 
     def observe(result: asyncio.Future[None]) -> None:
@@ -69,7 +69,7 @@ class _Message:
 
 
 class _ConnectionDelivery:
-    def __init__(self, connection: WebSocketConnection, config: _DeliveryConfig) -> None:
+    def __init__(self, connection: _ChatPeer, config: _DeliveryConfig) -> None:
         self.connection, self.config = connection, config
         self.messages: deque[_Message] = deque()
         self.by_key: dict[tuple[str, str, str], _Message] = {}
@@ -98,10 +98,10 @@ class _ConnectionDelivery:
         ):
             raise d.SinkRejectedError("connection output queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
         if message is None:
-            message = _Message(key, output.delivery, completion(f"message={key}"), output.message_id)
+            message = _Message(key, output.delivery, _completion(f"message={key}"), output.message_id)
             self.messages.append(message)
             self.by_key[key] = message
-        future = completion(f"interaction={key[0]} execution={key[1]} sequence={output.sequence_no}")
+        future = _completion(f"interaction={key[0]} execution={key[1]} sequence={output.sequence_no}")
         message.items.append(_Item(output, future, size))
         message.accepted_end = isinstance(output, d.MessageEndOutput)
         self.pending_outputs += 1
@@ -163,7 +163,7 @@ class _ConnectionDelivery:
                 message.done.set_result(None)
 
     async def _send(self, message: _Message, values: dict[str, object]) -> None:
-        packet = ChatResponse(
+        packet = _ChatResponse(
             uuid=message.message_id or str(uuid5(NAMESPACE_URL, json.dumps(["agent-message", *message.key]))),
             text="",
             audio="",
@@ -213,7 +213,7 @@ class _ConnectionDelivery:
     async def _deliver_item(self, message: _Message, item: _Item) -> None:
         message.current = item
         try:
-            for values in payloads(item.output):
+            for values in _payloads(item.output):
                 if message.cancelled or self.closed:
                     break
                 await self._send(message, values)
