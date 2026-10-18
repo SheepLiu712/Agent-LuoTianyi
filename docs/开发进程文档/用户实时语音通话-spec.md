@@ -5,7 +5,7 @@
 > 协议版本：`call.v1`  
 > 2026-10-13 契约补充：身份准备、首 ACK、接通前断线与恢复，以及实时停止、全部业务收尾完成和等待者取消的接口契约已确认，须由后续实现及测试兑现，不表示现有代码已验收。
 
-> 2026-10-13 CR-2 候选实现：隔离分支已用独立 `CallWebSocketAdapter` 封装 Session、Hub、Binding、输出队列及接入/恢复事务；`call_ws` 只负责鉴权、物理帧收发和稳定关闭。该实现仍等待独立审查，ADR-0001 继续为 Proposed，不表示生产协议已经获得批准。
+> 2026-10-13 CR-2 候选实现：隔离分支已用独立 `CallWebSocketAdapter` 封装 Session、Delivery、Binding、输出队列及接入/恢复事务；`call_ws` 只负责鉴权、物理帧收发和稳定关闭。该实现仍等待独立审查，ADR-0001 继续为 Proposed，不表示生产协议已经获得批准。
 >
 > 2026-10-14 CR-3 候选实现：`StageManager.initialize()` 在通话接入前执行旧账本恢复并共享 owned 初始化任务；AgentRuntime、StageManager 与 CallWebSocketAdapter 分别公开角色、业务恢复/结算和传输能力事实，组合根不再遍历 Skill 或解释恢复报告。该实现仍等待独立审查，不表示非作者 spec 审批、合入或发布完成。
 > UI 草图：[实时语音通话 UI 草图](assets/用户实时语音通话-ui.svg)
@@ -101,15 +101,15 @@
 
 **状态**：服务端已校验身份、取得占用、建立 PREPARING 账本，并由 StageManager 持有本次建立操作。
 
-**输入**：内部身份准备通知使 CallWebSocketAdapter 完成协议会话、交互控制接口及当前连接代际的逻辑绑定。
+**输入**：StageManager 返回 PREPARING CallStage；CallWebSocketAdapter 同次建立关联该 Stage 的 Session 与当前连接 Binding。
 
 **输出**：依次排入含 call_id 的 `call.state(PREPARING)`、`ack(ack_seq=1)`，再放行后续状态及音频。首 ACK 只确认服务端已接管 call.start，不确认 Context/供应商已初始化或角色已接听；初始化失败仍以该呼叫的稳定失败结果收敛。接入拒绝或账本建立失败不得发送成功 ACK。
 
-**状态**：呼叫仍在初始化，尚未创建 CallStage 或 Context。
+**状态**：CallStage 已创建并处于 PREPARING，Context 或实时语音供应商仍在异步初始化。
 
 **输入**：已接纳呼叫的用户挂断。
 
-**输出**：Adapter 不阻塞收帧，Manager 的交互控制接口立即接管挂断，停止后续建立并等待已拥有任务收敛，按 CANCELLED_BEFORE_ANSWER 结算；不能因资源尚未创建而改判系统失败。
+**输出**：Adapter 经 Binding/Session 直接将挂断交给 CallStage，Stage 取消自有初始化任务并等待资源清理，按 CANCELLED_BEFORE_ANSWER 结算；不能因资源尚未创建而改判系统失败。
 
 **状态**：服务端仍处于 PREPARING/RINGING，包括首个 PREPARING 或 ACK 未送达。
 
@@ -478,7 +478,7 @@ async def maintain(
 ### 当前基线
 
 - 服务端现有 `/chat_ws` 与独立 `/call_ws`；`CallWebSocketAdapter` 封装 call.v1 接入、恢复与传输，`StageManager.try_to_get_stage` 封装交互获取与业务建立，`CallStage` 已进入正式装配。
-- 聊天继续使用 `adapter.websocket.chat.WebSocketAdapter`；通话使用并列的 `adapter.websocket.call_v1.CallWebSocketAdapter`。Web 只负责鉴权与物理收发，不直连 CallStage，也不构造 Hub/Session/Binding。
+- 聊天继续使用 `adapter.websocket.chat.WebSocketAdapter`；通话使用并列的 `adapter.websocket.call_v1.CallWebSocketAdapter`。Web 只负责鉴权与物理收发，不直连 CallStage，也不构造 Session/Delivery/Binding。
 - Android 聊天页目前没有电话入口；现有 WebView 音频链路面向普通聊天播放。
 - 现有 Conversation 内容类型没有通话内容。
 - 现有反思流程会在普通聊天回复后频繁执行记忆、压缩和画像更新，本功能要求迁移为统一认知维护边界。
@@ -552,7 +552,7 @@ stateDiagram-v2
 | ChatAudioProcessor | `app` | 普通聊天 TTS、气泡、历史重放和现有缓存 | 播放 CALL 音频 |
 | CallAudioProcessor | `app` | CALL PCM 播放、口型、实际播放完成检测、`playback.completed` 重试、取消 tombstone、ACK 与恢复 | 聊天气泡、媒体落盘、用下载或入队完成冒充实际播放完成 |
 | call_ws endpoint | `web` | HTTP/WS 鉴权、物理连接生命周期、原始 JSON/二进制帧收发 | 把 wire 消息转成 Stimulus、绑定 CallStage、投递业务输出 |
-| WebSocket Adapter | `adapter/websocket` | 由独立 CallWebSocketAdapter 解析和校验 `call.v1`，内部封装 Hub/Session/Binding，把已鉴权 wire 输入转换为 CallStage 可接收的领域输入，维护连接与 `call_id`/逻辑交互的绑定，并把 StageOutput 转成有序信道消息完成 ACK、NACK、重传和背压投递 | 拥有物理连接、执行鉴权、判断角色回复、维护回复批次 |
+| WebSocket Adapter | `adapter/websocket` | 由独立 CallWebSocketAdapter 解析和校验 `call.v1`，内部封装 Session/Delivery/Binding，把已鉴权 wire 输入转换为 CallStage 可接收的领域输入，维护连接与 `call_id`/逻辑交互的绑定，并把 StageOutput 转成有序信道消息完成 ACK、NACK、重传和背压投递 | 拥有物理连接、执行鉴权、判断角色回复、维护回复批次 |
 | InteractionLeaseRegistry | `stage` | 由 StageManager 一侧持有，按同用户、同角色原子授予唯一交互所有权；主动切换期间以 `CallTransitionIntent` 保留过渡占用，旧 ChatStage 终止且 Context 关闭后才把所有权交给 CallStage | 分布式协调、接受未经当前绑定验证的客户端切换声明 |
 | CallStage | Stage | 状态机、PCM 顺序与背压、轮次、待播放项、沉默时钟、打断、恢复、播放结算、资源关闭 | 直接访问阿里 SDK、直接调用 Skill、用 TTS 生成进度推测客户端播放完成 |
 | RealtimeSpeechSession | `infrastructure/models/realtime_speech` | 把供应商实时 ASR/VAD 事件归一化为稳定领域事件 | 生成天依回复、写 Conversation |
@@ -579,10 +579,10 @@ stateDiagram-v2
 
 1. 用户从菜单进入通话页，客户端申请麦克风权限。
 2. 权限允许后生成 client_request_id，经当前已鉴权并绑定的 chat_ws 发送 call.switch_prepare；收到 call.switch_ready 后断开 chat_ws。无 ChatStage 时跳过准备。切换意图从 switch_ready 起有效 10 秒；呼叫建立总期限另从首次 call.start 起计 10 秒，二者不得混用。
-3. 客户端连接 call_ws；Web 完成正常鉴权，将 call.start 原始帧交给独立 CallWebSocketAdapter。Web 不装配 Hub/Session/Binding，不消费 claim，不判断创建执行到哪一步。
+3. 客户端连接 call_ws；Web 完成正常鉴权，将 call.start 原始帧交给独立 CallWebSocketAdapter。Web 不装配 Session/Delivery/Binding，不消费 claim，不判断创建执行到哪一步。
 4. Adapter 调用 StageManager 的完整接入操作。Manager 先按 client_request_id 查询账本并校验用户、角色；重复请求定位原操作、原身份和当前状态，不延长期限。首次请求在需要时原子消费匹配的切换意图、取得过渡占用，建立 PREPARING 账本，并持有最终接通或终止的建立操作。接入拒绝或账本建立失败不发送成功 ACK，不得误终止旧 ChatStage。
-5. Manager 发出内部身份准备通知，包含 call_id、client_request_id、character_id 和当前状态；不新增 wire 类型，不暴露 claim、Task 或账本对象。Adapter 内部建立或取得原 Session，关联交互控制接口及连接代际，准备输出路径，依次排入 call.state(PREPARING) 和首 ACK，再放行后续状态和音频。网络发送不在 Manager 占用锁内执行，不等待客户端收取。内部注册失败各自清理并由 Manager 按系统失败收敛；仅物理投递失败则按断线处理，不撤销已接管的呼叫身份。
-6. Manager 从可复用集合移除旧 ChatStage，以 SWITCH_TO_CALL 终止它，取消未完成工作并进行无用户可见输出的结束维护，关闭旧 Context 后才创建通话 Context。期间仍接收挂断和断线；返回给 Adapter 的控制接口已代表完整受管理交互，即使 CallStage 尚未创建，也不要求调用方补建 Stage。
+5. Manager 从可复用集合移除旧 ChatStage，以 SWITCH_TO_CALL 终止并关闭旧 Context，然后创建 PREPARING CallStage 并纳入管理；try_to_get_stage 直接返回该 Stage，不返回等待 Stage 出现的控制句柄。旧聊天回收和后续准备共同使用首次 start 的总期限。
+6. Adapter 为该 Stage 建立唯一 Session 与当前连接 Binding，输出先经 Adapter 路由，依次排入 call.state(PREPARING) 和首 ACK，然后启动 Stage 自有的异步初始化。网络发送不占 Manager 锁，不等待客户端确认；初始化中挂断或断线直接交给已存在的 Stage。内部注册失败由 Stage 终止准备并清理、Adapter 撤销协议对象；握手已排队后的物理发送失败按断线保留处理。
 7. CallStage 通过 ContextFactory 创建 EphemeralCallConversationStore 对应的 Context，按既有最近三分钟规则只读加载种子，预热画像并创建实时语音会话。准备完成后进入 RINGING，再请求 Agent 接听决定；第一版默认接受，保留拒接动作。
 8. Agent 接受且当前业务连接有效、未挂断、未超过原建立期限，才进入 ACTIVE 并首次提交 CallStarted 产生开场。接通前断线允许资源准备继续，保留已有接听决定，重绑不重复接听；未重绑则等待原期限届满。已进入 ACTIVE 后发生断线，无论状态消息是否送达，均采用 AC-11。
 9. 终止由 Manager/Stage 处理业务结果、账本和收尾，Adapter 按有限策略投递终止消息并释放协议资源。客户端退出通话页不等于占用已释放；旧 ChatStage 不复活，收尾完成后新聊天才可接入。
@@ -590,7 +590,7 @@ stateDiagram-v2
 ### 恢复握手顺序与责任
 
 1. 新物理连接必须重新鉴权。CallWebSocketAdapter 校验用户、角色、call_id、连续确认游标，预留新的连接代际；有效旧连接不得被抢占。
-2. Manager/Stage 确认原业务交互仍有效且可恢复：PREPARING/RINGING 使用首次 start 的剩余建立期限；已接通呼叫使用原三秒恢复期限。PREPARING 尚未创建 Stage 时继续原建立操作，不另起创建任务。终态、失效会话或应有但缺失的 Stage 不得通过补建对象冒充恢复。
+2. Manager/Stage 确认原业务交互仍有效且可恢复：PREPARING/RINGING 使用首次 start 的剩余建立期限；已接通呼叫使用原三秒恢复期限。PREPARING 复用已存在的 Stage 和其初始化任务，不另起创建任务。终态、失效会话或应有但缺失的 Stage 不得通过补建对象冒充恢复。
 3. Adapter 准备 call.resumed 和允许重放的旧帧，使新输出排在恢复输出之后；完成绑定并报告连接恢复，再放行新输出。完成绑定时重新核对代际、业务终态和期限，避免预检查后发生的挂断/超时被覆盖。
 4. call.resumed 不等待额外 ACK；随后物理发送失败按一次断线处理，不猜测客户端是否收到。保留原协议会话的序号、确认记录、取消记录和有限缓存，不从零重建。重复 call.start 用于定位原身份，不隐式确认客户端未声明收到的服务端帧。
 5. 校验失败由 Adapter 撤销临时绑定，Manager/Stage 保留原期限或按既有终止条件结束；旧连接的晚到输入和清理不得影响新代际。Web 只报告连接事实，不执行 claim 或业务补偿。
@@ -885,9 +885,9 @@ CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知
 
 ## Adapter 与交互侧的接入及切换契约
 
-聊天与通话保留独立 Adapter。Adapter 负责信道协议转换、去重、上传装配、输出投递，以及连接与交互的 binding；通话 Hub、Session、Binding 均为 CallWebSocketAdapter 内部实现。Web 负责鉴权和物理连接，不解析业务切换命令。普通聊天消息、语音上传各阶段及切换命令统一进入聊天 Adapter 的 `receive`；上传分片 ACK 与最终刺激接纳 ACK 保持各自的含义和幂等性。
+聊天与通话保留独立 Adapter。Adapter 负责信道协议转换、去重、上传装配、输出投递，以及连接与交互的 binding；通话 Session、Delivery、Binding 均为 CallWebSocketAdapter 内部实现。Web 负责鉴权和物理连接，不解析业务切换命令。普通聊天消息、语音上传各阶段及切换命令统一进入聊天 Adapter 的 `receive`；上传分片 ACK 与最终刺激接纳 ACK 保持各自的含义和幂等性。
 
-Adapter 通过 StageManager 的多参数 `try_to_get_stage` 获取交互：参数明确用户、角色、交互类型、连接和已有交互或请求身份，不专门创建接入 Request 类型。Manager 按内部规则复用、恢复、创建或给出明确拒绝；通话建立返回可先完成身份握手的控制句柄，Stage 尚未建立时不伪造已接通状态。恢复指定 call_id 只能恢复该交互，不能隐式新建。通话身份返回后，由 Adapter 自行注册协议会话并排入 PREPARING 与首 ACK，再释放业务建立；Manager 不调用传输对象的 prepare 或 bind_stage。相同建立请求的身份发布与协议注册串行化，不阻塞其他请求。绑定建立后，普通刺激直接投递 Stage；生命周期请求交给 Manager，PCM、播放确认和实时打断保持投递通话交互。两类 Adapter 统一网络接口；业务输出 sink 保持类型化，不要求相同业务协议或共同基类。
+Adapter 通过 StageManager 的多参数 `try_to_get_stage` 获取交互：参数明确用户、角色、交互类型、连接和已有交互或请求身份，不专门创建接入 Request 类型。Manager 按内部规则复用、恢复、创建或给出明确拒绝；通话建立直接返回 PREPARING CallStage，Context 和供应商由该 Stage 异步初始化。恢复指定 call_id 只能恢复该交互，不能隐式新建。通话身份返回后，由 Adapter 自行注册协议会话并排入 PREPARING 与首 ACK，再启动 Stage 自有初始化；Manager 不调用传输对象的 prepare 或 bind_stage。相同建立请求的身份发布与协议注册串行化，不阻塞其他请求。绑定建立后，普通刺激直接投递 Stage；生命周期请求交给 Manager，PCM、播放确认和实时打断保持投递通话交互。两类 Adapter 统一网络接口；业务输出 sink 保持类型化，不要求相同业务协议或共同基类。
 
 输入准入属于交互侧。binding 有效只代表连接仍关联该 Stage，不代表 Stage 此刻允许业务输入。切换准备期间由 Stage 的输入门禁拒绝普通消息、语音以及迟到的异步媒体投递；Adapter 不复制暂停业务状态。异步转换完成后必须重新验证原 binding 仍有效和 Stage 仍准入，然后才能接纳刺激。先前已经接纳的工作保持既有执行语义，不因为准备切换新增取消行为。
 
@@ -987,3 +987,18 @@ Adapter 在一次输入处理事务内串行完成解析、准入、投递及 he
 Adapter 维护连接句柄到 Binding 的集合，以及用于 Stage 输出路由的交互索引。创建、撤销 Stage 绑定和网络收发反馈均通过 Binding 操作，不再维护独立的 Peer、Outbox 或连接投递器集合。`_BoundInputSink` 已删除，Binding 自行检查权限并提交刺激。
 
 一条连接只绑定一个 Stage，Binding 直接持有该 Stage、输入权限及输出收尾状态，不再设置 Stage 集合或额外绑定记录。解绑永久撤销业务投递权限，取消业务输出并等待控制任务；WebSocket 仍可发送协议控制响应，真正断线才关闭发送队列。重连接入创建新的 Binding，异步媒体转换及语音上传持有的旧 Binding 始终失效。
+
+
+### 通话 Adapter、Session 与 Binding 的组合契约
+
+CallStage 在 PREPARING 状态下即创建并纳入 StageManager 管理，接入返回该 Stage 本身；Adapter 同次建立 Session 和 Binding，不等待 Context 或语音供应商准备。Manager 保证旧聊天 Context 关闭后才创建通话 Context。Adapter 先排入 PREPARING 与首 ACK，再放行 Stage 自有的异步初始化任务。初始化中挂断、断线、超时由该 Stage 处理；不再使用等待 Stage 出现的 CallControl 或 PreparedTransport。重复 start/resume 不创建第二个 Stage、不重置建立期限。
+
+Adapter 保留 open、receive、next_output、complete_output、disconnect、close 和能力查询接口，增加稳定的 submit_output(call_id, output) 路由。Stage 的类型化输出契约通过该路由投递，不持有连接 Binding。Session 关联唯一 Stage，创建并独占 Delivery；Adapter 只维护 call_id 到 Session、连接句柄到 Binding 的索引。Session 封装 attach、detach、receive、submit_output、drain_terminal、close；Adapter 不访问其 Delivery 或协议容器。
+
+Binding 只关联唯一 Session，集中保存本次连接有效性、Outbox、在途发送和网络完成反馈，提供 receive、enqueue、next_output、complete_output、invalidate。断线永久撤销旧 Binding 的权限；旧输入、发送结果及清理不得影响新 Binding。Session 与 Delivery 跨重连保留，Outbox 随连接清理。Session 对应同一次呼叫，实时停止后有限投递终态并释放协议资源，不等待认知维护及持久化收尾。
+
+_protocol_translate.py 负责控制/音频帧解析、字段校验与编码，不查询 Stage 或提交游标。_input.py 将可按序投递的帧转换为 Stage 输入，返回 (input 或 None, status 字典)，状态为 complete/error，不新增处理结果类。PCM 是独立可接纳帧，无上传 partial 状态；duplicate、缺口和缓冲属于 Session 的有序接纳机制。接纳成功与上行游标提交保持取消安全。ACK/NACK 不等待业务输入锁，避免输出背压等待 ACK 的循环依赖。
+
+Delivery 管理下行统一序号、重放、客户端 ACK、音频容量与取消范围，调用协议工具编码后送入当前 Binding。网络发送完成不推进客户端游标；播放完成由 Stage 单独处理。断线期间允许的输出受缓存限制，恢复先发送握手和必要重放，再放行新输出。保留现有发现缺口立即 NACK、缓存乱序帧和内容一致的重传去重策略。
+
+重构验收必须覆盖：初始化中挂断及时取消资源准备；Stage/Session/Delivery 跨断线恢复复用；同序号缺失帧重放且不重复业务接纳；已取消音频不重放；旧 Binding 等待者、反馈和断线失效；恢复事务失败释放资源；真实 Manager/Stage/Adapter 装配的收尾与接入约束。文件按包外使用关系命名；包内跨文件使用的类、函数和方法不加下划线并提供中文 docstring，文件内私有实现加下划线。

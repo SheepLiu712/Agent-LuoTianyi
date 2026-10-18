@@ -14,7 +14,7 @@ import time
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -107,6 +107,44 @@ class CallOutput:
 class CallPlaybackStop:
     response_id: str
     stream_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CallStreamStarted:
+    """声明业务音频流及其格式，不包含传输序号。"""
+
+    response_id: str
+    stream_id: int
+    audio_format: d.AudioFormat
+
+
+@dataclass(frozen=True, slots=True)
+class CallPCM:
+    """一段待交付的音频内容及业务流身份。"""
+
+    response_id: str
+    stream_id: int
+    payload: bytes
+    final: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CallSetupFailed:
+    """建立失败的稳定业务原因。"""
+
+    reason: CallEndReason
+
+
+CallStageOutput = (
+    CallStateChanged
+    | CallReplyFailed
+    | CallOutput
+    | CallFinalSnapshot
+    | CallStreamStarted
+    | CallPCM
+    | CallPlaybackStop
+    | CallSetupFailed
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,18 +323,58 @@ class CallStage:
     def termination_requested(self) -> bool:
         return self._termination_reason is not None
 
-    async def start(self) -> None:
-        """Create the ephemeral context and provider before publishing RINGING."""
-        if self._started:
-            return
-        if self._initialization is None:
-            self._initialization = asyncio.create_task(self._start(), name=f"call-initialize-{self._ownership.call_id}")
+    @property
+    def call_id(self) -> str:
+        """返回本次呼叫稳定的身份。"""
+        return str(self._record.call_id)
+
+    @property
+    def user_id(self) -> str:
+        """返回呼叫所属用户。"""
+        return self._record.user_id
+
+    @property
+    def character_id(self) -> str:
+        """返回呼叫所属角色。"""
+        return self._record.character_id
+
+    @property
+    def client_request_id(self) -> str:
+        """返回原始建立请求身份，重连不产生新请求。"""
+        return self._ownership.client_request_id
+
+    def begin_initialization(self) -> None:
+        """握手排队后启动自有初始化任务；不阻塞挂断或断线处理。"""
+        if self._initialization is None and not self.termination_requested and not self._closed.is_set():
+            self._initialization = asyncio.create_task(self._start(), name=f"call-initialize-{self.call_id}")
             self._initialization.add_done_callback(self._observe_task)
-        await asyncio.shield(self._initialization)
+
+    async def start(self) -> None:
+        """启动并等待资源准备；生产接入使用异步初始化入口。"""
+        self.begin_initialization()
+        if self._initialization is not None:
+            await asyncio.shield(self._initialization)
+
+    def can_reconnect(self) -> bool:
+        """检查准备期原期限或接通后恢复期限，不改变交互状态。"""
+        if self.termination_requested or self._closed.is_set():
+            return False
+        if self.state in {CallState.PREPARING, CallState.RINGING}:
+            return not self._setup_expired()
+        return self.can_resume()
+
+    async def reconnect(self) -> bool:
+        """实际绑定时重新校验业务期限，恢复连接而不重新初始化。"""
+        if not self.can_reconnect():
+            return False
+        if self.state in {CallState.PREPARING, CallState.RINGING}:
+            await self.set_connection_available(True)
+            return True
+        return await self.resume()
 
     async def _start(self) -> None:
-        self._require_setup_time()
         try:
+            self._require_setup_time()
             requested_at = self._record.requested_at.replace(tzinfo=None)
             self._context = await self._await_setup(
                 self._context_factory.create(
@@ -518,16 +596,14 @@ class CallStage:
         return await self.terminate(CallEndReason.SYSTEM_FAILURE)
 
     async def abort_failed_start(self) -> None:
-        """Idempotently clean a stage that was never delivered to its caller."""
+        """终止未交付的建立操作，持久化失败并释放初始化资源。"""
         initialization = self._initialization
         if initialization is not None and initialization is not asyncio.current_task() and not initialization.done():
             initialization.cancel()
             await asyncio.gather(initialization, return_exceptions=True)
         if self._closed.is_set():
             return
-        cleanup_error = await self._cleanup()
-        if cleanup_error is not None:
-            raise cleanup_error
+        await self._fail_setup(CallEndReason.SETUP_TIMEOUT if self._setup_expired() else CallEndReason.SYSTEM_FAILURE)
 
     async def _consume_events(self) -> None:
         assert self._provider is not None
@@ -861,7 +937,9 @@ class CallStage:
             lifecycle = CallLifecycle()
             lifecycle._snapshot = self._lifecycle.snapshot
             snapshot = lifecycle.transition(state, outcome=outcome, end_reason=end_reason)
-            changes: dict[str, object] = {"state": state, "updated_at": self._now()}
+            # 墙钟可能在相邻状态更新间不变，账本版本仍必须严格递增。
+            updated_at = max(self._now(), self._record.updated_at + timedelta(microseconds=1))
+            changes: dict[str, object] = {"state": state, "updated_at": updated_at}
             if outcome is not None:
                 changes["outcome"] = outcome
             if end_reason is not None:

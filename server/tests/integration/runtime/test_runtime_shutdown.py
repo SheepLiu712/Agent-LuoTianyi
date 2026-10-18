@@ -65,13 +65,13 @@ async def test_server_runtime_shutdown_is_ordered_idempotent_and_retryable():
 async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks():
     import asyncio
 
-    from src.adapter.websocket.call_v1._transport import _CallTransportHub
+    from src.adapter.websocket.call_v1 import CallWebSocketAdapter
 
     calls = []
     world = OrderedAsyncService(calls, "world", "stop_background_services")
     agent = OrderedAsyncService(calls, "agent", "shutdown")
     database = OrderedAsyncService(calls, "database", "shutdown")
-    hub = _CallTransportHub()
+    adapter = CallWebSocketAdapter(manager=SimpleNamespace())
     entered = asyncio.Event()
     cancelled = asyncio.Event()
 
@@ -82,7 +82,8 @@ async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks
         finally:
             cancelled.set()
 
-    task = hub.own_task(release(), name="call-transport-release")
+    task = asyncio.create_task(release(), name="call-transport-release")
+    adapter._release_tasks.add(task)
     await entered.wait()
     runtime = ServerRuntime(
         user_interface=object(),
@@ -95,7 +96,7 @@ async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks
         observability=object(),
         client_llm_executor=ClientLLMExecutor(),
         owns_observability=False,
-        call_adapter=SimpleNamespace(close=hub.close),
+        call_adapter=adapter,
     )
 
     await runtime.shutdown()

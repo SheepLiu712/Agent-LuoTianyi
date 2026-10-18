@@ -165,24 +165,24 @@ async def test_call_network_completion_does_not_ack_replay_and_reconnect_has_new
     try:
         preparing = await adapter.next_output(old)
         body = json.loads(preparing.message)
-        session = adapter._hub.session_for(body["call_id"])
+        session = adapter._sessions[body["call_id"]]
         adapter.complete_output(old, preparing.delivery_id)
-        assert session.server_ack_cursor == 0
+        assert session._delivery.server_ack_cursor == 0
         ack = await adapter.next_output(old)
         adapter.complete_output(old, ack.delivery_id)
         await adapter.receive(
             old, json.dumps({"protocol": "call.v1", "type": "ack", "call_id": session.call_id, "ack_seq": body["seq"]})
         )
-        assert session.server_ack_cursor == body["seq"]
+        assert session._delivery.server_ack_cursor == body["seq"]
         await adapter.disconnect(old)
         new = await adapter.open(user_id="user", connection_id=object(), initial_message=start_message())
         retried = await adapter.next_output(new)
         assert retried.delivery_id not in {preparing.delivery_id, ack.delivery_id}
-        state = adapter._state(new)
+        state = adapter._bindings[new]._outbox
         adapter.complete_output(old, retried.delivery_id)
-        assert retried.delivery_id in state.inflight
+        assert retried.delivery_id in state._inflight
         adapter.complete_output(new, retried.delivery_id)
-        assert not state.inflight
+        assert not state._inflight
         await adapter.disconnect(new)
     finally:
         speech.release.set()
@@ -271,11 +271,11 @@ async def test_resume_includes_output_produced_during_business_admission(monkeyp
         adapter.complete_output(old, ack.delivery_id)
         await adapter.disconnect(old)
         original = stages.try_to_get_stage
-        session = adapter._hub.session_for(call_id)
+        session = adapter._sessions[call_id]
 
         async def admit_with_concurrent_output(**kwargs):
             result = await original(**kwargs)
-            await session.business_sink.send_state(CallStateChanged(call_id, CallState.RINGING, "request-1"))
+            await adapter.submit_output(call_id, CallStateChanged(call_id, CallState.RINGING, "request-1"))
             return result
 
         monkeypatch.setattr(stages, "try_to_get_stage", admit_with_concurrent_output)

@@ -1,6 +1,6 @@
 """Public call.v1 handshake on the chat channel; no transport/session ownership."""
 
-from ._control import _ControlProtocolError, _decode_control_text
+from ._control import ControlProtocolError, decode_control_text
 
 
 class CallSwitchProtocolError(ValueError):
@@ -18,8 +18,8 @@ def parse_switch_prepare(raw: str | bytes) -> tuple[str, str]:
     operation does not reserve a Stage or change interaction state.
     """
     try:
-        message = _decode_control_text(raw, sender="client", transport="chat_ws")
-    except _ControlProtocolError as error:
+        message = decode_control_text(raw, sender="client", transport="chat_ws")
+    except ControlProtocolError as error:
         raise CallSwitchProtocolError(error.code) from None
     if message["type"] != "call.switch_prepare":
         raise CallSwitchProtocolError("UNKNOWN_TYPE")

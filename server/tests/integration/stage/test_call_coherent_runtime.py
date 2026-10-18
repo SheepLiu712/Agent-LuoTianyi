@@ -18,9 +18,9 @@ from support.stage_manager import make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
 import src.domain.agent as d
-from src.adapter.websocket.call_v1._audio_codec import _BinaryAudioFrameCodec
-from src.adapter.websocket.call_v1._stage_binding import _CallStageBinding
-from src.adapter.websocket.call_v1._transport import _CallTransportSession
+from src.adapter.websocket.call_v1._audio_codec import BinaryAudioFrameCodec
+from support.call_protocol import StageOutputDriver
+from support.call_protocol import ProtocolDriver
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent_runtime import agent_runtime as runtime_module
 from src.domain.call import CallAudioSemantic, CallEndReason, CallState
@@ -130,8 +130,8 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         character_id="luotianyi",
         client_request_id="component-evidence",
     )
-    binding = _CallStageBinding(call_id=str(claim.record.call_id), deliver=deliver)
-    session = _CallTransportSession(
+    binding = StageOutputDriver(call_id=str(claim.record.call_id), deliver=deliver)
+    session = ProtocolDriver(
         call_id=binding.call_id,
         user_id="user",
         character_id="luotianyi",
@@ -161,7 +161,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         await _eventually(
             lambda: any(
                 item.binary is not None
-                and _BinaryAudioFrameCodec().decode(item.binary).stream_id == opening["stream_id"]
+                and BinaryAudioFrameCodec().decode(item.binary).stream_id == opening["stream_id"]
                 for item in delivered
             )
         )
@@ -178,8 +178,8 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         await _eventually(
             lambda: any(
                 item.binary is not None
-                and _BinaryAudioFrameCodec().decode(item.binary).stream_id == provisional["stream_id"]
-                and _BinaryAudioFrameCodec().decode(item.binary).flags == 1
+                and BinaryAudioFrameCodec().decode(item.binary).stream_id == provisional["stream_id"]
+                and BinaryAudioFrameCodec().decode(item.binary).flags == 1
                 for item in delivered
             )
         )
@@ -200,8 +200,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         assert stage._responses[formal["response_id"]].playback_completed is False
         await _eventually(
             lambda: any(
-                item.binary is not None
-                and _BinaryAudioFrameCodec().decode(item.binary).stream_id == formal["stream_id"]
+                item.binary is not None and BinaryAudioFrameCodec().decode(item.binary).stream_id == formal["stream_id"]
                 for item in delivered
             )
         )
@@ -239,7 +238,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         await asyncio.sleep(0)
         assert not any(
             item.binary is not None
-            and _BinaryAudioFrameCodec().decode(item.binary).stream_id == formal["stream_id"]
+            and BinaryAudioFrameCodec().decode(item.binary).stream_id == formal["stream_id"]
             and index >= before_interrupt
             for index, item in enumerate(delivered)
         )
@@ -266,8 +265,8 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         await _eventually(
             lambda: any(
                 item.binary is not None
-                and _BinaryAudioFrameCodec().decode(item.binary).stream_id == farewell["stream_id"]
-                and _BinaryAudioFrameCodec().decode(item.binary).flags == 1
+                and BinaryAudioFrameCodec().decode(item.binary).stream_id == farewell["stream_id"]
+                and BinaryAudioFrameCodec().decode(item.binary).flags == 1
                 for item in delivered
             )
         )

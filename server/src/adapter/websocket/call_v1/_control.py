@@ -155,7 +155,7 @@ class _ErrorMessage(TypedDict, total=False):
     call_id: str
 
 
-_ControlMessage = Union[
+ControlMessage = Union[
     _SwitchPrepareMessage,
     _SwitchReadyMessage,
     _StartMessage,
@@ -181,8 +181,8 @@ _CALL_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
-class _ControlProtocolError(ValueError):
-    """A normalized control-protocol failure with a stable code and path."""
+class ControlProtocolError(ValueError):
+    """携带稳定错误码与出错字段路径的控制协议错误。"""
 
     def __init__(self, code: str, path: str) -> None:
         self.code = code
@@ -273,32 +273,32 @@ _ENUMS = {
 }
 
 
-def _decode_control_text(text: str | bytes, *, sender: _ControlSender, transport: _ControlTransport) -> _ControlMessage:
-    """Decode and validate one raw control frame at the protocol boundary."""
+def decode_control_text(text: str | bytes, *, sender: _ControlSender, transport: _ControlTransport) -> ControlMessage:
+    """严格校验单个控制报文的字段、方向及信道，不修改会话状态。"""
     raw = _strict_text(text)
     if _utf8_size(raw, text) > _MAX_RAW_BYTES:
-        raise _ControlProtocolError("CONTROL_TOO_LARGE", "$")
+        raise ControlProtocolError("CONTROL_TOO_LARGE", "$")
     try:
         # Standard JSON semantics; float conversion avoids Python's huge-int limit
         # and matches the numeric representation used by the JavaScript peer.
         parsed = json.loads(raw, parse_int=float, parse_constant=_reject_constant)
     except (ValueError, RecursionError):
-        raise _ControlProtocolError("BAD_JSON", "$") from None
+        raise ControlProtocolError("BAD_JSON", "$") from None
     if not isinstance(parsed, dict):
-        raise _ControlProtocolError("TOP_LEVEL_NOT_OBJECT", "$")
+        raise ControlProtocolError("TOP_LEVEL_NOT_OBJECT", "$")
     return _validate(parsed, sender=sender, transport=transport)
 
 
-def _encode_control_message(
+def encode_control_message(
     message: Mapping[str, object], *, sender: _ControlSender, transport: _ControlTransport
 ) -> str:
-    """Validate known fields and encode JSON without a wire field-order contract."""
+    """校验并序列化一个控制报文，不分配序号或推进确认游标。"""
     if not isinstance(message, Mapping):
-        raise _ControlProtocolError("TOP_LEVEL_NOT_OBJECT", "$")
+        raise ControlProtocolError("TOP_LEVEL_NOT_OBJECT", "$")
     validated = _validate(dict(message), sender=sender, transport=transport)
     encoded = json.dumps(validated, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     if _utf8_size(_strict_text(encoded), encoded) > _MAX_RAW_BYTES:
-        raise _ControlProtocolError("CONTROL_TOO_LARGE", "$")
+        raise ControlProtocolError("CONTROL_TOO_LARGE", "$")
     return encoded
 
 
@@ -306,14 +306,14 @@ def _strict_text(text: str | bytes) -> str:
     try:
         if isinstance(text, bytes):
             if len(text) > _MAX_RAW_BYTES:
-                raise _ControlProtocolError("CONTROL_TOO_LARGE", "$")
+                raise ControlProtocolError("CONTROL_TOO_LARGE", "$")
             return text.decode("utf-8", "strict")
         if isinstance(text, str):
             text.encode("utf-8", "strict")
             return text
     except UnicodeError:
         pass
-    raise _ControlProtocolError("BAD_JSON", "$")
+    raise ControlProtocolError("BAD_JSON", "$")
 
 
 def _utf8_size(raw: str, original: str | bytes) -> int:
@@ -335,15 +335,15 @@ def _known_fields(message: dict[str, object], message_type: str) -> dict[str, ob
 
 def _require_integer(value: object, path: str) -> None:
     if type(value) not in (int, float):
-        raise _ControlProtocolError("INVALID_FIELD_TYPE", path)
+        raise ControlProtocolError("INVALID_FIELD_TYPE", path)
     if isinstance(value, float):
         if not math.isfinite(value):
-            raise _ControlProtocolError("FIELD_OUT_OF_RANGE", path)
+            raise ControlProtocolError("FIELD_OUT_OF_RANGE", path)
         if not value.is_integer():
-            raise _ControlProtocolError("INVALID_FIELD_TYPE", path)
+            raise ControlProtocolError("INVALID_FIELD_TYPE", path)
 
 
-def _validate(message: dict[str, object], *, sender: str, transport: str) -> _ControlMessage:
+def _validate(message: dict[str, object], *, sender: str, transport: str) -> ControlMessage:
     message_type = _validate_discriminator(message)
     message = _known_fields(message, message_type)
     _validate_route(message_type, sender=sender, transport=transport)
@@ -357,36 +357,36 @@ def _validate(message: dict[str, object], *, sender: str, transport: str) -> _Co
 
 def _validate_discriminator(message: dict[str, object]) -> str:
     if "protocol" not in message:
-        raise _ControlProtocolError("MISSING_FIELD", "$.protocol")
+        raise ControlProtocolError("MISSING_FIELD", "$.protocol")
     protocol = message["protocol"]
     if not isinstance(protocol, str):
-        raise _ControlProtocolError("INVALID_FIELD_TYPE", "$.protocol")
+        raise ControlProtocolError("INVALID_FIELD_TYPE", "$.protocol")
     if protocol != "call.v1":
-        raise _ControlProtocolError("UNSUPPORTED_PROTOCOL", "$.protocol")
+        raise ControlProtocolError("UNSUPPORTED_PROTOCOL", "$.protocol")
     if "type" not in message:
-        raise _ControlProtocolError("MISSING_FIELD", "$.type")
+        raise ControlProtocolError("MISSING_FIELD", "$.type")
     message_type = message["type"]
     if not isinstance(message_type, str):
-        raise _ControlProtocolError("INVALID_FIELD_TYPE", "$.type")
+        raise ControlProtocolError("INVALID_FIELD_TYPE", "$.type")
     if message_type not in _FIELDS:
-        raise _ControlProtocolError("UNKNOWN_TYPE", "$.type")
+        raise ControlProtocolError("UNKNOWN_TYPE", "$.type")
     return message_type
 
 
 def _validate_route(message_type: str, *, sender: str, transport: str) -> None:
     expected_transports, expected_senders = _ROUTES[message_type]
     if transport not in expected_transports:
-        raise _ControlProtocolError("INVALID_TRANSPORT", "$")
+        raise ControlProtocolError("INVALID_TRANSPORT", "$")
     sender = {"client_to_server": "client", "server_to_client": "server"}.get(sender, sender)
     if sender not in expected_senders:
-        raise _ControlProtocolError("INVALID_DIRECTION", "$")
+        raise ControlProtocolError("INVALID_DIRECTION", "$")
 
 
 def _validate_shape(message: dict[str, object], message_type: str) -> None:
     required = set(_FIELDS[message_type]) - _OPTIONAL.get(message_type, set())
     for field in _FIELDS[message_type]:
         if field in required and field not in message:
-            raise _ControlProtocolError("MISSING_FIELD", f"$.{field}")
+            raise ControlProtocolError("MISSING_FIELD", f"$.{field}")
 
 
 def _validate_types(message: dict[str, object], message_type: str) -> None:
@@ -414,7 +414,7 @@ def _validate_types(message: dict[str, object], message_type: str) -> None:
             _require_integer(value, f"$.{field}")
             message[field] = int(value)
         if field == "retryable" and type(value) is not bool:
-            raise _ControlProtocolError("INVALID_FIELD_TYPE", "$.retryable")
+            raise ControlProtocolError("INVALID_FIELD_TYPE", "$.retryable")
         if field in {
             "protocol",
             "type",
@@ -432,9 +432,9 @@ def _validate_types(message: dict[str, object], message_type: str) -> None:
             "message",
             "request_type",
         } and not isinstance(value, str):
-            raise _ControlProtocolError("INVALID_FIELD_TYPE", f"$.{field}")
+            raise ControlProtocolError("INVALID_FIELD_TYPE", f"$.{field}")
         if field in {"audio", "retire_server_seq"} and not isinstance(value, dict):
-            raise _ControlProtocolError("INVALID_FIELD_TYPE", f"$.{field}")
+            raise ControlProtocolError("INVALID_FIELD_TYPE", f"$.{field}")
     if "audio" in message:
         _validate_object(message["audio"], "$.audio", ("encoding", "sample_rate", "channels"))
     if "retire_server_seq" in message:
@@ -443,16 +443,16 @@ def _validate_types(message: dict[str, object], message_type: str) -> None:
 
 def _validate_object(value: object, path: str, fields: tuple[str, ...]) -> None:
     if not isinstance(value, dict):
-        raise _ControlProtocolError("INVALID_FIELD_TYPE", path)
+        raise ControlProtocolError("INVALID_FIELD_TYPE", path)
     for field in fields:
         if field not in value:
-            raise _ControlProtocolError("MISSING_FIELD", f"{path}.{field}")
+            raise ControlProtocolError("MISSING_FIELD", f"{path}.{field}")
     for field in fields:
         item = value[field]
         if isinstance(item, str):
             _validate_scalar_string(item, f"{path}.{field}")
         if field == "encoding" and not isinstance(item, str):
-            raise _ControlProtocolError("INVALID_FIELD_TYPE", f"{path}.{field}")
+            raise ControlProtocolError("INVALID_FIELD_TYPE", f"{path}.{field}")
         if field != "encoding":
             _require_integer(item, f"{path}.{field}")
             value[field] = int(item)
@@ -488,11 +488,11 @@ def _validate_string_fields(message: dict[str, object]) -> None:
     if "call_id" in message:
         _validate_string(message["call_id"], "$.call_id", 1, None)
         if not _CALL_ID.fullmatch(message["call_id"]):
-            raise _ControlProtocolError("INVALID_FIELD_VALUE", "$.call_id")
+            raise ControlProtocolError("INVALID_FIELD_VALUE", "$.call_id")
     if "code" in message:
         _validate_string(message["code"], "$.code", 1, 64)
         if not _ERROR_CODE.fullmatch(message["code"]):
-            raise _ControlProtocolError("INVALID_FIELD_VALUE", "$.code")
+            raise ControlProtocolError("INVALID_FIELD_VALUE", "$.code")
 
 
 def _validate_nested_ranges(message: dict[str, object]) -> None:
@@ -511,31 +511,31 @@ def _validate_nested_ranges(message: dict[str, object]) -> None:
 def _validate_integer(value: object, path: str, minimum: int, maximum: int) -> None:
     _require_integer(value, path)
     if not minimum <= value <= maximum:
-        raise _ControlProtocolError("FIELD_OUT_OF_RANGE", path)
+        raise ControlProtocolError("FIELD_OUT_OF_RANGE", path)
 
 
 def _validate_scalar_string(value: str, path: str) -> None:
     if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
-        raise _ControlProtocolError("BAD_JSON", path)
+        raise ControlProtocolError("BAD_JSON", path)
 
 
 def _validate_string(value: object, path: str, minimum: int, maximum: int | None) -> None:
     assert isinstance(value, str)
     if len(value) < minimum or (maximum is not None and len(value) > maximum):
-        raise _ControlProtocolError("FIELD_OUT_OF_RANGE", path)
+        raise ControlProtocolError("FIELD_OUT_OF_RANGE", path)
     _validate_scalar_string(value, path)
     if "\x00" in value or "\ufffd" in value:
-        raise _ControlProtocolError("INVALID_FIELD_VALUE", path)
+        raise ControlProtocolError("INVALID_FIELD_VALUE", path)
 
 
 def _validate_enums(message: dict[str, object], message_type: str) -> None:
     for field, allowed in _ENUMS.items():
         if field in message and message[field] not in allowed:
-            raise _ControlProtocolError("INVALID_ENUM", f"$.{field}")
+            raise ControlProtocolError("INVALID_ENUM", f"$.{field}")
     if message_type == "call.hangup" and message["reason"] not in {"user_hangup", "backgrounded"}:
-        raise _ControlProtocolError("INVALID_ENUM", "$.reason")
+        raise ControlProtocolError("INVALID_ENUM", "$.reason")
     if message_type == "playback.stop" and message["reason"] != "user_interrupted":
-        raise _ControlProtocolError("INVALID_ENUM", "$.reason")
+        raise ControlProtocolError("INVALID_ENUM", "$.reason")
     _validate_audio_enums(message, message_type)
 
 
@@ -544,16 +544,16 @@ def _validate_audio_enums(message: dict[str, object], message_type: str) -> None
         audio = message["audio"]
         assert isinstance(audio, dict)
         if audio["encoding"] != "pcm_s16le":
-            raise _ControlProtocolError("INVALID_ENUM", "$.audio.encoding")
+            raise ControlProtocolError("INVALID_ENUM", "$.audio.encoding")
         if audio["sample_rate"] != 16000:
-            raise _ControlProtocolError("INVALID_ENUM", "$.audio.sample_rate")
+            raise ControlProtocolError("INVALID_ENUM", "$.audio.sample_rate")
         if audio["channels"] != 1:
-            raise _ControlProtocolError("INVALID_ENUM", "$.audio.channels")
+            raise ControlProtocolError("INVALID_ENUM", "$.audio.channels")
     if message_type == "audio.stream_started":
         if message["sample_rate"] != 24000:
-            raise _ControlProtocolError("INVALID_ENUM", "$.sample_rate")
+            raise ControlProtocolError("INVALID_ENUM", "$.sample_rate")
         if message["channels"] != 1:
-            raise _ControlProtocolError("INVALID_ENUM", "$.channels")
+            raise ControlProtocolError("INVALID_ENUM", "$.channels")
 
 
 def _validate_cross_fields(message: dict[str, object], message_type: str) -> None:
@@ -561,6 +561,6 @@ def _validate_cross_fields(message: dict[str, object], message_type: str) -> Non
         retired = message["retire_server_seq"]
         assert isinstance(retired, dict)
         if retired["from"] > retired["through"]:
-            raise _ControlProtocolError("INVALID_FIELD_VALUE", "$.retire_server_seq")
+            raise ControlProtocolError("INVALID_FIELD_VALUE", "$.retire_server_seq")
         if retired["through"] >= message["seq"]:
-            raise _ControlProtocolError("INVALID_FIELD_VALUE", "$.retire_server_seq.through")
+            raise ControlProtocolError("INVALID_FIELD_VALUE", "$.retire_server_seq.through")

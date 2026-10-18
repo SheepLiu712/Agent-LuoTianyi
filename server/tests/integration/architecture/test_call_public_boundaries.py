@@ -1,3 +1,4 @@
+from src.stage.call_stage import CallIngressReceipt
 import ast
 from pathlib import Path
 
@@ -37,7 +38,7 @@ def test_stage_manager_does_not_reexport_transitional_call_steps():
         "current_call_stage",
         "release_call",
     }.isdisjoint(public)
-    assert {"initialize", "try_to_get_stage", "commit_call_resume", "close"} <= public
+    assert {"initialize", "try_to_get_stage", "close"} <= public
     assert "start_call" not in public
 
 
@@ -53,15 +54,21 @@ def test_call_v1_package_exports_only_stable_facade_and_wire_contracts():
     exports = set(ast.literal_eval(assignment.value))
 
     assert {
+        "Session",
+        "Binding",
+        "Delivery",
+        "TransportConfig",
+        "WireOutput",
+        "InboundFrame",
         "_CallTransportHub",
         "_CallTransportSession",
         "_CallTransportBinding",
         "_CallStageBinding",
-        "_CallAcceptanceReceipt",
+        "CallIngressReceipt",
         "_CallBusinessAcceptanceSink",
-        "_CallTransportConfig",
-        "_CallWireOutput",
-        "_InboundCallFrame",
+        "TransportConfig",
+        "WireOutput",
+        "InboundFrame",
     }.isdisjoint(exports)
     assert {"CallWebSocketAdapter", "CallCapabilityStatus", "CallTransportError"} <= exports
 
@@ -103,9 +110,19 @@ def test_chat_and_call_have_the_same_network_operations_and_keep_protocol_intern
     network = {"open", "receive", "next_output", "complete_output", "disconnect", "close"}
     assert network <= chat & call
     assert chat - network == {"initialize", "output_sink", "detach_stage_binding"}
-    assert call - network == {"capability_status", "supports_call_character"}
+    assert call - network == {"capability_status", "supports_call_character", "submit_output"}
     for name in ("adapter.py", "_delivery.py", "_input.py", "_voice_upload_helper.py"):
         assert "src.web" not in (SERVER_ROOT / "src/adapter/websocket/chat" / name).read_text(encoding="utf-8")
-    for name in ("transport", "control", "audio_codec", "stage_binding"):
+    for name in ("session", "binding", "delivery", "protocol_translate", "input", "control", "audio_codec"):
         assert not (SERVER_ROOT / f"src/adapter/websocket/call_v1/{name}.py").exists()
         assert (SERVER_ROOT / f"src/adapter/websocket/call_v1/_{name}.py").is_file()
+
+
+def test_call_adapter_keeps_delivery_inside_session_and_removes_legacy_assembly():
+    root = SERVER_ROOT / "src/adapter/websocket/call_v1"
+    assert not (root / "_transport.py").exists()
+    assert not (root / "_stage_binding.py").exists()
+    source = (root / "adapter.py").read_text(encoding="utf-8")
+    assert "._delivery" not in source
+    assert "_CallTransportHub" not in source
+    assert "CallControl" not in (SERVER_ROOT / "src/stage/stage_manager.py").read_text(encoding="utf-8")

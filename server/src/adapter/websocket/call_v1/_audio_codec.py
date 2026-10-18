@@ -20,8 +20,8 @@ UINT32_MAX = (1 << 32) - 1
 MAX_PAYLOAD_BYTES = 16_384
 
 
-class _AudioFrameCodecError(ValueError):
-    """A codec validation failure with a stable cross-client error code."""
+class AudioFrameCodecError(ValueError):
+    """表示音频帧编码或校验失败，并保留稳定错误码。"""
 
     def __init__(self, code: str, message: str | None = None) -> None:
         self.code = code
@@ -30,8 +30,8 @@ class _AudioFrameCodecError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class _WireAudioFrame:
-    """The adapter-layer representation of one PCM16 mono audio frame."""
+class WireAudioFrame:
+    """表示一帧 PCM 音频及其路由、流标识、序号和结束标记。"""
 
     version: int
     route: int
@@ -42,22 +42,23 @@ class _WireAudioFrame:
 
 
 @runtime_checkable
-class _AudioFrameCodec(Protocol):
-    """A replaceable encoding for a single call audio frame."""
+class AudioFrameCodec(Protocol):
+    """约定单帧音频的无状态编码和解码操作。"""
 
-    def encode(self, frame: _WireAudioFrame) -> bytes:
-        """Encode one wire frame."""
+    def encode(self, frame: WireAudioFrame) -> bytes:
+        """将音频帧转换为线路字节。"""
 
-    def decode(self, encoded: bytes) -> _WireAudioFrame:
-        """Decode one wire frame."""
+    def decode(self, encoded: bytes) -> WireAudioFrame:
+        """将线路字节校验并转换为音频帧。"""
 
 
-class _BinaryAudioFrameCodec:
-    """Strict codec for the fixed-layout ``call.v1`` binary audio frame."""
+class BinaryAudioFrameCodec:
+    """实现 call.v1 固定头部和 PCM 负载的严格编解码。"""
 
-    def encode(self, frame: _WireAudioFrame) -> bytes:
-        if not isinstance(frame, _WireAudioFrame):
-            raise _AudioFrameCodecError("INVALID_FIELD_TYPE")
+    def encode(self, frame: WireAudioFrame) -> bytes:
+        """校验字段与负载并编码为一个二进制帧。"""
+        if not isinstance(frame, WireAudioFrame):
+            raise AudioFrameCodecError("INVALID_FIELD_TYPE")
 
         self._validate_frame(frame)
         payload_length = len(frame.payload)
@@ -71,11 +72,12 @@ class _BinaryAudioFrameCodec:
             )
         )
 
-    def decode(self, encoded: bytes) -> _WireAudioFrame:
+    def decode(self, encoded: bytes) -> WireAudioFrame:
+        """校验头部、标记和负载长度，返回一帧音频。"""
         if type(encoded) is not bytes:
-            raise _AudioFrameCodecError("INVALID_FIELD_TYPE")
+            raise AudioFrameCodecError("INVALID_FIELD_TYPE")
         if len(encoded) < HEADER_SIZE:
-            raise _AudioFrameCodecError("HEADER_TRUNCATED")
+            raise AudioFrameCodecError("HEADER_TRUNCATED")
 
         version = encoded[0]
         route = encoded[1]
@@ -86,21 +88,21 @@ class _BinaryAudioFrameCodec:
         actual_payload_length = len(encoded) - HEADER_SIZE
 
         if version != VERSION:
-            raise _AudioFrameCodecError("UNSUPPORTED_VERSION")
+            raise AudioFrameCodecError("UNSUPPORTED_VERSION")
         if route not in (CHAT_ROUTE, CALL_ROUTE):
-            raise _AudioFrameCodecError("INVALID_ROUTE")
+            raise AudioFrameCodecError("INVALID_ROUTE")
         if flags & ~ALLOWED_FLAGS_MASK:
-            raise _AudioFrameCodecError("UNSUPPORTED_FLAGS")
+            raise AudioFrameCodecError("UNSUPPORTED_FLAGS")
         if seq == 0:
-            raise _AudioFrameCodecError("INVALID_SEQ")
+            raise AudioFrameCodecError("INVALID_SEQ")
         if payload_length != actual_payload_length:
-            raise _AudioFrameCodecError("PAYLOAD_LENGTH_MISMATCH")
+            raise AudioFrameCodecError("PAYLOAD_LENGTH_MISMATCH")
         self._validate_payload_length(actual_payload_length)
         payload = self._copy_payload(encoded)
-        return _WireAudioFrame(version, route, flags, stream_id, seq, payload)
+        return WireAudioFrame(version, route, flags, stream_id, seq, payload)
 
     @staticmethod
-    def _validate_frame(frame: _WireAudioFrame) -> None:
+    def _validate_frame(frame: WireAudioFrame) -> None:
         if (
             any(
                 type(value) is not int
@@ -108,33 +110,33 @@ class _BinaryAudioFrameCodec:
             )
             or type(frame.payload) is not bytes
         ):
-            raise _AudioFrameCodecError("INVALID_FIELD_TYPE")
+            raise AudioFrameCodecError("INVALID_FIELD_TYPE")
         if not 0 <= frame.version <= 0xFF or not 0 <= frame.route <= 0xFF or not 0 <= frame.flags <= 0xFF:
-            raise _AudioFrameCodecError("FIELD_OUT_OF_RANGE")
+            raise AudioFrameCodecError("FIELD_OUT_OF_RANGE")
         if not 0 <= frame.stream_id <= UINT32_MAX or not 0 <= frame.seq <= UINT32_MAX:
-            raise _AudioFrameCodecError("FIELD_OUT_OF_RANGE")
+            raise AudioFrameCodecError("FIELD_OUT_OF_RANGE")
         if frame.version != VERSION:
-            raise _AudioFrameCodecError("UNSUPPORTED_VERSION")
+            raise AudioFrameCodecError("UNSUPPORTED_VERSION")
         if frame.route not in (CHAT_ROUTE, CALL_ROUTE):
-            raise _AudioFrameCodecError("INVALID_ROUTE")
+            raise AudioFrameCodecError("INVALID_ROUTE")
         if frame.flags & ~ALLOWED_FLAGS_MASK:
-            raise _AudioFrameCodecError("UNSUPPORTED_FLAGS")
+            raise AudioFrameCodecError("UNSUPPORTED_FLAGS")
         if frame.seq == 0:
-            raise _AudioFrameCodecError("INVALID_SEQ")
-        _BinaryAudioFrameCodec._validate_payload(frame.payload)
+            raise AudioFrameCodecError("INVALID_SEQ")
+        BinaryAudioFrameCodec._validate_payload(frame.payload)
 
     @staticmethod
     def _validate_payload(payload: bytes) -> None:
-        _BinaryAudioFrameCodec._validate_payload_length(len(payload))
+        BinaryAudioFrameCodec._validate_payload_length(len(payload))
 
     @staticmethod
     def _validate_payload_length(payload_length: int) -> None:
         if payload_length > MAX_PAYLOAD_BYTES:
-            raise _AudioFrameCodecError("PAYLOAD_TOO_LARGE")
+            raise AudioFrameCodecError("PAYLOAD_TOO_LARGE")
         if payload_length == 0:
-            raise _AudioFrameCodecError("EMPTY_PAYLOAD")
+            raise AudioFrameCodecError("EMPTY_PAYLOAD")
         if payload_length % 2:
-            raise _AudioFrameCodecError("PCM_ALIGNMENT_ERROR")
+            raise AudioFrameCodecError("PCM_ALIGNMENT_ERROR")
 
     @staticmethod
     def _copy_payload(encoded: bytes) -> bytes:

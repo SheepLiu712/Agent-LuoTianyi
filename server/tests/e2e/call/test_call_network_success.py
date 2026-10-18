@@ -16,7 +16,7 @@ import websocket
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from src.adapter.websocket.call_v1._audio_codec import CALL_ROUTE, VERSION, _BinaryAudioFrameCodec, _WireAudioFrame
+from src.adapter.websocket.call_v1._audio_codec import CALL_ROUTE, VERSION, BinaryAudioFrameCodec, WireAudioFrame
 
 
 @pytest.fixture
@@ -395,8 +395,8 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
         assert active["call_id"] == call_id
         client_pcm = b"\x10\x00\x20\x00"
         call.send_binary(
-            _BinaryAudioFrameCodec().encode(
-                _WireAudioFrame(
+            BinaryAudioFrameCodec().encode(
+                WireAudioFrame(
                     version=VERSION,
                     route=CALL_ROUTE,
                     flags=0,
