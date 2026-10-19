@@ -263,3 +263,39 @@ def test_agreement_loader_uses_binder_and_reports_missing_wiring(dialog):
     finally:
         unwired.close()
         unwired.deleteLater()
+
+
+def test_lost_response_keeps_request_id_for_retry(dialog):
+    """响应丢失：失败结果不得清除未决记录，重试必须复用同一 request ID。"""
+    dialog.widget.fill_register_form()
+    dialog.widget.do_register()
+    sign = FakeSignDialog.last_instance
+    dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
+    request_id = dialog.widget._submit_context["request_id"]
+    registration_resume.save_pending(request_id, "newbie", "terms-2026-10-v1")
+
+    # 服务端可能已经提交，只是响应没回来：客户端只能看到失败。
+    dialog.widget._on_register_finished(sign.submit_token, RegisterOutcome(False, "read timeout"))
+
+    assert sign.submissions == [(False, "read timeout")]
+    assert registration_resume.load_pending()["registration_request_id"] == request_id
+    assert registration_resume.request_id_for("newbie") == request_id
+
+
+def test_transport_error_becomes_visible_failure(dialog):
+    """后台任务把传输异常转成可显示结果，而不是让线程静默死掉。"""
+    received: list[tuple] = []
+    signals = login_module._RegisterSignals()
+    signals.finished.connect(lambda token, outcome: received.append((token, outcome)))
+
+    def boom():
+        raise TimeoutError("read timeout")
+
+    login_module._RegisterTask("tok", boom, signals).run()
+
+    assert len(received) == 1
+    token, outcome = received[0]
+    assert token == "tok"
+    assert outcome.ok is False
+    assert "read timeout" in outcome.message
