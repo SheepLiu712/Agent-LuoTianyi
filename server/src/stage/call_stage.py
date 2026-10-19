@@ -15,7 +15,7 @@ from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -50,39 +50,70 @@ from src.infrastructure.observability.call_metrics import (
     CallProvider,
 )
 from src.infrastructure.persistence.call_sessions.repository import CallSessionRecord, CallSessionRepository
+from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
 from ._call_playback import CallPlaybackCoordinator, PlaybackCompletion, PlaybackSettlementError
+from ._call_records import PreparedCall
 from .call_lifecycle import CallLifecycle
-
-if TYPE_CHECKING:
-    from .stage_manager import CallStageOwnership
+from .call_settlement import CallAgentSettlement, CallSettlement, CallSettlementConsumerImpl
 
 
-class CallTransportSink(Protocol):
-    """Typed output admission; completion is not this frame's network send/ACK/playback.
+def bind_call_stage_creator(
+    *,
+    get_agent,
+    get_context_factory,
+    call_sessions,
+    conversation_service,
+    call_maintenance_batches,
+    speech_factory,
+    output_sink,
+    call_metrics=None,
+    monotonic=time.monotonic,
+    wall_clock=None,
+) -> Callable[..., Awaitable[CallStage]] | None:
+    """预绑定固定资源；缺少创建或结算依赖时返回 None，禁止通话接入。"""
+    required = (
+        get_agent,
+        get_context_factory,
+        call_sessions,
+        conversation_service,
+        call_maintenance_batches,
+        speech_factory,
+        output_sink,
+    )
+    if any(resource is None for resource in required):
+        return None
 
-    Capacity waits may depend on older frames being acknowledged.
-    The adapter owns wire encoding, replay registration, and network feedback.
-    """
+    async def _create(prepared: PreparedCall, **lifecycle) -> CallStage:
+        return await CallStage.create(
+            record=prepared._record,
+            agent=get_agent(prepared.character_id),
+            context_factory=get_context_factory(prepared.character_id),
+            call_sessions=call_sessions,
+            conversation_service=conversation_service,
+            call_maintenance_batches=call_maintenance_batches,
+            speech_factory=speech_factory,
+            output_sink=output_sink,
+            call_metrics=call_metrics,
+            monotonic=monotonic,
+            wall_clock=wall_clock,
+            **lifecycle,
+        )
 
-    async def send_state(self, item: object) -> None: ...
-
-    async def send_ended(self, snapshot: CallFinalSnapshot) -> None: ...
-
-    async def send_failed(self, reason: CallEndReason) -> None: ...
-
-    async def start_stream(self, response_id: str, stream_id: int, audio_format: d.AudioFormat) -> None: ...
-
-    async def send_pcm(self, response_id: str, stream_id: int, payload: bytes, *, final: bool) -> None: ...
-
-    async def stop_response(self, response_id: str, stream_ids: tuple[int, ...]) -> None: ...
+    return _create
 
 
-class CallSettlementSink(Protocol):
-    """Observes the immutable terminal snapshot for the later settlement lane."""
+@dataclass(frozen=True, slots=True)
+class CallStageOwnership:
+    """一次通话的交互身份、原建立期限和所有权代次。"""
 
-    async def emit(self, snapshot: CallFinalSnapshot, context: InteractionContext) -> object: ...
+    call_id: str
+    user_id: str
+    character_id: str
+    client_request_id: str
+    setup_deadline: float
+    generation: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,10 +244,11 @@ class CallStage:
         context_factory: ContextFactory,
         call_sessions: CallSessionRepository,
         speech_factory: RealtimeSpeechSessionFactory,
-        transport: CallTransportSink,
+        output_sink: Callable[[str, CallStageOutput], Awaitable[None]],
         release_ownership: Callable[[CallStageOwnership], bool] | None = None,
-        settlement_sink: CallSettlementSink | None = None,
-        termination_owner: Callable[["CallStage", CallEndReason], asyncio.Task] | None = None,
+        settle: Callable[..., Awaitable[object]] | None = None,
+        own_finalization: Callable[..., asyncio.Task] | None = None,
+        own_termination: Callable[..., asyncio.Task] | None = None,
         call_metrics: Any | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] | None = None,
@@ -229,10 +261,12 @@ class CallStage:
             raise ValueError("call ownership identity does not match record")
         self._ownership, self._record = ownership, record
         self._agent, self._context_factory, self._repository = agent, context_factory, call_sessions
-        self._speech_factory, self._transport = speech_factory, transport
+        self._speech_factory, self._output_sink = speech_factory, output_sink
         self._release_ownership = release_ownership
-        self._settlement_sink = settlement_sink
-        self._termination_owner = termination_owner
+        self._settle = settle
+        self._own_finalization = own_finalization
+        self._finalization = None
+        self._own_termination = own_termination
         self._call_metrics = call_metrics
         self._monotonic = monotonic
         self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
@@ -298,9 +332,21 @@ class CallStage:
         self._pending_answer: d.AnswerCall | None = None
 
     @classmethod
-    async def create(cls, **kwargs: object) -> "CallStage":
+    async def create(cls, *, conversation_service, call_maintenance_batches, **kwargs: object) -> "CallStage":
+        """装配本次结算并返回 PREPARING Stage；握手排队后才启动耗时初始化。"""
         stage = cls(**kwargs)
-        await stage.start()
+        stage._settlement = CallSettlement(
+            consumer=CallSettlementConsumerImpl(
+                agent_settlement=CallAgentSettlement(agent=stage._agent, context_factory=stage._context_factory),
+                call_sessions=stage._repository,
+                conversation_service=conversation_service,
+                call_maintenance_batches=call_maintenance_batches,
+                call_metrics=stage._call_metrics,
+            )
+        )
+        if not stage._settlement.is_ready:
+            raise ValueError("call settlement dependencies are incomplete")
+        stage._settle = stage._settlement.settle
         return stage
 
     @property
@@ -548,16 +594,15 @@ class CallStage:
         """Stop realtime work once; caller cancellation does not cancel owned termination."""
         if self._termination_reason is None:
             self._termination_reason = reason
-        if self._termination_owner is not None:
-            task = self._termination_owner(self, self._termination_reason)
-        else:
-            if self._termination is None:
+        if self._termination is None:
+            if self._own_termination is not None:
+                self._termination = self._own_termination(lambda: self._terminate_owned(self._termination_reason))
+            else:
                 self._termination = asyncio.create_task(
-                    self._terminate_owned(self._termination_reason), name=f"call-terminate-{self._ownership.call_id}"
+                    self._terminate_owned(self._termination_reason), name=f"call-terminate-{self.call_id}"
                 )
                 self._termination.add_done_callback(self._observe_task)
-            task = self._termination
-        return await asyncio.shield(task)
+        return await asyncio.shield(self._termination)
 
     async def _terminate_owned(self, reason: CallEndReason) -> CallFinalSnapshot | None:
         initialization = self._initialization
@@ -786,7 +831,7 @@ class CallStage:
                 await self._realize_plan(retry, turn_seq, retried=retried | {retry.actions[0].action_id})
                 return
             if any(isinstance(action, d.Say) for action in plan.actions):
-                await self._transport_send(self._transport.send_state(CallReplyFailed(self._ownership.call_id)))
+                await self._transport_send(self._emit(CallReplyFailed(self._ownership.call_id)))
                 self._record_reply_failure(plan.origin_request_id)
                 self._retire_unrealized_responses(response_ids)
             if turn_seq is not None:
@@ -972,7 +1017,7 @@ class CallStage:
         )
         if publish:
             try:
-                await self._transport.send_state(
+                await self._emit(
                     CallStateChanged(
                         self._ownership.call_id,
                         state,
@@ -1042,21 +1087,29 @@ class CallStage:
         cleanup_error = await self._cleanup(release_ownership=False, close_context=False)
         settlement_context = self._context
         self._context = None
-        if self._settlement_sink is not None:
-            try:
-                await self._settlement_sink.emit(self._final, settlement_context)
-            except BaseException as error:
+        try:
+
+            async def operation():
+                await self._finalize(self._final, settlement_context)
+
+            if self._own_finalization is not None:
+                self._finalization = self._own_finalization(operation)
+            else:
+                # 独立 Stage 也必须持有清理；运行时由 Manager 统一持有任务。
+                self._finalization = asyncio.create_task(operation(), name=f"call-finalize-{self.call_id}")
+                self._finalization.add_done_callback(self._observe_task)
+                await asyncio.shield(self._finalization)
+        except BaseException as error:
+            ending_error = ending_error or error
+            if self._finalization is None:
                 self._record_metric(
                     CallMetricName.SETTLEMENT_ADMISSION,
                     duration_ms=0,
                     status=CallMetricStatus.ERROR,
                     labels={"result": CallMetricResult.FAILED.value, "error_code": "SETTLEMENT_ADMISSION_FAILED"},
                 )
-                ending_error = ending_error or error
                 if settlement_context is not None:
-                    await settlement_context.close()
-        elif settlement_context is not None:
-            await settlement_context.close()
+                    await complete_owned(settlement_context.close())
         # The manager has registered finalization before relinquishing the live call.
         self._release_call_ownership()
         await self._send_terminal_best_effort(self._final)
@@ -1065,13 +1118,49 @@ class CallStage:
             raise ending_error
         return self._final
 
+    async def _finalize(self, snapshot, context) -> None:
+        error = None
+        try:
+            if self._settle is not None:
+                await self._settle(snapshot, context=context)
+        except BaseException as settlement_error:
+            error = settlement_error
+        finally:
+            try:
+                if context is not None:
+                    await complete_owned(context.close())
+            except BaseException as close_error:
+                if error is None:
+                    error = close_error
+                else:
+                    get_logger(__name__).error(
+                        "Call context close failed call=%s settlement_type=%s close_type=%s",
+                        self.call_id,
+                        type(error).__name__,
+                        type(close_error).__name__,
+                    )
+        if error is not None:
+            raise error
+
+    async def _emit(self, output: CallStageOutput) -> None:
+        await self._output_sink(self.call_id, output)
+
+    @property
+    def is_finalizing(self) -> bool:
+        """实时退出已开始，不能接受新的交互接入。"""
+        return self.state in {CallState.ENDING, CallState.ENDED, CallState.DECLINED}
+
+    def can_attach(self) -> bool:
+        """检查能否申请连接；实际接入仍须重验恢复期限和连接状态。"""
+        return not self.termination_requested and (self.state is CallState.ACTIVE or self.can_reconnect())
+
     async def _send_terminal_best_effort(self, snapshot: CallFinalSnapshot) -> None:
         """Bound terminal delivery after realtime cleanup and settlement admission.
 
         Cancellation cannot retract bytes already written by a transport, so the
         binding remains responsible for terminal idempotency.
         """
-        task = asyncio.create_task(self._transport.send_ended(snapshot), name="call-terminal-delivery")
+        task = asyncio.create_task(self._emit(snapshot), name="call-terminal-delivery")
         try:
             await asyncio.wait_for(task, timeout=self._terminal_delivery_timeout)
         except TimeoutError:
@@ -1091,7 +1180,7 @@ class CallStage:
         await self._transition(CallState.FAILED, end_reason=reason, publish=False)
         cleanup_error = await self._cleanup()
         try:
-            await self._transport.send_failed(reason)
+            await self._emit(CallSetupFailed(reason))
         except BaseException:
             pass
         if cleanup_error is not None:
@@ -1310,7 +1399,7 @@ class CallStage:
 
     async def _stop_response(self, response_id: str, stream_ids: tuple[int, ...]) -> None:
         if stream_ids:
-            await self._transport_send(self._transport.stop_response(response_id, stream_ids))
+            await self._transport_send(self._emit(CallPlaybackStop(response_id, stream_ids)))
             return
         self._settle_response_if_complete(response_id)
 
@@ -1538,11 +1627,11 @@ class _OutputSink:
                     response.failed = True
                     stream_ids = (response.stream_id,) if response.stream_id is not None else ()
                     if stream_ids:
-                        await self._stage._transport_send(self._stage._transport.stop_response(response_id, stream_ids))
+                        await self._stage._transport_send(self._stage._emit(CallPlaybackStop(response_id, stream_ids)))
                     elif response.settled is not None:
                         response.settled.set()
         elif isinstance(output, d.ExpressionOutput):
-            await self._stage._transport_send(self._stage._transport.send_state(CallOutput(output)))
+            await self._stage._transport_send(self._stage._emit(CallOutput(output)))
 
     async def _send_audio(self, response_id: str, output: d.AudioChunkOutput) -> None:
         response = self._stage._responses[response_id]
@@ -1561,13 +1650,13 @@ class _OutputSink:
             self._stage._next_stream_id += 1
             self._stage.register_playback(response_id, response.stream_id)
             await self._stage._transport_send(
-                self._stage._transport.start_stream(response_id, response.stream_id, output.audio_format)
+                self._stage._emit(CallStreamStarted(response_id, response.stream_id, output.audio_format))
             )
         self._stage._pending_send += 1
         self._stage._playback.set_pending_send_count(self._stage._pending_send)
         try:
             await self._stage._transport_send(
-                self._stage._transport.send_pcm(response_id, response.stream_id, output.data, final=output.final)
+                self._stage._emit(CallPCM(response_id, response.stream_id, output.data, output.final))
             )
         finally:
             self._stage._pending_send -= 1

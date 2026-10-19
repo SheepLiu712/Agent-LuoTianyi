@@ -1002,3 +1002,22 @@ _protocol_translate.py 负责控制/音频帧解析、字段校验与编码，�
 Delivery 管理下行统一序号、重放、客户端 ACK、音频容量与取消范围，调用协议工具编码后送入当前 Binding。网络发送完成不推进客户端游标；播放完成由 Stage 单独处理。断线期间允许的输出受缓存限制，恢复先发送握手和必要重放，再放行新输出。保留现有发现缺口立即 NACK、缓存乱序帧和内容一致的重传去重策略。
 
 重构验收必须覆盖：初始化中挂断及时取消资源准备；Stage/Session/Delivery 跨断线恢复复用；同序号缺失帧重放且不重复业务接纳；已取消音频不重放；旧 Binding 等待者、反馈和断线失效；恢复事务失败释放资源；真实 Manager/Stage/Adapter 装配的收尾与接入约束。文件按包外使用关系命名；包内跨文件使用的类、函数和方法不加下划线并提供中文 docstring，文件内私有实现加下划线。
+
+
+### StageManager 通话职责收口（2026-10-19）
+
+StageManager 只协调 Stage 注册、唯一占用、接入、Chat→Call 意图及交接、建立请求合并、重置互斥和关闭顺序。通话记录的幂等准备、失败补偿、时间戳及启动恢复由 stage 内部 CallRecords 封装；它由 Manager 创建和初始化，不作为 ServerRuntime 一级成员，不管理第二套 Stage/Binding/收尾任务集合。
+
+CallRecords 只管理通话记录的建立、幂等查询、失败补偿与启动恢复，不持有 Agent、ContextFactory、语音 Provider、输出 sink 或结算执行器。其 ready 仅表示恢复完成。
+
+CallStage.create 负责创建轻量 PREPARING Stage，并在 Stage 内部装配本次通话的结算执行器。创建不启动 Context 或 Provider，不等待耗时初始化。结算复用本次 Stage 的 Agent 和原会话 Context，执行最终维护与概括，最终由 Stage 关闭 Context。共享存储和 Provider 工厂仍复用，但每次通话的结算执行器独立。
+
+StageManager 在构造时通过 CallStage 模块的绑定函数预绑定固定资源；运行时仅传入已准备身份、所有权和生命周期回调。该创建函数是普通函数，不新增 Factory 对象或 ServerRuntime 一级成员。绑定时检查依赖完整性，缺少依赖时不开放通话，不能等到结算才发现缺失；聊天接入不受影响。call_business_ready 同时要求创建函数可用和 CallRecords 恢复完成。
+
+通话输出使用装配时注入的 call_output_sink(call_id, output)，try_to_get_stage 保持多参数接口但不接收 transport。Stage 尚未建立时以具名异常返回，由 Adapter 编码拒绝；Stage 已建立后由 CallStage 发出失败、状态及结束输出。Manager 不调用 send_failed，也不接收结算快照或 Context。
+
+CallStage 负责初始化、状态机、断线保留、恢复、初始化中挂断及最终资源释放；终止和最终收尾通过 own_termination(operation)、own_finalization(operation) 登记到 Manager 的 FinalizationTasks。操作闭包持有本次会话 Context 和快照，调用既有结算实现并在 finally 中关闭 Context；Manager 只负责持有任务、去重、占用与等待。先登记收尾再释放实时占用；等待者取消不能取消实际终止、结算及写入。实时停止和全部业务完成仍是两个里程碑。
+
+切换顺序：校验意图并保留占用 → 持久化准备通话 → 提交聊天退出、撤销旧 Binding → 等待旧 Context 完全关闭 → 创建轻量 PREPARING CallStage → Adapter 建立 Session/Binding，排入 PREPARING 与首 ACK → Stage 异步初始化。首次 call.start 的绝对建立期限在交接时延续，不重置；意图期限仍独立由 Manager 管理。准备记录失败须恢复原聊天输入并保留 Binding；提交退出后失败须完成旧聊天清理与通话失败补偿，不能复活旧 Stage。清理尚未结束时不能释放占用。
+
+验收：公开接入验证切换记录失败仍可聊天、提交后失败不复活聊天；初始化中挂断不会迟到接通；取消建立/终止等待者不取消实际工作；结算和 Context 关闭期间新聊天、新通话返回 INTERACTION_FINALIZING，用户重置立即返回 USER_INTERACTION_BUSY；收尾真正完成后解除占用。原有断线恢复、重放、旧 Binding 失效及进程启动恢复回归必须通过。

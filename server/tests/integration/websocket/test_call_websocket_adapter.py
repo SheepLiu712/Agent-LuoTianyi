@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -9,13 +8,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
-from support.stage_manager import make_stage_manager
+from support.stage_manager import make_call_adapter, make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket.call_v1 import CallTransportError, CallWebSocketAdapter
+from src.adapter.websocket.call_v1 import CallTransportError
 from src.adapter.websocket.call_v1._binding import Binding
 from src.adapter.websocket.call_v1._session import Session
-from src.adapter.websocket.call_v1._messages import TransportBackpressure
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
@@ -23,7 +21,6 @@ from src.domain.call import CallAnswerDecision, CallEndReason, CallState
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
 from src.stage.call_stage import CallStateChanged
-from src.utils.logger import get_logger
 from tests.integration.stage.test_call_stage import _ContextDatabase
 from tests.integration.stage.test_chat_stage import RecordingAgent
 
@@ -72,7 +69,7 @@ def manager(*, speech_factory, repository=None, wall_clock=None):
 
 
 def call_adapter(stages):
-    return CallWebSocketAdapter(
+    return make_call_adapter(
         manager=stages,
         user_reset_fence=stages._user_reset_fence,
         enabled=True,
@@ -108,7 +105,7 @@ class BlockingSpeechFactory:
 async def test_unavailable_character_is_rejected_before_business_claim():
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
-    adapter = CallWebSocketAdapter(
+    adapter = make_call_adapter(
         manager=stages,
         user_reset_fence=stages._user_reset_fence,
         enabled=True,

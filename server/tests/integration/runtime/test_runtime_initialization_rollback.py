@@ -212,7 +212,7 @@ async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_de
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),
     )
-    manager._recovery_ready = False
+    manager._call_records._recovery_ready = False
 
     class Recovery:
         async def reconcile(self):
@@ -224,7 +224,7 @@ async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_de
 
             return await asyncio.to_thread(blocking_recovery)
 
-    manager._stale_call_recovery = Recovery()
+    manager._call_records._recovery = Recovery()
     initializing = asyncio.create_task(manager.initialize())
     await entered.wait()
 
@@ -284,7 +284,7 @@ async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_fail
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),
     )
-    manager._recovery_ready = False
+    manager._call_records._recovery_ready = False
 
     class Recovery:
         async def reconcile(self):
@@ -296,7 +296,7 @@ async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_fail
 
             return await asyncio.to_thread(blocking_recovery)
 
-    manager._stale_call_recovery = Recovery()
+    manager._call_records._recovery = Recovery()
     initializing = asyncio.create_task(manager.initialize())
     await entered.wait()
 

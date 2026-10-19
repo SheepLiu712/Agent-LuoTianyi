@@ -20,7 +20,6 @@ import uvicorn
 from fastapi import FastAPI
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
-from src.adapter.websocket.call_v1 import CallWebSocketAdapter
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import agent_runtime as agent_runtime_module
@@ -40,7 +39,7 @@ from support.call_coherent_runtime import (
     NoopMediaResolver,
     runtime_config,
 )
-from support.stage_manager import make_stage_manager
+from support.stage_manager import make_call_adapter, make_stage_manager
 
 
 def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntime:
@@ -66,7 +65,7 @@ def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntim
         get_context_factory=agents.context_factories.__getitem__,
         call_sessions=database.call_sessions,
     )
-    call_adapter = CallWebSocketAdapter(
+    call_adapter = make_call_adapter(
         manager=manager,
         enabled=True,
         trusted_host=host_context.supports_single_process_calls,

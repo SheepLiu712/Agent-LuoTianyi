@@ -13,14 +13,14 @@ from support.call_coherent_runtime import (
     NoopMediaResolver,
     runtime_config,
 )
+from support.call_output import output_sink
+from support.call_protocol import ProtocolDriver, StageOutputDriver
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 from support.stage_manager import make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
 import src.domain.agent as d
 from src.adapter.websocket.call_v1._audio_codec import BinaryAudioFrameCodec
-from support.call_protocol import StageOutputDriver
-from support.call_protocol import ProtocolDriver
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent_runtime import agent_runtime as runtime_module
 from src.domain.call import CallAudioSemantic, CallEndReason, CallState
@@ -32,7 +32,6 @@ from src.infrastructure.models.realtime_speech import (
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage import CallStage
-from src.stage._finalization import CallFinalizationSink
 from src.stage.call_settlement import CallSettlement
 
 
@@ -117,7 +116,6 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
             await context.close()
 
     settlement = CallSettlement(consumer=SettlementConsumer())
-    manager._call_settlement = settlement
     claim = await manager._claim_call(
         user_id="user",
         character_id="luotianyi",
@@ -130,7 +128,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         character_id="luotianyi",
         client_request_id="component-evidence",
     )
-    binding = StageOutputDriver(call_id=str(claim.record.call_id), deliver=deliver)
+    binding = StageOutputDriver(call_id=str(claim.prepared._record.call_id), deliver=deliver)
     session = ProtocolDriver(
         call_id=binding.call_id,
         user_id="user",
@@ -139,21 +137,22 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     )
     stage = CallStage(
         ownership=ownership,
-        record=claim.record,
+        record=claim.prepared._record,
         agent=runtime.get_agent("luotianyi"),
         context_factory=runtime.context_factories["luotianyi"],
         call_sessions=database.call_sessions,
         speech_factory=provider_factory,
-        transport=binding,
+        output_sink=output_sink(binding),
         release_ownership=manager._release_call,
-        settlement_sink=CallFinalizationSink(manager, ownership),
+        settle=settlement.settle,
+        own_finalization=lambda operation: manager._own_call_operation(ownership, operation),
     )
     binding.bind(stage=stage, session=session)
 
     try:
         await stage.start()
         await _eventually(lambda: stage.state is CallState.ACTIVE)
-        provider = provider_factory.sessions[claim.record.call_id]
+        provider = provider_factory.sessions[claim.prepared._record.call_id]
         assert provider.started_with is not None
 
         await _eventually(lambda: any(item["type"] == "audio.stream_started" for item in _controls(delivered)))
@@ -247,7 +246,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         await stage._submit_stimulus(
             d.CallSilenceElapsed(
                 **stage._stimulus_fields(),
-                call_id=claim.record.call_id,
+                call_id=claim.prepared._record.call_id,
                 silence_ms=5000,
             )
         )

@@ -16,7 +16,7 @@ from support.call_coherent_runtime import (
     runtime_config,
 )
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
-from support.stage_manager import make_stage_manager
+from support.stage_manager import create_call_stage, make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
 from src.adapter.websocket.chat import WebSocketAdapter
@@ -55,7 +55,10 @@ class _Transport:
     async def send_state(self, _event) -> None:
         return None
 
-    async def send_audio(self, _frame) -> None:
+    async def start_stream(self, response_id, stream_id, audio_format) -> None:
+        return None
+
+    async def send_pcm(self, response_id, stream_id, payload, *, final) -> None:
         return None
 
     async def stop_response(self, *_args, **_kwargs) -> None:
@@ -123,9 +126,16 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         return context
 
     monkeypatch.setattr(factory, "create", observed_create)
+    agent_lookups = []
+
+    def resolve_agent(character_id):
+        agent_lookups.append(character_id)
+        assert len(agent_lookups) == 1, "settlement must reuse the Stage agent"
+        return runtime.get_agent(character_id)
+
     clock = _StrictClock()
     manager = make_stage_manager(
-        get_agent=runtime.get_agent,
+        get_agent=resolve_agent,
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character_id: factory,
         call_sessions=database.call_sessions,
@@ -186,19 +196,20 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
             source_interaction_id=None,
             client_request_id="real-handoff",
         )
-        stage = await manager._create_call_stage(
+        stage = await create_call_stage(
+            manager,
             claim,
             user_id="user",
             character_id="luotianyi",
             client_request_id="real-handoff",
-            speech_factory=manager._realtime_speech_factory,
+            speech_factory=manager._test_call_resources["speech_factory"],
             transport=transport,
             stage_created=transport.bind_stage,
         )
         await _eventually(lambda: stage.state is CallState.ACTIVE)
         assert len(created) == 1
         context = created[0]
-        assert context.identity.interaction_id == str(claim.record.call_id)
+        assert context.identity.interaction_id == str(claim.prepared._record.call_id)
         assert stage.context is context
 
         close_original = context.close
@@ -282,12 +293,12 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         assert store._snapshot.entries == ()
         assert store._snapshot.summary.text == ""
         assert store._base_snapshot.entries == ()
-        assert manager._current_call_ownership(str(claim.record.call_id)) is None
+        assert manager._current_call_ownership(str(claim.prepared._record.call_id)) is None
         manager._require_chat_admission(("user", "luotianyi"))
         token = await manager.begin_user_data_reset("user")
         await manager.end_user_data_reset("user", token)
 
-        persisted = database.call_sessions.find_by_id(claim.record.call_id)
+        persisted = database.call_sessions.find_by_id(claim.prepared._record.call_id)
         assert persisted.summary_status.value == "succeeded"
         assert persisted.maintenance_status.value == "succeeded"
         assert persisted.maintenance_turn_seq == 2

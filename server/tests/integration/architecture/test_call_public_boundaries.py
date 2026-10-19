@@ -1,4 +1,3 @@
-from src.stage.call_stage import CallIngressReceipt
 import ast
 from pathlib import Path
 
@@ -126,3 +125,28 @@ def test_call_adapter_keeps_delivery_inside_session_and_removes_legacy_assembly(
     assert "._delivery" not in source
     assert "_CallTransportHub" not in source
     assert "CallControl" not in (SERVER_ROOT / "src/stage/stage_manager.py").read_text(encoding="utf-8")
+
+
+def test_manager_coordinates_call_operations_without_ledger_context_or_transport_knowledge():
+    path = SERVER_ROOT / "src/stage/stage_manager.py"
+    source = path.read_text(encoding="utf-8")
+    module = ast.parse(source)
+    acquisition = next(
+        node for node in ast.walk(module) if isinstance(node, ast.AsyncFunctionDef) and node.name == "try_to_get_stage"
+    )
+    assert "transport" not in {arg.arg for arg in acquisition.args.kwonlyargs}
+    for forbidden in (
+        "CallSessionRecord",
+        "CallState",
+        "CallFinalizationSink",
+        "CallSettlementConsumerImpl",
+        "_finalize_call",
+        "send_failed",
+        "stage._terminate_owned",
+        "context.close",
+        "create_if_absent",
+    ):
+        assert forbidden not in source
+    call_stage = (SERVER_ROOT / "src/stage/call_stage.py").read_text(encoding="utf-8")
+    assert "from .stage_manager" not in call_stage
+    assert "CallTransportSink" not in call_stage

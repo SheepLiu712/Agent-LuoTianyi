@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import pytest
+from support.call_output import output_sink
 from support.call_stage_failure_harness import activate, create_active_stage, eventually
 
 from src.domain.call import CallAudioSemantic, CallEndReason, CallOutcome, CallState
@@ -16,7 +17,7 @@ async def assert_terminal(stage, repository, record, ownership, provider, transp
         await asyncio.shield(stage._transport_abort_task)
     except asyncio.CancelledError:
         pass
-    await asyncio.sleep(0)
+    await stage.terminate()
     snapshot = stage.snapshot
     assert snapshot.terminal.outcome is CallOutcome.CONNECTED
     assert snapshot.terminal.end_reason is CallEndReason.SYSTEM_FAILURE
@@ -98,9 +99,9 @@ async def test_two_concurrent_stop_failures_collapse_to_one_abort(tmp_path):
 async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(
     tmp_path,
 ):
+    from support.call_protocol import ProtocolDriver, StageOutputDriver
+
     from src.adapter.websocket.call_v1._audio_codec import WireAudioFrame
-    from support.call_protocol import StageOutputDriver
-    from support.call_protocol import ProtocolDriver
 
     stage, repository, record, _, provider, _, settlement, _ = await create_active_stage(tmp_path)
     stopped = asyncio.Event()
@@ -137,7 +138,7 @@ async def test_user_interrupt_during_real_audio_backpressure_keeps_call_active(
         sink=bridge,
     )
     bridge.bind(stage=stage, session=session)
-    stage._transport = bridge
+    stage._output_sink = output_sink(bridge)
     try:
         await activate(stage, record.call_id)
         await provider.emit(TurnCompleted(CallAudioSemantic(transcript="第一轮")))

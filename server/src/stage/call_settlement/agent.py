@@ -13,9 +13,9 @@ from src.infrastructure.persistence.call_sessions import CallSessionRecord
 
 
 class CallAgentSettlement:
-    def __init__(self, *, get_agent, get_context_factory) -> None:
-        self._get_agent = get_agent
-        self._get_context_factory = get_context_factory
+    def __init__(self, *, agent, context_factory) -> None:
+        self._agent = agent
+        self._context_factory = context_factory
 
     async def settle(
         self,
@@ -28,7 +28,7 @@ class CallAgentSettlement:
     ) -> CallAgentSettlementResult:
         owns_context = context is None
         if context is None:
-            context = await self._get_context_factory(record.character_id).create(
+            context = await self._context_factory.create(
                 str(record.call_id),
                 mode=ConversationMode.CALL,
                 user_id=record.user_id,
@@ -37,7 +37,7 @@ class CallAgentSettlement:
         try:
             plans = _PlanSink()
             request = _request(record, snapshot, settlement_input_digest)
-            report = await self._get_agent(record.character_id).handle_stimulus(request, plans, context=context)
+            report = await self._agent.handle_stimulus(request, plans, context=context)
             if report.request_status is not d.HandlingRequestStatus.COMPLETED or len(plans.plans) != 1:
                 raise RuntimeError("Agent did not produce one call settlement plan")
             summary_action, maintenance_action = plans.plans[0].actions
@@ -86,7 +86,7 @@ class CallAgentSettlement:
             cancellation=d.CancellationToken(),
             interaction_context=context,
         )
-        report = await self._get_agent(record.character_id).realize_action_plan(plan, execution, _OutputSink())
+        report = await self._agent.realize_action_plan(plan, execution, _OutputSink())
         if report.status is not d.ExecutionStatus.COMPLETED:
             raise RuntimeError("call settlement action failed")
         return report.action_results[0]

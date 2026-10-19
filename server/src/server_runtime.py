@@ -183,9 +183,14 @@ class ServerRuntime:
                 vector_store=agent_runtime.vector_store,
                 user_store=database_manager.user_store,
             )
+
+            async def call_output_sink(call_id, output):
+                await runtime.call_adapter.submit_output(call_id, output)
+
             runtime.stage_manager = StageManager(
                 get_agent=agent_runtime.get_agent,
                 chat_output_sink=runtime.chat_adapter.output_sink,
+                call_output_sink=call_output_sink,
                 detach_stage_binding=runtime.chat_adapter.detach_stage_binding,
                 get_context_factory=agent_runtime.context_factories.__getitem__,
                 due_event_provider=EventStoreDueEventProvider(event_store),

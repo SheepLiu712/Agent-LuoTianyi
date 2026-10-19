@@ -10,6 +10,7 @@ from src.adapter.websocket.call_v1 import CallWebSocketAdapter, parse_call_trans
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.stage import StageManager
+from src.stage._call_records import CallRecords
 from src.stage.call_settlement import CallRecoveryReport
 
 
@@ -20,8 +21,7 @@ def test_call_transport_defaults_to_disabled(config):
 
 def test_adapter_capability_defaults_fail_closed():
     manager = SimpleNamespace(
-        call_settlement_ready=True,
-        call_recovery_ready=True,
+        call_business_ready=True,
         is_closed=lambda: False,
     )
     adapter = CallWebSocketAdapter(manager=manager)
@@ -32,8 +32,7 @@ def test_adapter_capability_defaults_fail_closed():
 
 def ready_adapter():
     manager = SimpleNamespace(
-        call_settlement_ready=True,
-        call_recovery_ready=True,
+        call_business_ready=True,
         is_closed=lambda: False,
     )
     return CallWebSocketAdapter(
@@ -69,9 +68,9 @@ def test_call_capability_requires_every_public_module_readiness_fact():
         ("provider_ready", lambda adapter: setattr(adapter, "_provider_ready", False)),
         ("call_tts_ready", lambda adapter: setattr(adapter, "_call_tts_character_ids", lambda: ())),
         ("summary_ready", lambda adapter: setattr(adapter, "_call_summary_character_ids", lambda: ())),
-        ("settlement_ready", lambda adapter: setattr(adapter._manager, "call_settlement_ready", False)),
+        ("settlement_ready", lambda adapter: setattr(adapter._manager, "call_business_ready", False)),
         ("stage_binding_ready", lambda adapter: setattr(adapter, "_closed", True)),
-        ("recovery_ready", lambda adapter: setattr(adapter._manager, "call_recovery_ready", False)),
+        ("recovery_ready", lambda adapter: setattr(adapter._manager, "call_business_ready", False)),
     ],
 )
 def test_each_missing_call_capability_fact_fails_closed(field, mutate):
@@ -109,8 +108,9 @@ def test_agent_runtime_exposes_call_capability_without_skills_tree_access():
 async def test_manager_rejects_call_admission_until_recovery_completes():
     manager = object.__new__(StageManager)
     manager._closed = False
-    manager._call_settlement = SimpleNamespace(is_ready=True)
-    manager._recovery_ready = False
+    manager._call_records = object.__new__(CallRecords)
+    manager._call_stage_creator = lambda: None
+    manager._call_records._recovery_ready = False
     entered, release = asyncio.Event(), asyncio.Event()
 
     class Recovery:
@@ -119,7 +119,7 @@ async def test_manager_rejects_call_admission_until_recovery_completes():
             await release.wait()
             return CallRecoveryReport(0, 0, 0, 0, 0)
 
-    manager._stale_call_recovery = Recovery()
+    manager._call_records._recovery = Recovery()
     manager._initialization = None
     initializing = asyncio.create_task(manager.initialize())
     await entered.wait()
@@ -130,20 +130,20 @@ async def test_manager_rejects_call_admission_until_recovery_completes():
             user_id="user",
             character_id="luotianyi",
             client_request_id="request",
-            transport=SimpleNamespace(),
         )
 
     release.set()
     await initializing
-    assert manager.call_recovery_ready is True
+    assert manager.call_business_ready is True
 
 
 @pytest.mark.asyncio
 async def test_manager_initialize_is_owned_idempotent_and_runs_recovery_once():
     manager = object.__new__(StageManager)
     manager._closed = False
-    manager._call_settlement = SimpleNamespace(is_ready=True)
-    manager._recovery_ready = False
+    manager._call_records = object.__new__(CallRecords)
+    manager._call_stage_creator = lambda: None
+    manager._call_records._recovery_ready = False
     entered, release = asyncio.Event(), asyncio.Event()
     calls = 0
 
@@ -155,7 +155,7 @@ async def test_manager_initialize_is_owned_idempotent_and_runs_recovery_once():
             await release.wait()
             return CallRecoveryReport(0, 0, 0, 0, 0)
 
-    manager._stale_call_recovery = Recovery()
+    manager._call_records._recovery = Recovery()
     manager._initialization = None
     first = asyncio.create_task(manager.initialize())
     await entered.wait()
@@ -168,7 +168,7 @@ async def test_manager_initialize_is_owned_idempotent_and_runs_recovery_once():
     await manager.initialize()
 
     assert calls == 1
-    assert manager.call_recovery_ready is True
+    assert manager.call_business_ready is True
 
 
 @pytest.mark.asyncio
@@ -182,15 +182,16 @@ async def test_manager_initialize_is_owned_idempotent_and_runs_recovery_once():
 async def test_manager_initialize_failure_remains_not_ready(report):
     manager = object.__new__(StageManager)
     manager._closed = False
-    manager._call_settlement = SimpleNamespace(is_ready=True)
-    manager._recovery_ready = False
+    manager._call_records = object.__new__(CallRecords)
+    manager._call_stage_creator = lambda: None
+    manager._call_records._recovery_ready = False
     manager._initialization = None
-    manager._stale_call_recovery = SimpleNamespace(reconcile=lambda: _report(report))
+    manager._call_records._recovery = SimpleNamespace(reconcile=lambda: _report(report))
 
     with pytest.raises(RuntimeError, match="did not converge"):
         await manager.initialize()
 
-    assert manager.call_recovery_ready is False
+    assert manager.call_business_ready is False
 
 
 @pytest.mark.asyncio
@@ -203,13 +204,13 @@ async def test_manager_close_waits_for_owned_recovery_and_late_success_stays_not
     await asyncio.sleep(0)
 
     assert closing.done() is False
-    assert manager.call_recovery_ready is False
+    assert manager.call_business_ready is False
     assert manager.call_business_ready is False
     manager._test_recovery_release.set()
     await asyncio.wait_for(closing, 2)
     with pytest.raises(RuntimeError, match="closed during initialization"):
         await initializing
-    assert manager.call_recovery_ready is False
+    assert manager.call_business_ready is False
     assert manager.call_business_ready is False
 
 
@@ -227,7 +228,7 @@ async def test_manager_close_drains_failed_initialization_without_unobserved_tas
         await initializing
     await asyncio.sleep(0)
     assert "Task exception was never retrieved" not in caplog.text
-    assert manager.call_recovery_ready is False
+    assert manager.call_business_ready is False
 
 
 @pytest.mark.asyncio
@@ -247,7 +248,7 @@ async def test_cancelled_initialize_waiters_do_not_cancel_owner_and_close_drains
         await second
     await asyncio.wait_for(closing, 2)
     assert manager._test_recovery_calls == 1
-    assert manager.call_recovery_ready is False
+    assert manager.call_business_ready is False
 
 
 def _manager_with_blocking_thread_recovery(*, error=None):
@@ -256,7 +257,8 @@ def _manager_with_blocking_thread_recovery(*, error=None):
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),
     )
-    manager._recovery_ready = False
+    manager._call_stage_creator = lambda: None
+    manager._call_records._recovery_ready = False
     manager._test_recovery_entered = asyncio.Event()
     manager._test_recovery_release = threading.Event()
     manager._test_recovery_calls = 0
@@ -275,7 +277,7 @@ def _manager_with_blocking_thread_recovery(*, error=None):
 
             return await asyncio.to_thread(blocking_recovery)
 
-    manager._stale_call_recovery = Recovery()
+    manager._call_records._recovery = Recovery()
     return manager
 
 

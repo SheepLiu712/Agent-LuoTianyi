@@ -6,6 +6,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from support.stage_manager import start_call_stage
+from support.call_output import output_sink
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 
 import src.domain.agent as d
@@ -32,8 +34,7 @@ from src.infrastructure.persistence.call_sessions import (
     SqlCallSessionRepository,
 )
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage.call_stage import CallIngressReceipt, CallStage, CallStateChanged
-from src.stage.stage_manager import CallStageOwnership
+from src.stage.call_stage import CallIngressReceipt, CallStage, CallStageOwnership, CallStateChanged
 
 
 class _ContextDatabase:
@@ -287,14 +288,14 @@ async def _create(call_setup, *, decision=CallAnswerDecision.ACCEPT, config=None
     transport = _Transport()
     turn_handler = _TurnHandler()
     context_factory = ContextFactory(character_id="luotianyi", database=_ContextDatabase())
-    stage = await CallStage.create(
+    stage = await start_call_stage(
         ownership=ownership,
         record=record,
         agent=_agent(turn_handler),
         context_factory=context_factory,
         call_sessions=repository,
         speech_factory=speech,
-        transport=transport,
+        output_sink=output_sink(transport),
         release_ownership=release,
         monotonic=clock.tick,
         wall_clock=clock.now,
@@ -356,14 +357,14 @@ async def test_decline_and_setup_deadline_are_terminal_without_active_duration(c
         str(second.call_id), "user", "luotianyi", "request-2", clock.monotonic, ownership.generation + 1
     )
     with pytest.raises(TimeoutError):
-        await CallStage.create(
+        await start_call_stage(
             ownership=expired,
             record=second,
             agent=_agent(_TurnHandler()),
             context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
             call_sessions=repository,
             speech_factory=FakeRealtimeSpeechSessionFactory(),
-            transport=_Transport(),
+            output_sink=output_sink(_Transport()),
             monotonic=clock.tick,
             wall_clock=clock.now,
         )
@@ -517,16 +518,16 @@ async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_s
             settled.append(snapshot)
             await context.close()
 
-    stage = await CallStage.create(
+    stage = await start_call_stage(
         ownership=ownership,
         record=record,
         agent=_agent(_TurnHandler()),
         context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
         call_sessions=repository,
         speech_factory=speech,
-        transport=transport,
+        output_sink=output_sink(transport),
         release_ownership=lambda value: not released.append(value),
-        settlement_sink=Settlement(),
+        settle=Settlement().emit,
         monotonic=clock.tick,
         wall_clock=clock.now,
     )
@@ -558,16 +559,16 @@ async def test_blocked_terminal_delivery_is_bounded_after_settlement_admission(c
             settled.append(snapshot)
             await context.close()
 
-    stage = await CallStage.create(
+    stage = await start_call_stage(
         ownership=ownership,
         record=record,
         agent=_agent(_TurnHandler()),
         context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
         call_sessions=repository,
         speech_factory=speech,
-        transport=transport,
+        output_sink=output_sink(transport),
         release_ownership=lambda value: not released.append(value),
-        settlement_sink=Settlement(),
+        settle=Settlement().emit,
         monotonic=clock.tick,
         wall_clock=clock.now,
         config={"terminal_delivery_timeout": 0.01},
@@ -599,19 +600,18 @@ async def test_settlement_admission_failure_records_only_admission_metric(call_s
             captured.append(metric)
             return True
 
-    class Settlement:
-        async def emit(self, snapshot, context):
-            raise RuntimeError("reset admission rejected")
+    def reject_finalization(operation):
+        raise RuntimeError("reset admission rejected")
 
-    stage = await CallStage.create(
+    stage = await start_call_stage(
         ownership=ownership,
         record=record,
         agent=_agent(_TurnHandler()),
         context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
         call_sessions=repository,
         speech_factory=FakeRealtimeSpeechSessionFactory(),
-        transport=_Transport(),
-        settlement_sink=Settlement(),
+        output_sink=output_sink(_Transport()),
+        own_finalization=reject_finalization,
         call_metrics=Metrics(),
         monotonic=clock.tick,
         wall_clock=clock.now,
@@ -658,14 +658,14 @@ async def test_setup_await_is_bounded_by_original_deadline(call_setup):
         ownership.generation,
     )
     with pytest.raises(TimeoutError):
-        await CallStage.create(
+        await start_call_stage(
             ownership=ownership,
             record=record,
             agent=_agent(_TurnHandler()),
             context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
             call_sessions=repository,
             speech_factory=_BlockingProviderFactory(),
-            transport=_Transport(),
+            output_sink=output_sink(_Transport()),
             monotonic=clock.tick,
             wall_clock=clock.now,
         )

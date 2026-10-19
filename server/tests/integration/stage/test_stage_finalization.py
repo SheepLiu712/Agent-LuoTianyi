@@ -6,7 +6,7 @@ import threading
 import pytest
 from support.chat_connection import StubChatConnection
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
-from support.stage_manager import make_stage_manager
+from support.stage_manager import create_call_stage, make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
@@ -136,8 +136,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         wall_clock=clock.now,
         monotonic=clock.tick,
     )
-    assert stages.call_settlement_ready
-    stages._call_settlement._timeout = 0.01 if mode == "timeout" else 5
+    assert stages.call_business_ready
     claim = await stages._claim_call(
         user_id="user",
         character_id="luotianyi",
@@ -146,7 +145,8 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     )
     with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
         await stages.begin_user_data_reset("user")
-    stage = await stages._create_call_stage(
+    stage = await create_call_stage(
+        stages,
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -154,10 +154,11 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
+    stage._settlement._timeout = 0.01 if mode == "timeout" else 5
     await stage.apply_answer(
         d.AnswerCall(
             action_id="answer",
-            call_id=claim.record.call_id,
+            call_id=claim.prepared._record.call_id,
             decision=CallAnswerDecision.ACCEPT,
         )
     )
@@ -229,14 +230,14 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
     async def settle(_snapshot, *, context=None):
         await context.close()
 
-    stages._call_settlement._consumer.settle = settle
     claim = await stages._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=None,
         client_request_id="terminate-owned",
     )
-    stage = await stages._create_call_stage(
+    stage = await create_call_stage(
+        stages,
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -244,6 +245,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
+    stage._settlement._consumer.settle = settle
     entered, release = asyncio.Event(), asyncio.Event()
     settlement_entered, settlement_release = asyncio.Event(), asyncio.Event()
     original_close = stage._provider.close
@@ -264,7 +266,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
         settlement_entered.set()
         await settlement_release.wait()
 
-    stages._call_settlement._consumer.settle = settle
+    stage._settlement._consumer.settle = settle
 
     stage._provider.close = close_provider
     first = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
@@ -331,7 +333,8 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
         client_request_id="terminate-start",
     )
     creation = asyncio.create_task(
-        stages._create_call_stage(
+        create_call_stage(
+            stages,
             claim,
             user_id="user",
             character_id="luotianyi",
@@ -342,7 +345,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
         )
     )
     await asyncio.wait_for(create_entered.wait(), 1)
-    ownership = stages._current_call_ownership(str(claim.record.call_id))
+    ownership = stages._current_call_ownership(str(claim.prepared._record.call_id))
     assert ownership is not None
     stage = transport.stage
     snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
@@ -352,7 +355,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
     await asyncio.sleep(0)
     assert created_contexts == []
     assert speech_factory.sessions == {}
-    assert stages._call_stages.get(str(claim.record.call_id)) is None
+    assert stages._call_stages.get(str(claim.prepared._record.call_id)) is None
     await stages.close()
 
 
@@ -439,7 +442,6 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
         wall_clock=clock.now,
         monotonic=clock.tick,
     )
-    stages._call_settlement._consumer.settle = lambda _snapshot: asyncio.sleep(0)
     claim = await stages._claim_call(
         user_id="user",
         character_id="luotianyi",
@@ -447,7 +449,8 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
         client_request_id=blocked_phase,
     )
     creation = asyncio.create_task(
-        stages._create_call_stage(
+        create_call_stage(
+            stages,
             claim,
             user_id="user",
             character_id="luotianyi",
@@ -458,6 +461,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
         )
     )
     await asyncio.wait_for(entered.wait(), 1)
+    transport.stage._settlement._consumer.settle = lambda _snapshot, **_kwargs: asyncio.sleep(0)
     ending = asyncio.create_task(transport.stage.terminate(CallEndReason.USER_HANGUP))
     await asyncio.sleep(0)
     assert not ending.done()
@@ -468,7 +472,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
     await stages._finalizations.close()
     assert len(contexts) == 1 and contexts[0].was_closed
     assert len(providers) == 1 and providers[0].closed
-    assert stages._call_stages.get(str(claim.record.call_id)) is None
+    assert stages._call_stages.get(str(claim.prepared._record.call_id)) is None
     await stages.close()
 
 
@@ -506,14 +510,14 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
         wall_clock=clock.now,
         monotonic=clock.tick,
     )
-    stages._call_settlement._timeout = 0.01
     claim = await stages._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=None,
         client_request_id="thread-write",
     )
-    stage = await stages._create_call_stage(
+    stage = await create_call_stage(
+        stages,
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -521,6 +525,7 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
+    stage._settlement._timeout = 0.01
     await stage.terminate(CallEndReason.USER_HANGUP)
     await asyncio.to_thread(thread_started.wait)
     await asyncio.sleep(0.02)
@@ -579,14 +584,14 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         wall_clock=clock.now,
         monotonic=clock.tick,
     )
-    stages._call_settlement._consumer = Consumer()
     claim = await stages._claim_call(
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=None,
         client_request_id="close-owned",
     )
-    stage = await stages._create_call_stage(
+    stage = await create_call_stage(
+        stages,
         claim,
         user_id="user",
         character_id="luotianyi",
@@ -594,10 +599,11 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
+    stage._settlement._consumer = Consumer()
     await stage.apply_answer(
         d.AnswerCall(
             action_id="answer",
-            call_id=claim.record.call_id,
+            call_id=claim.prepared._record.call_id,
             decision=CallAnswerDecision.ACCEPT,
         )
     )
@@ -612,7 +618,7 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
     context.close = blocked_close
     ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
     assert await asyncio.to_thread(close_entered.wait, 2)
-    finalization = stages._finalizations._tasks[str(claim.record.call_id)].finalization
+    finalization = stages._finalizations._tasks[str(claim.prepared._record.call_id)].finalization
     for _ in range(cancel_count):
         finalization.cancel()
         await asyncio.sleep(0)

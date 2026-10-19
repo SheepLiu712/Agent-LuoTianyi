@@ -7,9 +7,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
-from support.stage_manager import make_stage_manager
+from support.stage_manager import make_call_adapter, make_stage_manager
 
-from src.adapter.websocket.call_v1 import CallTransportError, CallWebSocketAdapter
+from src.adapter.websocket.call_v1 import CallTransportError
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
@@ -87,7 +87,7 @@ async def test_physical_send_failure_cancels_receive_disconnects_and_allows_resu
         realtime_speech_factory=speech,
         user_reset_fence=UserResetFence(),
     )
-    adapter = CallWebSocketAdapter(
+    adapter = make_call_adapter(
         manager=manager,
         user_reset_fence=manager._user_reset_fence,
         enabled=True,

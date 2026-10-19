@@ -103,12 +103,3 @@ class FinalizationTasks:
             for identity, entry in tuple(self._tasks.items()):
                 if entry.finalization is None and entry.termination is not None and entry.termination.done():
                     self._tasks.pop(identity, None)
-
-
-class CallFinalizationSink:
-    def __init__(self, manager, ownership) -> None:
-        self._manager = manager
-        self._ownership = ownership
-
-    async def emit(self, snapshot, context) -> None:
-        self._manager._start_call_finalization(self._ownership, snapshot, context)

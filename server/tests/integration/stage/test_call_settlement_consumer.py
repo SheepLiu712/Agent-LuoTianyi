@@ -99,8 +99,8 @@ async def test_real_agent_settlement_persists_one_private_call_record_and_progre
     )
     consumer = CallSettlementConsumerImpl(
         agent_settlement=CallAgentSettlement(
-            get_agent=runtime.get_agent,
-            get_context_factory=lambda character_id: runtime.context_factories[character_id],
+            agent=runtime.get_agent("luotianyi"),
+            context_factory=runtime.context_factories["luotianyi"],
         ),
         call_sessions=database.call_sessions,
         conversation_service=database.conversation_service,
@@ -276,8 +276,8 @@ async def test_committed_call_winner_skips_summary_model_and_repairs_pending_cas
     )
     consumer = CallSettlementConsumerImpl(
         agent_settlement=CallAgentSettlement(
-            get_agent=runtime.get_agent,
-            get_context_factory=lambda character_id: runtime.context_factories[character_id],
+            agent=runtime.get_agent("luotianyi"),
+            context_factory=runtime.context_factories["luotianyi"],
         ),
         call_sessions=database.call_sessions,
         conversation_service=database.conversation_service,
@@ -488,8 +488,8 @@ async def test_legacy_null_digest_batch_fails_only_maintenance_and_releases_reso
     memory.write_maintenance_candidates = no_write
     consumer = CallSettlementConsumerImpl(
         agent_settlement=CallAgentSettlement(
-            get_agent=runtime.get_agent,
-            get_context_factory=lambda character_id: runtime.context_factories[character_id],
+            agent=runtime.get_agent("luotianyi"),
+            context_factory=runtime.context_factories["luotianyi"],
         ),
         call_sessions=database.call_sessions,
         conversation_service=database.conversation_service,

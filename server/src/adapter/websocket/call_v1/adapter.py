@@ -6,8 +6,8 @@ import asyncio
 from dataclasses import dataclass
 
 from src.domain.call import CallEndReason
-from src.stage.call_stage import CallPCM, CallPlaybackStop, CallSetupFailed, CallStageOutput, CallStreamStarted
-from src.stage.stage_manager import CallStartFailed, InteractionFinalizing, StageManager
+from src.stage import CallStartFailed, InteractionFinalizing, StageManager
+from src.stage.call_stage import CallStageOutput
 from src.utils.owned_operation import complete_owned
 
 from ..connection import AdapterConnection, OutboundDelivery
@@ -15,38 +15,6 @@ from ._binding import Binding
 from ._protocol_translate import encode_control, parse_message
 from ._session import Session
 from .errors import CallTransportError
-
-
-class _OutputSink:
-    """保留 Stage 的类型化输出契约，所有输出经 Adapter 按 call_id 路由。"""
-
-    def __init__(self, adapter):
-        self._adapter = adapter
-        self.call_id = None
-
-    async def send_state(self, item):
-        """提交通话状态或回复失败事件。"""
-        await self._adapter.submit_output(self.call_id, item)
-
-    async def send_ended(self, snapshot):
-        """提交业务终态。"""
-        await self._adapter.submit_output(self.call_id, snapshot)
-
-    async def send_failed(self, reason):
-        """提交建立失败原因。"""
-        await self._adapter.submit_output(self.call_id, CallSetupFailed(reason))
-
-    async def start_stream(self, response_id, stream_id, audio_format):
-        """提交音频流开始，不分配传输序号。"""
-        await self._adapter.submit_output(self.call_id, CallStreamStarted(response_id, stream_id, audio_format))
-
-    async def send_pcm(self, response_id, stream_id, payload, *, final):
-        """提交音频内容及流末尾标记。"""
-        await self._adapter.submit_output(self.call_id, CallPCM(response_id, stream_id, payload, final))
-
-    async def stop_response(self, response_id, stream_ids):
-        """提交业务取消意图，序号范围由 Delivery 计算。"""
-        await self._adapter.submit_output(self.call_id, CallPlaybackStop(response_id, stream_ids))
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,9 +97,9 @@ class CallWebSocketAdapter:
             provider_ready=self._provider_ready,
             call_tts_ready=bool(tts_ids) or legacy_ready,
             summary_ready=bool(summary_ids) or legacy_ready,
-            settlement_ready=self._manager.call_settlement_ready or legacy_ready,
+            settlement_ready=self._manager.call_business_ready or legacy_ready,
             stage_binding_ready=not self._closed and not self._manager.is_closed(),
-            recovery_ready=self._manager.call_recovery_ready or legacy_ready,
+            recovery_ready=self._manager.call_business_ready or legacy_ready,
             character_ids=character_ids,
         )
 
@@ -211,15 +179,12 @@ class CallWebSocketAdapter:
         stage = session = binding = None
         created = False
         try:
-            sink = _OutputSink(self)
             stage = await self._manager.try_to_get_stage(
                 stage_type="call",
                 user_id=user_id,
                 character_id=character_id,
                 client_request_id=request_id,
-                transport=sink,
             )
-            sink.call_id = stage.call_id
             session = self._sessions.get(stage.call_id)
             if session is None:
                 created = True
