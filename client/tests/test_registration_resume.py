@@ -87,10 +87,12 @@ def test_pending_request_survives_process_restart(monkeypatch, tmp_path):
         "print(json.dumps(pending, ensure_ascii=False));"
         "print(r.request_id_for('newbie'))"
     )
+    # 追加而不是覆盖 PYTHONPATH：子进程仍要能解析父进程已有的依赖路径。
+    python_path = os.pathsep.join(filter(None, [str(client_root), os.environ.get("PYTHONPATH", "")]))
     completed = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(client_root)},
+        env={**os.environ, "PYTHONPATH": python_path},
         capture_output=True,
         text=True,
         check=True,

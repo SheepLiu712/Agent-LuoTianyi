@@ -31,6 +31,8 @@ from .agreement_dialog import (
     COLOR_MUTED,
     COLOR_PRIMARY,
     COLOR_SECONDARY_BG,
+    COLOR_SCROLL_HANDLE,
+    COLOR_SCROLL_HANDLE_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     TEXT_RETRY,
@@ -144,8 +146,10 @@ class AgreementSignDialog(QDialog):
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.view.setStyleSheet(
             f"QTextEdit {{ background: transparent; color: {COLOR_TEXT}; border: none; }}"
-            "QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }"
-            "QScrollBar::handle:vertical { background: #cbd5e1; min-height: 40px; border-radius: 2px; }"
+            "QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }"
+            f"QScrollBar::handle:vertical {{ background: {COLOR_SCROLL_HANDLE}; min-height: 40px;"
+            " border-radius: 3px; }"
+            f"QScrollBar::handle:vertical:hover {{ background: {COLOR_SCROLL_HANDLE_HOVER}; }}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
         self.view.verticalScrollBar().valueChanged.connect(self._on_scroll)
@@ -285,8 +289,10 @@ class AgreementSignDialog(QDialog):
 
     def _sync_scroll_state(self) -> None:
         bar = self.view.verticalScrollBar()
-        # 先让布局算完尺寸，再判定"一屏放得下"：重排前不能提前认定已读到底部。
-        self.view.document().adjustSize()
+        # 只强制排版，不改变文档宽度。此前用 adjustSize()：它会把文档宽度设成"不换行的理想宽度"，
+        # 于是窗口缩放时不再重排（右侧留白/窄窗裁切），且滚动中反复改文档尺寸会让滚动范围与真实
+        # 内容高度不一致（滚到底后仍差一截、继续下滑先超出再弹回）。
+        self.view.document().documentLayout().documentSize()
         self.gate.observe_scroll(bar.value(), bar.maximum())
 
     def _on_confirm_clicked(self) -> None:

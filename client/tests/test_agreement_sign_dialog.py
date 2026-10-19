@@ -241,3 +241,77 @@ def test_document_that_fits_on_one_screen_satisfies_bottom_after_five_seconds(ap
     assert widget.confirm_btn.isEnabled() is True
     widget.close()
     widget.deleteLater()
+
+
+def _laid_out(dialog):
+    """强制排版并返回 (文档排版宽, 文档排版高, viewport 宽)。"""
+    dialog._sync_scroll_state()
+    size = dialog.view.document().documentLayout().documentSize()
+    return size.width(), size.height(), dialog.view.viewport().width()
+
+
+def _wrapping_document() -> dict:
+    """长段落文档：宽度变化会改变换行数，用来验证响应式排版。"""
+    return {
+        "version": "terms-2026-10-v1",
+        "title": "用户协议",
+        "format": "agreement.richtext.v1",
+        "blocks": [
+            {"font_size": 16, "align": "justify", "runs": [{"text": "甲" * 400, "bold": False}]}
+            for _ in range(20)
+        ],
+    }
+
+
+def test_document_reflows_when_window_narrows(app):
+    """窗口变窄时正文必须重新换行，而不是固定在初始宽度。"""
+    widget = AgreementSignDialog(document=_wrapping_document())
+    widget.show()
+    try:
+        widget.resize(900, 600)
+        app.processEvents()
+        _, wide_height, wide_viewport = _laid_out(widget)
+
+        widget.resize(520, 600)
+        app.processEvents()
+        narrow_width, narrow_height, narrow_viewport = _laid_out(widget)
+
+        assert narrow_viewport < wide_viewport  # 平台确实缩小了窗口
+        assert narrow_width <= narrow_viewport + 2  # 不再按未换行宽度排版
+        assert narrow_height > wide_height  # 换行导致行数增加
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_default_width_does_not_clip_document(app):
+    """默认窗口宽度下正文不得超出可视区（此前默认 640 就裁掉约 61px）。"""
+    widget = AgreementSignDialog(document=_wrapping_document())
+    widget.show()
+    try:
+        app.processEvents()
+        doc_width, _, viewport_width = _laid_out(widget)
+
+        assert doc_width <= viewport_width + 2
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_bottom_scroll_is_stable(app, dialog):
+    """滚到底后 value == maximum，且不会因为再次同步排版而多出一截。"""
+    bar = dialog.view.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    app.processEvents()
+    dialog._sync_scroll_state()
+    app.processEvents()
+
+    stable_maximum = bar.maximum()
+    assert bar.value() == stable_maximum
+
+    dialog._sync_scroll_state()
+    app.processEvents()
+    assert bar.maximum() == stable_maximum
+    assert bar.value() == bar.maximum()
