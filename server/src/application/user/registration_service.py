@@ -143,8 +143,8 @@ class RegistrationService:
             db.rollback()
             # 两个相同 request ID 可能同时通过首次 replay 检查；若另一事务已提交，
             # 本事务会在邀请码占用处失败。回滚后重新核验原请求，保证幂等重试最终返回同一结果。
-            if error.code is None and registration_request_id:
-                replayed = self._replay_after_race(
+            if error.code is None:
+                replayed = self._recover_after_race(
                     username=username,
                     password=password,
                     invite_code=invite_code,
@@ -156,6 +156,17 @@ class RegistrationService:
             raise
         except Exception:
             db.rollback()
+            # 并发同 ID 时另一方可能已先提交，本事务会在用户名/邀请码的唯一约束上抛 IntegrityError；
+            # 同样尝试按原请求恢复，避免把"已经成功的注册"变成 500。
+            replayed = self._recover_after_race(
+                username=username,
+                password=password,
+                invite_code=invite_code,
+                registration_request_id=registration_request_id,
+                agreement_version=agreement_version,
+            )
+            if replayed is not None:
+                return replayed
             raise
         finally:
             db.close()
@@ -163,16 +174,18 @@ class RegistrationService:
         self._credentials.cache_user_uuid(username, user_uuid)
         return payload
 
-    def _replay_after_race(
+    def _recover_after_race(
         self,
         *,
         username: str,
         password: str,
         invite_code: str,
-        registration_request_id: str,
+        registration_request_id: Optional[str],
         agreement_version: str,
     ) -> Optional[dict]:
-        """事务竞争失败后，用独立会话确认另一提交是否已完成同一请求。"""
+        """竞争失败后在独立会话里复核原请求；复核自身出错时保留原失败原因。"""
+        if not registration_request_id:
+            return None
         db = self._credentials.new_session()
         try:
             return self._replay(
@@ -183,6 +196,8 @@ class RegistrationService:
                 registration_request_id=registration_request_id,
                 agreement_version=agreement_version,
             )
+        except Exception:
+            return None
         finally:
             db.close()
 

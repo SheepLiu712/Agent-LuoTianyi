@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from src.application.user import registration_service
 from src.application.user.agreement_service import AgreementService, first_signed_at
@@ -258,6 +259,36 @@ def test_same_request_id_race_replays_the_committed_result(env, monkeypatch):
     assert len(state["signatures"]) == 1
     assert len(state["requests"]) == 1
     assert state["invite"].is_used is True
+
+
+def test_concurrent_same_request_id_unique_violation_replays_committed_result(env, monkeypatch):
+    """另一方已提交、本事务撞唯一约束时，应返回原成功结果而不是抛 IntegrityError（HTTP 500）。"""
+    service = env.build()
+    first = submit(service, registration_request_id="req-race-500")
+
+    calls = 0
+    original_replay = service._replay
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_replay(db, **kwargs)
+
+    def fail_with_unique_violation(*args, **kwargs):
+        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    monkeypatch.setattr(service._credentials, "create_account_with_invite", fail_with_unique_violation)
+
+    second = submit(service, registration_request_id="req-race-500")
+
+    assert second == first
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["signatures"]) == 1
+    assert len(state["requests"]) == 1
 
 
 def test_two_requests_competing_for_one_invite_code_leave_exactly_one_account(env):
