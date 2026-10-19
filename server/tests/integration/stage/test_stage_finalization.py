@@ -181,14 +181,15 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         await assert_finalizing(stages)
     finally:
         cleanup_release.set()
-    await ending
+    await stage.wait_realtime_stopped()
+    assert not ending.done()
     await asyncio.wait_for(entered.wait(), 1)
     try:
         await assert_finalizing(stages)
         if mode == "timeout":
             await asyncio.wait_for(cancelling.wait(), 1)
             await assert_finalizing(stages)
-        await stage.terminate(CallEndReason.USER_HANGUP)
+        assert stage.begin_termination(CallEndReason.USER_HANGUP) is stage._termination
         if shutdown:
             closing = asyncio.create_task(stages.close())
             await asyncio.sleep(0)
@@ -196,6 +197,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     finally:
         release.set()
         await stages._finalizations.close()
+        await ending
     if not shutdown:
         token = await stages.begin_user_data_reset("user")
         await stages.end_user_data_reset("user", token)
@@ -279,14 +281,19 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
     assert close_calls == 1
     await assert_finalizing(stages)
     release.set()
-    snapshot = await first
     await asyncio.wait_for(settlement_entered.wait(), 1)
+    assert not first.done()
+    snapshot = stage.snapshot
     assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
     assert close_calls == 1
     assert settlement_calls == 1
-    assert await stage.terminate(CallEndReason.PROVIDER_FAILED) is snapshot
+    third = asyncio.create_task(stage.terminate(CallEndReason.PROVIDER_FAILED))
+    await asyncio.sleep(0)
+    assert not third.done()
     assert settlement_calls == 1
     settlement_release.set()
+    assert await first is snapshot
+    assert await third is snapshot
     await stages.close()
 
 
@@ -526,8 +533,9 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
     stage._settlement._timeout = 0.01
-    await stage.terminate(CallEndReason.USER_HANGUP)
-    await asyncio.to_thread(thread_started.wait)
+    ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    await asyncio.wait_for(asyncio.to_thread(thread_started.wait, 3), 4)
+    assert not ending.done()
     await asyncio.sleep(0.02)
     assert not thread_finished.is_set()
     await assert_finalizing(stages)
@@ -536,6 +544,7 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
     assert not closing.done()
     thread_release.set()
     await closing
+    await ending
     assert thread_finished.is_set()
 
 
@@ -629,7 +638,8 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         await stages.begin_user_data_reset("user")
     close_release.set()
     result = await asyncio.gather(finalization, return_exceptions=True)
-    await ending
+    with pytest.raises(asyncio.CancelledError):
+        await ending
 
     assert isinstance(result[0], asyncio.CancelledError)
     assert context.was_closed is True

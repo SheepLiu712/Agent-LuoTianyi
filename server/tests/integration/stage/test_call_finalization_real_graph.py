@@ -246,8 +246,11 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
             ),
         }
 
-        snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+        ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+        await stage.wait_realtime_stopped()
+        snapshot = stage.snapshot
         assert snapshot is not None
+        assert not ending.done()
         assert stage.context is None
         assert await asyncio.to_thread(write_entered.wait, 10)
 
@@ -280,6 +283,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         assert order.index("maintenance") < order.index("summary") < order.index("sqlite-write-start")
 
         write_release.set()
+        assert await ending is snapshot
         await manager._finalizations.close()
         order.append("finalizing-release")
 

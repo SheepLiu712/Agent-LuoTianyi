@@ -163,8 +163,9 @@ class StageManager:
         self._user_reset_fence = user_reset_fence
         self._monotonic = monotonic
         self._stages: dict[tuple[str, str], ChatStage] = {}
+        self._chat_creations: dict[tuple[str, str], asyncio.Task[ChatStage]] = {}
         self._connections: dict[ChatStage, InteractionConnection] = {}
-        self._expiry: dict[ChatStage, asyncio.Task[None]] = {}
+        self._expiry: dict[ChatStage | CallStage, asyncio.Task[None]] = {}
         self._finalizations = FinalizationTasks()
         self._lock = asyncio.Lock()
         self._closed = False
@@ -308,6 +309,7 @@ class StageManager:
         return (
             self._finalizations.has_user(user_id)
             or any(owner == user_id for owner, _ in self._stages)
+            or any(owner == user_id for owner, _ in self._chat_creations)
             or any(owner.user_id == user_id for owner in self._call_ownerships.values())
             or any(claim.prepared.user_id == user_id for claim in self._call_claims.values())
             or any(owner[0] == user_id for owner in self._call_start_operations.values())
@@ -403,37 +405,34 @@ class StageManager:
         return self._closed
 
     async def _connect(self, connection: InteractionConnection, character_id: str) -> ChatStage:
+        key = (connection.user_uuid, character_id)
         async with self._lock:
             if self._user_reset_fence is not None:
                 await self._user_reset_fence.track_current(connection.user_uuid)
-            if self._closed or connection.is_closed or not connection.user_uuid:
-                raise ValueError("manager or connection is unavailable")
-            key = (connection.user_uuid, character_id)
-            self._require_chat_admission(key)
+            self._require_chat_connection(connection, key)
             stage = self._stages.get(key)
-            if stage is None or stage.state in (
-                StageState.TERMINATING,
-                StageState.TERMINATED,
-            ):
-                if stage is not None:
-                    self._lease_registry.release(
-                        InteractionLease(
-                            stage.user_id,
-                            stage.character_id,
-                            stage.interaction_id,
-                            InteractionSource.CHAT,
-                        )
-                    )
-                stage = await ChatStage.create(
-                    user_id=key[0],
-                    character_id=key[1],
-                    agent=self._get_agent(character_id),
-                    output_sink=self._chat_output_sink,
-                    config=self._stage_config,
-                    context_factory=self._get_context_factory(character_id),
-                    due_event_provider=self._due_event_provider,
-                )
-                self._stages[key] = stage
+            if stage is None or stage.state in (StageState.TERMINATING, StageState.TERMINATED):
+                creation = self._chat_creations.get(key)
+                if creation is None:
+                    creation = asyncio.create_task(self._create_chat_stage(key), name="chat-stage-create")
+                    self._chat_creations[key] = creation
+                    creation.add_done_callback(lambda done: self._chat_creation_done(key, done))
+            else:
+                creation = None
+        if creation is not None:
+            stage = await asyncio.shield(creation)
+        return await self._claim_chat_connection(stage, connection, key)
+
+    async def _claim_chat_connection(self, stage, connection, key) -> ChatStage:
+        async with self._lock:
+            try:
+                self._require_chat_connection(connection, key)
+            except BaseException:
+                if self._stages.get(key) is stage and stage not in self._connections:
+                    self._schedule_expiry(stage)
+                raise
+            if self._stages.get(key) is not stage:
+                raise ValueError("chat stage is no longer current")
             timer = self._expiry.pop(stage, None)
             if timer is not None:
                 timer.cancel()
@@ -450,6 +449,50 @@ class StageManager:
                 self._pending_regular_logins.remove(key)
                 stage.schedule_login_reminders()
             return stage
+
+    def _require_chat_connection(self, connection, key) -> None:
+        if self._closed or connection.is_closed or not connection.user_uuid:
+            raise ValueError("manager or connection is unavailable")
+        self._require_chat_admission(key)
+
+    async def _create_chat_stage(self, key: tuple[str, str]) -> ChatStage:
+        generation = 0
+        if self._user_reset_fence is not None:
+            generation = await self._user_reset_fence.track_current(key[0])
+        stage = await ChatStage.create(
+            user_id=key[0],
+            character_id=key[1],
+            agent=self._get_agent(key[1]),
+            output_sink=self._chat_output_sink,
+            config=self._stage_config,
+            context_factory=self._get_context_factory(key[1]),
+            due_event_provider=self._due_event_provider,
+        )
+        try:
+            async with self._lock:
+                await self._require_generation(key[0], generation)
+                if self._closed:
+                    raise ValueError("stage manager closed during chat creation")
+                self._require_chat_admission(key)
+                lease = InteractionLease(*key, stage.interaction_id, InteractionSource.CHAT)
+                previous = self._stages.get(key)
+                if previous is not None and previous.state is StageState.TERMINATED:
+                    self._lease_registry.release(
+                        InteractionLease(*key, previous.interaction_id, InteractionSource.CHAT)
+                    )
+                if not self._lease_registry.claim(lease):
+                    raise ValueError("interaction is already owned")
+                self._stages[key] = stage
+            return stage
+        except BaseException:
+            await asyncio.shield(self._start_chat_finalization(stage, InteractionEndingReason.SHUTDOWN))
+            raise
+
+    def _chat_creation_done(self, key, task) -> None:
+        if self._chat_creations.get(key) is task:
+            self._chat_creations.pop(key, None)
+        if not task.cancelled():
+            task.exception()
 
     def _require_chat_admission(self, key: tuple[str, str]) -> None:
         self._require_finalization_idle(key)
@@ -839,6 +882,7 @@ class StageManager:
                 release_ownership=self._release_call_stage_ownership,
                 own_termination=lambda operation: self._own_call_operation(ownership, operation, termination=True),
                 own_finalization=lambda operation: self._own_call_operation(ownership, operation),
+                retention_changed=lambda deadline: self._update_call_retention(ownership, deadline),
                 config=config,
                 connection_available=connection_available,
             )
@@ -932,6 +976,8 @@ class StageManager:
         async with self._lock:
             if self._closed:
                 raise ValueError("stage manager is closed")
+            if (user_id, character_id) in self._chat_creations:
+                raise ValueError("interaction is already owned")
             if source_interaction_id is None:
                 direct = self._lease_registry.begin_direct_call_transition(
                     user_id=user_id,
@@ -1013,6 +1059,7 @@ class StageManager:
         async with self._lock:
             self._closed = True
             initialization = self._initialization
+            chat_creations = tuple(self._chat_creations.values())
             stages = tuple(self._stages.values())
             self._stages.clear()
             timers = tuple(self._expiry.values())
@@ -1023,6 +1070,7 @@ class StageManager:
             self._intent_expiry.clear()
         if initialization is not None and initialization is not asyncio.current_task():
             await asyncio.gather(initialization, return_exceptions=True)
+        await asyncio.gather(*chat_creations, return_exceptions=True)
         await asyncio.gather(*timers, return_exceptions=True)
         for timer in intent_timers:
             timer.cancel()
@@ -1050,6 +1098,30 @@ class StageManager:
         self._call_setup_deadlines.clear()
         self._call_claims.clear()
         self._call_ownerships.clear()
+
+    def _update_call_retention(self, ownership: CallStageOwnership, deadline: float | None) -> None:
+        stage = self._call_stages.get(ownership.call_id)
+        if stage is None or self._current_call_ownership(ownership.call_id) != ownership:
+            return
+        old = self._expiry.pop(stage, None)
+        if old is not None and old is not asyncio.current_task():
+            old.cancel()
+        if deadline is not None and not self._closed:
+            task = asyncio.create_task(self._expire_call(stage, deadline), name="call-offline-expiry")
+            self._expiry[stage] = task
+            task.add_done_callback(self._observe_call_expiry)
+
+    @staticmethod
+    def _observe_call_expiry(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            get_logger(__name__).error("Call offline expiry failed type=%s", type(task.exception()).__name__)
+
+    async def _expire_call(self, stage: CallStage, deadline: float) -> None:
+        await asyncio.sleep(max(0.0, deadline - self._monotonic()))
+        if self._expiry.get(stage) is not asyncio.current_task():
+            return
+        self._expiry.pop(stage, None)
+        await stage.expire_retention(deadline)
 
     def _schedule_expiry(self, stage: ChatStage) -> None:
         old = self._expiry.pop(stage, None)

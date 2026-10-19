@@ -238,7 +238,8 @@ class CallWebSocketAdapter:
         except BaseException:
             await complete_owned(session.detach(binding))
             if committed:
-                await complete_owned(stage.terminate(CallEndReason.SYSTEM_FAILURE))
+                stage.begin_termination(CallEndReason.SYSTEM_FAILURE)
+                await complete_owned(stage.wait_realtime_stopped())
                 await self._remove_session(session)
             raise
 

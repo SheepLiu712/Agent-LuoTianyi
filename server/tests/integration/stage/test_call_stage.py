@@ -485,7 +485,7 @@ async def test_user_hangup_reason_wins_recovery_deadline_race(call_setup):
     stage._terminate_owned = delayed
     hangup = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
     await asyncio.wait_for(entered.wait(), 1)
-    deadline = asyncio.create_task(stage._recover_deadline())
+    deadline = asyncio.create_task(stage.expire_retention(stage._recovery_deadline))
     await asyncio.sleep(0)
     release.set()
     snapshot = await hangup

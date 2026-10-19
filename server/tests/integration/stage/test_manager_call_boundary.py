@@ -135,8 +135,9 @@ async def test_public_admission_remains_closed_through_settlement_and_context_cl
             await original_close()
 
         context.close = close_context
-        await stage.terminate(CallEndReason.USER_HANGUP)
+        ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
         await asyncio.wait_for(settling.wait(), 1)
+        assert not ending.done()
         for phase in ("settling", "closing"):
             if phase == "closing":
                 release_settlement.set()
@@ -148,6 +149,7 @@ async def test_public_admission_remains_closed_through_settlement_and_context_cl
             with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
                 await stages.begin_user_data_reset("user")
         release_close.set()
+        await ending
         await _eventually(lambda: not stages._finalizations.has_user("user"))
         replacement = await _get_call(stages, "another-call")
         assert replacement.call_id != stage.call_id

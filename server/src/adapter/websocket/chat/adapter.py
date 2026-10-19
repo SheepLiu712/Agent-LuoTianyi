@@ -8,6 +8,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
+from weakref import WeakValueDictionary
 
 import src.domain.agent as d
 from src.domain.stage import StageOutput
@@ -104,7 +105,7 @@ class WebSocketAdapter:
         self._recent_client_msg_ttl_seconds = 600.0
         self._recent_client_msg_limit = 4096
         self._stage_manager: StageManager | None = None
-        self._admission_lock = asyncio.Lock()
+        self._admission_locks = WeakValueDictionary()
         self._bindings: dict[AdapterConnection, Binding] = {}
         self._output_sink = _ChatOutputSink(self)
         self._client_executor = None
@@ -250,7 +251,12 @@ class WebSocketAdapter:
     async def _open(self, connection: Binding, character_id: str) -> ChatStage:
         if self._stage_manager is None:
             raise RuntimeError("adapter is not initialized")
-        async with self._admission_lock:
+        key = (connection.user_uuid, character_id)
+        admission_lock = self._admission_locks.get(key)
+        if admission_lock is None:
+            admission_lock = asyncio.Lock()
+            self._admission_locks[key] = admission_lock
+        async with admission_lock:
             stage = await self._stage_manager.try_to_get_stage(
                 user_id=connection.user_uuid,
                 character_id=character_id,

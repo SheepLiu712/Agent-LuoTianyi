@@ -625,14 +625,14 @@ async def test_protocol_ack_bypasses_blocked_business_input_and_hangup_ack_prece
     session = adapter._sessions[call_id]
     stage = stages._call_stages[call_id]
     entered, release = asyncio.Event(), asyncio.Event()
-    original = stage.terminate
+    original = stage._terminate_locked
 
     async def delayed_terminate(*args, **kwargs):
         entered.set()
         await release.wait()
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(stage, "terminate", delayed_terminate)
+    monkeypatch.setattr(stage, "_terminate_locked", delayed_terminate)
     receiving = asyncio.create_task(
         adapter.receive(
             connection,
@@ -641,7 +641,7 @@ async def test_protocol_ack_bypasses_blocked_business_input_and_hangup_ack_prece
             ),
         )
     )
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), 2)
 
     async def ack(target):
         await adapter.receive(
@@ -673,6 +673,73 @@ async def test_protocol_ack_bypasses_blocked_business_input_and_hangup_ack_prece
     assert not adapter._bindings and not adapter._sessions
     await adapter.close()
     await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_hangup_ack_and_protocol_release_do_not_wait_for_full_termination():
+    stages, _ = manager(speech_factory=BlockingSpeechFactory())
+    adapter = call_adapter(stages)
+    connection, call_id = await _opened(adapter)
+    stage = stages._call_stages[call_id]
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def settle(_snapshot, *, context):
+        entered.set()
+        await release.wait()
+
+    stage._settlement._consumer.settle = settle
+    received = []
+
+    async def pump():
+        while True:
+            try:
+                item = await adapter.next_output(connection)
+            except (ConnectionError, CallTransportError):
+                return
+            received.append(json.loads(item.message))
+            adapter.complete_output(connection, item.delivery_id)
+
+    pumping = asyncio.create_task(pump())
+    try:
+        await asyncio.wait_for(
+            adapter.receive(
+                connection,
+                json.dumps(
+                    {
+                        "protocol": "call.v1",
+                        "type": "call.hangup",
+                        "seq": 2,
+                        "call_id": call_id,
+                        "reason": "user_hangup",
+                    }
+                ),
+            ),
+            1,
+        )
+        await asyncio.wait_for(entered.wait(), 1)
+        await asyncio.wait_for(pumping, 3)
+        assert any(item["type"] == "ack" and item["ack_seq"] == 2 for item in received)
+        assert any(item["type"] == "call.ended" for item in received)
+        assert not adapter._sessions and not adapter._bindings
+        assert not stage._termination.done()
+        waiter = asyncio.create_task(stage.terminate())
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not stage._termination.done()
+        with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
+            await stages.begin_user_data_reset("user")
+        # 当前通话收尾不阻塞其他用户的管理操作。
+        token = await asyncio.wait_for(stages.begin_user_data_reset("other"), 1)
+        await stages.end_user_data_reset("other", token)
+        release.set()
+        await asyncio.wait_for(stage.terminate(), 1)
+    finally:
+        release.set()
+        await adapter.close()
+        await stages.close()
+        await asyncio.gather(pumping, return_exceptions=True)
 
 
 @pytest.mark.asyncio

@@ -74,16 +74,9 @@ class FinalizationTasks:
                 get_logger(__name__).error(
                     "Stage %s failed interaction=%s type=%s", phase, identity, type(error).__name__
                 )
-        if phase == "termination":
-            # A finalization registered by termination keeps this entry busy.
-            # If none was registered, retain the completed task so repeated
-            # termination callers observe the same result or exception.
-            if entry.finalization is not None:
-                entry.termination = None
-        else:
-            entry.finalization = None
-            if entry.termination is None or entry.termination.done():
-                self._tasks.pop(identity, None)
+        # Stage 自身保留幂等终止句柄；Manager 只保留仍在执行的任务。
+        if not self._is_busy(entry):
+            self._tasks.pop(identity, None)
 
     @staticmethod
     def _is_busy(entry: _InteractionTasks) -> bool:

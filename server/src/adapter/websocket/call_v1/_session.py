@@ -98,7 +98,8 @@ class Session:
             self._resume_pending = None
             if business_started:
                 try:
-                    await complete_owned(self._stage.terminate(CallEndReason.SYSTEM_FAILURE))
+                    self._stage.begin_termination(CallEndReason.SYSTEM_FAILURE)
+                    await complete_owned(self._stage.wait_realtime_stopped())
                 except BaseException as cleanup_error:
                     try:
                         get_logger(__name__).error(
@@ -194,7 +195,8 @@ class Session:
         elif value[0] == "stopped":
             self._stage.playback_stopped(value[1], value[2])
         else:
-            await self._stage.terminate()
+            self._stage.begin_termination()
+            await self._stage.wait_realtime_stopped()
         return True
 
     async def submit_output(self, output) -> None:

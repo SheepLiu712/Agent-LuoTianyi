@@ -249,6 +249,7 @@ class CallStage:
         settle: Callable[..., Awaitable[object]] | None = None,
         own_finalization: Callable[..., asyncio.Task] | None = None,
         own_termination: Callable[..., asyncio.Task] | None = None,
+        retention_changed: Callable[[float | None], None] | None = None,
         call_metrics: Any | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] | None = None,
@@ -267,6 +268,8 @@ class CallStage:
         self._own_finalization = own_finalization
         self._finalization = None
         self._own_termination = own_termination
+        self._retention_changed = retention_changed
+        self._realtime_ended = asyncio.Event()
         self._call_metrics = call_metrics
         self._monotonic = monotonic
         self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
@@ -295,7 +298,6 @@ class CallStage:
         self._pcm_task: asyncio.Task[Any] | None = None
         self._events_task: asyncio.Task[Any] | None = None
         self._realize_task: asyncio.Task[Any] | None = None
-        self._recovery_task: asyncio.Task[Any] | None = None
         self._silence_task: asyncio.Task[Any] | None = None
         self._playback = CallPlaybackCoordinator(monotonic=monotonic)
         self._revision = 0
@@ -534,7 +536,8 @@ class CallStage:
             self._reconnect_count += 1
             self._recovery_deadline = disconnected_monotonic + 3.0
             self._cancel_task(self._silence_task)
-            self._recovery_task = self._track(asyncio.create_task(self._recover_deadline(), name="call-recovery"))
+            if self._retention_changed is not None:
+                self._retention_changed(self._recovery_deadline)
 
     async def set_connection_available(self, available: bool) -> None:
         self._connection_available = available
@@ -561,7 +564,8 @@ class CallStage:
                 )
                 timed_out = True
             else:
-                self._cancel_task(self._recovery_task)
+                if self._retention_changed is not None:
+                    self._retention_changed(None)
                 await self._transition_or_close(CallState.ACTIVE)
                 self._first_disconnect_monotonic = None
                 self._recovery_deadline = None
@@ -580,7 +584,8 @@ class CallStage:
                 )
                 return True
         if timed_out:
-            await self.terminate(CallEndReason.RECOVERY_TIMEOUT)
+            self.begin_termination(CallEndReason.RECOVERY_TIMEOUT)
+            await self.wait_realtime_stopped()
         return False
 
     def can_resume(self) -> bool:
@@ -590,8 +595,8 @@ class CallStage:
             and self._monotonic() < self._recovery_deadline
         )
 
-    async def terminate(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> CallFinalSnapshot | None:
-        """Stop realtime work once; caller cancellation does not cancel owned termination."""
+    def begin_termination(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> asyncio.Task:
+        """登记唯一完整终止任务；调用者可继续处理其他交互。"""
         if self._termination_reason is None:
             self._termination_reason = reason
         if self._termination is None:
@@ -602,15 +607,35 @@ class CallStage:
                     self._terminate_owned(self._termination_reason), name=f"call-terminate-{self.call_id}"
                 )
                 self._termination.add_done_callback(self._observe_task)
-        return await asyncio.shield(self._termination)
+        return self._termination
+
+    async def terminate(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> CallFinalSnapshot | None:
+        """等待实时停止、全部收尾和 Context 关闭；取消等待者不取消实际操作。"""
+        return await asyncio.shield(self.begin_termination(reason))
+
+    async def wait_realtime_stopped(self) -> CallFinalSnapshot | None:
+        """等待终态输出处理和实时资源释放，不等待认知结算。"""
+        await self._realtime_ended.wait()
+        if self._termination is not None and self._termination.done():
+            return self._termination.result()
+        return self._final
 
     async def _terminate_owned(self, reason: CallEndReason) -> CallFinalSnapshot | None:
-        initialization = self._initialization
-        if initialization is not None and initialization is not asyncio.current_task() and not initialization.done():
-            initialization.cancel()
-            await asyncio.gather(initialization, return_exceptions=True)
-        async with self._lifecycle_lock:
-            return await self._terminate_locked(reason)
+        try:
+            initialization = self._initialization
+            if (
+                initialization is not None
+                and initialization is not asyncio.current_task()
+                and not initialization.done()
+            ):
+                initialization.cancel()
+                await asyncio.gather(initialization, return_exceptions=True)
+            async with self._lifecycle_lock:
+                return await self._terminate_locked(reason)
+        finally:
+            self._realtime_ended.set()
+            if self._finalization is not None:
+                await asyncio.shield(self._finalization)
 
     async def _terminate_locked(self, reason: CallEndReason) -> CallFinalSnapshot | None:
         if self._final is not None:
@@ -942,11 +967,8 @@ class CallStage:
                 self._pcm_buffered_bytes = max(0, self._pcm_buffered_bytes - len(frame.payload))
                 self._pcm.task_done()
 
-    async def _recover_deadline(self) -> None:
-        deadline = self._recovery_deadline
-        if deadline is None:
-            return
-        await asyncio.sleep(max(0.0, deadline - self._monotonic()))
+    async def expire_retention(self, deadline: float) -> None:
+        """应用 Manager 的离线到期通知，重新校验期限避免旧计时终止新连接。"""
         should_terminate = False
         async with self._lifecycle_lock:
             should_terminate = (
@@ -1238,6 +1260,8 @@ class CallStage:
         self._cancel_task(self._realize_task)
 
     async def _cleanup(self, *, release_ownership: bool = True, close_context: bool = True) -> BaseException | None:
+        if self._retention_changed is not None:
+            self._retention_changed(None)
         self._plans.clear()
         current = asyncio.current_task()
         pending = tuple(task for task in self._tasks if task is not current and not task.done())
