@@ -28,6 +28,10 @@ python tests/manual_e2e/register_with_agreement_e2e.py \
 6. 另一请求 ID 抢同一邀请码 → 失败（不再消耗邀请码）。
 
 输出为逐项 PASS/FAIL；任何一项失败都会以非 0 退出码结束。
+
+竞争场景：两个进程同时用同一邀请码注册时，用 `--race-peer` 各跑一次。
+该模式只做一次提交，并区分"赢得竞争"与"按预期失败（邀请码已被占用）"，
+两者都算 PASS——避免把竞争失败方误判成脚本失败（审查项 N4）。
 """
 
 from __future__ import annotations
@@ -51,7 +55,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--old-version", default="", help="历史上存在但已不是当前的版本（用于换版场景）")
     parser.add_argument("--password", default="e2e-password")
     parser.add_argument("--verify-ssl", default="true", choices=["true", "false"])
+    parser.add_argument(
+        "--race-peer",
+        action="store_true",
+        help="竞争场景的对等方：只提交一次，赢或按预期失败都算 PASS",
+    )
     return parser.parse_args()
+
+
+def run_race_peer(api: AuthApi, args: argparse.Namespace, username: str, request_id: str) -> int:
+    """竞争对等方：赢或输都是预期结果，只把"非预期失败"判为 FAIL。"""
+    outcome = api.register_with_agreement(
+        username,
+        args.password,
+        args.invite_code,
+        registration_request_id=request_id,
+        agreement_version=args.current_version,
+        accepted=True,
+    )
+    if outcome.ok:
+        print(f"[PASS] 竞争结果：本进程赢得竞争（创建账号 {username}）")
+        return 0
+    message = outcome.message or ""
+    if "邀请码" in message or "注册失败" in message:
+        print(f"[PASS] 竞争结果：本进程按预期失败（{message}），未创建账号")
+        return 0
+    print(f"[FAIL] 竞争结果：非预期失败（code={outcome.code}, message={message}）")
+    return 1
 
 
 def main() -> int:
@@ -61,6 +91,10 @@ def main() -> int:
     username = f"ua2-e2e-{suffix}"
     other_username = f"ua2-e2e-other-{suffix}"
     request_id = str(uuid.uuid4())
+
+    if args.race_peer:
+        return run_race_peer(api, args, username, request_id)
+
     failures: list[str] = []
 
     def check(label: str, condition: bool, detail: object) -> None:
