@@ -165,7 +165,7 @@ class Delivery:
         if registration.final_seen:
             raise CallTransportError("STREAM_ALREADY_FINAL")
         raw = encode_audio(frame).binary
-        output = WireOutput(binary=raw)
+        output = WireOutput(binary=raw, audio_response_id=registration.response_id if frame.payload else None)
         self._require_response_audio_capacity(registration, len(frame.payload))
         self._store_replay(
             frame.seq,

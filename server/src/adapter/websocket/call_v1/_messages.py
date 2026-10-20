@@ -33,6 +33,7 @@ class WireOutput:
 
     text: str | None = None
     binary: bytes | None = None
+    audio_response_id: str | None = None
 
     def __post_init__(self) -> None:
         if (self.text is None) == (self.binary is None):

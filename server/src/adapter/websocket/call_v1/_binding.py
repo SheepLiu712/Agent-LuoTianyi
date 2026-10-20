@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from uuid import uuid4
 
 from src.domain.agent import SinkRejectedError, SinkRejectionCode
@@ -26,10 +27,10 @@ class Binding:
         self._require_open()
         await self.session.receive(self, frame)
 
-    def enqueue(self, message: str | bytes) -> None:
+    def enqueue(self, message: str | bytes, *, on_sent: Callable[[], None] | None = None) -> None:
         """接纳本连接的网络发送任务，容量不足时明确拒绝。"""
         self._require_open()
-        self._outbox._enqueue(message)
+        self._outbox._enqueue(message, on_sent=on_sent)
 
     async def next_output(self) -> OutboundDelivery:
         """等待下一次发送任务，断线唤醒且不消费新连接的队列。"""
@@ -63,7 +64,7 @@ class _Outbox:
 
     def __init__(self, *, max_outputs: int = 256, max_bytes: int = 16 * 1024 * 1024) -> None:
         self._queue: asyncio.Queue[OutboundDelivery | None] = asyncio.Queue()
-        self._pending: dict[str, int] = {}
+        self._pending: dict[str, tuple[int, Callable[[], None] | None]] = {}
         self._inflight: set[str] = set()
         self._bytes = 0
         self._max_outputs, self._max_bytes = max_outputs, max_bytes
@@ -71,14 +72,14 @@ class _Outbox:
         self._idle = asyncio.Event()
         self._idle.set()
 
-    def _enqueue(self, message: str | bytes) -> None:
+    def _enqueue(self, message: str | bytes, *, on_sent: Callable[[], None] | None = None) -> None:
         if self._closed:
             raise ConnectionError("connection is closed")
         size = len(message.encode("utf-8")) if isinstance(message, str) else len(message)
         if len(self._pending) >= self._max_outputs or self._bytes + size > self._max_bytes:
             raise SinkRejectedError("output queue is full", code=SinkRejectionCode.BACKPRESSURE_TIMEOUT)
         delivery = OutboundDelivery(uuid4().hex, message)
-        self._pending[delivery.delivery_id] = size
+        self._pending[delivery.delivery_id] = (size, on_sent)
         self._bytes += size
         self._idle.clear()
         self._queue.put_nowait(delivery)
@@ -97,13 +98,16 @@ class _Outbox:
         """记录指定投递的网络结果；发送失败时关闭整个队列。"""
         if delivery_id not in self._inflight:
             return
+        _, on_sent = self._pending[delivery_id]
         self._inflight.remove(delivery_id)
         self._settle(delivery_id)
         if error is not None:
             self._close()
+        elif on_sent is not None:
+            on_sent()
 
     def _settle(self, delivery_id: str) -> None:
-        size = self._pending.pop(delivery_id)
+        size, _ = self._pending.pop(delivery_id)
         self._bytes -= size
         if not self._pending:
             self._idle.set()

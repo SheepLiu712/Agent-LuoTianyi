@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections import OrderedDict
+from functools import partial
 
 from src.domain.call import CallEndReason, CallFinalSnapshot, CallState
 from src.stage.call_stage import (
@@ -228,9 +229,11 @@ class Session:
         elif self._binding is not None and not self._binding.is_closed:
             self._enqueue(self._binding, output)
 
-    @staticmethod
-    def _enqueue(binding, output):
-        binding.enqueue(output.text if output.text is not None else output.binary)
+    def _enqueue(self, binding, output):
+        on_sent = (
+            partial(self._stage.audio_sent, output.audio_response_id) if output.audio_response_id is not None else None
+        )
+        binding.enqueue(output.text if output.text is not None else output.binary, on_sent=on_sent)
 
     def _preview_resume(self, cursor):
         self._require_open()
