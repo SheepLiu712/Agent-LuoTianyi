@@ -122,12 +122,45 @@ class CallStartedHandler:
         )
         if drafts is None:
             return _failed_report(request, plans)
-        await _append_agent_entries(plans, "opening", drafts, request)
         await _emit_formal(plans, request, drafts, prefix="opening")
         return _with_emitted(request, plans)
 
 
 class CallTurnCompletedHandler:
+    """Accept a user fact independently of cancellable reply generation."""
+
+    async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
+        stimulus = request.stimulus
+        if not isinstance(stimulus, d.CallTurnCompleted):
+            raise TypeError("CallTurnCompletedHandler requires CallTurnCompleted")
+        entry = ConversationEntry(
+            entry_id=f"call-turn-{stimulus.turn_seq}-user",
+            timestamp=_local_fact_time(request),
+            source=ConversationSource.USER.value,
+            content=TextContent(stimulus.audio_content.render()),
+        )
+        await plans.context.conversation.append((entry,))
+        return _report(request)
+
+
+class CallReplyConfirmedHandler:
+    async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
+        stimulus = request.stimulus
+        if not isinstance(stimulus, d.CallReplyConfirmed):
+            raise TypeError("CallReplyConfirmedHandler requires CallReplyConfirmed")
+        prefix = f"turn-{stimulus.turn_seq}" if stimulus.turn_seq is not None else "proactive"
+        entry = ConversationEntry(
+            entry_id=f"call-{prefix}-agent-{stimulus.response_id}",
+            timestamp=_local_fact_time(request),
+            source=ConversationSource.AGENT.value,
+            content=TextContent(stimulus.text),
+        )
+        await plans.context.conversation.append((entry,))
+        await _emit_maintenance(plans, request)
+        return _with_emitted(request, plans)
+
+
+class CallReplyRequestedHandler:
     def __init__(
         self, recall: CallRecallDecisionSkill, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog
     ) -> None:
@@ -137,16 +170,14 @@ class CallTurnCompletedHandler:
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
-        if not isinstance(stimulus, d.CallTurnCompleted):
-            raise TypeError("CallTurnCompletedHandler requires CallTurnCompleted")
-        semantic = stimulus.audio_content.render()
-        user_entry = ConversationEntry(
-            entry_id=f"call-turn-{stimulus.turn_seq}-user",
-            timestamp=_local_fact_time(request),
-            source=ConversationSource.USER.value,
-            content=TextContent(semantic),
+        if not isinstance(stimulus, d.CallReplyRequested):
+            raise TypeError("CallReplyRequestedHandler requires CallReplyRequested")
+        semantic = (
+            "\n".join(item.audio_content.render() for item in request.interaction.pending_stimuli)
+            or stimulus.audio_content.render()
         )
-        await plans.context.conversation.append((user_entry,))
+        if stimulus.interrupted:
+            semantic += "\n此前回复被打断。结合已确认播放的对话继续处理所有待回复内容，不要假设未确认部分已被听到。"
         invocation = handling_invocation(request, plans.context)
         history = render_conversation_history(plans.context.conversation.read())
         decision = await self._recall.decide(
@@ -178,9 +209,11 @@ class CallTurnCompletedHandler:
         )
         if drafts is None:
             return _failed_report(request, plans)
-        await _append_formal_reply(plans, stimulus.turn_seq, drafts, request)
         await _emit_formal(plans, request, drafts, prefix=f"turn-{stimulus.turn_seq}")
-        return _with_emitted(request, plans)
+        pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
+        return replace(
+            _with_emitted(request, plans), consumed_pending_stimulus_ids=pending, retained_pending_stimulus_ids=()
+        )
 
 
 class CallSilenceElapsedHandler:
@@ -224,7 +257,6 @@ class CallSilenceElapsedHandler:
         )
         if drafts is None:
             return _failed_report(request, plans)
-        await _append_agent_entries(plans, "silence", drafts, request)
         actions = tuple(
             _call_say(request, draft, suffix=f"silence-{index}", provisional=False)
             for index, draft in enumerate(drafts)
@@ -236,8 +268,6 @@ class CallSilenceElapsedHandler:
             )
         if actions:
             await plans.emit(ActionPlanDraft(source_stimulus_ids=(stimulus.stimulus_id,), actions=actions))
-            if decision is SilenceDecision.SPEAK:
-                await _emit_maintenance(plans, request)
         return _with_emitted(request, plans)
 
 
@@ -291,7 +321,6 @@ async def _emit_formal(
     )
     if actions:
         await plans.emit(ActionPlanDraft(source_stimulus_ids=(request.stimulus.stimulus_id,), actions=actions))
-        await _emit_maintenance(plans, request)
 
 
 async def _emit_maintenance(plans: PlanEmitter, request: d.HandleStimulusRequest) -> None:
@@ -306,34 +335,6 @@ async def _emit_maintenance(plans: PlanEmitter, request: d.HandleStimulusRequest
             ),
         )
     )
-
-
-async def _append_formal_reply(
-    plans: PlanEmitter,
-    turn_seq: int,
-    drafts: tuple[ReplyDraft, ...],
-    request: d.HandleStimulusRequest,
-) -> None:
-    await _append_agent_entries(plans, f"turn-{turn_seq}", drafts, request)
-
-
-async def _append_agent_entries(
-    plans: PlanEmitter,
-    entry_prefix: str,
-    drafts: tuple[ReplyDraft, ...],
-    request: d.HandleStimulusRequest,
-) -> None:
-    entries = tuple(
-        ConversationEntry(
-            entry_id=f"call-{entry_prefix}-agent-{index}",
-            timestamp=_local_fact_time(request, offset=index + 1),
-            source=ConversationSource.AGENT.value,
-            content=TextContent(draft.content),
-        )
-        for index, draft in enumerate(drafts)
-    )
-    if entries:
-        await plans.context.conversation.append(entries)
 
 
 def _local_fact_time(request: d.HandleStimulusRequest, *, offset: int = 0) -> datetime:

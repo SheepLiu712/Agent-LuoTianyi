@@ -13,6 +13,7 @@ import src.domain.agent as d
 from src.agent.context import ContextFactory
 from src.agent.facade import Agent
 from src.agent.handlers.action.router import ActionRouter
+from src.agent.handlers.stimulus.call import CallReplyConfirmedHandler, CallTurnCompletedHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.output_drafts import AudioChunkDraft, MessageEndDraft, TextFinalDraft
 from src.agent.processing.plan_emitter import ActionPlanDraft
@@ -155,8 +156,8 @@ def report(request, plans):
         request_status=d.HandlingRequestStatus.COMPLETED,
         trigger_stimulus_id=request.stimulus.stimulus_id,
         basis_interaction_revision=request.interaction.interaction_revision,
-        considered_pending_stimulus_ids=(),
-        consumed_pending_stimulus_ids=(),
+        considered_pending_stimulus_ids=tuple(i.stimulus_id for i in request.interaction.pending_stimuli),
+        consumed_pending_stimulus_ids=tuple(i.stimulus_id for i in request.interaction.pending_stimuli),
         retained_pending_stimulus_ids=(),
         emitted_plan_ids=tuple(plans.accepted_ids),
         error_code=None,
@@ -180,9 +181,11 @@ def build_agent(*, response_count: int = 1) -> Agent:
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
             (
+                (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+                (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
                 (d.StimulusKind.CALL_ANSWER_REQUESTED, no_plan),
                 (d.StimulusKind.CALL_STARTED, no_plan),
-                (d.StimulusKind.CALL_TURN_COMPLETED, TurnHandler(response_count=response_count)),
+                (d.StimulusKind.CALL_REPLY_REQUESTED, TurnHandler(response_count=response_count)),
                 (d.StimulusKind.CALL_SILENCE_ELAPSED, no_plan),
                 (d.StimulusKind.CALL_ENDING, no_plan),
             )

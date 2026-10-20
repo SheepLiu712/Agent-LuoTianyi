@@ -184,6 +184,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         )
         assert not tts.formal_started.is_set()
         call_memory = stage.context.call_memory
+        await _eventually(lambda: bool(call_memory.snapshot()))
         assert tuple(item.content for item in call_memory.snapshot()) == ("用户喜欢音乐",)
 
         await session.receive_text(_completed(binding.call_id, 2, provisional))

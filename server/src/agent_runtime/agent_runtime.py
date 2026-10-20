@@ -19,6 +19,8 @@ from src.agent.handlers.action.write_diary import WriteDiaryHandler
 from src.agent.handlers.stimulus.call import (
     CallAnswerRequestedHandler,
     CallEndingHandler,
+    CallReplyConfirmedHandler,
+    CallReplyRequestedHandler,
     CallSilenceElapsedHandler,
     CallStartedHandler,
     CallTurnCompletedHandler,
@@ -217,13 +219,15 @@ class AgentRuntime:
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
             (StimulusKind.CALL_STARTED, CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech)),
             (
-                StimulusKind.CALL_TURN_COMPLETED,
-                CallTurnCompletedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
+                StimulusKind.CALL_REPLY_REQUESTED,
+                CallReplyRequestedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
             ),
             (
                 StimulusKind.CALL_SILENCE_ELAPSED,
                 CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
             ),
+            (StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+            (StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
             (StimulusKind.CALL_ENDING, CallEndingHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),

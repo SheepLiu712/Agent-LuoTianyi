@@ -257,6 +257,8 @@ def test_agent_domain_exports_the_registered_stimulus_contract() -> None:
         "CALL_ANSWER_REQUESTED": "call_answer_requested",
         "CALL_STARTED": "call_started",
         "CALL_TURN_COMPLETED": "call_turn_completed",
+        "CALL_REPLY_REQUESTED": "call_reply_requested",
+        "CALL_REPLY_CONFIRMED": "call_reply_confirmed",
         "CALL_SILENCE_ELAPSED": "call_silence_elapsed",
         "CALL_ENDING": "call_ending",
     }

@@ -227,6 +227,25 @@
 **输入**：收到取消。  
 **输出**：200 ms 内停止发送新块；无法中止生成的半成品块不得发送。客户端保留已取消 `response_id` 的 tombstone，重连或迟到包不得恢复该回复。
 
+### AC-08a 输入接纳、合并回复与播放结算（PR #350 整合）
+
+用户输入与回复尝试分离：`turn_seq` 仅标识已完成的用户表达顺序；一次回复尝试冻结全部已准备、尚未完整回复的输入，可覆盖多个 turn。生成成功不是回复完成；只有该尝试的正式回复全部成功、收到有效播放完成确认并写入确认事实后，才消费 HandlingReport 明确覆盖的输入。过渡语和失败道歉不消费输入。
+
+- 有效 `TurnCompleted` 先登记输入，再由独立、按接纳顺序执行的短任务向 Agent 提交输入事实并写入本次 Ephemeral Context。用户打断不得取消输入接纳任务；新一批回复等待已接纳输入全部准备完成。
+- `SpeechStarted` 仍立即取消旧回复、TTS 和未完成输出，保留输入并使被打断批次重新待回复。下一次请求包含全部 pending，且传入已确认回复历史和此前中断事实，不仅以最新一句为话题。
+- 供应商的 `SpeechStarted`、`SpeechStopped`、`TurnCompleted`、`TurnInvalid` 使用相同 item 身份。停止发声后仍等待最终语义或无效结果；旧轮次结果不能清除新轮次讲话状态；重复有效结果不新增输入。
+- 新回复只在 ACTIVE、用户已停止讲话、已知语音片段最终结果齐备、输入写入完成、没有待结算旧回复时启动。多个唤醒事件只能冻结一次批次；恢复时无需再等新一句，也不额外等待五秒沉默。
+- 重连期间继续按原顺序提交已接纳但尚未提交的 PCM，并持续消费供应商事件、记录输入，暂停新回复调度。恢复后统一处理 pending；若用户仍在说话或最终转写未到，则等待。已有正式输出沿用协议重放并保留输入占用，不同时重新生成同一批回复。
+- “全部 pending”指调度时已经接纳的有效输入，并等待已知在途语音结果。供应商接口没有覆盖全部已提交 PCM 的识别完成水位；队列为空不代表远端识别完成。后来到达的新语音沿用正常打断规则，不用固定延时冒充识别屏障。
+- 生成文本仅属于回复尝试，不能提前作为角色已说过的话写入工作 context。完整正式 response 播放确认后才追加确认事实；中途停止的 response 不推测逐字已播放前缀。多 response 尝试部分成功时保留已确认部分，输入仍待完整回复。
+- 已生成、已发送、过渡语完成、停止确认、被取消流的迟到完成回执均不得冒充正式回复成功。失败后保留 pending，沿用有限重试与失败退出策略；同一 pending 不因失败立即无限重新调度。
+- 原生播放消费回执可能先于最终帧 enqueue Promise 返回；客户端暂存身份匹配的在途回执，仅在最终帧接受成功且未停止后发送一次 `playback.completed`，接受失败或停止不得发送。
+- 维护快照保护 pending 及仍有在途事实写入的范围。共享回复锚定批次最后一个输入，其他输入引用该锚点；压缩不能切开关联批次，也不重复维护共享回复。继续使用冻结候选、输入指纹、批次幂等写入与进度推进。
+- 完整终止先关闭新输入/回复接纳、取消回复，再排空已接纳输入和播放确认事实，冻结快照，经唯一 `CallEnding → FinalizeCall` 完成维护、概要与保存。无需回复完 pending，也不等待供应商无限产生新转写；取消等待者不取消完整终止任务。所有本次用户事实进入结束处理，不增加进程终止后的恢复。
+- 输入事实写入失败时仍执行结束处理与历史保存，再报告异常。最终概要从冻结快照补入工作 Context 缺失的未压缩输入；不能使用结束维护之后的新进度过滤，因为结束维护推进进度并不等于 Context 已压缩或补写。
+
+验收入口：`test_call_pending_inputs.py`、`test_call_stage.py`、`test_call_failure_policy.py`、`test_call_threshold_maintenance.py`、`test_call_finalization_real_graph.py` 及 Call Adapter/真实网络回归。供应商事件队列满导致读循环无法及时观察故障的问题，经负责人确认本轮暂不处理。
+
 ### AC-09 沉默、角色挂断与通话上限
 
 **状态**：CallStage 已为一个或多个服务端话语登记待播放项。
@@ -610,7 +629,9 @@ CallStage 只向 Agent 提交以下正式刺激：
 
 ```python
 CallStarted(call_id, started_at)
-CallTurnCompleted(call_id, turn_seq, audio_content)
+CallTurnCompleted(call_id, turn_seq, audio_content)  # 输入事实，不生成回复
+CallReplyRequested(call_id, turn_seq, audio_content, interrupted)  # 快照携带整批 pending
+CallReplyConfirmed(call_id, turn_seq, response_id, text)  # 已确认播放，仅记账与维护
 CallSilenceElapsed(call_id, silence_ms)
 CallEnding(call_id, reason, final_snapshot)
 InteractionEnding(interaction_id, reason)

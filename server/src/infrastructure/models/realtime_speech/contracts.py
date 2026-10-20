@@ -47,6 +47,7 @@ class SpeechStopped:
 @dataclass(frozen=True, slots=True)
 class TurnCompleted:
     semantic: CallAudioSemantic
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +78,8 @@ class RealtimeSpeechSession(Protocol):
     async def push_audio(self, frame: AudioFrame) -> None: ...
 
     def events(self) -> AsyncIterator[RealtimeSpeechEvent]: ...
+
+    async def wait_failure(self) -> ProviderFailed | None: ...
 
     async def close(self) -> None: ...
 

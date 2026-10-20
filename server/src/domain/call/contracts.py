@@ -69,6 +69,8 @@ class CallFinalTurn:
     user_semantic: str
     reply_status: CallReplyStatus
     formal_agent_text: str | None
+    reply_turn_seq: int | None = None
+    confirmed_agent_text: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.turn_seq) is not int or self.turn_seq <= 0:
@@ -78,7 +80,17 @@ class CallFinalTurn:
             raise ValueError("reply_status is required")
         if self.formal_agent_text is not None:
             _nonblank(self.formal_agent_text, "formal_agent_text")
-        if self.reply_status is CallReplyStatus.COMPLETED and self.formal_agent_text is None:
+        if self.confirmed_agent_text is not None:
+            _nonblank(self.confirmed_agent_text, "confirmed_agent_text")
+        if self.reply_turn_seq is not None and (
+            type(self.reply_turn_seq) is not int or self.reply_turn_seq < self.turn_seq
+        ):
+            raise ValueError("reply anchor cannot precede its input")
+        if (
+            self.reply_status is CallReplyStatus.COMPLETED
+            and self.formal_agent_text is None
+            and self.reply_turn_seq is None
+        ):
             raise ValueError("completed reply requires formal agent text")
         if (
             self.reply_status in {CallReplyStatus.NOT_STARTED, CallReplyStatus.FAILED}

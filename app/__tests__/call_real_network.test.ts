@@ -1,7 +1,13 @@
 import { constants, publicEncrypt } from 'node:crypto';
 
 import { server_config } from '../config';
-import type { CallAudioFormat, CallPlaybackChunk, CapturedAudioFrame, PlaybackConsumptionReceipt } from '../utils/call_audio_contracts';
+import type {
+  CallAudioFormat,
+  CallAudioStreamIdentity,
+  CallPlaybackChunk,
+  CapturedAudioFrame,
+  PlaybackConsumptionReceipt,
+} from '../utils/call_audio_contracts';
 import { ProductionCallResolver } from '../utils/call_session/production_resolver';
 import { NetworkClient, type ConnectCallbacks } from '../utils/network_client';
 import { launchCallServer, resolveCallServerSource, waitUntil } from './support/call_network_server';
@@ -30,6 +36,7 @@ class ExternalNativeAudio {
   private consumed: (receipt: PlaybackConsumptionReceipt) => void = () => undefined;
   private events: { onFailure?(event: { code: string }): void } = {};
   readonly chunks: CallPlaybackChunk[] = [];
+  readonly consumedStreams: CallAudioStreamIdentity[] = [];
   readonly tombstones: CallPlaybackChunk['stream'][] = [];
 
   setCoordinatorEvents(events: { onFailure?(event: { code: string }): void }) { this.events = events; }
@@ -41,7 +48,13 @@ class ExternalNativeAudio {
   async resumeCapture() {}
   async enqueue(chunk: CallPlaybackChunk) {
     this.chunks.push(chunk);
-    if (chunk.isFinal) queueMicrotask(() => this.consumed({ stream: chunk.stream }));
+    if (chunk.isFinal) {
+      queueMicrotask(() => {
+        const receipt = { stream: chunk.stream };
+        this.consumedStreams.push(receipt.stream);
+        this.consumed(receipt);
+      });
+    }
   }
   async stop() {}
   async tombstone(stream: CallPlaybackChunk['stream']) { this.tombstones.push(stream); }
@@ -69,17 +82,19 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
   server_config.BASE_URL = server.url;
   let token = '';
   let transcript = '你还记得我喜欢什么吗';
+  let chat: NetworkClient | undefined;
+  let resolver: ProductionCallResolver | undefined;
   try {
     const credentials = await registerAndLogin(server.url, 'alice', 'offline-password');
     token = credentials.token;
-    const chat = new NetworkClient();
+    chat = new NetworkClient();
     expect(await chat.reconnectWs('alice', token, 'luotianyi', callbacks)).toBe(true);
 
     const native = new ExternalNativeAudio();
-    const resolver = new ProductionCallResolver({
+    resolver = new ProductionCallResolver({
       characterId: 'luotianyi',
       credentials: { username: 'alice', token },
-      switchPort: { prepare: (requestId, characterId) => chat.prepareCallSwitch(requestId, characterId) },
+      switchPort: { prepare: (requestId, characterId) => chat!.prepareCallSwitch(requestId, characterId) },
       createNativeAudio: () => native as never,
     });
     expect((await resolver.refreshCapability()).available).toBe(true);
@@ -102,19 +117,41 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
     ) as any;
     expect(evidence.provider_audio.find((entry: any) => entry.call_id === callId).frames[0].payload).toBe('10002000');
     await waitUntil(() => native.chunks.length, (count) => count >= 1);
+    const existingStreamIdentities = new Set(native.chunks.map((chunk) => streamIdentityKey(chunk.stream)));
 
     expect((await fetch(`${server.url}/test/provider/${callId}/turn`, { method: 'POST' })).ok).toBe(true);
-    await waitUntil(() => native.chunks.length, (count) => count >= 2);
-    const streamedResponse = native.chunks.at(-1)!.stream.responseId;
+    const turnStreams = await waitUntil(
+      () => selectNewTurnStreams(native.chunks, existingStreamIdentities),
+      (streams) => streams.provisional !== undefined && streams.formal !== undefined,
+    ).catch(async (error) => {
+      const state = await json(`${server.url}/test/call_state/${callId}`);
+      throw new Error(`${String(error)}; call_state=${JSON.stringify(state)}`);
+    });
+    const provisional = turnStreams.provisional!;
+    const formal = turnStreams.formal!;
+    expect(provisional.stream.responseId).not.toBe(formal.stream.responseId);
+    expect(provisional.stream.streamId).not.toBe(formal.stream.streamId);
+    await waitUntil(
+      () => native.consumedStreams,
+      (streams) => streams.some((stream) => sameStreamIdentity(stream, provisional.stream)),
+    );
+
     const lostAt = performance.now();
     native.loseFocus();
     await waitUntil(() => attempt.session.state.status, (status) => status === 'recovering');
     const resumed = await waitUntil(() => attempt.session.state, (state) => state.status === 'connected');
     expect(resumed.callId).toBe(callId);
     expect(performance.now() - lostAt).toBeLessThan(3_000);
+    expect(native.chunks.some((chunk) => sameStreamIdentity(chunk.stream, formal.stream) && !chunk.isFinal)).toBe(true);
+
+    const tombstonesBeforeInterrupt = native.tombstones.length;
     expect((await fetch(`${server.url}/test/provider/${callId}/interrupt`, { method: 'POST' })).ok).toBe(true);
-    await waitUntil(() => native.tombstones.length, (count) => count >= 1);
-    expect(native.tombstones.some((stream) => stream.responseId === streamedResponse)).toBe(true);
+    const interruptTombstones = await waitUntil(
+      () => native.tombstones.slice(tombstonesBeforeInterrupt),
+      (streams) => streams.length > 0,
+    );
+    expect(sameStreamIdentity(interruptTombstones[0], formal.stream)).toBe(true);
+    expect(interruptTombstones.some((stream) => sameStreamIdentity(stream, provisional.stream))).toBe(false);
 
     const chatRecovery = chat.reconnectWs('alice', token, 'luotianyi', callbacks, 10_000);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -163,6 +200,8 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
     expect((await login(server.url, 'alice', 'offline-password')).token).toBeTruthy();
     await resolver.close();
   } finally {
+    await resolver?.close();
+    chat?.disconnectWs();
     server_config.BASE_URL = previousBaseUrl;
     const stopped = await server.stop();
     expect(stopped.exitCode).toBe(0);
@@ -195,6 +234,25 @@ networkTest('production capability remains disabled without a ready call graph',
     expect(stopped.exitCode).toBe(0);
   }
 }, 60_000);
+
+function streamIdentityKey(stream: CallAudioStreamIdentity): string {
+  return `${stream.callId}:${stream.responseId}:${stream.streamId}`;
+}
+
+function sameStreamIdentity(left: CallAudioStreamIdentity, right: CallAudioStreamIdentity): boolean {
+  return left.callId === right.callId && left.responseId === right.responseId && left.streamId === right.streamId;
+}
+
+function selectNewTurnStreams(chunks: readonly CallPlaybackChunk[], existing: ReadonlySet<string>): {
+  provisional?: CallPlaybackChunk;
+  formal?: CallPlaybackChunk;
+} {
+  const newChunks = chunks.filter((chunk) => !existing.has(streamIdentityKey(chunk.stream)));
+  return {
+    provisional: newChunks.find((chunk) => chunk.isFinal),
+    formal: newChunks.find((chunk) => !chunk.isFinal),
+  };
+}
 
 async function registerAndLogin(url: string, username: string, password: string) {
   const encrypted = await encryptedPassword(url, password);

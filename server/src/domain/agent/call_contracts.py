@@ -73,6 +73,41 @@ class CallTurnCompleted(Stimulus):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CallReplyRequested(Stimulus):
+    """A frozen pending-input batch; turn_seq anchors its maintenance range."""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.CALL_REPLY_REQUESTED
+    call_id: UUID
+    turn_seq: int
+    audio_content: CallAudioSemantic
+    interrupted: bool = False
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_instance(self.call_id, UUID)
+        _require(type(self.turn_seq) is int and self.turn_seq > 0, "turn_seq")
+        _require_instance(self.audio_content, CallAudioSemantic)
+        _require(type(self.interrupted) is bool, "interrupted")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallReplyConfirmed(Stimulus):
+    """A complete formal response was played; bookkeeping only, never cognition."""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.CALL_REPLY_CONFIRMED
+    call_id: UUID
+    turn_seq: int | None
+    response_id: str
+    text: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_instance(self.call_id, UUID)
+        _require(bool(self.response_id.strip()) and bool(self.text.strip()), "confirmed response")
+        _require(self.turn_seq is None or type(self.turn_seq) is int and self.turn_seq > 0, "turn_seq")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CallSilenceElapsed(Stimulus):
     kind: ClassVar[StimulusKind] = StimulusKind.CALL_SILENCE_ELAPSED
     call_id: UUID
@@ -102,4 +137,12 @@ class CallEnding(Stimulus):
             raise ValueError("call ending reason mismatch")
 
 
-CallStimulus = CallAnswerRequested | CallStarted | CallTurnCompleted | CallSilenceElapsed | CallEnding
+CallStimulus = (
+    CallAnswerRequested
+    | CallStarted
+    | CallTurnCompleted
+    | CallReplyRequested
+    | CallReplyConfirmed
+    | CallSilenceElapsed
+    | CallEnding
+)

@@ -26,8 +26,11 @@ def render_call_turns(snapshot: CallFinalSnapshot, *, after_turn_seq: int = 0) -
         if turn.turn_seq <= after_turn_seq:
             continue
         text = f"用户：{turn.user_semantic}"
-        if turn.reply_status is CallReplyStatus.COMPLETED and turn.formal_agent_text is not None:
-            text += f"\n角色：{turn.formal_agent_text}"
+        confirmed = turn.confirmed_agent_text
+        if confirmed is None and turn.reply_turn_seq is None and turn.reply_status is CallReplyStatus.COMPLETED:
+            confirmed = turn.formal_agent_text
+        if confirmed is not None:
+            text += f"\n角色：{confirmed}"
         rendered.append(text)
     return tuple(rendered)
 
@@ -52,6 +55,17 @@ class CallSummarySkill:
             if working.summary.text.strip():
                 working_inputs.append(f"本次通话已有摘要：{working.summary.text.strip()}")
             working_inputs.extend(f"{entry.source}：{entry.content.text}" for entry in working.entries)
+            # An accepted input can survive a failed context append at shutdown.
+            # Compacted inputs are already represented by the working summary.
+            present = {entry.entry_id for entry in working.entries}
+            # Ending maintenance advances progress without compacting working
+            # entries. Only the boundary frozen before ending covers old inputs.
+            progress = snapshot.maintenance_turn_seq
+            working_inputs.extend(
+                f"用户：{turn.user_semantic}"
+                for turn in snapshot.completed_turns
+                if turn.turn_seq > progress and f"call-turn-{turn.turn_seq}-user" not in present
+            )
             if working_inputs:
                 turns = tuple(working_inputs)
         if not turns:
@@ -189,6 +203,14 @@ class CallMaintenanceSkill:
         # Never advance over an earlier turn split by the compaction boundary.
         boundary = min((seq for seq in partial if seq is not None), default=float("inf"))
         target = max((seq for seq in whole if seq < boundary), default=progress)
+        # A merged reply belongs to the whole batch; never compact half of it.
+        crossing = [
+            turn.turn_seq
+            for turn in snapshot.completed_turns
+            if turn.turn_seq <= target and turn.reply_turn_seq is not None and turn.reply_turn_seq > target
+        ]
+        if crossing:
+            target = min(crossing) - 1
         safe_ids = tuple(
             entry.entry_id
             for entry in window.entries
@@ -294,7 +316,7 @@ def _call_id(snapshot):
 
 
 def _entry_turn(entry_id):
-    match = re.fullmatch(r"call-turn-(\d+)-(?:user|agent-\d+)", entry_id)
+    match = re.fullmatch(r"call-turn-(\d+)-(?:user|agent-[\w-]+)", entry_id)
     return int(match.group(1)) if match else None
 
 
@@ -303,7 +325,14 @@ def _maintenance_digest(snapshot: CallMaintenanceSnapshot | CallFinalSnapshot) -
         str(_call_id(snapshot)),
         snapshot.maintenance_turn_seq,
         [
-            [turn.turn_seq, turn.user_semantic, turn.reply_status.value, turn.formal_agent_text]
+            [
+                turn.turn_seq,
+                turn.user_semantic,
+                turn.reply_status.value,
+                turn.formal_agent_text,
+                turn.reply_turn_seq,
+                turn.confirmed_agent_text,
+            ]
             for turn in snapshot.completed_turns
         ],
     ]

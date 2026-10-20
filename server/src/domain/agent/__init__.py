@@ -33,6 +33,8 @@ from .call_contracts import (
     CallAnswerRequested,
     CallEnding,
     CallInteractionSnapshot,
+    CallReplyConfirmed,
+    CallReplyRequested,
     CallSilenceElapsed,
     CallStarted,
     CallStimulus,
@@ -288,4 +290,6 @@ __all__ = (
     "CallStarted",
     "CallStimulus",
     "CallTurnCompleted",
+    "CallReplyRequested",
+    "CallReplyConfirmed",
 )

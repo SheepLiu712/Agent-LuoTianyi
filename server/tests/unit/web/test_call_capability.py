@@ -30,7 +30,7 @@ def _client(runtime):
 
 
 def test_call_capability_requires_bearer_message_token_and_never_accepts_username():
-    status = CallCapabilityStatus(*(True for _ in range(8)), ("luotianyi",))
+    status = CallCapabilityStatus(*(True for _ in range(7)), ("luotianyi",))
     with _client(_runtime(status)) as client:
         assert client.get("/call/capability?character_id=luotianyi").status_code == 401
         assert (
@@ -57,10 +57,9 @@ def test_call_capability_projects_each_readiness_failure_without_runtime_details
         "summary_unavailable",
         "settlement_unavailable",
         "stage_binding_unavailable",
-        "recovery_unavailable",
     )
     for index, reason in enumerate(reasons):
-        values = [True] * 8
+        values = [True] * 7
         values[index] = False
         status = CallCapabilityStatus(*values, ("luotianyi",))
         with _client(_runtime(status)) as client:
@@ -72,7 +71,7 @@ def test_call_capability_projects_each_readiness_failure_without_runtime_details
 
 
 def test_call_capability_rejects_unknown_characters_and_invalid_query_shape():
-    status = CallCapabilityStatus(*(True for _ in range(8)), ("luotianyi",))
+    status = CallCapabilityStatus(*(True for _ in range(7)), ("luotianyi",))
     with _client(_runtime(status, supported=False)) as client:
         response = client.get("/call/capability?character_id=other", headers={"Authorization": "Bearer good-token"})
         assert response.json() == {"available": False, "character_id": "other", "reason": "character_unavailable"}

@@ -116,6 +116,9 @@ async def test_first_audio_waits_for_actual_websocket_completion(network_call, r
         if result == "success":
             await b._eventually(lambda: bool(first_audio(captured)))
             assert first_audio(captured) == [875.0]
+            for response_id, stream_id in stage._playback.pending_streams:
+                stage.playback_completed(response_id, stream_id)
+            await b._eventually(lambda: not stage._inputs.pending)
             await produce_turn(stage)
             await b._eventually(lambda: len(first_audio(captured)) == 2)
             assert first_audio(captured) == [875.0, 250.0]

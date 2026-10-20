@@ -12,7 +12,13 @@ from src.agent.context.memory_pool import CallMemoryPool
 from src.agent.handlers.action.call import EndCallHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
-from src.agent.handlers.stimulus.call import CallEndingHandler, CallSilenceElapsedHandler, CallTurnCompletedHandler
+from src.agent.handlers.stimulus.call import (
+    CallEndingHandler,
+    CallReplyConfirmedHandler,
+    CallReplyRequestedHandler,
+    CallSilenceElapsedHandler,
+    CallTurnCompletedHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.plan_identity import decode_plan, encode_plan
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
@@ -152,11 +158,11 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
         return CallRecallDecision(RecallMode.RECALL, ("喜欢什么",), AckStyle.THINKING)
 
     recall.decide = decide
-    handler = CallTurnCompletedHandler(recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({}))
+    handler = CallReplyRequestedHandler(recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({}))
     call_id = uuid4()
     request = _request(
         _stimulus(
-            d.CallTurnCompleted,
+            d.CallReplyRequested,
             call_id=call_id,
             turn_seq=1,
             audio_content=CallAudioSemantic(transcript="你还记得吗"),
@@ -166,7 +172,7 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
 
     report = await handler.handle(request, plans)
 
-    assert report.emitted_plan_ids == ("plan-1", "plan-2", "plan-3")
+    assert report.emitted_plan_ids == ("plan-1", "plan-2")
     assert len(memory.calls) == 1
     assert tuple(item.content for item in plans.context.call_memory.snapshot()) == ("旧记忆", "新记忆")
     provisional = plans.drafts[0].actions[0]
@@ -177,13 +183,8 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
     assert formal.call_delivery.is_ephemeral is True
     assert formal.message_id is None
     assert all(isinstance(action, d.Say) for draft in plans.drafts[:2] for action in draft.actions)
-    maintenance = plans.drafts[2].actions[0]
-    assert isinstance(maintenance, d.CognitiveMaintenance)
-    assert maintenance.reason is d.MaintenanceReason.COMPACTION_THRESHOLD
-    assert [entry.content.text for entry in plans.context.conversation.entries] == [
-        "用户说：“你还记得吗”",
-        "正式回答",
-    ]
+    # Neither generated replies nor provisional acknowledgements are confirmed facts.
+    assert plans.context.conversation.entries == []
 
 
 @pytest.mark.asyncio
@@ -217,6 +218,8 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
             (
+                (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+                (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
                 (
                     d.StimulusKind.CALL_SILENCE_ELAPSED,
                     CallSilenceElapsedHandler(
@@ -337,19 +340,16 @@ async def test_provisional_ack_is_not_appended_to_ephemeral_formal_facts():
     plans = _Plans()
     request = _request(
         _stimulus(
-            d.CallTurnCompleted,
+            d.CallReplyRequested,
             call_id=uuid4(),
             turn_seq=1,
             audio_content=CallAudioSemantic(transcript="继续说"),
         )
     )
 
-    await CallTurnCompletedHandler(
+    await CallReplyRequestedHandler(
         recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({})
     ).handle(request, plans)
 
     assert plans.drafts[0].actions[0].call_delivery.provisional is True
-    assert [entry.content.text for entry in plans.context.conversation.entries] == [
-        "用户说：“继续说”",
-        "正式回答",
-    ]
+    assert plans.context.conversation.entries == []

@@ -232,6 +232,41 @@ describe('reliable call transport', () => {
     expect(completed).toMatchObject({ seq: 2, response_id: 'response-1', stream_id: 9 });
   });
 
+  test.each(['accepted', 'stopped', 'failed'])('retains early consumption until final enqueue is %s', async (outcome) => {
+    const { socket, native, session } = await establish();
+    let release!: () => void;
+    let reject!: (error: Error) => void;
+    const stream = { callId: CALL_ID, responseId: 'response-1', streamId: 9 };
+    native.enqueue = async () => {
+      native.listener?.({ stream });
+      await new Promise<void>((resolve, fail) => { release = resolve; reject = fail; });
+    };
+    const completions = () => socket.sent.filter((wire): wire is string => typeof wire === 'string')
+      .map((wire) => JSON.parse(wire)).filter((message) => message.type === 'playback.completed');
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'response-1', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([1, 0]),
+    }));
+    await flush();
+    expect(completions()).toHaveLength(0);
+    if (outcome === 'stopped') {
+      socket.message(serverControl({
+        protocol: 'call.v1', type: 'playback.stop', seq: 5, call_id: CALL_ID, response_id: 'response-1', stream_id: 9,
+        retire_server_seq: { from: 3, through: 4 }, reason: 'user_interrupted',
+      }));
+      await flush();
+    }
+    if (outcome === 'failed') reject(new Error('ENQUEUE_FAILED'));
+    else release();
+    await flush();
+    native.listener?.({ stream });
+    expect(completions()).toHaveLength(outcome === 'accepted' ? 1 : 0);
+    await session.close();
+  });
+
   test('orders binary audio that arrives before its stream_started control', async () => {
     const { socket, native } = await establish();
     const codec = new BinaryAudioFrameCodec();

@@ -45,6 +45,8 @@ interface StreamState {
   format?: { encoding: string; sampleRateHz: number; channels: number };
   generation: number;
   finalAccepted: boolean;
+  finalEnqueuing?: boolean;
+  consumedBeforeAcceptance?: boolean;
   stopped: boolean;
 }
 
@@ -316,14 +318,22 @@ export class CallTransportSession {
       if (!stream || !stream.registered || stream.stopped) throw new Error('UNREGISTERED_STREAM');
       frame.audio.responseId = stream.identity.responseId;
       const generation = stream.generation;
-      await this.options.nativeAudio.enqueue({
-        stream: stream.identity,
-        format: { encoding: 'pcm_s16le', sampleRateHz: 24_000, channels: 1 },
-        payload: frame.audio.payload,
-        isFinal: frame.audio.final,
-      });
+      stream.finalEnqueuing = frame.audio.final;
+      try {
+        await this.options.nativeAudio.enqueue({
+          stream: stream.identity,
+          format: { encoding: 'pcm_s16le', sampleRateHz: 24_000, channels: 1 },
+          payload: frame.audio.payload,
+          isFinal: frame.audio.final,
+        });
+      } finally {
+        stream.finalEnqueuing = false;
+      }
       if (stream.stopped || stream.generation !== generation) throw new Error('FRAME_RETIRED');
-      if (frame.audio.final) stream.finalAccepted = true;
+      if (frame.audio.final) {
+        stream.finalAccepted = true;
+        if (stream.consumedBeforeAcceptance) this.onPlaybackConsumed({ stream: stream.identity });
+      }
       return;
     }
     if (!frame.control) throw new Error('INVALID_INCOMING_FRAME');
@@ -425,8 +435,14 @@ export class CallTransportSession {
 
   private onPlaybackConsumed(receipt: PlaybackConsumptionReceipt): void {
     const stream = this.streams.get(receipt.stream.streamId);
-    if (!stream || stream.stopped || !stream.finalAccepted) return;
+    if (!stream || stream.stopped) return;
     if (stream.identity.callId !== receipt.stream.callId || stream.identity.responseId !== receipt.stream.responseId) return;
+    // Native consumption may arrive before the enqueue Promise resumes JS.
+    // Retain it, but only acknowledge after successful final-frame acceptance.
+    if (!stream.finalAccepted) {
+      if (stream.finalEnqueuing) stream.consumedBeforeAcceptance = true;
+      return;
+    }
     const key = `${stream.identity.responseId}:${stream.identity.streamId}`;
     if (this.completedStreams.has(key)) return;
     try {

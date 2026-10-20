@@ -14,6 +14,7 @@ import src.domain.agent as d
 from src.agent.context import ContextFactory
 from src.agent.facade import Agent
 from src.agent.handlers.action.router import ActionRouter
+from src.agent.handlers.stimulus.call import CallReplyConfirmedHandler, CallTurnCompletedHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.output_drafts import AudioChunkDraft, MessageEndDraft, TextFinalDraft
 from src.agent.processing.plan_emitter import ActionPlanDraft
@@ -27,7 +28,14 @@ from src.domain.call import (
     CallSpeechDelivery,
     CallState,
 )
-from src.infrastructure.models.realtime_speech import SpeechStarted, SpeechStopped, TurnCompleted, TurnInvalid
+from src.infrastructure.models.realtime_speech import (
+    ProviderFailed,
+    SpeechStarted,
+    SpeechStopped,
+    TurnCompleted,
+    TurnInvalid,
+)
+from src.infrastructure.observability.call_metrics import CallMetricName
 from src.infrastructure.persistence.call_sessions import (
     BEIJING_TIMEZONE,
     CallSessionRecord,
@@ -125,14 +133,30 @@ class _BlockingProviderFactory:
         await asyncio.Event().wait()
 
 
+class _BlockingPushProviderFactory(FakeRealtimeSpeechSessionFactory):
+    async def create(self, call_id):
+        provider = await super().create(call_id)
+        provider.push_started = asyncio.Event()
+        provider.release_push = asyncio.Event()
+        original_push = provider.push_audio
+
+        async def push_audio(frame):
+            provider.push_started.set()
+            await provider.release_push.wait()
+            await original_push(frame)
+
+        provider.push_audio = push_audio
+        return provider
+
+
 def _report(request, plans):
     return d.HandlingReport(
         request_id=request.request_id,
         request_status=d.HandlingRequestStatus.COMPLETED,
         trigger_stimulus_id=request.stimulus.stimulus_id,
         basis_interaction_revision=request.interaction.interaction_revision,
-        considered_pending_stimulus_ids=(),
-        consumed_pending_stimulus_ids=(),
+        considered_pending_stimulus_ids=tuple(i.stimulus_id for i in request.interaction.pending_stimuli),
+        consumed_pending_stimulus_ids=tuple(i.stimulus_id for i in request.interaction.pending_stimuli),
         retained_pending_stimulus_ids=(),
         emitted_plan_ids=tuple(plans.accepted_ids),
         error_code=None,
@@ -235,9 +259,11 @@ def _agent(turn_handler, *, silence_handler=None):
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
             (
+                (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+                (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
                 (d.StimulusKind.CALL_ANSWER_REQUESTED, _AnswerHandler()),
                 (d.StimulusKind.CALL_STARTED, no_plan),
-                (d.StimulusKind.CALL_TURN_COMPLETED, turn_handler),
+                (d.StimulusKind.CALL_REPLY_REQUESTED, turn_handler),
                 (d.StimulusKind.CALL_SILENCE_ELAPSED, silence),
                 (d.StimulusKind.CALL_ENDING, no_plan),
             )
@@ -246,6 +272,7 @@ def _agent(turn_handler, *, silence_handler=None):
             (
                 (d.ActionKind.ANSWER_CALL, _NoOutputActionHandler()),
                 (d.ActionKind.SAY, _SayHandler()),
+                (d.ActionKind.COGNITIVE_MAINTENANCE, _NoOutputActionHandler()),
             )
         ),
     )
@@ -406,6 +433,197 @@ async def test_pcm_receipts_are_bounded_idempotent_and_turns_require_completed_e
     stage.playback_completed(response_id, stream_id)
     await _eventually(lambda: stage._turns[1].status is CallReplyStatus.COMPLETED)
     await stage.terminate()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_preserves_accepted_pcm_and_completed_turn_exactly_once(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    transport = _Transport()
+    turn_handler = _TurnHandler()
+    turn_handler.gate.set()
+    captured_metrics = []
+
+    class Metrics:
+        def record(self, metric):
+            captured_metrics.append(metric)
+            return True
+
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(transport),
+        call_metrics=Metrics(),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        assert stage.accept_pcm(_receipt(record.call_id, 1, b"\x01\x00"), b"\x01\x00")
+        assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x02\x00"), b"\x02\x00")
+        await provider.push_started.wait()
+
+        await stage.disconnect()
+        provider.release_push.set()
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="断线期已完成轮次")))
+        assert await stage.resume() is True
+
+        await asyncio.wait_for(stage._pcm.join(), 1)
+        assert [frame.sequence for frame in provider.pushed_frames] == [1, 2]
+        await _eventually(lambda: len(turn_handler.requests) == 1)
+        await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
+        assert [frame.payload for frame in provider.pushed_frames] == [b"\x01\x00", b"\x02\x00"]
+        assert len(turn_handler.requests[0].interaction.pending_stimuli) == 1
+        assert list(stage._turns) == [1]
+        assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured_metrics]
+
+        response_id, stream_id = stage._playback.pending_streams[0]
+        stage.playback_completed(response_id, stream_id)
+        await _eventually(lambda: not stage._inputs.pending)
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="恢复后新轮次")))
+        await _eventually(lambda: len(turn_handler.requests) == 2)
+        await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
+        response_id, _ = stage._playback.pending_streams[0]
+        stage.audio_sent(response_id)
+        assert [metric.name for metric in captured_metrics].count(CallMetricName.FIRST_AUDIO) == 1
+    finally:
+        provider.release_push.set()
+        await stage.terminate(CallEndReason.USER_HANGUP)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_timeout_discards_paused_pcm_and_provider_events(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    turn_handler = _TurnHandler()
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(_Transport()),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x01\x00"), b"\x01\x00")
+        assert stage.accept_pcm(_receipt(record.call_id, 3, b"\x02\x00"), b"\x02\x00")
+        await provider.push_started.wait()
+        await stage.disconnect()
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="不得兑现")))
+        clock.advance(3.0)
+
+        assert await stage.resume() is False
+        await stage.wait_closed()
+
+        assert stage.context is None
+        assert stage._pcm.empty()
+        assert stage._pcm_buffered_bytes == 0
+        assert turn_handler.requests == []
+        assert not stage.tasks
+    finally:
+        provider.release_push.set()
+        await stage.terminate(CallEndReason.USER_HANGUP)
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_bypasses_paused_reconnect_events_and_cleans_owned_work(call_setup):
+    stage, provider, _, turn_handler = await _create(call_setup)
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    await stage.disconnect()
+    await provider.emit(TurnCompleted(CallAudioSemantic(transcript="恢复后才可兑现")))
+    await _eventually(
+        lambda: provider._events.empty() and stage._events_task is not None and not stage._events_task.done()
+    )
+
+    await provider.emit(ProviderFailed("provider_connection_closed", True))
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 0.2)
+
+    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
+    assert turn_handler.requests == []
+    assert stage.context is None
+    assert stage._pcm.empty()
+    assert stage._pcm_buffered_bytes == 0
+    assert not stage.tasks
+    assert provider.closed is True
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_requested_before_resume_rejects_resume_and_cleans_paused_work(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    turn_handler = _TurnHandler()
+    released = []
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(_Transport()),
+        release_ownership=lambda value: not released.append(value),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x01\x00"), b"\x01\x00")
+    assert stage.accept_pcm(_receipt(record.call_id, 3, b"\x02\x00"), b"\x02\x00")
+    await provider.push_started.wait()
+    await stage.disconnect()
+    await provider.emit(TurnCompleted(CallAudioSemantic(transcript="竞态中不得兑现")))
+    await _eventually(lambda: provider._events.empty())
+
+    termination_entered = asyncio.Event()
+    release_termination = asyncio.Event()
+    original_terminate_owned = stage._terminate_owned
+
+    async def delayed_terminate_owned(reason):
+        termination_entered.set()
+        await release_termination.wait()
+        return await original_terminate_owned(reason)
+
+    stage._terminate_owned = delayed_terminate_owned
+    await provider.emit(ProviderFailed("provider_connection_closed", True))
+    await asyncio.wait_for(termination_entered.wait(), 0.2)
+    assert stage.termination_requested is True
+
+    assert await stage.resume() is False
+    assert stage.state is CallState.RECONNECTING
+    assert turn_handler.requests == []
+    assert [frame.sequence for frame in provider.pushed_frames] == []
+
+    release_termination.set()
+    provider.release_push.set()
+    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
+    assert turn_handler.requests == []
+    assert stage.context is None
+    assert stage._pcm.empty()
+    assert stage._pcm_buffered_bytes == 0
+    await _eventually(lambda: released == [ownership])
+    assert released == [ownership]
+    assert provider.closed is True
+    assert not stage.tasks
 
 
 @pytest.mark.asyncio
@@ -876,7 +1094,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
     from types import SimpleNamespace
 
     from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
-    from src.agent.handlers.stimulus.call import CallTurnCompletedHandler
+    from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
     from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
     from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
     from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
@@ -924,9 +1142,11 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
             (
+                (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+                (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
                 (
-                    d.StimulusKind.CALL_TURN_COMPLETED,
-                    CallTurnCompletedHandler(
+                    d.StimulusKind.CALL_REPLY_REQUESTED,
+                    CallReplyRequestedHandler(
                         recall, CallReplySkill({"luotianyi": Generator()}), PreparedSpeechCatalog({})
                     ),
                 ),
@@ -949,6 +1169,8 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
             await _eventually(lambda: stage._realize_task.done())
             stream = [item for item in transport.items if isinstance(item, tuple) and item[0] == "start"][-1]
             stage.playback_completed(stream[1], stream[2])
+            await _eventually(lambda: not stage._inputs.pending and not stage._fact_tasks)
+            await _eventually(lambda: stage._realize_task.done())
         assert stage.context.conversation.read().summary.text == "compressed call prefix"
         assert len(stage.context.conversation.read().entries) == 32
         assert stage.context.conversation.read_call_maintenance_progress() == 16
@@ -962,7 +1184,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
 
 
 @pytest.mark.asyncio
-async def test_interrupted_unrealized_turn_does_not_block_maintenance_prefix(call_setup):
+async def test_interrupted_unanswered_input_is_protected_from_maintenance(call_setup):
     stage, provider, _, handler = await _create(call_setup)
     try:
         # This turn has a completed provider semantic but is still waiting in
@@ -973,8 +1195,7 @@ async def test_interrupted_unrealized_turn_does_not_block_maintenance_prefix(cal
         await provider.emit(SpeechStarted())
         await _eventually(lambda: stage._generation > generation)
         snapshot = stage._maintenance_snapshot()
-        assert len(snapshot.completed_turns) == 1
-        assert snapshot.completed_turns[0].user_semantic == "用户说：“settled user fact”"
-        assert snapshot.completed_turns[0].formal_agent_text is None
+        assert snapshot.completed_turns == ()
+        assert 1 in stage._inputs.pending
     finally:
         await stage.terminate(CallEndReason.USER_HANGUP)

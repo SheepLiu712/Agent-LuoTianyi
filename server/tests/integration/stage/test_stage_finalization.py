@@ -409,6 +409,9 @@ class _BlockingProvider:
         if False:
             yield None
 
+    async def wait_failure(self):
+        await asyncio.Event().wait()
+
 
 class _BlockingSpeechFactory:
     def __init__(self, blocked_phase, entered, release, providers):

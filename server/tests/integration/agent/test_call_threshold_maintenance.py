@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -23,8 +24,9 @@ from src.agent.context import (
     TextContent,
 )
 from src.agent.context._conversation_store import EphemeralCallConversationStore
+from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
-from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
+from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.contracts import SkillInvocation
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
@@ -189,6 +191,29 @@ def final_snapshot(setup, turns, progress=0):
 
 
 @pytest.mark.asyncio
+async def test_final_summary_keeps_accepted_input_missing_from_context_after_ending_maintenance(setup):
+    context, turns = await context_with_turns(count=1)
+    turns += (CallFinalTurn(2, "accepted but context append failed", CallReplyStatus.NOT_STARTED, None),)
+    snapshot = final_snapshot(setup, turns)
+    execution = d.ExecutionContext(
+        execution_id="ending",
+        interaction_id="call",
+        current_interaction_revision=0,
+        cancellation=d.CancellationToken(),
+        interaction_context=context,
+    )
+    result = await FinalizeCallHandler(
+        "luotianyi", setup.call_skill, CallSummarySkill({"luotianyi": setup.model})
+    ).realize(d.FinalizeCall(action_id="ending", user_id="user", final_snapshot=snapshot), execution, None)
+    assert result.call_ending.maintenance_succeeded
+    assert context.conversation.read_call_maintenance_progress() == 2
+    inputs = setup.model.inputs[0]["completed_turns"]
+    assert sum("accepted but context append failed" in item for item in inputs) == 1
+    assert sum("private user 1" in item for item in inputs) == 1
+    assert "accepted but context append failed" in setup.memory.inputs[0]["current_dialogue"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("seed_count,expected_progress", [(0, 17), (30, 17)])
 async def test_threshold_compacts_ephemeral_only_and_ending_maintains_tail(setup, seed_count, expected_progress):
     # Without a seed use 32 turns => 34 covered entries / 17 complete turns.
@@ -242,6 +267,47 @@ async def test_failed_threshold_is_frozen_and_recovered_before_new_ending_tail(s
     assert "new user tail" in setup.memory.inputs[1]["current_dialogue"]
     assert "private user 17\n" not in setup.memory.inputs[1]["current_dialogue"]
     assert context.conversation.read_call_maintenance_progress() == 33
+
+
+@pytest.mark.asyncio
+async def test_merged_batch_is_not_split_and_frozen_retry_keeps_one_shared_reply(setup):
+    context, turns = await context_with_turns()
+    turns = tuple(
+        (
+            replace(
+                turn,
+                formal_agent_text=None,
+                reply_turn_seq=18,
+            )
+            if turn.turn_seq in {16, 17}
+            else (
+                replace(turn, reply_turn_seq=18, confirmed_agent_text="one shared reply")
+                if turn.turn_seq == 18
+                else turn
+            )
+        )
+        for turn in turns
+    )
+    setup.memory.failures = 2
+    with pytest.raises(RuntimeError, match="write unavailable"):
+        await threshold(setup, context, turns)
+    # Normal compaction would cover 17 inputs. The 16..18 batch must remain whole.
+    assert context.conversation.read_call_maintenance_progress() == 0
+    assert "private user 16" not in setup.memory.inputs[0]["current_dialogue"]
+    assert len(setup.memory.inputs) == 1
+    await threshold(setup, context, turns)
+    assert context.conversation.read_call_maintenance_progress() == 15
+    assert setup.memory.writes[0] == setup.memory.writes[2]
+    assert len(setup.memory.inputs) == 1
+    result = await setup.call_skill.maintain_ending(
+        SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
+        context,
+        final_snapshot(setup, turns, 15),
+    )
+    assert result == 32
+    tail = setup.memory.inputs[1]["current_dialogue"]
+    assert "private user 16" in tail and "private user 17" in tail
+    assert tail.count("one shared reply") == 1
 
 
 @pytest.mark.asyncio

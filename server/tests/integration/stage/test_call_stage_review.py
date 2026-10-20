@@ -27,9 +27,23 @@ async def _create_with_immediate_network(*, transport, **kwargs):
     return stage
 
 
-async def _await_realized(stage):
-    await baseline._eventually(lambda: stage._realize_task is not None)
-    await baseline._eventually(lambda: stage._realize_task.done())
+async def _await_realized(stage, *, target=None):
+    # Input admission now precedes the asynchronously scheduled batch reply.
+    if target is None:
+        target = len(stage._turns) + (1 if stage._provider is not None and not stage._provider._events.empty() else 0)
+    await baseline._eventually(lambda: target in stage._request_turn.values())
+    await baseline._eventually(
+        lambda: not stage._handle_tasks and stage._realize_task is not None and stage._realize_task.done()
+    )
+
+
+async def _complete_playback(stage):
+    for response_id, stream_id in stage._playback.pending_streams:
+        if stage._responses[response_id].failed:
+            stage.playback_stopped(response_id, stream_id)
+        else:
+            stage.playback_completed(response_id, stream_id)
+    await baseline._eventually(lambda: not stage._fact_tasks)
 
 
 class _FailedSay:
@@ -264,6 +278,7 @@ async def test_first_audio_is_measured_once_per_turn_after_successful_pcm_send(c
         assert provider is not None
         await provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="第一轮")))
         await _await_realized(stage)
+        await _complete_playback(stage)
         await provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="第二轮")))
         await _await_realized(stage)
 
@@ -356,7 +371,7 @@ async def test_first_audio_is_not_recorded_for_interrupted_response(call_setup):
         await provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="被打断")))
         await action_handler.started.wait()
         stage._interrupt()
-        await baseline._eventually(lambda: stage._realize_task.done())
+        await _await_realized(stage)
 
         assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured]
     finally:
@@ -408,6 +423,7 @@ async def test_first_audio_excludes_turns_crossing_reconnect_and_accepts_new_tur
         await _await_realized(stage)
         assert await stage.resume() is True
 
+        await _complete_playback(stage)
         await provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="恢复后新轮次")))
         await _await_realized(stage)
 
@@ -462,6 +478,7 @@ async def test_first_audio_remains_excluded_when_inflight_pcm_returns_after_resu
         transport.release.set()
         await _await_realized(stage)
 
+        await _complete_playback(stage)
         await provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="恢复后轮次")))
         await _await_realized(stage)
 
@@ -602,7 +619,8 @@ async def test_late_interrupted_generation_audio_is_excluded_and_new_provider_tu
         await provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="旧轮次")))
         await late_handler.started.wait()
         await provider.emit(baseline.SpeechStarted())
-        await _await_realized(stage)
+        await baseline._eventually(lambda: stage._user_speaking)
+        await _await_realized(stage, target=1)
 
         stage._agent._action_router = baseline.ActionRouter(
             ((baseline.d.ActionKind.SAY, _TimedMultiChunkSay(clock, (0.125,))),)
@@ -624,7 +642,7 @@ async def test_all_formal_segments_are_preserved_and_wait_for_playback(call_setu
     stage._agent = baseline._agent(handler)
     try:
         await stage._on_turn(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="用户发言")))
-        await baseline._eventually(lambda: stage._realize_task.done())
+        await _await_realized(stage)
         streams = tuple(stage._playback.pending_streams)
         assert len(streams) == 2
         stage.playback_completed(*streams[0])
@@ -644,14 +662,15 @@ async def test_failed_reply_then_success_can_settle_terminal_snapshot(call_setup
     stage._agent._action_router = baseline.ActionRouter(((baseline.d.ActionKind.SAY, _FailedSay()),))
     try:
         await stage._on_turn(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="失败轮")))
-        await baseline._eventually(lambda: stage._realize_task.done())
+        await _await_realized(stage)
         stage._agent._action_router = baseline.ActionRouter(((baseline.d.ActionKind.SAY, baseline._SayHandler()),))
         await stage._on_turn(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="成功轮")))
-        await baseline._eventually(lambda: stage._realize_task.done())
+        await _await_realized(stage)
         for response_id, stream_id in tuple(stage._playback.pending_streams):
             stage.playback_completed(response_id, stream_id)
         snapshot = await stage.terminate(baseline.CallEndReason.USER_HANGUP)
-        assert snapshot.completed_turns[0].reply_status is CallReplyStatus.FAILED
+        assert snapshot.completed_turns[0].reply_status is CallReplyStatus.COMPLETED
+        assert snapshot.completed_turns[0].reply_turn_seq == 2
         assert snapshot.completed_turns[0].formal_agent_text is None
         assert snapshot.completed_turns[1].reply_status is CallReplyStatus.COMPLETED
         assert snapshot.completed_turns[1].formal_agent_text == "正式回答"

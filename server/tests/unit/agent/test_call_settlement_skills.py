@@ -74,7 +74,7 @@ async def test_call_summary_combines_working_prefix_and_tail_updates_same_contex
         identity=ContextIdentity("luotianyi", "call", "user"),
         _store=EphemeralCallConversationStore(seed),
     )
-    await conversation.append((entry("c2", "uncompressed call tail"),))
+    await conversation.append((entry("call-turn-2-user", "uncompressed call tail"),))
     conversation._store.update_working_summary(ConversationSummary("maintained call prefix"))
     context = SimpleNamespace(conversation=conversation)
 
@@ -105,7 +105,7 @@ async def test_call_summary_combines_working_prefix_and_tail_updates_same_contex
     assert "old seed" not in repr(model.inputs)
     working = conversation.read_working()
     assert working.summary.text == result
-    assert tuple(item.entry_id for item in working.entries) == ("c2",)
+    assert tuple(item.entry_id for item in working.entries) == ("call-turn-2-user",)
 
 
 def test_call_settlement_input_keeps_all_user_facts_and_only_completed_formal_reply():

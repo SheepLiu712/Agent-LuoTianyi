@@ -6,7 +6,7 @@ import pytest
 from support.call_apology import Recall, Replies, _Plans, _request, _stimulus, catalog
 
 import src.domain.agent as d
-from src.agent.handlers.stimulus.call import CallSilenceElapsedHandler, CallStartedHandler, CallTurnCompletedHandler
+from src.agent.handlers.stimulus.call import CallReplyRequestedHandler, CallSilenceElapsedHandler, CallStartedHandler
 from src.agent.skills.cognitive.call_recall import SilenceDecision
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import CallAudioSemantic
@@ -46,9 +46,9 @@ async def test_failed_handler_randomly_selects_only_its_scene(tmp_path, monkeypa
             _stimulus(d.CallStarted, call_id=call_id, connected_at=now),
         ),
         "turn": (
-            CallTurnCompletedHandler(recall, replies, resources),
+            CallReplyRequestedHandler(recall, replies, resources),
             _stimulus(
-                d.CallTurnCompleted, call_id=call_id, turn_seq=1, audio_content=CallAudioSemantic(transcript="hello")
+                d.CallReplyRequested, call_id=call_id, turn_seq=1, audio_content=CallAudioSemantic(transcript="hello")
             ),
         ),
         "silence": (

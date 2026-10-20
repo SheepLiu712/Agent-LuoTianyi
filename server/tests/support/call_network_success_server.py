@@ -215,6 +215,30 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
             "provider_audio": provider.evidence() if provider is not None else [],
         }
 
+    @server_main.app.get("/test/call_state/{call_id}")
+    async def call_state(call_id: str):
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        stage = runtime.stage_manager._call_stages.get(call_id)
+        if stage is None:
+            return {"missing": True}
+        return {
+            "state": stage.state.value,
+            "pending": list(stage._inputs.pending),
+            "ready": sorted(stage._inputs.ready),
+            "speech": list(stage._inputs.speech),
+            "fact_tasks": len(stage._fact_tasks),
+            "responses": {
+                key: {
+                    "completed": value.playback_completed,
+                    "message_end": value.message_completed,
+                    "failed": value.failed,
+                    "confirmed": value.confirmed,
+                    "provisional": value.provisional,
+                }
+                for key, value in stage._responses.items()
+            },
+        }
+
     @server_main.app.post("/test/settlement_write/block_next")
     async def block_next_settlement_write():
         runtime = lifecycle.admin_shell.runtime_supervisor.runtime
