@@ -121,7 +121,6 @@ class StageManager:
         call_maintenance_batches: SqlCallMaintenanceBatchRepository | None = None,
         call_metrics: CallMetrics | None = None,
         realtime_speech_factory: RealtimeSpeechSessionFactory | None = None,
-        recovery_projection_verifier: Any | None = None,
         user_reset_fence: Any | None = None,
         wall_clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
@@ -140,13 +139,7 @@ class StageManager:
         self._get_context_factory = get_context_factory
         self._due_event_provider = due_event_provider
         self._lease_registry = lease_registry or InteractionLeaseRegistry()
-        self._call_records = CallRecords(
-            call_sessions=call_sessions,
-            conversation_service=conversation_service,
-            call_maintenance_batches=call_maintenance_batches,
-            projection_verifier=recovery_projection_verifier,
-            wall_clock=wall_clock,
-        )
+        self._call_records = CallRecords(call_sessions=call_sessions, wall_clock=wall_clock)
         self._call_stage_creator = bind_call_stage_creator(
             get_agent=get_agent,
             get_context_factory=get_context_factory,
@@ -159,7 +152,6 @@ class StageManager:
             monotonic=monotonic,
             wall_clock=wall_clock,
         )
-        self._initialization: asyncio.Task[None] | None = None
         self._user_reset_fence = user_reset_fence
         self._monotonic = monotonic
         self._stages: dict[tuple[str, str], ChatStage] = {}
@@ -186,31 +178,13 @@ class StageManager:
 
     @property
     def call_business_ready(self) -> bool:
-        """返回通话持久化收尾与恢复的完整就绪事实。"""
-        return not self._closed and self._call_stage_creator is not None and self._call_records.ready
+        """返回通话依赖的完整就绪事实。"""
+        return not self._closed and self._call_stage_creator is not None
 
     async def initialize(self) -> None:
-        """Recover durable call state exactly once before opening call admission."""
+        """Validate admission without replaying calls from an earlier process."""
         if self._closed:
             raise RuntimeError("stage manager closed during initialization")
-        if self._initialization is None:
-            self._initialization = asyncio.create_task(self._initialize(), name="stage-manager-initialize")
-            self._initialization.add_done_callback(self._observe_initialization)
-        await complete_owned(self._await_initialization(self._initialization))
-
-    async def _initialize(self) -> None:
-        await self._call_records.initialize()
-        if self._closed:
-            raise RuntimeError("stage manager closed during initialization")
-
-    @staticmethod
-    def _observe_initialization(task: asyncio.Task[None]) -> None:
-        if not task.cancelled():
-            task.exception()
-
-    @staticmethod
-    async def _await_initialization(task: asyncio.Task[None]) -> None:
-        await asyncio.shield(task)
 
     async def _get_call_stage(self, request: _CallOpenRequest) -> CallStage:
         """接管呼叫并返回 PREPARING Stage，不等待 Context 或供应商初始化。"""
@@ -288,9 +262,8 @@ class StageManager:
             prepared.reject()
         return None
 
-    def _own_call_operation(self, ownership, operation, *, termination=False) -> asyncio.Task:
-        register = self._finalizations.start_termination if termination else self._finalizations.start
-        return register(ownership.call_id, (ownership.user_id, ownership.character_id), operation)
+    def _own_call_operation(self, ownership, operation) -> asyncio.Task:
+        return self._finalizations.start(ownership.call_id, (ownership.user_id, ownership.character_id), operation)
 
     async def begin_user_data_reset(self, user_id: str) -> object:
         async with self._lock:
@@ -880,8 +853,7 @@ class StageManager:
                 claim.prepared,
                 ownership=ownership,
                 release_ownership=self._release_call_stage_ownership,
-                own_termination=lambda operation: self._own_call_operation(ownership, operation, termination=True),
-                own_finalization=lambda operation: self._own_call_operation(ownership, operation),
+                own_termination=lambda operation: self._own_call_operation(ownership, operation),
                 retention_changed=lambda deadline: self._update_call_retention(ownership, deadline),
                 config=config,
                 connection_available=connection_available,
@@ -1058,7 +1030,6 @@ class StageManager:
     async def _close(self) -> None:
         async with self._lock:
             self._closed = True
-            initialization = self._initialization
             chat_creations = tuple(self._chat_creations.values())
             stages = tuple(self._stages.values())
             self._stages.clear()
@@ -1068,8 +1039,6 @@ class StageManager:
                 timer.cancel()
             intent_timers = tuple(self._intent_expiry.values())
             self._intent_expiry.clear()
-        if initialization is not None and initialization is not asyncio.current_task():
-            await asyncio.gather(initialization, return_exceptions=True)
         await asyncio.gather(*chat_creations, return_exceptions=True)
         await asyncio.gather(*timers, return_exceptions=True)
         for timer in intent_timers:

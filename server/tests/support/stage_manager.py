@@ -12,7 +12,7 @@ def make_stage_manager(*, adapter, **kwargs):
         from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 
         # 生命周期与协议测试不验证存储方法；结算测试须显式提供真实存储或替换 consumer。
-        kwargs.setdefault("conversation_service", object())
+        kwargs.setdefault("conversation_service", CallConversationStore())
         kwargs.setdefault("call_maintenance_batches", object())
         kwargs.setdefault("realtime_speech_factory", FakeRealtimeSpeechSessionFactory())
     manager = StageManager(
@@ -52,9 +52,8 @@ def make_call_adapter(*, manager, **kwargs):
 
 async def create_call_stage(manager, claim, *, transport, speech_factory, call_metrics=None, **kwargs):
     """底层交接测试装配真实通话服务；生产接入不接受逐次资源注入。"""
-    from support.call_output import output_sink
-
     from src.stage.call_stage import bind_call_stage_creator
+    from support.call_output import output_sink
 
     resources = dict(manager._test_call_resources)
     resources.update(output_sink=output_sink(transport), speech_factory=speech_factory, call_metrics=call_metrics)
@@ -69,3 +68,16 @@ async def start_call_stage(**kwargs):
     stage = CallStage(**kwargs)
     await stage.start()
     return stage
+
+
+class CallConversationStore:
+    """Small in-memory history port for lifecycle-only tests."""
+
+    def __init__(self):
+        self.items = {}
+
+    def get_call_conversation(self, identity, *, user_id, character_id):
+        return self.items.get((user_id, character_id, identity))
+
+    def add_call_conversation(self, user_id, character_id, item):
+        self.items.setdefault((user_id, character_id, item.uuid), item)

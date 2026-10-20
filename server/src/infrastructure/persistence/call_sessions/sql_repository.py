@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, case, delete, or_, select, update
+from sqlalchemy import case, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -139,33 +139,6 @@ class SqlCallSessionRepository:
         try:
             row = session.scalar(select(CallSession).where(CallSession.client_request_id == client_request_id))
             return _to_record(row) if row is not None else None
-        finally:
-            session.close()
-
-    def claim_settlement_input(self, call_id: UUID, *, digest: str) -> bool:
-        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
-            raise ValueError("digest must be lowercase SHA-256 hex")
-        session = self._sql_session_factory()
-        try:
-            result = session.execute(
-                update(CallSession)
-                .where(
-                    CallSession.call_id == str(call_id),
-                    CallSession.state == CallState.ENDED.value,
-                    CallSession.settlement_input_digest.is_(None),
-                )
-                .values(settlement_input_digest=digest)
-            )
-            if result.rowcount == 1:
-                session.commit()
-                return True
-            session.rollback()
-            row = session.get(CallSession, str(call_id))
-            if row is None or row.state != CallState.ENDED.value:
-                return False
-            if row.settlement_input_digest != digest:
-                raise ValueError("SETTLEMENT_INPUT_CONFLICT")
-            return True
         finally:
             session.close()
 
@@ -358,35 +331,6 @@ class SqlCallSessionRepository:
                 .where(
                     CallSession.state.in_(state.value for state in query_states),
                     CallSession.updated_at < _stored_time(before),
-                )
-                .order_by(CallSession.updated_at, CallSession.call_id)
-            ).all()
-            return tuple(_to_record(row) for row in rows)
-        finally:
-            session.close()
-
-    def list_recovery_pending(self) -> tuple[CallSessionRecord, ...]:
-        """List startup recovery candidates without an age/heartbeat heuristic."""
-        session = self._sql_session_factory()
-        try:
-            rows = session.scalars(
-                select(CallSession)
-                .where(
-                    or_(
-                        CallSession.state.in_(state.value for state in STALE_RECOVERABLE_STATES),
-                        and_(
-                            CallSession.state == CallState.ENDED.value,
-                            CallSession.outcome == CallOutcome.CONNECTED.value,
-                            or_(
-                                and_(
-                                    CallSession.end_reason == CallEndReason.SYSTEM_FAILURE.value,
-                                    CallSession.summary_status != SettlementStatus.SUCCEEDED.value,
-                                ),
-                                CallSession.summary_status == SettlementStatus.PENDING.value,
-                                CallSession.maintenance_status == SettlementStatus.PENDING.value,
-                            ),
-                        ),
-                    )
                 )
                 .order_by(CallSession.updated_at, CallSession.call_id)
             ).all()

@@ -15,10 +15,9 @@ from src.agent.context import (
 )
 from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.skills.cognitive.call_settlement import (
-    EMPTY_CALL_SUMMARY,
-    FAILED_CALL_SUMMARY,
     CallMaintenanceSkill,
     CallSummarySkill,
+    _maintenance_digest,
     render_call_turns,
 )
 from src.agent.skills.contracts import SkillInvocation
@@ -29,7 +28,6 @@ from src.domain.call import (
     CallOutcome,
     CallReplyStatus,
     CallTerminalFacts,
-    call_settlement_input_digest,
 )
 
 
@@ -49,7 +47,7 @@ def _invocation():
 @pytest.mark.asyncio
 async def test_call_summary_empty_retry_fallback_and_length_limit():
     empty = await CallSummarySkill({"luotianyi": SimpleNamespace()}).summarize(_invocation(), _snapshot())
-    assert empty == EMPTY_CALL_SUMMARY
+    assert empty is None
 
     class Model:
         def __init__(self):
@@ -61,9 +59,9 @@ async def test_call_summary_empty_retry_fallback_and_length_limit():
 
     model = Model()
     snapshot = _snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),))
-    assert await CallSummarySkill({"luotianyi": model}).summarize(_invocation(), snapshot) == FAILED_CALL_SUMMARY
-    assert model.calls == 2
-    assert await CallSummarySkill({}).summarize(_invocation(), snapshot) == FAILED_CALL_SUMMARY
+    assert await CallSummarySkill({"luotianyi": model}).summarize(_invocation(), snapshot) is None
+    assert model.calls == 1
+    assert await CallSummarySkill({}).summarize(_invocation(), snapshot) is None
 
 
 @pytest.mark.asyncio
@@ -141,9 +139,9 @@ def test_settlement_digest_changes_with_user_or_reply_fact_and_is_stable_for_sam
         0,
     )
 
-    assert call_settlement_input_digest(first) == call_settlement_input_digest(first)
-    assert call_settlement_input_digest(first) != call_settlement_input_digest(changed_user)
-    assert call_settlement_input_digest(first) != call_settlement_input_digest(changed_reply)
+    assert _maintenance_digest(first) == _maintenance_digest(first)
+    assert _maintenance_digest(first) != _maintenance_digest(changed_user)
+    assert _maintenance_digest(first) != _maintenance_digest(changed_reply)
 
 
 @pytest.mark.asyncio

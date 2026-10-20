@@ -275,7 +275,7 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
 
 
 @pytest.mark.asyncio
-async def test_call_ending_does_not_fake_maintenance_or_release_pool_before_settlement():
+async def test_call_ending_emits_one_finalize_action_and_keeps_context_alive():
     memory = _Memory()
     recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
     call_id = uuid4()
@@ -303,8 +303,11 @@ async def test_call_ending_does_not_fake_maintenance_or_release_pool_before_sett
     )
     report = await CallEndingHandler().handle(_request(ending), plans)
 
-    assert report.emitted_plan_ids == ()
-    assert plans.drafts == []
+    assert report.emitted_plan_ids == ("plan-1",)
+    assert len(plans.drafts) == 1
+    assert len(plans.drafts[0].actions) == 1
+    assert isinstance(plans.drafts[0].actions[0], d.FinalizeCall)
+    assert plans.drafts[0].actions[0].final_snapshot is ending.final_snapshot
     assert tuple(item.content for item in plans.context.call_memory.snapshot()) == ("旧记忆", "新记忆")
 
 

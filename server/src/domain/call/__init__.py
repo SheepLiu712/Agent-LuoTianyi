@@ -11,7 +11,7 @@ from .contracts import (
     CallTerminalFacts,
 )
 from .recall import AckStyle, CallRecallDecision, RecallMode
-from .settlement import CallAgentSettlementResult, call_settlement_input_digest
+from .settlement import DEFAULT_CALL_SUMMARY, CallEndingResult, CallSummarySource, fallback_call_summary
 from .types import CallAudioSemantic, CallEndReason, CallOutcome, CallState
 
 __all__ = [
@@ -19,7 +19,9 @@ __all__ = [
     "CALL_CONVERSATION_NAMESPACE",
     "CallAudioSemantic",
     "CallAnswerDecision",
-    "CallAgentSettlementResult",
+    "CallEndingResult",
+    "CallSummarySource",
+    "DEFAULT_CALL_SUMMARY",
     "CallAudioRoute",
     "CallContent",
     "CallEndReason",
@@ -33,5 +35,5 @@ __all__ = [
     "CallTerminalFacts",
     "RecallMode",
     "derive_call_conversation_id",
-    "call_settlement_input_digest",
+    "fallback_call_summary",
 ]

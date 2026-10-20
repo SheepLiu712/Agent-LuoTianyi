@@ -1,10 +1,8 @@
-import asyncio
 import json
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 from src.server_runtime import CallCapabilityStatus
 from src.web.websocket import call_endpoint
@@ -36,7 +34,7 @@ def runtime(*, available: bool):
         SimpleNamespace(
             websocket_service=WebSocketService(),
             database_manager=SimpleNamespace(credential_service=CredentialService()),
-            call_capability=CallCapabilityStatus(*(available for _ in range(8)), ("luotianyi",) if available else ()),
+            call_capability=CallCapabilityStatus(*(available for _ in range(7)), ("luotianyi",) if available else ()),
             supports_call_character=lambda character_id: available and character_id == "luotianyi",
         ),
         None,

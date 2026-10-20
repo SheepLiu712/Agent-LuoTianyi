@@ -13,7 +13,15 @@ from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, Call
 from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
-from src.domain.call import AckStyle, CallAnswerDecision, CallAudioRoute, CallEndReason, CallSpeechDelivery, RecallMode
+from src.domain.call import (
+    AckStyle,
+    CallAnswerDecision,
+    CallAudioRoute,
+    CallEndReason,
+    CallOutcome,
+    CallSpeechDelivery,
+    RecallMode,
+)
 from src.utils.enum_type import ConversationSource
 from src.utils.logger import get_logger
 
@@ -234,14 +242,28 @@ class CallSilenceElapsedHandler:
 
 
 class CallEndingHandler:
-    """Acknowledge frozen terminal facts; CL-10 owns settlement, maintenance, and release."""
+    """以唯一结束刺激安排一次维护及概要行动。"""
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
         if not isinstance(stimulus, d.CallEnding):
             raise TypeError("CallEndingHandler requires CallEnding")
-        _ = plans, stimulus.final_snapshot
-        return _report(request)
+        if stimulus.user_id is None:
+            raise ValueError("call ending requires user identity")
+        if stimulus.final_snapshot.terminal.outcome is CallOutcome.CONNECTED:
+            await plans.emit(
+                ActionPlanDraft(
+                    source_stimulus_ids=(stimulus.stimulus_id,),
+                    actions=(
+                        d.FinalizeCall(
+                            action_id=f"{request.request_id}-finalize-call",
+                            user_id=stimulus.user_id,
+                            final_snapshot=stimulus.final_snapshot,
+                        ),
+                    ),
+                )
+            )
+        return _with_emitted(request, plans)
 
 
 async def _emit_ack(plans: PlanEmitter, request: d.HandleStimulusRequest, style: AckStyle) -> None:

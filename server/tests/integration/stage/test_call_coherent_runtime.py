@@ -32,7 +32,7 @@ from src.infrastructure.models.realtime_speech import (
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage import CallStage
-from src.stage.call_settlement import CallSettlement
+from src.stage._call_history import CallHistory
 
 
 async def _eventually(predicate, timeout=2.0):
@@ -110,12 +110,12 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     provider_factory = FakeRealtimeSpeechSessionFactory()
     settled = []
 
-    class SettlementConsumer:
-        async def settle(self, snapshot, *, context=None):
-            settled.append(snapshot)
-            await context.close()
+    history = CallHistory(call_sessions=database.call_sessions, conversation_service=database.conversation_service)
 
-    settlement = CallSettlement(consumer=SettlementConsumer())
+    async def save(snapshot, *, result):
+        settled.append(snapshot)
+        await history.save(snapshot, result=result)
+
     claim = await manager._claim_call(
         user_id="user",
         character_id="luotianyi",
@@ -144,8 +144,8 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         speech_factory=provider_factory,
         output_sink=output_sink(binding),
         release_ownership=manager._release_call,
-        settle=settlement.settle,
-        own_finalization=lambda operation: manager._own_call_operation(ownership, operation),
+        save_history=save,
+        own_termination=lambda operation: manager._own_call_operation(ownership, operation),
     )
     binding.bind(stage=stage, session=session)
 
@@ -285,7 +285,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         assert not call_memory._items
         assert vector.searches == [("user", "用户喜欢的音乐", 3)]
         with database.open_sql_session() as sql:
-            assert sql.query(Conversation).filter_by(user_id="user").count() == 0
+            assert sql.query(Conversation).filter_by(user_id="user").count() == 1
     finally:
         if stage.snapshot is None:
             await stage._cleanup()

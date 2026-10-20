@@ -187,18 +187,12 @@ class AnswerCall(Action):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class SummarizeCall(Action):
-    kind: ClassVar[ActionKind] = ActionKind.SUMMARIZE_CALL
+class FinalizeCall(Action):
+    """完成本次通话的最终维护与概要，失败时按通话规则降级。"""
+
+    kind: ClassVar[ActionKind] = ActionKind.FINALIZE_CALL
     user_id: str
     final_snapshot: CallFinalSnapshot
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class MaintainCall(Action):
-    kind: ClassVar[ActionKind] = ActionKind.MAINTAIN_CALL
-    user_id: str
-    final_snapshot: CallFinalSnapshot
-    settlement_input_digest: str
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

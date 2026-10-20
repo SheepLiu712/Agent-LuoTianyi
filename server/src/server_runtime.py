@@ -16,7 +16,6 @@ from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_
 from src.infrastructure.models.realtime_speech import AliyunRealtimeSpeechSessionFactory
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
-from src.infrastructure.persistence.call_maintenance_projection import CallMaintenanceProjectionVerifier
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
@@ -178,11 +177,6 @@ class ServerRuntime:
                 or database_manager.user_store is None
             ):
                 raise RuntimeError("Call runtime persistence dependencies are required")
-            projection_verifier = CallMaintenanceProjectionVerifier(
-                memory_store=database_manager.memory_store,
-                vector_store=agent_runtime.vector_store,
-                user_store=database_manager.user_store,
-            )
 
             async def call_output_sink(call_id, output):
                 await runtime.call_adapter.submit_output(call_id, output)
@@ -199,7 +193,6 @@ class ServerRuntime:
                 call_maintenance_batches=database_manager.call_maintenance_batches,
                 call_metrics=call_metrics,
                 realtime_speech_factory=speech_factory,
-                recovery_projection_verifier=projection_verifier,
                 user_reset_fence=reset_fence,
                 config=config.get("stage_manager", {}),
             )

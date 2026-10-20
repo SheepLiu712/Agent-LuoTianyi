@@ -200,9 +200,11 @@ async def test_initialization_hangup_cancels_stage_preparation_without_waiting_f
             "reason": "user_hangup",
         }
     )
+    stage = stages._call_stages[call_id]
     receiving = asyncio.create_task(adapter.receive(connection, hangup))
     await asyncio.wait_for(receiving, 1)
     assert not speech.release.is_set()
+    await asyncio.wait_for(stage.terminate(), 1)
     assert not stages._call_stages
     assert not stages._call_ownerships
     assert speech.calls == 1
@@ -676,6 +678,55 @@ async def test_protocol_ack_bypasses_blocked_business_input_and_hangup_ack_prece
 
 
 @pytest.mark.asyncio
+async def test_late_protocol_release_drains_terminal_after_history_failure(monkeypatch):
+    stages, _ = manager(speech_factory=BlockingSpeechFactory())
+    adapter = call_adapter(stages)
+    release_protocol = asyncio.Event()
+    original_release = adapter._release_terminal
+
+    async def delayed_release(stage, session):
+        await release_protocol.wait()
+        await original_release(stage, session)
+
+    monkeypatch.setattr(adapter, "_release_terminal", delayed_release)
+    connection, call_id = await _opened(adapter)
+    stage = stages._call_stages[call_id]
+
+    async def fail_history(_snapshot, *, result):
+        raise RuntimeError("history write failed")
+
+    stage._save_history = fail_history
+    received = []
+    try:
+        await adapter.receive(
+            connection,
+            json.dumps(
+                {"protocol": "call.v1", "type": "call.hangup", "seq": 2, "call_id": call_id, "reason": "user_hangup"}
+            ),
+        )
+        with pytest.raises(RuntimeError, match="history write failed"):
+            await stage.terminate()
+        assert stage.context is None and stage._termination.done()
+        # Release only after the complete termination task has failed. Queued
+        # terminal frames must still be drained to the actual protocol binding.
+        release_protocol.set()
+        while True:
+            try:
+                item = await asyncio.wait_for(adapter.next_output(connection), 3)
+            except (ConnectionError, CallTransportError):
+                break
+            received.append(json.loads(item.message))
+            adapter.complete_output(connection, item.delivery_id)
+        assert any(item["type"] == "call.ended" for item in received)
+        assert any(item["type"] == "ack" and item["ack_seq"] == 2 for item in received)
+        assert not adapter._sessions and not adapter._bindings
+    finally:
+        release_protocol.set()
+        await adapter.close()
+        await stages.close()
+
+
+@pytest.mark.asyncio
 async def test_hangup_ack_and_protocol_release_do_not_wait_for_full_termination():
     stages, _ = manager(speech_factory=BlockingSpeechFactory())
     adapter = call_adapter(stages)
@@ -683,11 +734,11 @@ async def test_hangup_ack_and_protocol_release_do_not_wait_for_full_termination(
     stage = stages._call_stages[call_id]
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def settle(_snapshot, *, context):
+    async def settle(_snapshot, *, result):
         entered.set()
         await release.wait()
 
-    stage._settlement._consumer.settle = settle
+    stage._save_history = settle
     received = []
 
     async def pump():

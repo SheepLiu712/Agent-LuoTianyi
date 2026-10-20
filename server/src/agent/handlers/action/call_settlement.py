@@ -1,52 +1,49 @@
-"""Real Agent actions for summary and call-only cognitive maintenance."""
+"""通过一次结束行动完成维护、概要生成和降级选择。"""
 
 import src.domain.agent as d
-from src.agent.processing.output_emitter import OutputEmitter
-from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
 from src.agent.skills.invocation import execution_invocation
+from src.domain.call import CallEndingResult, CallSummarySource, fallback_call_summary
+from src.utils.logger import get_logger
 
 
-class SummarizeCallHandler:
-    def __init__(self, character_id: str, skill: CallSummarySkill) -> None:
-        self._character_id, self._skill = character_id, skill
+class FinalizeCallHandler:
+    """维护失败不短路概要；模型重试由模型接口拥有。"""
 
-    async def realize(self, action: d.Action, context: d.ExecutionContext, outputs: OutputEmitter) -> d.ActionResult:
-        if not isinstance(action, d.SummarizeCall):
-            raise TypeError("SummarizeCallHandler requires SummarizeCall")
-        summary = await self._skill.summarize(
-            execution_invocation(self._character_id, context, user_id=action.user_id),
-            action.final_snapshot,
-            context=context.interaction_context,
+    def __init__(self, character_id, maintenance, summary):
+        self._character_id = character_id
+        self._maintenance = maintenance
+        self._summary = summary
+
+    async def realize(self, action, context, outputs):
+        if not isinstance(action, d.FinalizeCall):
+            raise TypeError("FinalizeCallHandler requires FinalizeCall")
+        interaction = context.interaction_context
+        if interaction is None:
+            raise RuntimeError("call ending requires its original context")
+        invocation = execution_invocation(self._character_id, context, user_id=action.user_id)
+        succeeded = True
+        try:
+            await self._maintenance.maintain_ending(invocation, interaction, action.final_snapshot)
+        except Exception as error:
+            succeeded = False
+            get_logger(__name__).warning("Call maintenance failed type=%s", type(error).__name__)
+        summary = await self._summary.summarize(invocation, action.final_snapshot, context=interaction)
+        if summary is not None:
+            source = CallSummarySource.GENERATED
+        else:
+            summary, source = fallback_call_summary(interaction.conversation.read_working().summary.text)
+        result = CallEndingResult(
+            summary=summary,
+            summary_source=source,
+            maintenance_succeeded=succeeded,
+            maintenance_turn_seq=interaction.conversation.read_call_maintenance_progress(),
         )
-        return _result(action, effect_ref=d.EffectRef(kind=d.EffectKind.CALL_SUMMARY, effect_id=summary))
-
-
-class MaintainCallHandler:
-    def __init__(self, character_id: str, skill: CallMaintenanceSkill) -> None:
-        self._character_id, self._skill = character_id, skill
-
-    async def realize(self, action: d.Action, context: d.ExecutionContext, outputs: OutputEmitter) -> d.ActionResult:
-        if not isinstance(action, d.MaintainCall):
-            raise TypeError("MaintainCallHandler requires MaintainCall")
-        if context.interaction_context is None:
-            raise RuntimeError("call maintenance requires interaction context")
-        turn_seq = await self._skill.maintain_ending(
-            execution_invocation(self._character_id, context, user_id=action.user_id),
-            context.interaction_context,
-            action.final_snapshot,
-            settlement_input_digest=action.settlement_input_digest,
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=d.ActionExecutionStatus.COMPLETED,
+            error_code=None,
+            # 维护失败也可能已经写入部分记忆，禁止把整个行动作为无副作用重试。
+            irreversible_effect_committed=True,
+            effect_ref=None,
+            call_ending=result,
         )
-        return _result(
-            action,
-            effect_ref=d.EffectRef(kind=d.EffectKind.CALL_MAINTENANCE, effect_id=str(turn_seq)),
-        )
-
-
-def _result(action: d.Action, *, effect_ref: d.EffectRef) -> d.ActionResult:
-    return d.ActionResult(
-        action_id=action.action_id,
-        status=d.ActionExecutionStatus.COMPLETED,
-        error_code=None,
-        irreversible_effect_committed=True,
-        effect_ref=effect_ref,
-    )

@@ -1,39 +1,39 @@
-"""Settlement identity and Agent-produced results for immutable call snapshots."""
+"""本次通话结束处理的值结果，不包含跨进程恢复或执行认领。"""
 
-import json
 from dataclasses import dataclass
-from datetime import timedelta, timezone
-from hashlib import sha256
+from enum import Enum
 
-from .contracts import CallFinalSnapshot
+DEFAULT_CALL_SUMMARY = "[和用户打了一通电话]"
+
+
+class CallSummarySource(str, Enum):
+    GENERATED = "generated"
+    CONTEXT = "context"
+    DEFAULT = "default"
 
 
 @dataclass(frozen=True, slots=True)
-class CallAgentSettlementResult:
-    summary: str | BaseException
-    maintenance_turn_seq: int | BaseException
+class CallEndingResult:
+    """概要来源与真实维护结果；概要降级不会把维护失败改成成功。"""
+
+    summary: str
+    summary_source: CallSummarySource
+    maintenance_succeeded: bool
+    maintenance_turn_seq: int
+
+    def __post_init__(self):
+        if not isinstance(self.summary, str) or not self.summary.strip():
+            raise ValueError("call ending summary must be nonblank")
+        if not isinstance(self.summary_source, CallSummarySource):
+            raise TypeError("call summary source must be CallSummarySource")
+        if type(self.maintenance_succeeded) is not bool:
+            raise TypeError("maintenance_succeeded must be bool")
+        if type(self.maintenance_turn_seq) is not int or self.maintenance_turn_seq < 0:
+            raise ValueError("invalid maintenance progress")
 
 
-def call_settlement_input_digest(snapshot: CallFinalSnapshot) -> str:
-    """Hash the canonical immutable settlement input without persisting its plaintext."""
-    terminal = snapshot.terminal
-    payload = {
-        "version": 1,
-        "call_id": str(terminal.call_id),
-        "outcome": terminal.outcome.value,
-        "end_reason": terminal.end_reason.value,
-        "active_duration_ms": terminal.active_duration_ms,
-        "ended_at": terminal.ended_at.astimezone(timezone(timedelta(hours=8))).isoformat(),
-        "maintenance_turn_seq": snapshot.maintenance_turn_seq,
-        "turns": [
-            {
-                "turn_seq": turn.turn_seq,
-                "user_semantic": turn.user_semantic,
-                "reply_status": turn.reply_status.value,
-                "formal_agent_text": turn.formal_agent_text,
-            }
-            for turn in snapshot.completed_turns
-        ],
-    }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return sha256(encoded).hexdigest()
+def fallback_call_summary(working_summary: str) -> tuple[str, CallSummarySource]:
+    """只接收本次通话的工作概要；禁止调用者传入聊天种子概要。"""
+    if working_summary.strip():
+        return working_summary, CallSummarySource.CONTEXT
+    return DEFAULT_CALL_SUMMARY, CallSummarySource.DEFAULT

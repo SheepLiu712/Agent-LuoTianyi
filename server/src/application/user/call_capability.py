@@ -14,7 +14,6 @@ class CallCapabilityStatusPort(Protocol):
     summary_ready: bool
     settlement_ready: bool
     stage_binding_ready: bool
-    recovery_ready: bool
 
 
 class CallCapabilityRuntimePort(Protocol):
@@ -44,7 +43,6 @@ def get_call_capability(runtime: CallCapabilityRuntimePort, character_id: str) -
         ("summary_ready", "summary_unavailable"),
         ("settlement_ready", "settlement_unavailable"),
         ("stage_binding_ready", "stage_binding_unavailable"),
-        ("recovery_ready", "recovery_unavailable"),
     )
     for field, reason in checks:
         if not getattr(status, field, False):

@@ -1,4 +1,4 @@
-"""通话记录的幂等建立、失败补偿与启动恢复。"""
+"""通话记录的幂等建立与失败补偿。"""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ from uuid import uuid4
 from src.domain.call import CallEndReason, CallState
 from src.infrastructure.persistence.call_sessions import BEIJING_TIMEZONE, CallSessionRecord
 from src.utils.owned_operation import complete_owned
-
-from .call_settlement import StaleCallRecoveryService
 
 
 class CallStartFailed(RuntimeError):
@@ -66,40 +64,12 @@ class CallRecords:
         self,
         *,
         call_sessions,
-        conversation_service,
-        call_maintenance_batches,
-        projection_verifier,
         wall_clock,
     ):
         self._call_sessions = call_sessions
         self._wall_clock = wall_clock or (lambda: datetime.now(BEIJING_TIMEZONE))
         self._last_call_timestamp = None
         self._time_lock = asyncio.Lock()
-        self._recovery = (
-            StaleCallRecoveryService(
-                call_sessions=call_sessions,
-                conversation_service=conversation_service,
-                call_maintenance_batches=call_maintenance_batches,
-                projection_verifier=projection_verifier,
-            )
-            if projection_verifier is not None
-            else None
-        )
-        self._recovery_ready = self._recovery is None
-
-    @property
-    def ready(self):
-        """返回旧账本恢复是否已经完成。"""
-        return self._recovery_ready
-
-    async def initialize(self):
-        """在接入前收敛遗留账本，失败时保持不可用。"""
-        if self._recovery_ready:
-            return
-        report = await self._recovery.reconcile()
-        if report.failed or report.conflicted:
-            raise RuntimeError("stale call recovery did not converge")
-        self._recovery_ready = True
 
     async def find_start(self, client_request_id, *, user_id, character_id):
         """读取并验证幂等请求身份，不尝试复活持久化交互。"""

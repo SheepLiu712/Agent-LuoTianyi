@@ -7,63 +7,64 @@ from datetime import datetime, timezone
 
 from src.domain.call import (
     CallContent,
+    CallEndingResult,
     CallFinalSnapshot,
     CallOutcome,
     CallState,
-    call_settlement_input_digest,
     derive_call_conversation_id,
 )
 from src.domain.conversation_type import ConversationItem
 from src.infrastructure.observability.call_metrics import CallMetric, CallMetricName, CallMetricResult, CallMetricStatus
-from src.infrastructure.persistence.call_sessions import CallSessionRepository, SettlementStatus
+from src.infrastructure.persistence.call_sessions import SettlementStatus
 from src.utils.owned_operation import complete_owned
 
-from .conversation_projection import validate_call_conversation_winner
+from ._call_conversation import validate_call_conversation_winner
 
 
-class CallAgentSettlementPort:
-    async def settle(self, record, snapshot, *, context): ...
+class CallHistory:
+    """保存通话结束结果，封装稳定身份及两个独立结果状态。"""
 
-
-class CallSettlementConsumerImpl:
-    def __init__(
-        self,
-        *,
-        agent_settlement: CallAgentSettlementPort,
-        call_sessions: CallSessionRepository,
-        conversation_service: object,
-        call_maintenance_batches=None,
-        call_metrics=None,
-    ) -> None:
-        self._agent_settlement = agent_settlement
+    def __init__(self, *, call_sessions, conversation_service, call_metrics=None):
         self._calls = call_sessions
         self._conversations = conversation_service
-        self._batches = call_maintenance_batches
         self._call_metrics = call_metrics
 
-    @property
-    def is_ready(self) -> bool:
-        return bool(
-            self._agent_settlement is not None
-            and self._calls is not None
-            and self._conversations is not None
-            and self._batches is not None
-        )
-
-    async def settle(self, snapshot: CallFinalSnapshot, *, context=None) -> None:
+    async def save(self, snapshot: CallFinalSnapshot, *, result: CallEndingResult | None) -> None:
+        """写入概要和维护状态；等待两项写入均停止后再报告错误。"""
         record = await complete_owned(asyncio.to_thread(self._calls.find_by_id, snapshot.terminal.call_id))
         self._validate_record(record, snapshot)
-        digest = call_settlement_input_digest(snapshot)
-        claimed = await complete_owned(
-            asyncio.to_thread(self._calls.claim_settlement_input, record.call_id, digest=digest)
-        )
-        if not claimed:
-            raise RuntimeError("settlement input claim failed")
-        record = await complete_owned(asyncio.to_thread(self._calls.find_by_id, record.call_id))
-        await self._reconcile_completed_batches(record)
-        if self._settled(record):
-            return
-        await self._settle_record(record, snapshot, digest, context)
+        winner = await self._load_summary_winner(record)
+        if record.outcome is CallOutcome.CONNECTED and result is None:
+            raise ValueError("connected call requires an ending result")
+        summary = winner if winner is not None else (result.summary if result else "")
+        lanes = []
+        if record.summary_status is not SettlementStatus.SUCCEEDED:
+            lanes.append((CallMetricName.SUMMARY, self._settle_summary(record, summary)))
+        if record.maintenance_status is not SettlementStatus.SUCCEEDED:
+            succeeded = result is None or result.maintenance_succeeded
+            progress = record.maintenance_turn_seq if result is None else result.maintenance_turn_seq
+            lanes.append(
+                (
+                    CallMetricName.MAINTENANCE,
+                    self._maintenance_cas(
+                        record, SettlementStatus.SUCCEEDED if succeeded else SettlementStatus.FAILED, progress
+                    ),
+                )
+            )
+        outcomes = await asyncio.gather(*(operation for _, operation in lanes), return_exceptions=True)
+        for (name, _), outcome in zip(lanes, outcomes):
+            failed = isinstance(outcome, BaseException) or (
+                name is CallMetricName.MAINTENANCE and result is not None and not result.maintenance_succeeded
+            )
+            self._record_metric(
+                record.call_id,
+                name,
+                CallMetricResult.FAILED if failed else CallMetricResult.SUCCEEDED,
+                status=CallMetricStatus.ERROR if failed else CallMetricStatus.SUCCESS,
+            )
+        errors = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+        if errors:
+            raise errors[0]
 
     def _record_metric(self, call_id, name, result, *, status=CallMetricStatus.SUCCESS) -> None:
         if self._call_metrics is None:
@@ -79,55 +80,6 @@ class CallSettlementConsumerImpl:
                 status=status,
                 labels={"result": result.value},
             )
-        )
-
-    async def _settle_record(self, record, snapshot, digest, context) -> None:
-        winner = await self._load_summary_winner(record)
-        if record.outcome is not CallOutcome.CONNECTED:
-            if record.summary_status is not SettlementStatus.SUCCEEDED:
-                await self._settle_summary(record, winner if winner is not None else "")
-            if record.maintenance_status is not SettlementStatus.SUCCEEDED:
-                await self._maintenance_cas(record, SettlementStatus.SUCCEEDED, record.maintenance_turn_seq)
-            return
-        result = await self._agent_settlement.settle(
-            record,
-            snapshot,
-            skip_summary=winner is not None,
-            settlement_input_digest=digest,
-            context=context,
-        )
-        lanes = []
-        if record.summary_status is not SettlementStatus.SUCCEEDED:
-            lanes.append(self._settle_summary(record, winner if winner is not None else result.summary))
-        if record.maintenance_status is not SettlementStatus.SUCCEEDED:
-            lanes.append(self._settle_maintenance(record, result.maintenance_turn_seq))
-        outcomes = await asyncio.gather(*lanes, return_exceptions=True)
-        for name, outcome in zip(
-            (
-                name
-                for name, required in (
-                    (CallMetricName.SUMMARY, record.summary_status is not SettlementStatus.SUCCEEDED),
-                    (CallMetricName.MAINTENANCE, record.maintenance_status is not SettlementStatus.SUCCEEDED),
-                )
-                if required
-            ),
-            outcomes,
-        ):
-            self._record_metric(
-                record.call_id,
-                name,
-                CallMetricResult.FAILED if isinstance(outcome, BaseException) else CallMetricResult.SUCCEEDED,
-                status=CallMetricStatus.ERROR if isinstance(outcome, BaseException) else CallMetricStatus.SUCCESS,
-            )
-        errors = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
-        if errors:
-            raise errors[0]
-
-    @staticmethod
-    def _settled(record) -> bool:
-        return (
-            record.summary_status is SettlementStatus.SUCCEEDED
-            and record.maintenance_status is SettlementStatus.SUCCEEDED
         )
 
     @staticmethod
@@ -156,9 +108,6 @@ class CallSettlementConsumerImpl:
         return validate_call_conversation_winner(record, item)
 
     async def _settle_summary(self, record, summary) -> None:
-        if isinstance(summary, BaseException):
-            await self._summary_cas(record, SettlementStatus.FAILED, None)
-            raise summary
         content = CallContent(
             call_id=record.call_id,
             outcome=record.outcome,
@@ -190,35 +139,13 @@ class CallSettlementConsumerImpl:
         except Exception:
             winner = await self._load_summary_winner(record)
             if winner is None:
+                await self._summary_cas(record, SettlementStatus.FAILED, None)
                 raise
         await self._summary_cas(record, SettlementStatus.SUCCEEDED, conversation_id)
 
-    async def _settle_maintenance(self, record, turn_seq) -> None:
-        if isinstance(turn_seq, BaseException):
-            await self._maintenance_cas(record, SettlementStatus.FAILED, record.maintenance_turn_seq)
-            raise turn_seq
-        await self._maintenance_cas(record, SettlementStatus.SUCCEEDED, turn_seq)
-        current = await complete_owned(asyncio.to_thread(self._calls.find_by_id, record.call_id))
-        await self._reconcile_completed_batches(current)
-
-    async def _reconcile_completed_batches(self, record) -> None:
-        if self._batches is None or record.maintenance_turn_seq <= 0:
-            return
-        batches = await complete_owned(
-            asyncio.to_thread(
-                self._batches.list_for_call,
-                call_id=record.call_id,
-                user_id=record.user_id,
-                character_id=record.character_id,
-            )
-        )
-        for batch in batches:
-            if batch.status == "frozen" and batch.target_turn_seq <= record.maintenance_turn_seq:
-                await complete_owned(asyncio.to_thread(self._batches.mark_completed, batch.maintenance_id))
-
     async def _summary_cas(self, record, new, conversation_id) -> None:
         current = await complete_owned(asyncio.to_thread(self._calls.find_by_id, record.call_id))
-        if current.summary_status is SettlementStatus.SUCCEEDED:
+        if current.summary_status in {SettlementStatus.SUCCEEDED, new}:
             return
         changed = await complete_owned(
             asyncio.to_thread(
@@ -235,7 +162,7 @@ class CallSettlementConsumerImpl:
 
     async def _maintenance_cas(self, record, new, turn_seq) -> None:
         current = await complete_owned(asyncio.to_thread(self._calls.find_by_id, record.call_id))
-        if current.maintenance_status is SettlementStatus.SUCCEEDED:
+        if current.maintenance_status in {SettlementStatus.SUCCEEDED, new}:
             return
         changed = await complete_owned(
             asyncio.to_thread(

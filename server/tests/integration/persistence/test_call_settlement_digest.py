@@ -1,12 +1,7 @@
-from datetime import datetime, timezone
-from uuid import uuid4
-
-import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.domain.call import CallEndReason, CallOutcome, CallState
-from src.infrastructure.persistence.call_sessions import CallSessionRecord, SqlCallSessionRepository
+from src.infrastructure.persistence.call_sessions import CallSessionRecord
 from src.infrastructure.persistence.database.sql_database import Base, _migrate_sqlite_schema
 
 
@@ -26,19 +21,6 @@ def _record(call_id, now):
         ended_at=now,
         active_duration_ms=1,
     )
-
-
-def test_sql_settlement_digest_claim_is_idempotent_and_conflicts(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'digest.sqlite'}")
-    Base.metadata.create_all(engine)
-    repository = SqlCallSessionRepository(sessionmaker(bind=engine))
-    call_id = uuid4()
-    repository.create_if_absent(_record(call_id, datetime.now(timezone.utc)))
-
-    assert repository.claim_settlement_input(call_id, digest="a" * 64)
-    assert repository.claim_settlement_input(call_id, digest="a" * 64)
-    with pytest.raises(ValueError, match="SETTLEMENT_INPUT_CONFLICT"):
-        repository.claim_settlement_input(call_id, digest="b" * 64)
 
 
 def test_old_call_sessions_schema_adds_only_nullable_digest_column(tmp_path):

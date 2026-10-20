@@ -58,9 +58,8 @@ async def test_bound_creator_returns_preparing_without_starting_resources_and_ow
     assert first.context is second.context is None
     assert first._initialization is second._initialization is None
     assert resolutions == ["luotianyi", "luotianyi"]
-    assert first._settlement is not second._settlement
-    assert first._settlement._consumer is not second._settlement._consumer
-    assert first._settlement._consumer._agent_settlement._agent is agent
+    assert first._save_history.__self__ is not second._save_history.__self__
+    assert first._agent is second._agent is agent
     # No initialization has run, so there are no tasks or external resources to close.
 
 

@@ -110,7 +110,7 @@ def setup(tmp_path):
         CallSessionRecord(call_id, "request", "user", "luotianyi", CallState.ACTIVE, now, now, now)
     )
     memory, model = Memory(), SummaryModel()
-    call_skill = CallMaintenanceSkill({"luotianyi": memory}, batches, calls=calls)
+    call_skill = CallMaintenanceSkill({"luotianyi": memory}, batches)
     compaction = ConversationCompactionSkill(
         {"llm_module": {}}, SimpleNamespace(register_llm_module=lambda *args: model)
     )
@@ -205,7 +205,6 @@ async def test_threshold_compacts_ephemeral_only_and_ending_maintains_tail(setup
         SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
         context,
         final_snapshot(setup, turns, expected_progress),
-        settlement_input_digest="f" * 64,
     )
     assert result == 32
     assert "private user 17\n" not in setup.memory.inputs[1]["current_dialogue"]
@@ -230,13 +229,12 @@ async def test_failed_threshold_is_frozen_and_recovered_before_new_ending_tail(s
     assert len(context.conversation.read().entries) == 64
     assert context.conversation.read_call_maintenance_progress() == 0
     # A new stateless Skill instance must recover the frozen prefix from persistence.
-    setup.call_skill = CallMaintenanceSkill({"luotianyi": setup.memory}, setup.batches, calls=setup.calls)
+    setup.call_skill = CallMaintenanceSkill({"luotianyi": setup.memory}, setup.batches)
     turns += (CallFinalTurn(33, "new user tail", CallReplyStatus.NOT_STARTED, None),)
     result = await setup.call_skill.maintain_ending(
         SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
         context,
         final_snapshot(setup, turns),
-        settlement_input_digest="f" * 64,
     )
     assert result == 33
     assert len(setup.memory.inputs) == 2
@@ -292,7 +290,6 @@ async def test_partial_turn_compaction_keeps_both_halves_and_finally_maintains_t
         invocation,
         context,
         final_snapshot(setup, turns),
-        settlement_input_digest="f" * 64,
     )
     assert result == 3
     assert "private user 2" in setup.memory.inputs[-1]["current_dialogue"]
@@ -405,7 +402,6 @@ async def test_factory_seed_is_answer_context_only_after_compaction_and_ending(s
             SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
             context,
             final_snapshot(setup, turns),
-            settlement_input_digest="f" * 64,
         )
         assert result == 2
         assert "new call one" in setup.memory.inputs[0]["current_dialogue"]

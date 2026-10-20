@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.action.call import AnswerCallHandler, EndCallHandler
-from src.agent.handlers.action.call_settlement import MaintainCallHandler, SummarizeCallHandler
+from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
@@ -23,7 +23,6 @@ from src.agent.handlers.stimulus.call import (
     CallStartedHandler,
     CallTurnCompletedHandler,
 )
-from src.agent.handlers.stimulus.call_settlement import CallSettlementRequestedHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReplyHandler,
@@ -226,7 +225,6 @@ class AgentRuntime:
                 CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
             ),
             (StimulusKind.CALL_ENDING, CallEndingHandler()),
-            (StimulusKind.CALL_SETTLEMENT_REQUESTED, CallSettlementRequestedHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),
             (
@@ -323,8 +321,10 @@ class AgentRuntime:
                 ),
                 (ActionKind.ANSWER_CALL, AnswerCallHandler()),
                 (ActionKind.END_CALL, EndCallHandler()),
-                (ActionKind.SUMMARIZE_CALL, SummarizeCallHandler(character_id, self.skills.call_summary)),
-                (ActionKind.MAINTAIN_CALL, MaintainCallHandler(character_id, self.skills.call_maintenance)),
+                (
+                    ActionKind.FINALIZE_CALL,
+                    FinalizeCallHandler(character_id, self.skills.call_maintenance, self.skills.call_summary),
+                ),
             )
         )
 

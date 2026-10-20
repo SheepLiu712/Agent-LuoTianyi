@@ -118,13 +118,13 @@ async def test_public_admission_remains_closed_through_settlement_and_context_cl
         user_reset_fence=UserResetFence(),
     )
 
-    async def settle(_snapshot, *, context):
+    async def settle(_snapshot, *, result):
         settling.set()
         await release_settlement.wait()
 
     try:
         stage = await _get_call(stages)
-        stage._settlement._consumer.settle = settle
+        stage._save_history = settle
         await stage.start()
         context = stage.context
         original_close = context.close

@@ -20,9 +20,9 @@ from src.domain.call import CallAnswerDecision, CallSpeechDelivery, CallState
 from src.infrastructure.persistence.call_sessions import BEIJING_TIMEZONE, CallSessionRecord, SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
 from src.stage.call_stage import CallStage, CallStageOwnership
-from support.stage_manager import start_call_stage
 from support.call_output import output_sink
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_manager import start_call_stage
 
 
 class ContextDatabase:
@@ -89,9 +89,9 @@ class Settlement:
         self.snapshots = []
         self.settlement_contexts = []
 
-    async def emit(self, snapshot, *, context):
+    async def emit(self, snapshot, *, result):
         self.snapshots.append(snapshot)
-        self.settlement_contexts.append(context)
+        self.settlement_contexts.append(result)
 
 
 class TurnHandler:
@@ -224,7 +224,7 @@ async def create_active_stage(tmp_path, *, response_count: int = 1):
         speech_factory=provider_factory,
         output_sink=output_sink(transport),
         release_ownership=lambda value: not released.append(value),
-        settle=settlement.emit,
+        save_history=settlement.emit,
         monotonic=clock.tick,
         wall_clock=clock.now,
     )

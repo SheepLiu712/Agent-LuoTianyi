@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from src.domain.call import CallEndingResult
+
 from ._realization_contract import RealizationContractErrorCode as _Code
 from ._realization_contract import _Value
 from .realization_enums import ActionExecutionStatus, EffectKind, ExecutionErrorCode, ExecutionStatus
@@ -36,6 +38,7 @@ class ActionResult(_Value):
     error_code: ExecutionErrorCode | None
     irreversible_effect_committed: bool
     effect_ref: EffectRef | None
+    call_ending: CallEndingResult | None = None
 
     def __post_init__(self):
         _Value.__post_init__(self)
@@ -43,6 +46,7 @@ class ActionResult(_Value):
         self._require(self.effect_ref is None or self.irreversible_effect_committed, "Uncommitted effect reference")
         if self.status is ActionExecutionStatus.NOT_STARTED:
             self._require(not self.irreversible_effect_committed, "Unstarted action has effect")
+            self._require(self.call_ending is None, "Unstarted action has call ending result")
 
 
 @dataclass(frozen=True, kw_only=True)

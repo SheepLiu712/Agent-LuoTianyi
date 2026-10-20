@@ -11,7 +11,6 @@ from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.infrastructure.persistence.database import vector_store as vector_store_module
 from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
-from src.stage.call_settlement import CallRecoveryReport
 
 
 class FakeLLM:
@@ -28,7 +27,7 @@ class FakeMediaResolver:
 
 
 class EmptyCallSessions:
-    def list_recovery_pending(self):
+    def list_termination_pending(self):
         return []
 
     def find_by_id(self, _call_id):
@@ -200,7 +199,7 @@ async def test_initialization_rollback_waits_for_stage_manager_before_agent_and_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_count", [1, 2])
-async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_dependencies(
+async def test_cancelled_runtime_rollback_drains_real_manager_termination_before_dependencies(
     cancel_count,
 ):
     calls = []
@@ -212,20 +211,18 @@ async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_de
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),
     )
-    manager._call_records._recovery_ready = False
 
-    class Recovery:
+    class Termination:
         async def reconcile(self):
-            def blocking_recovery():
+            def blocking_termination():
                 loop.call_soon_threadsafe(entered.set)
                 release.wait()
-                calls.append("recovery_stopped")
-                return CallRecoveryReport(0, 0, 0, 0, 0)
+                calls.append("termination_stopped")
+                return None
 
-            return await asyncio.to_thread(blocking_recovery)
+            return await asyncio.to_thread(blocking_termination)
 
-    manager._call_records._recovery = Recovery()
-    initializing = asyncio.create_task(manager.initialize())
+    initializing = manager._finalizations.start("call", ("user", "luotianyi"), Termination().reconcile)
     await entered.wait()
 
     runtime = SimpleNamespace(
@@ -262,17 +259,16 @@ async def test_cancelled_runtime_rollback_drains_real_manager_recovery_before_de
     dependencies_closed_before_release = "agent" in calls or "database" in calls
     release.set()
     result = await asyncio.gather(rollback, return_exceptions=True)
-    with pytest.raises(RuntimeError, match="closed during initialization"):
-        await initializing
+    await initializing
     assert done_before_release is False
     assert dependencies_closed_before_release is False
     assert result_before_release is None
     assert isinstance(result[0], asyncio.CancelledError)
-    assert calls.index("recovery_stopped") < calls.index("agent") < calls.index("database")
+    assert calls.index("termination_stopped") < calls.index("agent") < calls.index("database")
 
 
 @pytest.mark.asyncio
-async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_failures(
+async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_failures(
     caplog,
 ):
     calls = []
@@ -284,20 +280,18 @@ async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_fail
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _character: object(),
     )
-    manager._call_records._recovery_ready = False
 
-    class Recovery:
+    class Termination:
         async def reconcile(self):
-            def blocking_recovery():
+            def blocking_termination():
                 loop.call_soon_threadsafe(entered.set)
                 release.wait()
-                calls.append("recovery_stopped")
-                raise RuntimeError("recovery internal detail")
+                calls.append("termination_stopped")
+                raise RuntimeError("termination internal detail")
 
-            return await asyncio.to_thread(blocking_recovery)
+            return await asyncio.to_thread(blocking_termination)
 
-    manager._call_records._recovery = Recovery()
-    initializing = asyncio.create_task(manager.initialize())
+    initializing = manager._finalizations.start("call", ("user", "luotianyi"), Termination().reconcile)
     await entered.wait()
 
     async def failing_world_stop():
@@ -331,12 +325,12 @@ async def test_cancelled_runtime_rollback_continues_after_recovery_and_stop_fail
     release.set()
 
     result = await asyncio.gather(rollback, return_exceptions=True)
-    with pytest.raises(RuntimeError, match="recovery internal detail"):
+    with pytest.raises(RuntimeError, match="termination internal detail"):
         await initializing
     assert dependencies_closed_before_release is False
     assert done_before_release is False
     assert isinstance(result[0], asyncio.CancelledError)
-    assert calls.index("recovery_stopped") < calls.index("agent") < calls.index("database")
+    assert calls.index("termination_stopped") < calls.index("agent") < calls.index("database")
     assert "world internal detail" not in caplog.text
     assert "Task exception was never retrieved" not in caplog.text
 

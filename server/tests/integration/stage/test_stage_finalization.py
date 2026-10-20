@@ -13,7 +13,7 @@ from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
-from src.stage.call_settlement import CallSettlementConsumerImpl
+from src.stage._call_history import CallHistory
 
 from . import test_call_stage
 from .test_call_handoff import connected, manager
@@ -103,7 +103,7 @@ async def test_reset_admission_blocks_chat_and_call_until_end():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["success", "failure", "timeout"])
+@pytest.mark.parametrize("mode", ["success", "failure"])
 @pytest.mark.parametrize("shutdown", [False, True])
 async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_setup, mode, shutdown, monkeypatch):
     repository, _, _, clock = call_setup
@@ -113,7 +113,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     class Consumer:
         is_ready = True
 
-        async def settle(self, snapshot, *, context=None):
+        async def settle(self, snapshot, *, result=None):
             entered.set()
             try:
                 await release.wait()
@@ -124,7 +124,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
                 await release.wait()
                 raise
 
-    monkeypatch.setattr(CallSettlementConsumerImpl, "settle", Consumer.settle)
+    monkeypatch.setattr(CallHistory, "save", Consumer.settle)
     stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
@@ -154,7 +154,6 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
-    stage._settlement._timeout = 0.01 if mode == "timeout" else 5
     await stage.apply_answer(
         d.AnswerCall(
             action_id="answer",
@@ -197,7 +196,11 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     finally:
         release.set()
         await stages._finalizations.close()
-        await ending
+        if mode == "failure":
+            with pytest.raises(RuntimeError, match="settlement failed"):
+                await ending
+        else:
+            await ending
     if not shutdown:
         token = await stages.begin_user_data_reset("user")
         await stages.end_user_data_reset("user", token)
@@ -229,8 +232,8 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
         monotonic=clock.tick,
     )
 
-    async def settle(_snapshot, *, context=None):
-        await context.close()
+    async def settle(_snapshot, *, result=None):
+        pass
 
     claim = await stages._claim_call(
         user_id="user",
@@ -247,7 +250,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
-    stage._settlement._consumer.settle = settle
+    stage._save_history = settle
     entered, release = asyncio.Event(), asyncio.Event()
     settlement_entered, settlement_release = asyncio.Event(), asyncio.Event()
     original_close = stage._provider.close
@@ -262,13 +265,13 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
 
     settlement_calls = 0
 
-    async def settle(_snapshot, *, context=None):
+    async def settle(_snapshot, *, result=None):
         nonlocal settlement_calls
         settlement_calls += 1
         settlement_entered.set()
         await settlement_release.wait()
 
-    stage._settlement._consumer.settle = settle
+    stage._save_history = settle
 
     stage._provider.close = close_provider
     first = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
@@ -355,6 +358,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
     ownership = stages._current_call_ownership(str(claim.prepared._record.call_id))
     assert ownership is not None
     stage = transport.stage
+    stage._save_history = lambda *args, **kwargs: asyncio.sleep(0)
     snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
     assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
     create_release.set()
@@ -468,7 +472,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
         )
     )
     await asyncio.wait_for(entered.wait(), 1)
-    transport.stage._settlement._consumer.settle = lambda _snapshot, **_kwargs: asyncio.sleep(0)
+    transport.stage._save_history = lambda _snapshot, **_kwargs: asyncio.sleep(0)
     ending = asyncio.create_task(transport.stage.terminate(CallEndReason.USER_HANGUP))
     await asyncio.sleep(0)
     assert not ending.done()
@@ -484,7 +488,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
 
 
 @pytest.mark.asyncio
-async def test_finalization_timeout_waits_for_real_thread_write_before_releasing_admission(call_setup, monkeypatch):
+async def test_full_termination_waits_for_real_thread_write_before_releasing_admission(call_setup, monkeypatch):
     repository, _, _, clock = call_setup
     thread_started, thread_release, thread_finished = (
         threading.Event(),
@@ -495,7 +499,7 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
     class Consumer:
         is_ready = True
 
-        async def settle(self, _snapshot, *, context=None):
+        async def settle(self, _snapshot, *, result=None):
             from src.utils.owned_operation import complete_owned
 
             def write():
@@ -505,7 +509,7 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
 
             await complete_owned(asyncio.to_thread(write))
 
-    monkeypatch.setattr(CallSettlementConsumerImpl, "settle", Consumer.settle)
+    monkeypatch.setattr(CallHistory, "save", Consumer.settle)
     stages = make_stage_manager(
         get_agent=lambda _: _agent(_TurnHandler()),
         adapter=WebSocketAdapter(),
@@ -532,7 +536,6 @@ async def test_finalization_timeout_waits_for_real_thread_write_before_releasing
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
-    stage._settlement._timeout = 0.01
     ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
     await asyncio.wait_for(asyncio.to_thread(thread_started.wait, 3), 4)
     assert not ending.done()
@@ -579,7 +582,7 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
     class Consumer:
         is_ready = True
 
-        async def settle(self, _snapshot, *, context=None):
+        async def settle(self, _snapshot, *, result=None):
             pass
 
     stages = make_stage_manager(
@@ -608,7 +611,7 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
-    stage._settlement._consumer = Consumer()
+    stage._save_history = Consumer().settle
     await stage.apply_answer(
         d.AnswerCall(
             action_id="answer",

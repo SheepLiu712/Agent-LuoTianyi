@@ -18,8 +18,7 @@ class ActionKind(str, Enum):
     REFLECTION = "reflection"
     END_CALL = "end_call"
     ANSWER_CALL = "answer_call"
-    SUMMARIZE_CALL = "summarize_call"
-    MAINTAIN_CALL = "maintain_call"
+    FINALIZE_CALL = "finalize_call"
 
 
 class OutputDelivery(str, Enum):
@@ -97,8 +96,6 @@ class EffectKind(str, Enum):
     DYNAMIC_POST = "dynamic_post"
     DYNAMIC_COMMENT = "dynamic_comment"
     SONG_LEARNING_JOB = "song_learning_job"
-    CALL_SUMMARY = "call_summary"
-    CALL_MAINTENANCE = "call_maintenance"
 
 
 class ExecutionErrorCode(str, Enum):

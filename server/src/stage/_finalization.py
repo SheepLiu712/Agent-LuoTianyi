@@ -18,7 +18,6 @@ class InteractionFinalizing(RuntimeError):
 @dataclass(slots=True)
 class _InteractionTasks:
     owner: tuple[str, str]
-    termination: asyncio.Task | None = None
     finalization: asyncio.Task | None = None
 
 
@@ -32,17 +31,6 @@ class FinalizationTasks:
 
     def has_user(self, user_id: str) -> bool:
         return any(entry.owner[0] == user_id and self._is_busy(entry) for entry in self._tasks.values())
-
-    def start_termination(
-        self, identity: str, owner: tuple[str, str], operation: Callable[[], Coroutine[Any, Any, Any]]
-    ) -> asyncio.Task:
-        entry = self._entry(identity, owner)
-        if entry.termination is not None:
-            return entry.termination
-        task = asyncio.create_task(operation(), name=f"stage-terminate-{identity}")
-        entry.termination = task
-        task.add_done_callback(lambda done: self._completed(identity, "termination", done))
-        return task
 
     def start(
         self, identity: str, owner: tuple[str, str], operation: Callable[[], Coroutine[Any, Any, Any]]
@@ -80,19 +68,14 @@ class FinalizationTasks:
 
     @staticmethod
     def _is_busy(entry: _InteractionTasks) -> bool:
-        return any(task is not None and not task.done() for task in (entry.termination, entry.finalization))
+        return any(task is not None and not task.done() for task in (entry.finalization,))
 
     async def close(self) -> None:
         while self._tasks:
-            tasks = tuple(
-                task
-                for entry in self._tasks.values()
-                for task in (entry.termination, entry.finalization)
-                if task is not None
-            )
+            tasks = tuple(task for entry in self._tasks.values() for task in (entry.finalization,) if task is not None)
             if not tasks:
                 return
             await asyncio.gather(*tasks, return_exceptions=True)
             for identity, entry in tuple(self._tasks.items()):
-                if entry.finalization is None and entry.termination is not None and entry.termination.done():
+                if not self._is_busy(entry):
                     self._tasks.pop(identity, None)

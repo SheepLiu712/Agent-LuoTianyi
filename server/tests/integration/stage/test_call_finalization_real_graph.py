@@ -89,7 +89,11 @@ async def _eventually(predicate, timeout: float = 5.0) -> None:
 
 
 @pytest.mark.asyncio
-async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finishes(monkeypatch, tmp_path):
+@pytest.mark.parametrize("summary_mode", ["generated", "context", "default"])
+@pytest.mark.parametrize("maintenance_failure", [False, True])
+async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finishes(  # noqa: C901
+    monkeypatch, tmp_path, summary_mode, maintenance_failure
+):
     """The Stage-owned Context remains readable and admission stays busy through the real SQL write."""
     vector = DeterministicVectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: vector)
@@ -154,15 +158,16 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
     maintenance = runtime.skills.call_maintenance
     original_maintenance = maintenance.maintain_ending
 
-    async def observed_maintenance(invocation, context, snapshot, *, settlement_input_digest):
+    async def observed_maintenance(invocation, context, snapshot):
         assert context is created[0]
         assert invocation.interaction_id == str(snapshot.terminal.call_id)
         order.append("maintenance")
+        if maintenance_failure:
+            raise TimeoutError("maintenance model exhausted")
         return await original_maintenance(
             invocation,
             context,
             snapshot,
-            settlement_input_digest=settlement_input_digest,
         )
 
     monkeypatch.setattr(maintenance, "maintain_ending", observed_maintenance)
@@ -176,6 +181,14 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         return await original_summary(invocation, snapshot, context=context)
 
     monkeypatch.setattr(summary_skill, "summarize", observed_summary)
+    if summary_mode != "generated":
+        model = llm.modules["luotianyi_call_summary"]
+
+        async def exhausted(**kwargs):
+            model.calls.append(kwargs)
+            raise TimeoutError("summary attempts exhausted")
+
+        monkeypatch.setattr(model, "generate_response", exhausted)
     original_write = database.conversation_service.add_call_conversation
 
     def blocked_real_write(*args, **kwargs):
@@ -230,13 +243,14 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
                 _entry("call-turn-2-agent-0", 13, "agent", "uncompressed tail agent"),
             )
         )
-        await context.conversation.compact(
-            ConversationCompaction(
-                ConversationSummary(),
-                ("call-turn-1-user", "call-turn-1-agent-0"),
-                ConversationSummary("maintained working prefix"),
+        if summary_mode != "default":
+            await context.conversation.compact(
+                ConversationCompaction(
+                    ConversationSummary(),
+                    ("call-turn-1-user", "call-turn-1-agent-0"),
+                    ConversationSummary("maintained working prefix"),
+                )
             )
-        )
         stage._turns = {
             1: _Turn("turn one user", CallReplyStatus.COMPLETED, "turn one agent"),
             2: _Turn(
@@ -246,16 +260,26 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
             ),
         }
 
+        handled = []
+        original_handle = stage._agent.handle_stimulus
+
+        async def observed_handle(self, request, plans, **kwargs):
+            handled.append(request.stimulus.kind.value)
+            return await original_handle(request, plans, **kwargs)
+
+        monkeypatch.setattr(type(stage._agent), "handle_stimulus", observed_handle)
         ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
         await stage.wait_realtime_stopped()
         snapshot = stage.snapshot
         assert snapshot is not None
         assert not ending.done()
-        assert stage.context is None
+        assert stage.context is context
+        assert not stage._closed.is_set()
         assert await asyncio.to_thread(write_entered.wait, 10)
 
         working_during_write = context.conversation.read_working()
-        assert working_during_write.summary.text
+        if summary_mode != "default":
+            assert working_during_write.summary.text
         working_by_id = {item.entry_id: item.content.text for item in working_during_write.entries}
         assert working_by_id["call-turn-2-user"] == "uncompressed tail user"
         assert working_by_id["call-turn-2-agent-0"] == "uncompressed tail agent"
@@ -276,7 +300,8 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         summary_calls = llm.modules["luotianyi_call_summary"].calls
         assert len(summary_calls) == 1
         rendered = repr(summary_calls[0]["completed_turns"])
-        assert "maintained working prefix" in rendered
+        if summary_mode != "default":
+            assert "maintained working prefix" in rendered
         assert "uncompressed tail user" in rendered
         assert "uncompressed tail agent" in rendered
         assert "seed history must stay out" not in rendered
@@ -284,6 +309,8 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
 
         write_release.set()
         assert await ending is snapshot
+        assert await stage.terminate(CallEndReason.SYSTEM_FAILURE) is snapshot
+        assert handled == ["call_ending"]
         await manager._finalizations.close()
         order.append("finalizing-release")
 
@@ -304,12 +331,14 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
 
         persisted = database.call_sessions.find_by_id(claim.prepared._record.call_id)
         assert persisted.summary_status.value == "succeeded"
-        assert persisted.maintenance_status.value == "succeeded"
-        assert persisted.maintenance_turn_seq == 2
+        assert persisted.maintenance_status.value == ("failed" if maintenance_failure else "succeeded")
+        assert persisted.maintenance_turn_seq == (0 if maintenance_failure else 2)
         with database.open_sql_session() as sql:
             row = sql.query(Conversation).filter_by(user_id="user", type="call").one()
             metadata = json.loads(row.meta_data)
-            assert metadata["summary"] == working_during_write.summary.text
+            assert metadata["summary"] == (
+                "[和用户打了一通电话]" if summary_mode == "default" else working_during_write.summary.text
+            )
     finally:
         write_release.set()
         if stage is not None and stage.snapshot is None:

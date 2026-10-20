@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 import src.domain.agent as d
 from src.agent.context import ContextFactory, ConversationMode, InteractionContext
 from src.domain.call import (
+    CallEndingResult,
     CallEndReason,
     CallFinalSnapshot,
     CallFinalTurn,
@@ -29,6 +30,7 @@ from src.domain.call import (
     CallReplyStatus,
     CallState,
     CallTerminalFacts,
+    fallback_call_summary,
 )
 from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.models.realtime_speech import (
@@ -53,10 +55,10 @@ from src.infrastructure.persistence.call_sessions.repository import CallSessionR
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
+from ._call_history import CallHistory
 from ._call_playback import CallPlaybackCoordinator, PlaybackCompletion, PlaybackSettlementError
 from ._call_records import PreparedCall
 from .call_lifecycle import CallLifecycle
-from .call_settlement import CallAgentSettlement, CallSettlement, CallSettlementConsumerImpl
 
 
 def bind_call_stage_creator(
@@ -246,8 +248,7 @@ class CallStage:
         speech_factory: RealtimeSpeechSessionFactory,
         output_sink: Callable[[str, CallStageOutput], Awaitable[None]],
         release_ownership: Callable[[CallStageOwnership], bool] | None = None,
-        settle: Callable[..., Awaitable[object]] | None = None,
-        own_finalization: Callable[..., asyncio.Task] | None = None,
+        save_history: Callable[..., Awaitable[object]] | None = None,
         own_termination: Callable[..., asyncio.Task] | None = None,
         retention_changed: Callable[[float | None], None] | None = None,
         call_metrics: Any | None = None,
@@ -264,9 +265,7 @@ class CallStage:
         self._agent, self._context_factory, self._repository = agent, context_factory, call_sessions
         self._speech_factory, self._output_sink = speech_factory, output_sink
         self._release_ownership = release_ownership
-        self._settle = settle
-        self._own_finalization = own_finalization
-        self._finalization = None
+        self._save_history = save_history
         self._own_termination = own_termination
         self._retention_changed = retention_changed
         self._realtime_ended = asyncio.Event()
@@ -322,7 +321,6 @@ class CallStage:
         self._first_disconnect_monotonic: float | None = None
         self._recovery_deadline: float | None = None
         self._pending_end_reason: CallEndReason | None = None
-        self._ending_delivery = False
         self._ownership_released = False
         self._transition_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
@@ -337,18 +335,12 @@ class CallStage:
     async def create(cls, *, conversation_service, call_maintenance_batches, **kwargs: object) -> "CallStage":
         """装配本次结算并返回 PREPARING Stage；握手排队后才启动耗时初始化。"""
         stage = cls(**kwargs)
-        stage._settlement = CallSettlement(
-            consumer=CallSettlementConsumerImpl(
-                agent_settlement=CallAgentSettlement(agent=stage._agent, context_factory=stage._context_factory),
-                call_sessions=stage._repository,
-                conversation_service=conversation_service,
-                call_maintenance_batches=call_maintenance_batches,
-                call_metrics=stage._call_metrics,
-            )
+        history = CallHistory(
+            call_sessions=stage._repository,
+            conversation_service=conversation_service,
+            call_metrics=stage._call_metrics,
         )
-        if not stage._settlement.is_ready:
-            raise ValueError("call settlement dependencies are incomplete")
-        stage._settle = stage._settlement.settle
+        stage._save_history = history.save
         return stage
 
     @property
@@ -616,8 +608,6 @@ class CallStage:
     async def wait_realtime_stopped(self) -> CallFinalSnapshot | None:
         """等待终态输出处理和实时资源释放，不等待认知结算。"""
         await self._realtime_ended.wait()
-        if self._termination is not None and self._termination.done():
-            return self._termination.result()
         return self._final
 
     async def _terminate_owned(self, reason: CallEndReason) -> CallFinalSnapshot | None:
@@ -632,10 +622,15 @@ class CallStage:
                 await asyncio.gather(initialization, return_exceptions=True)
             async with self._lifecycle_lock:
                 return await self._terminate_locked(reason)
+        except BaseException:
+            # A ledger transition can fail before _finish takes ownership of
+            # cleanup. Never report completion with live resources or a lease.
+            if not self._closed.is_set():
+                await complete_owned(self._cleanup())
+            raise
         finally:
             self._realtime_ended.set()
-            if self._finalization is not None:
-                await asyncio.shield(self._finalization)
+            self._closed.set()
 
     async def _terminate_locked(self, reason: CallEndReason) -> CallFinalSnapshot | None:
         if self._final is not None:
@@ -720,10 +715,8 @@ class CallStage:
         self,
         stimulus: d.Stimulus,
         turn_seq: int | None = None,
-        *,
-        allow_terminal: bool = False,
     ) -> None:
-        if not allow_terminal and self.state in {
+        if self.state in {
             CallState.ENDING,
             CallState.ENDED,
             CallState.FAILED,
@@ -783,9 +776,7 @@ class CallStage:
             self._realize_task.add_done_callback(self._resume_queued_plans)
 
     async def _realize(self) -> None:
-        while self._plans and (
-            self.state not in {CallState.ENDING, CallState.ENDED, CallState.FAILED} or self._ending_delivery
-        ):
+        while self._plans and self.state not in {CallState.ENDING, CallState.ENDED, CallState.FAILED}:
             queued = self._plans.popleft()
             if queued.token.is_cancelled:
                 continue
@@ -1038,19 +1029,29 @@ class CallStage:
             labels={"state": state.value, "result": CallMetricResult.SUCCEEDED.value},
         )
         if publish:
-            try:
-                await self._emit(
-                    CallStateChanged(
-                        self._ownership.call_id,
-                        state,
-                        self._ownership.client_request_id,
-                        updated.connected_at,
-                    )
+            await self._publish_state(snapshot)
+
+    async def _publish_state(self, snapshot) -> None:
+        try:
+            await self._emit(
+                CallStateChanged(
+                    self._ownership.call_id,
+                    snapshot.state,
+                    self._ownership.client_request_id,
+                    self._record.connected_at,
                 )
-            except BaseException:
-                if snapshot.has_connected and self._final is None:
-                    self._request_transport_abort()
-                raise
+            )
+        except BaseException as error:
+            if isinstance(error, Exception) and snapshot.state in {
+                CallState.ENDING,
+                CallState.DECLINED,
+                CallState.ENDED,
+            }:
+                get_logger(__name__).warning("Call terminal state delivery failed state=%s", snapshot.state.value)
+                return
+            if snapshot.has_connected and self._final is None:
+                self._request_transport_abort()
+            raise
 
     async def _transition_or_close(self, state: CallState, **facts: object) -> None:
         await self._transition(state, **facts)
@@ -1084,85 +1085,86 @@ class CallStage:
             )
             persisted = await complete_owned(asyncio.to_thread(self._repository.find_by_id, self._record.call_id))
             progress = persisted.maintenance_turn_seq if persisted is not None else self._record.maintenance_turn_seq
+            if self._context is not None:
+                progress = self._context.conversation.read_call_maintenance_progress()
             self._final = CallFinalSnapshot(terminal, completed, progress)
         except BaseException:
-            await self._cleanup()
+            await complete_owned(self._cleanup())
             raise
-        self._ending_delivery = True
-        ending_error: BaseException | None = None
+        cleanup_error = await complete_owned(self._cleanup(release_ownership=False, close_context=False))
         try:
-            await self._submit_stimulus(
-                d.CallEnding(
-                    **self._stimulus_fields(),
-                    call_id=self._record.call_id,
-                    reason=reason,
-                    final_snapshot=self._final,
-                ),
-                allow_terminal=True,
-            )
-            if self._realize_task is not None:
-                await asyncio.gather(self._realize_task, return_exceptions=True)
-        except BaseException as error:
-            ending_error = error
-        finally:
-            self._ending_delivery = False
-        cleanup_error = await self._cleanup(release_ownership=False, close_context=False)
-        settlement_context = self._context
-        self._context = None
-        try:
-
-            async def operation():
-                await self._finalize(self._final, settlement_context)
-
-            if self._own_finalization is not None:
-                self._finalization = self._own_finalization(operation)
-            else:
-                # 独立 Stage 也必须持有清理；运行时由 Manager 统一持有任务。
-                self._finalization = asyncio.create_task(operation(), name=f"call-finalize-{self.call_id}")
-                self._finalization.add_done_callback(self._observe_task)
-                await asyncio.shield(self._finalization)
-        except BaseException as error:
-            ending_error = ending_error or error
-            if self._finalization is None:
-                self._record_metric(
-                    CallMetricName.SETTLEMENT_ADMISSION,
-                    duration_ms=0,
-                    status=CallMetricStatus.ERROR,
-                    labels={"result": CallMetricResult.FAILED.value, "error_code": "SETTLEMENT_ADMISSION_FAILED"},
-                )
-                if settlement_context is not None:
-                    await complete_owned(settlement_context.close())
-        # The manager has registered finalization before relinquishing the live call.
-        self._release_call_ownership()
-        await self._send_terminal_best_effort(self._final)
-        ending_error = ending_error or cleanup_error
-        if ending_error is not None:
-            raise ending_error
-        return self._final
-
-    async def _finalize(self, snapshot, context) -> None:
-        error = None
-        try:
-            if self._settle is not None:
-                await self._settle(snapshot, context=context)
-        except BaseException as settlement_error:
-            error = settlement_error
+            await self._send_terminal_best_effort(self._final)
+            self._realtime_ended.set()
+            result = await self._complete_ending(self._final)
+            if self._save_history is not None:
+                await complete_owned(self._save_history(self._final, result=result))
+            if cleanup_error is not None:
+                raise cleanup_error
         finally:
             try:
-                if context is not None:
-                    await complete_owned(context.close())
-            except BaseException as close_error:
-                if error is None:
-                    error = close_error
-                else:
-                    get_logger(__name__).error(
-                        "Call context close failed call=%s settlement_type=%s close_type=%s",
-                        self.call_id,
-                        type(error).__name__,
-                        type(close_error).__name__,
-                    )
-        if error is not None:
-            raise error
+                if self._context is not None:
+                    await complete_owned(self._context.close())
+            finally:
+                self._context = None
+                self._release_call_ownership()
+                self._closed.set()
+        return self._final
+
+    async def _complete_ending(self, snapshot) -> CallEndingResult | None:
+        """Deliver the sole settlement stimulus using this call's original context."""
+        try:
+            token = d.CancellationToken()
+            request = d.HandleStimulusRequest(
+                request_id=str(uuid4()),
+                stimulus=d.CallEnding(
+                    **self._stimulus_fields(),
+                    call_id=self._record.call_id,
+                    reason=snapshot.terminal.end_reason,
+                    final_snapshot=snapshot,
+                ),
+                interaction=self._agent_snapshot(),
+                cancellation=token,
+            )
+            sink = _EndingPlanSink()
+            report = await self._agent.handle_stimulus(request, sink, context=self._context)
+            if report.request_status is not d.HandlingRequestStatus.COMPLETED:
+                raise RuntimeError("Agent failed to handle CallEnding")
+            if snapshot.terminal.outcome is not CallOutcome.CONNECTED:
+                if sink.plans:
+                    raise RuntimeError("nonconnected CallEnding must not run cognition")
+                return None
+            if (
+                len(sink.plans) != 1
+                or len(sink.plans[0].actions) != 1
+                or not isinstance(sink.plans[0].actions[0], d.FinalizeCall)
+            ):
+                raise RuntimeError("CallEnding must produce exactly one FinalizeCall")
+            execution = d.ExecutionContext(
+                execution_id=str(uuid4()),
+                interaction_id=self.call_id,
+                current_interaction_revision=self._revision,
+                cancellation=token,
+                interaction_context=self._context,
+            )
+            realized = await self._agent.realize_action_plan(sink.plans[0], execution, _EndingOutputSink())
+            if realized.status is not d.ExecutionStatus.COMPLETED or len(realized.action_results) != 1:
+                raise RuntimeError("FinalizeCall failed")
+            result = realized.action_results[0].call_ending
+            if result is None:
+                raise RuntimeError("FinalizeCall returned no result")
+            return result
+        except Exception:
+            get_logger(__name__).exception("CallEnding failed call=%s", self.call_id)
+            if snapshot.terminal.outcome is not CallOutcome.CONNECTED:
+                return None
+            working = self._context.conversation.read_working().summary.text if self._context is not None else ""
+            progress = (
+                self._context.conversation.read_call_maintenance_progress()
+                if self._context is not None
+                else snapshot.maintenance_turn_seq
+            )
+            summary, source = fallback_call_summary(working)
+            return CallEndingResult(summary, source, False, progress)
 
     async def _emit(self, output: CallStageOutput) -> None:
         await self._output_sink(self.call_id, output)
@@ -1177,7 +1179,7 @@ class CallStage:
         return not self.termination_requested and (self.state is CallState.ACTIVE or self.can_reconnect())
 
     async def _send_terminal_best_effort(self, snapshot: CallFinalSnapshot) -> None:
-        """Bound terminal delivery after realtime cleanup and settlement admission.
+        """Bound terminal delivery after realtime cleanup, before cognition.
 
         Cancellation cannot retract bytes already written by a transport, so the
         binding remains responsible for terminal idempotency.
@@ -1205,6 +1207,8 @@ class CallStage:
             await self._emit(CallSetupFailed(reason))
         except BaseException:
             pass
+        finally:
+            self._realtime_ended.set()
         if cleanup_error is not None:
             raise cleanup_error
 
@@ -1287,7 +1291,8 @@ class CallStage:
                 self._release_call_ownership()
             except BaseException as error:
                 cleanup_error = cleanup_error or error
-        self._closed.set()
+        if close_context:
+            self._closed.set()
         return cleanup_error
 
     def _release_call_ownership(self) -> None:
@@ -1692,3 +1697,17 @@ class _OutputSink:
                 duration_ms=max(0, (self._stage._monotonic() - response.audio_started_at) * 1000),
                 labels={"result": CallMetricResult.SUCCEEDED.value},
             )
+
+
+class _EndingPlanSink:
+    def __init__(self):
+        self.plans = []
+
+    async def emit(self, plan):
+        self.plans.append(plan)
+        return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
+
+
+class _EndingOutputSink:
+    async def emit(self, output):
+        raise d.SinkRejectedError("CallEnding cannot emit output", code=d.SinkRejectionCode.UNSUPPORTED_OUTPUT)

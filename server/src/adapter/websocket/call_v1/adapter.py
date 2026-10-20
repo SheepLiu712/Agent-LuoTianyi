@@ -28,7 +28,6 @@ class CallCapabilityStatus:
     summary_ready: bool
     settlement_ready: bool
     stage_binding_ready: bool
-    recovery_ready: bool
     character_ids: tuple[str, ...] = ()
 
     @property
@@ -43,7 +42,6 @@ class CallCapabilityStatus:
                 self.summary_ready,
                 self.settlement_ready,
                 self.stage_binding_ready,
-                self.recovery_ready,
                 bool(self.character_ids),
             )
         )
@@ -99,7 +97,6 @@ class CallWebSocketAdapter:
             summary_ready=bool(summary_ids) or legacy_ready,
             settlement_ready=self._manager.call_business_ready or legacy_ready,
             stage_binding_ready=not self._closed and not self._manager.is_closed(),
-            recovery_ready=self._manager.call_business_ready or legacy_ready,
             character_ids=character_ids,
         )
 
@@ -300,8 +297,8 @@ class CallWebSocketAdapter:
         task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
 
     async def _release_terminal(self, stage, session):
-        await stage.wait_closed()
         try:
+            await stage.wait_realtime_stopped()
             await session.drain_terminal()
         finally:
             await self._remove_session(session)

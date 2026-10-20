@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 
 import requests
-from sqlalchemy import create_engine, text
 
 _SERVER_MODULE = "support.call_network_success_server"
 _SERVER_BOOTSTRAP = """
@@ -84,30 +83,6 @@ def _stop_server(process, session, url, log, log_path):
     assert process.returncode == 0, log_path.read_text(encoding="utf-8")
 
 
-def _start_server_expect_failure(root: Path) -> str:
-    repo = Path(__file__).resolve().parents[4]
-    log_path = root / f"server-failed-{time.time_ns()}.log"
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([str(repo / "server"), str(repo / "server/tests"), env.get("PYTHONPATH", "")])
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUNBUFFERED"] = "1"
-    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-        env.pop(key, None)
-    with log_path.open("w", encoding="utf-8") as log:
-        process = subprocess.Popen(
-            _server_command(root),
-            cwd=root,
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
-        process.wait(timeout=30)
-    output = log_path.read_text(encoding="utf-8")
-    assert process.returncode != 0
-    assert "production runtime did not become ready" in output
-    return output
-
-
 def _encrypted_password(session, url: str, password: str) -> str:
     from base64 import b64encode
 
@@ -134,7 +109,7 @@ def _login(session, url: str) -> str:
     return response.json()["message_token"]
 
 
-def test_production_process_restart_recovers_recent_calls_once_and_preserves_credentials(tmp_path):
+def test_production_restart_preserves_credentials_without_replaying_old_calls(tmp_path):
     root = tmp_path / "restart-runtime"
     root.mkdir()
     first = _start_server(root)
@@ -168,13 +143,13 @@ def test_production_process_restart_recovers_recent_calls_once_and_preserves_cre
             assert capability.status_code == 200
             evidence = http.get(url + "/test/recovery_counts", timeout=5).json()
             by_id = {item["call_id"]: item for item in evidence["calls"]}
-            assert by_id[seeded["preparing_call_id"]]["state"] == "failed"
+            assert by_id[seeded["preparing_call_id"]]["state"] == "preparing"
             active = by_id[seeded["active_call_id"]]
-            assert active["state"] == "ended"
-            assert active["summary_status"] == "succeeded"
-            assert active["maintenance_status"] == "failed"
-            assert active["conversation_id"] is not None
-            assert evidence["call_conversations"] == 1
+            assert active["state"] == "active"
+            assert active["summary_status"] == "pending"
+            assert active["maintenance_status"] == "pending"
+            assert active["conversation_id"] is None
+            assert evidence["call_conversations"] == 0
             assert evidence["maintenance_batches"] == 0
             current = (active["conversation_id"], evidence["call_conversations"], evidence["maintenance_batches"])
             if expected is None:
@@ -185,53 +160,7 @@ def test_production_process_restart_recovers_recent_calls_once_and_preserves_cre
             _stop_server(process, http, url, log, log_path)
 
 
-def test_production_startup_fails_closed_on_recovery_conflict_without_late_writes(tmp_path):
-    root = tmp_path / "failed-restart-runtime"
-    root.mkdir()
-    process, http, url, log, log_path = _start_server(root)
-    try:
-        registered = http.post(
-            url + "/auth/register",
-            json={
-                "username": "alice",
-                "password": _encrypted_password(http, url, "offline-password"),
-                "invite_code": "invite",
-            },
-            timeout=10,
-        )
-        assert registered.ok, registered.text
-        seeded = http.post(url + "/test/seed_recovery_conflict", timeout=10).json()
-    finally:
-        _stop_server(process, http, url, log, log_path)
-
-    _start_server_expect_failure(root)
-    database_path = root / "db" / "calls.sqlite"
-    engine = create_engine(f"sqlite:///{database_path}")
-    with engine.connect() as connection:
-        first = connection.execute(
-            text("SELECT state, summary_status, maintenance_status FROM call_sessions WHERE call_id=:call_id"),
-            {"call_id": seeded["call_id"]},
-        ).one()
-        conversation_count = connection.execute(
-            text("SELECT COUNT(*) FROM conversations WHERE type='call'")
-        ).scalar_one()
-    time.sleep(0.2)
-    with engine.connect() as connection:
-        second = connection.execute(
-            text("SELECT state, summary_status, maintenance_status FROM call_sessions WHERE call_id=:call_id"),
-            {"call_id": seeded["call_id"]},
-        ).one()
-        assert (
-            connection.execute(text("SELECT COUNT(*) FROM conversations WHERE type='call'")).scalar_one()
-            == conversation_count
-        )
-    engine.dispose()
-    assert first == second
-    assert first == ("ended", "pending", "pending")
-    assert conversation_count == 1
-
-
-def test_process_restart_repairs_partial_summary_and_maintenance_exactly_once(tmp_path):
+def test_process_restart_leaves_partial_summary_and_maintenance_unchanged(tmp_path):
     root = tmp_path / "partial-settlement-restart"
     root.mkdir()
     process, http, url, log, log_path = _start_server(root)
@@ -258,10 +187,10 @@ def test_process_restart_repairs_partial_summary_and_maintenance_exactly_once(tm
             by_id = {item["call_id"]: item for item in evidence["calls"]}
             summary = by_id[seeded["summary_call_id"]]
             maintenance = by_id[seeded["maintenance_call_id"]]
-            assert summary["summary_status"] == "succeeded"
-            assert summary["conversation_id"] == seeded["summary_conversation_id"]
-            assert maintenance["maintenance_status"] == "succeeded"
-            assert maintenance["maintenance_turn_seq"] == 1
+            assert summary["summary_status"] == "pending"
+            assert summary["conversation_id"] is None
+            assert maintenance["maintenance_status"] == "pending"
+            assert maintenance["maintenance_turn_seq"] == 0
             assert evidence["call_conversations"] == 1
             assert evidence["maintenance_batches"] == 1
             current = (

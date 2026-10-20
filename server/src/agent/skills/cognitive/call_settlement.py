@@ -18,9 +18,6 @@ from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
 from src.utils.owned_operation import complete_owned
 
-EMPTY_CALL_SUMMARY = "本次通话未形成有效对话内容"
-FAILED_CALL_SUMMARY = "本次通话未能形成可用概要"
-
 
 def render_call_turns(snapshot: CallFinalSnapshot, *, after_turn_seq: int = 0) -> tuple[str, ...]:
     """Keep every completed user fact; include only fully completed formal replies."""
@@ -47,7 +44,7 @@ class CallSummarySkill:
         model = self._models.get(character_id)
         return model is not None and callable(getattr(model, "generate_response", None))
 
-    async def summarize(self, invocation: SkillInvocation, snapshot: CallFinalSnapshot, *, context=None) -> str:
+    async def summarize(self, invocation: SkillInvocation, snapshot: CallFinalSnapshot, *, context=None) -> str | None:
         turns = render_call_turns(snapshot)
         if context is not None:
             working = context.conversation.read_working()
@@ -58,20 +55,21 @@ class CallSummarySkill:
             if working_inputs:
                 turns = tuple(working_inputs)
         if not turns:
-            return EMPTY_CALL_SUMMARY
+            return None
         model = self._models.get(invocation.character_id)
         if model is None:
-            return FAILED_CALL_SUMMARY
-        for _ in range(2):
-            try:
-                summary = str(await model.generate_response(completed_turns=turns)).strip()
-                if summary and len(summary) <= 200:
-                    if context is not None:
-                        await context.conversation.update_call_working_summary(ConversationSummary(summary))
-                    return summary
-            except Exception:
-                continue
-        return FAILED_CALL_SUMMARY
+            return None
+        try:
+            # The model adapter owns bounded attempts and exponential backoff.
+            response = await model.generate_response(completed_turns=turns)
+            summary = response.strip() if isinstance(response, str) else ""
+            if summary and len(summary) <= 200:
+                if context is not None:
+                    await context.conversation.update_call_working_summary(ConversationSummary(summary))
+                return summary
+        except Exception:
+            logging.getLogger(__name__).warning("Call summary generation failed")
+        return None
 
 
 class CallMaintenanceMemory(Protocol):
@@ -95,10 +93,9 @@ class _WorkingConversation:
 
 
 class CallMaintenanceSkill:
-    def __init__(self, memories: dict[str, CallMaintenanceMemory], batches=None, *, calls=None) -> None:
+    def __init__(self, memories: dict[str, CallMaintenanceMemory], batches=None) -> None:
         self._memories = memories
         self._batches = batches
-        self._calls = calls
 
     async def maintain(
         self,
@@ -205,7 +202,7 @@ class CallMaintenanceSkill:
             tuple(turn for turn in snapshot.completed_turns if turn.turn_seq <= target),
             progress,
         )
-        digest = _threshold_digest(maintenance)
+        digest = _maintenance_digest(maintenance)
         await self._apply_pending(invocation, context, maintenance, digest)
         self._check_cancelled(invocation)
         await context.conversation.compact(result)
@@ -236,9 +233,10 @@ class CallMaintenanceSkill:
         if not context.conversation.advance_call_maintenance_progress(expected=previous, new=turn_seq):
             raise RuntimeError("call maintenance progress conflict")
 
-    async def maintain_ending(self, invocation, context, snapshot, *, settlement_input_digest):
+    async def maintain_ending(self, invocation, context, snapshot):
         """Finish an interrupted threshold batch before processing the final tail."""
         call_id = _call_id(snapshot)
+        settlement_input_digest = _maintenance_digest(snapshot)
         progress = self._read_progress(context)
         pending = None
         if self._batches is not None:
@@ -258,7 +256,7 @@ class CallMaintenanceSkill:
                     tuple(t for t in snapshot.completed_turns if t.turn_seq <= batch.target_turn_seq),
                     progress,
                 )
-                digest = _threshold_digest(bounded)
+                digest = _maintenance_digest(bounded)
                 if digest != batch.settlement_input_digest:
                     raise ValueError("SETTLEMENT_INPUT_CONFLICT")
                 pending = (bounded, None, digest)
@@ -272,7 +270,7 @@ class CallMaintenanceSkill:
             invocation,
             bounded,
             current_profile=context.user.read().profile.description,
-            settlement_input_digest=settlement_input_digest,
+            settlement_input_digest=_maintenance_digest(bounded),
         )
         self._check_cancelled(invocation)
         if profile is not None:
@@ -300,9 +298,9 @@ def _entry_turn(entry_id):
     return int(match.group(1)) if match else None
 
 
-def _threshold_digest(snapshot: CallMaintenanceSnapshot) -> str:
+def _maintenance_digest(snapshot: CallMaintenanceSnapshot | CallFinalSnapshot) -> str:
     payload = [
-        str(snapshot.call_id),
+        str(_call_id(snapshot)),
         snapshot.maintenance_turn_seq,
         [
             [turn.turn_seq, turn.user_semantic, turn.reply_status.value, turn.formal_agent_text]

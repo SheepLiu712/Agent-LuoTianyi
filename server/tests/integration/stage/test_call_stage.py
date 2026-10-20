@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from support.stage_manager import start_call_stage
 from support.call_output import output_sink
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_manager import start_call_stage
 
 import src.domain.agent as d
 from src.agent.context import ContextFactory
@@ -34,7 +34,7 @@ from src.infrastructure.persistence.call_sessions import (
     SqlCallSessionRepository,
 )
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage.call_stage import CallIngressReceipt, CallStage, CallStageOwnership, CallStateChanged
+from src.stage.call_stage import CallIngressReceipt, CallStageOwnership, CallStateChanged
 
 
 class _ContextDatabase:
@@ -514,9 +514,8 @@ async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_s
     settled = []
 
     class Settlement:
-        async def emit(self, snapshot, context):
+        async def emit(self, snapshot, *, result):
             settled.append(snapshot)
-            await context.close()
 
     stage = await start_call_stage(
         ownership=ownership,
@@ -527,7 +526,7 @@ async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_s
         speech_factory=speech,
         output_sink=output_sink(transport),
         release_ownership=lambda value: not released.append(value),
-        settle=Settlement().emit,
+        save_history=Settlement().emit,
         monotonic=clock.tick,
         wall_clock=clock.now,
     )
@@ -547,7 +546,7 @@ async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_s
 
 
 @pytest.mark.asyncio
-async def test_blocked_terminal_delivery_is_bounded_after_settlement_admission(call_setup):
+async def test_blocked_terminal_delivery_is_bounded_before_history_write(call_setup):
     repository, record, ownership, clock = call_setup
     speech = FakeRealtimeSpeechSessionFactory()
     transport = _BlockingTerminalTransport()
@@ -555,9 +554,8 @@ async def test_blocked_terminal_delivery_is_bounded_after_settlement_admission(c
     settled = []
 
     class Settlement:
-        async def emit(self, snapshot, context):
+        async def emit(self, snapshot, *, result):
             settled.append(snapshot)
-            await context.close()
 
     stage = await start_call_stage(
         ownership=ownership,
@@ -568,7 +566,7 @@ async def test_blocked_terminal_delivery_is_bounded_after_settlement_admission(c
         speech_factory=speech,
         output_sink=output_sink(transport),
         release_ownership=lambda value: not released.append(value),
-        settle=Settlement().emit,
+        save_history=Settlement().emit,
         monotonic=clock.tick,
         wall_clock=clock.now,
         config={"terminal_delivery_timeout": 0.01},
@@ -588,44 +586,6 @@ async def test_blocked_terminal_delivery_is_bounded_after_settlement_admission(c
     assert released == [ownership]
     assert repository.find_by_id(record.call_id).state is CallState.ENDED
     assert not stage.tasks
-
-
-@pytest.mark.asyncio
-async def test_settlement_admission_failure_records_only_admission_metric(call_setup):
-    repository, record, ownership, clock = call_setup
-    captured = []
-
-    class Metrics:
-        def record(self, metric):
-            captured.append(metric)
-            return True
-
-    def reject_finalization(operation):
-        raise RuntimeError("reset admission rejected")
-
-    stage = await start_call_stage(
-        ownership=ownership,
-        record=record,
-        agent=_agent(_TurnHandler()),
-        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
-        call_sessions=repository,
-        speech_factory=FakeRealtimeSpeechSessionFactory(),
-        output_sink=output_sink(_Transport()),
-        own_finalization=reject_finalization,
-        call_metrics=Metrics(),
-        monotonic=clock.tick,
-        wall_clock=clock.now,
-    )
-    await stage.apply_answer(
-        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
-    )
-    with pytest.raises(RuntimeError, match="reset admission rejected"):
-        await stage.terminate()
-
-    names = [metric.name.value for metric in captured]
-    assert "settlement_admission" in names
-    assert "summary" not in names
-    assert "maintenance" not in names
 
 
 @pytest.mark.asyncio
@@ -806,7 +766,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
     stage, provider, transport, _ = await _create(call_setup)
     repository, record, _, _ = call_setup
     memory = Memory()
-    call_skill = CallMaintenanceSkill({"luotianyi": memory}, calls=repository)
+    call_skill = CallMaintenanceSkill({"luotianyi": memory})
     compaction = ConversationCompactionSkill(
         {"llm_module": {}}, SimpleNamespace(register_llm_module=lambda *args: Model())
     )
@@ -849,7 +809,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
         assert stage.context.conversation.read_call_maintenance_progress() == 16
         assert len(memory.inputs) == 1
         snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
-        assert snapshot.maintenance_turn_seq == 0
+        assert snapshot.maintenance_turn_seq == 16
         assert all(turn.reply_status is CallReplyStatus.COMPLETED for turn in snapshot.completed_turns)
     finally:
         if stage.snapshot is None:

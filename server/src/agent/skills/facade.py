@@ -116,9 +116,7 @@ class SharedSkills:
         self.call_recall = CallRecallDecisionSkill(memories=memories, model=call_recall_model)
         self.call_reply = CallReplySkill(reply_generators)
         self.call_summary = CallSummarySkill(dict(call_summary_models))
-        self.call_maintenance = CallMaintenanceSkill(
-            dict(memories), call_maintenance_batches, calls=getattr(database_manager, "call_sessions", None)
-        )
+        self.call_maintenance = CallMaintenanceSkill(dict(memories), call_maintenance_batches)
         self.cognitive_maintenance = CognitiveMaintenanceSkill(
             memories=memories,
             compaction=self.conversation_compaction,

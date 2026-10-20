@@ -11,6 +11,121 @@ from src.domain.call import CallAudioSemantic, CallEndReason, CallOutcome, CallS
 from src.infrastructure.models.realtime_speech import SpeechStarted, TurnCompleted
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [CallState.ENDING, CallState.DECLINED, CallState.ENDED])
+@pytest.mark.parametrize("cancel_owner", [False, True])
+async def test_terminal_ledger_failure_closes_resources_before_signalling_completion(
+    tmp_path, monkeypatch, target, cancel_owner
+):
+    stage, repository, record, ownership, provider, _, settlement, released = await create_active_stage(tmp_path)
+    if target is not CallState.DECLINED:
+        await activate(stage, record.call_id)
+    context = stage.context
+    original_update = repository.update_if_state
+    close_entered, close_release = asyncio.Event(), asyncio.Event()
+    original_close = context.close
+
+    def fail_transition(*args, **kwargs):
+        if kwargs["record"].state is target:
+            raise RuntimeError("ledger unavailable")
+        return original_update(*args, **kwargs)
+
+    async def blocked_close():
+        close_entered.set()
+        await close_release.wait()
+        await original_close()
+
+    monkeypatch.setattr(repository, "update_if_state", fail_transition)
+    monkeypatch.setattr(context, "close", blocked_close)
+    reason = CallEndReason.DECLINED if target is CallState.DECLINED else CallEndReason.USER_HANGUP
+    ending = stage.begin_termination(reason)
+    try:
+        await asyncio.wait_for(close_entered.wait(), 2)
+        if cancel_owner:
+            ending.cancel()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+        assert not ending.done() and not stage._closed.is_set()
+        assert not released
+    finally:
+        close_release.set()
+    expected = asyncio.CancelledError if cancel_owner else RuntimeError
+    with pytest.raises(expected):
+        await stage.terminate()
+    assert provider.closed and stage.context is None
+    with pytest.raises(RuntimeError, match="交互上下文已经释放"):
+        context.conversation.read_working()
+    assert released == [ownership]
+    assert not stage.tasks
+    assert stage._closed.is_set()
+    assert not settlement.snapshots
+    assert await stage.wait_realtime_stopped() is None
+    repository._sql_session_factory.kw["bind"].dispose()
+
+
+@pytest.mark.asyncio
+async def test_owner_cancellation_waits_for_provider_close_before_releasing_call(tmp_path, monkeypatch):
+    stage, repository, record, ownership, provider, _, _, released = await create_active_stage(tmp_path)
+    await activate(stage, record.call_id)
+    context = stage.context
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_close = provider.close
+
+    async def blocked_close():
+        entered.set()
+        await release.wait()
+        await original_close()
+
+    monkeypatch.setattr(provider, "close", blocked_close)
+    ending = stage.begin_termination()
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        ending.cancel()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert not ending.done() and not stage._closed.is_set()
+        assert not released and not provider.closed
+        context.conversation.read_working()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await ending
+    assert provider.closed and stage.context is None
+    with pytest.raises(RuntimeError, match="交互上下文已经释放"):
+        context.conversation.read_working()
+    assert released == [ownership]
+    assert not stage.tasks
+    assert stage._closed.is_set()
+    repository._sql_session_factory.kw["bind"].dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [CallState.ENDING, CallState.DECLINED, CallState.ENDED])
+async def test_terminal_state_delivery_failure_still_completes_settlement(tmp_path, monkeypatch, target):
+    stage, repository, record, ownership, provider, transport, settlement, released = await create_active_stage(
+        tmp_path
+    )
+    if target is not CallState.DECLINED:
+        await activate(stage, record.call_id)
+    original_send = transport.send_state
+
+    async def fail_state(item):
+        if item.state is target:
+            raise RuntimeError("terminal state output failed")
+        await original_send(item)
+
+    monkeypatch.setattr(transport, "send_state", fail_state)
+    reason = CallEndReason.DECLINED if target is CallState.DECLINED else CallEndReason.USER_HANGUP
+    snapshot = await stage.terminate(reason)
+    assert repository.find_by_id(record.call_id).state is CallState.ENDED
+    assert settlement.snapshots == [snapshot]
+    assert provider.closed and stage.context is None
+    assert released == [ownership]
+    assert not stage.tasks
+    assert await stage.wait_realtime_stopped() is snapshot
+    repository._sql_session_factory.kw["bind"].dispose()
+
+
 async def assert_terminal(stage, repository, record, ownership, provider, transport, settlement, released):
     assert stage._transport_abort_task is not None
     try:
