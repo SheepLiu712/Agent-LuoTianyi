@@ -133,6 +133,9 @@ class StageManager:
         config = {} if config is None else config
         self._config = _ManagerConfig.from_dict(config)
         self._stage_config = config.get("stage", {})
+        self._call_stage_config = config.get("call_stage", {})
+        if not isinstance(self._call_stage_config, dict):
+            raise TypeError("call_stage config must be a dictionary")
         self._get_agent = get_agent
         self._chat_output_sink = chat_output_sink
         self._detach_stage_binding = detach_stage_binding
@@ -218,6 +221,7 @@ class StageManager:
             character_id=request.character_id,
             client_request_id=request.client_request_id,
             initialize=False,
+            config=self._call_stage_config,
         )
         self._call_stages_by_request[request.client_request_id] = stage
         return stage

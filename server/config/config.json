@@ -237,6 +237,10 @@
         "stage": {
             "proactive_idle_seconds": 30,
             "login_reminder_wait": 1
+        },
+        "call_stage": {
+            "time_limit_seconds": 1800,
+            "time_limit_warning_seconds": 30
         }
     },
     "agent_runtime": {

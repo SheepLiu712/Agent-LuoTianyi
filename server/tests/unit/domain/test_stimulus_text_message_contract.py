@@ -95,6 +95,7 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "CALL_REPLY_REQUESTED": "call_reply_requested",
         "CALL_REPLY_CONFIRMED": "call_reply_confirmed",
         "CALL_SILENCE_ELAPSED": "call_silence_elapsed",
+        "CALL_TIME_LIMIT_WARNING": "call_time_limit_warning",
         "CALL_ENDING": "call_ending",
     }
     assert {item.name: item.value for item in agent_domain.StimulusSource} == {

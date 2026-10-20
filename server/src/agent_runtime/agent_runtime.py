@@ -23,6 +23,7 @@ from src.agent.handlers.stimulus.call import (
     CallReplyRequestedHandler,
     CallSilenceElapsedHandler,
     CallStartedHandler,
+    CallTimeLimitWarningHandler,
     CallTurnCompletedHandler,
 )
 from src.agent.handlers.stimulus.chat import (
@@ -227,6 +228,7 @@ class AgentRuntime:
                 CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
             ),
             (StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+            (StimulusKind.CALL_TIME_LIMIT_WARNING, CallTimeLimitWarningHandler()),
             (StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
             (StimulusKind.CALL_ENDING, CallEndingHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),

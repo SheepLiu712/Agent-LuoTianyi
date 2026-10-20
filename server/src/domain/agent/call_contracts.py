@@ -120,6 +120,18 @@ class CallSilenceElapsed(Stimulus):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CallTimeLimitWarning(Stimulus):
+    kind: ClassVar[StimulusKind] = StimulusKind.CALL_TIME_LIMIT_WARNING
+    call_id: UUID
+    remaining_ms: int
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_instance(self.call_id, UUID)
+        _require_nonnegative_int(self.remaining_ms)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CallEnding(Stimulus):
     kind: ClassVar[StimulusKind] = StimulusKind.CALL_ENDING
     call_id: UUID
@@ -138,7 +150,8 @@ class CallEnding(Stimulus):
 
 
 CallStimulus = (
-    CallAnswerRequested
+    CallTimeLimitWarning
+    | CallAnswerRequested
     | CallStarted
     | CallTurnCompleted
     | CallReplyRequested

@@ -271,6 +271,24 @@ class CallSilenceElapsedHandler:
         return _with_emitted(request, plans)
 
 
+class CallTimeLimitWarningHandler:
+    """Produce the fixed pre-deadline notice without invoking a generative model."""
+
+    async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
+        stimulus = request.stimulus
+        if not isinstance(stimulus, d.CallTimeLimitWarning):
+            raise TypeError("CallTimeLimitWarningHandler requires CallTimeLimitWarning")
+        text = "通话时间快到了，我们很快就要结束啦。"
+        action = _call_say(
+            request,
+            ReplyDraft(content=text, sound_content=text, tone="normal", expression=None),
+            suffix="time-limit-warning",
+            provisional=False,
+        )
+        await plans.emit(ActionPlanDraft(source_stimulus_ids=(stimulus.stimulus_id,), actions=(action,)))
+        return _with_emitted(request, plans)
+
+
 class CallEndingHandler:
     """以唯一结束刺激安排一次维护及概要行动。"""
 

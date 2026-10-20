@@ -75,6 +75,7 @@ class StimulusKind(str, Enum):
     CALL_REPLY_REQUESTED = "call_reply_requested"
     CALL_REPLY_CONFIRMED = "call_reply_confirmed"
     CALL_SILENCE_ELAPSED = "call_silence_elapsed"
+    CALL_TIME_LIMIT_WARNING = "call_time_limit_warning"
     CALL_ENDING = "call_ending"
 
 

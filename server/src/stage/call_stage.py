@@ -61,6 +61,7 @@ from ._call_history import CallHistory
 from ._call_inputs import CallInputs, ReplyAttempt
 from ._call_playback import CallPlaybackCoordinator, PlaybackCompletion, PlaybackSettlementError
 from ._call_records import PreparedCall
+from ._call_warning import CallWarning, WarningState
 from .call_lifecycle import CallLifecycle
 
 
@@ -286,12 +287,22 @@ class CallStage:
         self._pcm_capacity = int(settings.get("pcm_queue_capacity", 64))
         self._receipt_capacity = int(settings.get("receipt_capacity", 4096))
         self._terminal_delivery_timeout = float(settings.get("terminal_delivery_timeout", 1.0))
+        self._time_limit_seconds = float(settings.get("time_limit_seconds", 30 * 60))
+        self._time_limit_warning_seconds = float(settings.get("time_limit_warning_seconds", 30))
         if self._pcm_capacity <= 0:
             raise ValueError("pcm_queue_capacity must be positive")
         if self._receipt_capacity <= 0:
             raise ValueError("receipt_capacity must be positive")
         if not math.isfinite(self._terminal_delivery_timeout) or self._terminal_delivery_timeout <= 0:
             raise ValueError("terminal_delivery_timeout must be positive and finite")
+        if not math.isfinite(self._time_limit_seconds) or self._time_limit_seconds <= 0:
+            raise ValueError("time_limit_seconds must be positive and finite")
+        if (
+            not math.isfinite(self._time_limit_warning_seconds)
+            or self._time_limit_warning_seconds < 0
+            or self._time_limit_warning_seconds >= self._time_limit_seconds
+        ):
+            raise ValueError("time_limit_warning_seconds must be nonnegative and less than time_limit_seconds")
         self._lifecycle = CallLifecycle()
         self._context: InteractionContext | None = None
         self._provider: RealtimeSpeechSession | None = None
@@ -309,6 +320,9 @@ class CallStage:
         self._provider_failure_task: asyncio.Task[Any] | None = None
         self._realize_task: asyncio.Task[Any] | None = None
         self._silence_task: asyncio.Task[Any] | None = None
+        self._time_limit_task: asyncio.Task[Any] | None = None
+        self._time_limit_changed = asyncio.Event()
+        self._warning = CallWarning()
         self._playback = CallPlaybackCoordinator(monotonic=monotonic)
         self._revision = 0
         self._turns: dict[int, _Turn] = {}
@@ -319,7 +333,7 @@ class CallStage:
         self._fact_tasks: set[asyncio.Task[Any]] = set()
         self._fact_tail: asyncio.Task[Any] | None = None
         self._fact_error: Exception | None = None
-        self._reply_schedule: asyncio.Task[Any] | None = None
+        self._output_schedule: asyncio.Task[Any] | None = None
         self._user_speaking = False
         self._request_turn: dict[str, int | None] = {}
         self._started = False
@@ -570,6 +584,7 @@ class CallStage:
                 if not turn.first_audio_recorded:
                     turn.first_audio_disqualified = True
             await self._transition_or_close(CallState.RECONNECTING, ledger_facts={"disconnected_at": disconnected_at})
+            self._time_limit_changed.set()
             if self._first_disconnect_monotonic is None:
                 self._first_disconnect_monotonic = disconnected_monotonic
             self._reconnect_count += 1
@@ -608,8 +623,9 @@ class CallStage:
                 if self._retention_changed is not None:
                     self._retention_changed(None)
                 await self._transition_or_close(CallState.ACTIVE)
+                self._time_limit_changed.set()
                 self._inputs.blocked = False
-                self._schedule_reply()
+                self._schedule_output()
                 self._first_disconnect_monotonic = None
                 self._recovery_deadline = None
                 # Product policy: a successful resume always starts a fresh full silence period.
@@ -643,6 +659,7 @@ class CallStage:
         """登记唯一完整终止任务；调用者可继续处理其他交互。"""
         if self._termination_reason is None:
             self._termination_reason = reason
+            self._time_limit_changed.set()
         if self._termination is None:
             if self._own_termination is not None:
                 self._termination = self._own_termination(lambda: self._terminate_owned(self._termination_reason))
@@ -750,7 +767,7 @@ class CallStage:
             elif isinstance(event, TurnInvalid):
                 self._inputs.speech.discard(event.item_id)
                 self._release_user_speaking(event.item_id, invalid=True)
-                self._schedule_reply()
+                self._schedule_output()
             elif isinstance(event, ProviderFailed):
                 return
             elif isinstance(event, AmbientAudio):
@@ -839,7 +856,7 @@ class CallStage:
                 self.begin_termination(CallEndReason.SYSTEM_FAILURE)
                 raise
             finally:
-                self._schedule_reply()
+                self._schedule_output()
 
         task = asyncio.create_task(write(), name="call-input-fact")
         self._fact_tail = task
@@ -865,25 +882,64 @@ class CallStage:
         await self._write_fact(stimulus)
         self._inputs.ready.add(stimulus.turn_seq)
 
-    def _schedule_reply(self) -> None:
+    def _schedule_output(self) -> None:
         if self._termination is not None:
             return
-        if self._reply_schedule is None or self._reply_schedule.done():
-            self._reply_schedule = self._track(asyncio.create_task(self._try_reply(), name="call-pending-reply"))
-            self._reply_schedule.add_done_callback(self._observe_task)
+        if self._output_schedule is None or self._output_schedule.done():
+            self._output_schedule = self._track(asyncio.create_task(self._try_output(), name="call-output-schedule"))
+            self._output_schedule.add_done_callback(self._observe_task)
 
-    async def _try_reply(self) -> None:
-        # Coalesce ready events; never depend on task scheduling to preserve input facts.
-        await asyncio.sleep(0)
-        if (
+    def _deadline_reached(self) -> bool:
+        return (
+            self._connected_monotonic is not None
+            and self._monotonic() >= self._connected_monotonic + self._time_limit_seconds
+        )
+
+    def _output_available(self) -> bool:
+        return not (
             self._termination is not None
             or self.state is not CallState.ACTIVE
+            or self._pending_end_reason is not None
             or self._user_speaking
-            or not self._inputs.can_reply()
-            or self._fact_tasks
+            or self._inputs.speech
+            or not self._inputs.ready.issuperset(self._inputs.pending)
+            or any(not task.done() for task in self._fact_tasks | self._handle_tasks)
+            or self._request_tokens
+            or self._execution_tokens
+            or self._plans
+            or (self._realize_task is not None and not self._realize_task.done())
             or self._pcm_buffered_bytes
+            or self._pending_send
             or any(not r.playback_completed and not r.failed for r in self._responses.values())
-        ):
+        )
+
+    async def _try_output(self) -> None:
+        # One no-await selection step reserves warning/reply before spawning work.
+        await asyncio.sleep(0)
+        if self.state is CallState.ACTIVE and self._deadline_reached():
+            self.begin_termination(CallEndReason.TIME_LIMIT)
+            return
+        if not self._output_available() or self._inputs.attempt is not None:
+            return
+        if self._warning.state is WarningState.IN_FLIGHT:
+            return
+        if self._warning.state is WarningState.PENDING:
+            request_id = str(uuid4())
+            self._warning.begin(request_id)
+            remaining = self._connected_monotonic + self._time_limit_seconds - self._monotonic()
+            self._spawn_handle(
+                self._submit_stimulus(
+                    d.CallTimeLimitWarning(
+                        **self._stimulus_fields(),
+                        call_id=self._record.call_id,
+                        remaining_ms=max(0, int(remaining * 1000)),
+                    ),
+                    request_id=request_id,
+                ),
+                name="call-time-limit-warning",
+            )
+            return
+        if not self._inputs.can_reply():
             return
         attempt = self._inputs.begin(str(uuid4()))
         semantic = "\n".join(item.audio_content.transcript or item.audio_content.render() for item in attempt.inputs)
@@ -903,6 +959,7 @@ class CallStage:
         stimulus: d.Stimulus,
         turn_seq: int | None = None,
         attempt: ReplyAttempt | None = None,
+        request_id: str | None = None,
     ) -> None:
         if self.state in {
             CallState.ENDING,
@@ -912,7 +969,7 @@ class CallStage:
         }:
             return
         token = d.CancellationToken()
-        request_id = attempt.request_id if attempt is not None else str(uuid4())
+        request_id = attempt.request_id if attempt is not None else (request_id or str(uuid4()))
         self._request_tokens.add(token)
         self._request_turn[request_id] = turn_seq
         request = d.HandleStimulusRequest(
@@ -924,6 +981,8 @@ class CallStage:
         sink = _PlanSink(self, request_id, token, turn_seq)
         try:
             report = await self._agent.handle_stimulus(request, sink, context=self._context)
+            if request_id == self._warning.request_id:
+                self._warning.report = report
             if attempt is not None:
                 attempt.report = report
                 self._settle_attempt()
@@ -936,11 +995,15 @@ class CallStage:
                     self._turns[turn_seq].status = CallReplyStatus.FAILED
                 self._record_reply_failure(request_id)
         except Exception:
+            if request_id == self._warning.request_id:
+                self._warning.finish(success=False)
             if attempt is not None and self._inputs.attempt is attempt:
                 self._inputs.settle(attempt, success=False)
             raise
         finally:
             self._request_tokens.discard(token)
+            self._settle_warning()
+            self._schedule_output()
             if turn_seq is not None and not sink.ids:
                 self._finish_user_turn(turn_seq)
 
@@ -965,6 +1028,7 @@ class CallStage:
             self._realize_task.add_done_callback(self._resume_queued_plans)
 
     def _resume_queued_plans(self, completed) -> None:
+        self._schedule_output()
         if (
             self._realize_task is completed
             and self._plans
@@ -1032,6 +1096,7 @@ class CallStage:
                 self._turns[turn_seq].status = CallReplyStatus.FAILED
         finally:
             self._execution_tokens.discard(execution_token)
+            self._settle_warning()
             self._settle_attempt()
             self._playback.set_generation_count(0)
             if turn_seq is not None and not self._turn_has_unsettled_response(turn_seq):
@@ -1047,7 +1112,8 @@ class CallStage:
                 return
             if any(isinstance(action, d.Say) for action in plan.actions):
                 await self._transport_send(self._emit(CallReplyFailed(self._ownership.call_id)))
-                self._record_reply_failure(plan.origin_request_id)
+                if plan.origin_request_id != self._warning.request_id:
+                    self._record_reply_failure(plan.origin_request_id)
                 self._retire_unrealized_responses(response_ids)
             if turn_seq is not None:
                 self._turns[turn_seq].status = CallReplyStatus.FAILED
@@ -1147,6 +1213,7 @@ class CallStage:
         connected_at = self._now()
         await self._transition_or_close(CallState.ACTIVE, ledger_facts={"connected_at": connected_at})
         self._connected_monotonic = self._monotonic()
+        self._time_limit_task = self._track(asyncio.create_task(self._run_time_limit(), name="call-time-limit"))
         if not self._started:
             return
         await self._submit_stimulus(
@@ -1162,7 +1229,7 @@ class CallStage:
             finally:
                 self._pcm_buffered_bytes = max(0, self._pcm_buffered_bytes - len(frame.payload))
                 self._pcm.task_done()
-                self._schedule_reply()
+                self._schedule_output()
 
     async def expire_retention(self, deadline: float) -> None:
         """应用 Manager 的离线到期通知，重新校验期限避免旧计时终止新连接。"""
@@ -1183,10 +1250,48 @@ class CallStage:
 
     async def _await_silence(self) -> None:
         await asyncio.sleep(5.0)
-        if self.state is CallState.ACTIVE and self._playback.silence_elapsed():
+        if (
+            self._output_available()
+            and not self._deadline_reached()
+            and not self._inputs.pending
+            and self._warning.state not in {WarningState.PENDING, WarningState.IN_FLIGHT}
+            and self._playback.silence_elapsed()
+        ):
             await self._submit_stimulus(
                 d.CallSilenceElapsed(**self._stimulus_fields(), call_id=self._record.call_id, silence_ms=5000)
             )
+
+    async def _run_time_limit(self) -> None:
+        assert self._connected_monotonic is not None
+        deadline = self._connected_monotonic + self._time_limit_seconds
+        if self._time_limit_warning_seconds > 0:
+            await self._wait_until_monotonic(deadline - self._time_limit_warning_seconds)
+            self._warning.due()
+            self._schedule_output()
+        await self._wait_until_monotonic(deadline)
+        if await self._await_time_limit_active():
+            self.begin_termination(CallEndReason.TIME_LIMIT)
+
+    async def _await_time_limit_active(self) -> bool:
+        # Preserve the original three-second recovery opportunity. Successful
+        # resume retains the absolute deadline; failed recovery owns its reason.
+        while self._termination_reason is None:
+            if self.state is CallState.ACTIVE:
+                return True
+            if self.state is not CallState.RECONNECTING:
+                return False
+            self._time_limit_changed.clear()
+            await self._time_limit_changed.wait()
+        return False
+
+    async def _wait_until_monotonic(self, deadline: float) -> None:
+        while self._monotonic() < deadline:
+            self._time_limit_changed.clear()
+            remaining = deadline - self._monotonic()
+            try:
+                await asyncio.wait_for(self._time_limit_changed.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                pass
 
     async def _transition(
         self,
@@ -1202,7 +1307,8 @@ class CallStage:
             lifecycle._snapshot = self._lifecycle.snapshot
             snapshot = lifecycle.transition(state, outcome=outcome, end_reason=end_reason)
             # 墙钟可能在相邻状态更新间不变，账本版本仍必须严格递增。
-            updated_at = max(self._now(), self._record.updated_at + timedelta(microseconds=1))
+            wall_now = self._now()
+            updated_at = max(wall_now, self._record.updated_at + timedelta(microseconds=1))
             changes: dict[str, object] = {"state": state, "updated_at": updated_at}
             if outcome is not None:
                 changes["outcome"] = outcome
@@ -1211,7 +1317,7 @@ class CallStage:
             if ledger_facts:
                 changes.update(ledger_facts)
             if state is CallState.ENDED:
-                changes["ended_at"] = self._now()
+                changes["ended_at"] = wall_now
             updated = self._record.with_update(**changes)
             changed = await complete_owned(
                 asyncio.to_thread(
@@ -1418,6 +1524,15 @@ class CallStage:
             duration_ms=0,
             numeric={"interrupt_count": 1},
             labels={"result": CallMetricResult.SUCCEEDED.value},
+        )
+        warning_responses = [
+            r
+            for r in self._responses.values()
+            if self._warning.request_id is not None and r.request_id == self._warning.request_id and not r.provisional
+        ]
+        self._warning.interrupt(
+            playback_succeeded=bool(warning_responses)
+            and all(r.message_completed and r.playback_completed and not r.failed for r in warning_responses)
         )
         self._generation += 1
         attempt = self._inputs.attempt
@@ -1704,6 +1819,7 @@ class CallStage:
         task = self._track(asyncio.create_task(awaitable, name=name))
         self._handle_tasks.add(task)
         task.add_done_callback(self._handle_tasks.discard)
+        task.add_done_callback(lambda _: self._schedule_output())
 
     def _finish_pending_end_if_ready(self) -> None:
         if (
@@ -1740,7 +1856,7 @@ class CallStage:
         self._settle_attempt()
         if self._active_response_id == response_id:
             self._active_response_id = None
-        self._schedule_reply()
+        self._schedule_output()
 
     async def _confirm_response(self, response_id: str, response: _Response) -> None:
         plans = await self._write_fact(
@@ -1760,12 +1876,33 @@ class CallStage:
                 for item in self._responses.values()
                 if item.turn_seq == response.turn_seq and item.confirmed
             )
-        self._reset_failures_after_playback(response)
+        if response.request_id != self._warning.request_id:
+            self._reset_failures_after_playback(response)
+        self._settle_warning()
         self._settle_attempt()
         if self._termination is None:
             for plan in plans:
                 self._enqueue_plan(plan, d.CancellationToken(), None)
         self._refresh_silence_task()
+
+    def _settle_warning(self) -> None:
+        warning = self._warning
+        if warning.state is not WarningState.IN_FLIGHT or warning.report is None or self._execution_tokens:
+            return
+        responses = [r for r in self._responses.values() if r.request_id == warning.request_id and not r.provisional]
+        failed = warning.report.request_status is not d.HandlingRequestStatus.COMPLETED
+        if (
+            not failed
+            and responses
+            and not any(r.failed for r in responses)
+            and not all(r.confirmed for r in responses)
+        ):
+            return
+        success = not failed and bool(responses) and all(r.confirmed and not r.failed for r in responses)
+        warning.finish(success=success)
+        if not success:
+            get_logger(__name__).warning("Call time-limit warning failed call={}", self.call_id)
+        self._schedule_output()
 
     def _settle_attempt(self) -> None:
         attempt = self._inputs.attempt
@@ -1786,7 +1923,7 @@ class CallStage:
         if not success:
             for item in attempt.inputs:
                 self._turns[item.turn_seq].status = CallReplyStatus.FAILED
-        self._schedule_reply()
+        self._schedule_output()
 
     def _reset_failures_after_playback(self, response) -> None:
         if not response.provisional and response.request_id is not None:
