@@ -71,6 +71,7 @@ function compositionNative(): CallNativeAudioPort {
     tombstone: async (_stream) => {},
     pauseCapture: async () => {},
     resumeCapture: async () => {},
+    playReplyFailureTone: async () => {},
     subscribeConsumption: (_listener: (receipt: PlaybackConsumptionReceipt) => void) => () => {},
   };
 }

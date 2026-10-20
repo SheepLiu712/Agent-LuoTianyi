@@ -53,6 +53,8 @@ export interface CallNativeAudioPort {
   /** Pause production before the reliable PCM outbox overflows. */
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;
+  /** Play the local, non-conversational cue for one failed reply. */
+  playReplyFailureTone(): Promise<void>;
   subscribeConsumption(listener: (receipt: PlaybackConsumptionReceipt) => void): () => void;
 }
 
