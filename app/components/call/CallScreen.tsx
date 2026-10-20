@@ -1,23 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useReducer } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AppTheme } from '../../utils/theme';
 import type { CallState } from '../../types/call';
 import { getCallActiveDurationMs } from '../../utils/call_state';
+import { callMonotonicNowMs } from '../../utils/call_clock';
 
-interface Props { state: CallState; theme: AppTheme; onHangup: () => void; onBack: () => void; }
+interface Props {
+  state: CallState;
+  theme: AppTheme;
+  onHangup: () => void;
+  onBack: () => void;
+  now?: () => number;
+}
 
 const labels: Record<string, string> = { REQUESTING_PERMISSION: '需要麦克风权限', SWITCH_PREPARING: '准备通话', CONNECTING: '连接中', PREPARING: '准备中', RINGING: '呼叫中', ACTIVE: '通话中', RECONNECTING: '正在重新连接', ENDING: '正在结束', ENDED: '通话已结束', FAILED: '通话失败', DECLINED: '通话未接通' };
 function clock(ms: number) { const seconds = Math.floor(ms / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; }
 
-export function CallScreen({ state, theme, onHangup, onBack }: Props) {
+export function CallScreen({ state, theme, onHangup, onBack, now = callMonotonicNowMs }: Props) {
   const insets = useSafeAreaInsets();
-  const [now, setNow] = useState(Date.now());
+  const [, refreshClock] = useReducer((tick: number) => tick + 1, 0);
   useEffect(() => {
     if (state.phase !== 'ACTIVE' && state.phase !== 'RECONNECTING') return;
     let mounted = true;
     const id = setInterval(() => {
-      if (mounted) setNow(Date.now());
+      if (mounted) refreshClock();
     }, 1000);
     return () => {
       mounted = false;
@@ -34,7 +41,8 @@ export function CallScreen({ state, theme, onHangup, onBack }: Props) {
       <Image source={require('../../assets/images/tianyi_icon.png')} style={styles.avatar} />
       <Text style={styles.name}>洛天依</Text>
       <Text style={styles.status}>{labels[state.phase] ?? '通话'}</Text>
-      {active ? <Text style={styles.timer}>{clock(getCallActiveDurationMs(state, now))}</Text> : null}
+      {/* Sample on render so entering ACTIVE never reuses the dialing-time sample. */}
+      {active ? <Text style={styles.timer}>{clock(getCallActiveDurationMs(state, now()))}</Text> : null}
       {state.phase === 'RECONNECTING' ? <View style={styles.reconnect}><Text style={styles.reconnectText}>连接中断，正在恢复。不会重复播放开场语音</Text></View> : null}
       {ended ? <Text style={styles.outcome}>{state.endReason === 'failed' ? '请稍后重试' : '本次通话已结束'}</Text> : null}
     </View>
