@@ -105,6 +105,60 @@ def test_new_work_cancels_running_silence_and_new_completion_uses_new_time():
     assert playback.silence_started_at == 130.0
 
 
+@pytest.mark.parametrize("stopped_first", [False, True])
+def test_invalid_speech_restores_completed_playback_and_starts_a_full_silence_period(stopped_first):
+    playback, clock = coordinator()
+    final_stream(playback)
+    playback.complete_playback("response", 1)
+    clock.now = 103.0
+    playback.set_user_speaking(True)
+    if stopped_first:
+        playback.set_user_speaking(False)
+        assert playback.silence_started_at is None
+    clock.now = 110.0
+    playback.finish_invalid_user_speech()
+    assert playback.silence_started_at == 110.0
+    assert not playback.silence_elapsed(now=114.999)
+    assert playback.silence_elapsed(now=115.0)
+    clock.now = 113.0
+    playback.finish_invalid_user_speech()
+    assert playback.silence_started_at == 110.0
+
+
+@pytest.mark.parametrize("busy", ["pending_send", "generation", "unfinished_turn", "stream", "new_speech"])
+def test_invalid_speech_cannot_restore_qualification_invalidated_by_other_work(busy):
+    playback, _ = coordinator()
+    final_stream(playback)
+    playback.complete_playback("response", 1)
+    playback.set_user_speaking(True)
+    if busy == "stream":
+        final_stream(playback, "new-response", 2)
+        playback.settle_stopped_stream("new-response", 2)
+    else:
+        setter = {
+            "pending_send": playback.set_pending_send_count,
+            "generation": playback.set_generation_count,
+            "unfinished_turn": playback.set_unfinished_user_turn_count,
+            "new_speech": lambda count: playback.set_user_speaking(bool(count)),
+        }[busy]
+        setter(1)
+        setter(0)
+    playback.finish_invalid_user_speech()
+    assert playback.silence_started_at is None
+
+
+def test_invalid_speech_does_not_invent_a_playback_completion():
+    playback, _ = coordinator()
+    playback.set_user_speaking(True)
+    playback.finish_invalid_user_speech()
+    assert playback.silence_started_at is None
+    final_stream(playback)
+    playback.set_user_speaking(True)
+    playback.settle_stopped_stream("response", 1)
+    playback.finish_invalid_user_speech()
+    assert playback.silence_started_at is None
+
+
 def test_reconnecting_blocks_implicit_restart_until_stage_provides_baseline():
     playback, clock = coordinator()
     final_stream(playback)

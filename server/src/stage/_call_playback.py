@@ -42,6 +42,7 @@ class CallPlaybackCoordinator:
         self._state = CallState.ACTIVE
         self._silence_started_at: float | None = None
         self._has_completion_qualification = False
+        self._speech_completion_qualification = False
         self._reconnect_resume_required = False
 
     @property
@@ -101,8 +102,22 @@ class CallPlaybackCoordinator:
         if not isinstance(speaking, bool):
             raise TypeError("speaking must be bool")
         if speaking:
+            completed_before_speech = self._has_completion_qualification
             self._invalidate_silence_qualification()
+            self._speech_completion_qualification = completed_before_speech
         self._user_speaking = speaking
+        self._refresh_silence()
+
+    def finish_invalid_user_speech(self) -> None:
+        """Restore only real completion suspended by this invalid speech.
+
+        New output or a valid turn invalidates the saved qualification. A
+        normal speech stop may precede an empty final transcript; it must not
+        restore qualification before the invalid result arrives.
+        """
+        self._has_completion_qualification |= self._speech_completion_qualification
+        self._speech_completion_qualification = False
+        self._user_speaking = False
         self._refresh_silence()
 
     def set_unfinished_user_turn_count(self, count: int) -> None:
@@ -148,6 +163,7 @@ class CallPlaybackCoordinator:
         self._unfinished_user_turns = 0
         self._silence_started_at = None
         self._has_completion_qualification = False
+        self._speech_completion_qualification = False
         self._reconnect_resume_required = False
 
     def _refresh_silence(self) -> float | None:
@@ -171,6 +187,7 @@ class CallPlaybackCoordinator:
 
     def _invalidate_silence_qualification(self) -> None:
         self._has_completion_qualification = False
+        self._speech_completion_qualification = False
         self._silence_started_at = None
 
     def _require_stream(self, response_id: str, stream_id: int) -> _Stream:

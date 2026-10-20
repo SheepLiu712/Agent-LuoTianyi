@@ -43,6 +43,7 @@ from src.infrastructure.models.realtime_speech import (
     SpeechStarted,
     SpeechStopped,
     TurnCompleted,
+    TurnInvalid,
 )
 from src.infrastructure.observability.call_metrics import (
     CallMetric,
@@ -315,6 +316,7 @@ class CallStage:
         self._responses: dict[str, _Response] = {}
         self._tombstones: set[str] = set()
         self._generation = 0
+        self._active_speech_item_id: str | None = None
         self._next_stream_id = 1
         self._pending_send = 0
         self._connected_monotonic: float | None = None
@@ -676,13 +678,15 @@ class CallStage:
             if self.state in {CallState.ENDED, CallState.FAILED}:
                 return
             if isinstance(event, SpeechStarted):
+                self._active_speech_item_id = event.item_id
                 self._playback.set_user_speaking(True)
                 self._interrupt()
             elif isinstance(event, SpeechStopped):
-                self._playback.set_user_speaking(False)
-                self._refresh_silence_task()
+                self._release_user_speaking(event.item_id)
             elif isinstance(event, TurnCompleted):
                 self._spawn_handle(self._on_turn(event), name="call-turn-handle")
+            elif isinstance(event, TurnInvalid):
+                self._release_user_speaking(event.item_id, invalid=True)
             elif isinstance(event, ProviderFailed):
                 self._record_metric(
                     CallMetricName.PROVIDER_ENDPOINT,
@@ -698,6 +702,23 @@ class CallStage:
                 return
             elif isinstance(event, AmbientAudio):
                 continue
+
+    def _release_user_speaking(self, item_id: str | None, *, invalid: bool = False) -> None:
+        """Release only the provider turn that currently owns speaking state."""
+        if item_id is not None and item_id != self._active_speech_item_id:
+            return
+        if item_id is None and self._active_speech_item_id is not None:
+            return
+        previous_silence = self._playback.silence_started_at
+        if invalid:
+            self._active_speech_item_id = None
+            self._playback.finish_invalid_user_speech()
+        else:
+            # Keep this identity until the final transcript or next speech:
+            # an empty transcript can invalidate an already stopped item.
+            self._playback.set_user_speaking(False)
+        if self._playback.silence_started_at != previous_silence:
+            self._refresh_silence_task()
 
     async def _on_turn(self, event: TurnCompleted) -> None:
         if self.state is not CallState.ACTIVE:
