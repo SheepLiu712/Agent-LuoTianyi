@@ -77,7 +77,9 @@ def run_race_peer(api: AuthApi, args: argparse.Namespace, username: str, request
         print(f"[PASS] 竞争结果：本进程赢得竞争（创建账号 {username}）")
         return 0
     message = outcome.message or ""
-    if "邀请码" in message or "注册失败" in message:
+    # 竞争失败方走的是“邀请码/用户名不可用”的既有 400：只有 detail、没有稳定 code。
+    # 带 code 的失败（换版、请求冲突、缺同意字段等）不属于竞争预期，判 FAIL。
+    if not outcome.code:
         print(f"[PASS] 竞争结果：本进程按预期失败（{message}），未创建账号")
         return 0
     print(f"[FAIL] 竞争结果：非预期失败（code={outcome.code}, message={message}）")
