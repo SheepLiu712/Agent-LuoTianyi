@@ -87,13 +87,13 @@ networkTest('active transport failure sends a legal 4001 close frame and leaves 
     expect(callEvents.find((event) => event.event === 'close_event')).toMatchObject({ event: 'close_event', code: 4001 });
     const serverEvidence = await waitUntil(
       () => readEvidence(server.disconnectEvidencePath),
-      (items) => items.some((item) => item.event === 'hub.detach_after_disconnect'),
+      (items) => items.some((item) => item.event === 'session.detach'),
     );
     expect(serverEvidence).toContainEqual(expect.objectContaining({
       event: 'websocket.disconnect', path: '/call_ws', code: 4001,
     }));
     expect(serverEvidence).toContainEqual(expect.objectContaining({
-      event: 'hub.detach_after_disconnect', detached: true, connection_present: false, stage_state: 'reconnecting',
+      event: 'session.detach', detached: true, connection_present: false, stage_state: 'reconnecting',
     }));
     expect(serverEvidence.some((item) => item.event === 'websocket.disconnect' && item.path === '/chat_ws' && item.code === 4001)).toBe(false);
     await attempt.close();

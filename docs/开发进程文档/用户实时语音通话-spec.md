@@ -99,6 +99,12 @@
 **输入**：服务端返回稳定错误码。  
 **输出**：返回聊天页并提示失败，不创建 Conversation 通话记录。
 
+**客户端终态提示规则（#333 / #357）**：失败提示在返回聊天及通话状态重置后保留，用户可关闭，发起下一通呼叫时清除。除稳定错误码外，`call.ended` 必须保留 `outcome` 与 `end_reason`；Transport 的 `closed` 仅表示连接生命周期结束，不能据此判断业务成功。`outcome=cancelled_before_answer` 仅说明未接通，不能替代结束原因判断。
+
+- `setup_timeout`、`provider_failed`、`recovery_timeout`、`system_failure` 均展示固定安全提示；接通前与接通后异常均适用，供应商/系统异常文案不误称已接通的通话“未能建立”。不得展示供应商原始异常、地址、token 或堆栈。
+- `user_hangup`、`agent_hangup`、`declined`、`time_limit` 不展示错误；本地主动取消或挂断后，旧通话的迟到失败不能产生提示或影响新通话。
+- 同一尝试的错误回调、失败快照、重复终态只通知一次。终态通知引发同步 `close()` 时，仍保留首次终态与时长，并只执行一份清理任务。此处只规定客户端提示，不改变服务端记录与结算规则。
+
 **状态**：服务端已校验身份、取得占用、建立 PREPARING 账本，并由 StageManager 持有本次建立操作。
 
 **输入**：StageManager 返回 PREPARING CallStage；CallWebSocketAdapter 同次建立关联该 Stage 的 Session 与当前连接 Binding。

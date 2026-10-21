@@ -1,4 +1,5 @@
 import type { CallAudioFormat, CallPlaybackChunk, CapturedAudioFrame, PlaybackConsumptionReceipt } from '../utils/call_audio_contracts';
+import type { CallEnded } from '../utils/call_protocol/control_types';
 
 export interface DeferredCallSocketData {
   resolve(): Promise<Uint8Array>;
@@ -101,6 +102,9 @@ export interface CallTransportSnapshot {
   activeDurationMs: number;
   recoveryDeadlineMonotonicMs?: number;
   errorCode?: string;
+  /** Server terminal facts: closed describes transport lifetime, not business success. */
+  outcome?: CallEnded['outcome'];
+  endReason?: CallEnded['end_reason'];
 }
 
 export interface StartCallRequest {

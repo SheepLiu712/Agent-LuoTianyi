@@ -297,7 +297,7 @@ export class CallTransportSession {
       if (this.pendingEnded) {
         const ended = this.pendingEnded;
         this.pendingEnded = null;
-        void this.terminate('closed', undefined, ended.active_duration_ms);
+        void this.terminate('closed', undefined, ended.active_duration_ms, ended);
         return;
       }
       this.startNativeAcceptance(this.socketEpoch);
@@ -693,10 +693,13 @@ export class CallTransportSession {
     return this.snapshot.status === 'closed' || this.snapshot.status === 'failed';
   }
 
-  private terminate(status: 'closed' | 'failed', code?: string, activeDurationMs = 0): Promise<void> {
+  private terminate(status: 'closed' | 'failed', code?: string, activeDurationMs = 0, ended?: CallEnded): Promise<void> {
     if (this.terminalPromise) return this.terminalPromise;
+    // Observers may synchronously close their session while handling the terminal snapshot.
+    // Claim cleanup before notifying them so reentry cannot replace the terminal facts.
+    this.terminalPromise = Promise.resolve().then(() => this.finishTerminalCleanup());
     this.closed = true;
-    this.update({ status, errorCode: code, activeDurationMs });
+    this.update({ status, errorCode: code, activeDurationMs, outcome: ended?.outcome, endReason: ended?.end_reason });
     this.clearRecoveryTimer();
     this.clearControlRetry();
     this.socketEpoch += 1;
@@ -717,7 +720,6 @@ export class CallTransportSession {
         try { listener(code); } catch { /* observer failures are isolated */ }
       }
     }
-    this.terminalPromise = this.finishTerminalCleanup();
     return this.terminalPromise;
   }
 

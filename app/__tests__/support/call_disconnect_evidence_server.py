@@ -10,7 +10,7 @@ from pathlib import Path
 from support.call_network_success_server import main
 
 import server_main
-from src.adapter.websocket.call_v1.transport import CallTransportHub
+from src.adapter.websocket.call_v1._session import Session
 
 EVIDENCE = Path(sys.argv[1]).resolve() / "disconnect-evidence.jsonl"
 
@@ -42,35 +42,24 @@ class DisconnectEvidenceMiddleware:
 
 server_main.app.add_middleware(DisconnectEvidenceMiddleware)
 
-_detach_after_disconnect = CallTransportHub.detach_after_disconnect
+_detach = Session.detach
 
 
-async def _observed_detach_after_disconnect(self, binding, disconnect_stage):
-    call_id = binding.session.call_id
-    stage_state = None
-
-    async def observed_stage_disconnect():
-        nonlocal stage_state
-        result = await disconnect_stage()
-        manager = getattr(binding.session.business_sink, "_stage", None)
-        state = getattr(manager, "state", None)
-        stage_state = getattr(state, "value", None)
-        return result
-
-    detached = await _detach_after_disconnect(self, binding, observed_stage_disconnect)
-    entry = self._sessions.get(call_id)  # noqa: SLF001 - test-only observation
+async def _observed_detach(self, binding):
+    # Observe the current Session/Binding seam without replacing disconnect behavior.
+    was_current = self._binding is binding
+    result = await _detach(self, binding)
     _record(
-        "hub.detach_after_disconnect",
-        call_id=call_id,
-        detached=detached,
-        connection_present=entry is not None and entry.connection_id is not None,
-        generation=None if entry is None else entry.generation,
-        stage_state=stage_state,
+        "session.detach",
+        call_id=self.call_id,
+        detached=was_current and self._binding is not binding,
+        connection_present=self._binding is not None,
+        stage_state=self._stage.state.value,
     )
-    return detached
+    return result
 
 
-CallTransportHub.detach_after_disconnect = _observed_detach_after_disconnect
+Session.detach = _observed_detach
 
 
 if __name__ == "__main__":
