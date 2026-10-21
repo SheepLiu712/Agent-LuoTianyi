@@ -12,6 +12,7 @@ import { addDebugTrace } from '../utils/debug_trace';
 import { useVoiceInput } from './useVoiceInput';
 import { voicePlaybackManager } from '../utils/voice_playback_manager';
 import { runImageSelection } from '../utils/image_selection';
+import { mergeLoadedHistory } from '../utils/call_history';
 
 function createUuid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -440,6 +441,13 @@ export const useChatLogic = (
   const handleToggleAgentAudio = toggleHistoryAudio;
   const toggleVoicePlayback = toggleHistoryAudio;
 
+  const addLocalCallRecord = useCallback((record: ChatMessage) => {
+    setMessages((previous) => previous.some((message) => message.uuid === record.uuid
+      || (message.type === 'call' && record.callId && message.callId === record.callId))
+      ? previous : [record, ...previous]);
+    setTimeout(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: false }), 10);
+  }, []);
+
   const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
     for (const msg of newMessages) {
       if (!msg.isUser && msg.audioAvailable && msg.audioLocalUri) {
@@ -457,16 +465,14 @@ export const useChatLogic = (
           .map(([uploadId]) => uploadId),
       );
       const retained = prev.filter((msg) => !optimisticToReplace.has(msg.uuid));
-      const existingUuids = new Set(retained.map((msg) => msg.uuid));
       const normalized = newMessages
-        .filter((msg) => !existingUuids.has(msg.uuid))
         .map((msg) => ({
           ...msg,
           sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
           audioPlayState: msg.audioPlayState || 'idle',
           audioDownloadState: msg.type === 'audio' ? 'idle' : msg.audioDownloadState,
         }));
-      const next = [...retained, ...normalized.reverse()];
+      const next = mergeLoadedHistory(retained, normalized.reverse());
 
       if (nowScrollIndex >= 0) {
         // 快速滑动时目标 index 可能尚未渲染，scrollToIndex 会抛 invariant violation 导致应用闪退。
@@ -513,6 +519,7 @@ export const useChatLogic = (
     thinking,
     setInputText: handleInputChange,
     addHistoryMessage,
+    addLocalCallRecord,
     handleSendText,
     handleSendImage,
     handleWebViewMessage,

@@ -167,6 +167,7 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
       15_000,
     ) as any;
     const callHistory = history.history.find((item: any) => item.type === 'call');
+    expect(callHistory.call_id).toBe(callId);
     expect(callHistory.content).toMatch(/^\[语音通话\] /);
     expect(callHistory.content).not.toContain('用户与角色讨论');
 

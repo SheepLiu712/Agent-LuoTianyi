@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
+import { AppState } from 'react-native';
 import { CallFailureBanner } from '../components/call/CallFailureBanner';
 import { useCallSession } from '../hooks/useCallSession';
 import { CallSession } from '../utils/call_session/call_session';
@@ -13,7 +14,7 @@ import { THEMES } from '../utils/theme';
 jest.mock('react-native', () => ({
   __esModule: true,
   Platform: { OS: 'android' },
-  AppState: { addEventListener: () => ({ remove: jest.fn() }) },
+  AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
   BackHandler: { addEventListener: () => ({ remove: jest.fn() }) },
   Pressable: 'Pressable', Text: 'Text', View: 'View',
   StyleSheet: { absoluteFillObject: {}, create: (styles: any) => styles },
@@ -73,6 +74,9 @@ function mountCall() {
   const sockets = new Sockets();
   const onFailure = jest.fn();
   const onReturnToChat = jest.fn();
+  const onCallRecord = jest.fn();
+  const clock = new Clock();
+  const now = () => clock.now;
   const release = jest.fn();
   const unsubscribeConsumption = jest.fn();
   const audio = {
@@ -87,18 +91,18 @@ function mountCall() {
   function createSession() {
     transport = new CallTransportSession({
       url: 'ws://example/call_ws', credentials: { username: 'u', token: 't' }, characterId: 'luotianyi',
-      sockets, nativeAudio: audio, clock: new Clock(), serverAvailable: true, nativeAvailable: true,
+      sockets, nativeAudio: audio, clock, serverAvailable: true, nativeAvailable: true,
     });
     return new CallSession(transport, { prepare: async () => {} }, 'luotianyi', release);
   }
   function Harness() {
     result = useCallSession({ createSession, capabilities: { serverAvailable: true, nativeAvailable: true },
-      requestPermission: async () => 'granted', onFailure, onReturnToChat });
+      requestPermission: async () => 'granted', onFailure, onReturnToChat, onCallRecord, now });
     return result.failureNotice ? <CallFailureBanner notice={result.failureNotice} theme={THEMES.dark} onDismiss={result.dismissFailure} /> : null;
   }
   act(() => { tree = create(<Harness />); });
   return {
-    sockets, onFailure, onReturnToChat, release, unsubscribeConsumption, audio,
+    sockets, onFailure, onReturnToChat, onCallRecord, clock, release, unsubscribeConsumption, audio,
     get result() { return result; },
     get transport() { return transport; },
     rendered: () => tree.root.findAllByType('Text' as any).map(textOf).join(''),
@@ -131,6 +135,37 @@ function mountCall() {
 }
 
 describe('call.ended production composition', () => {
+  test('backgrounding during recovery records duration at the first disconnect, only once', async () => {
+    const call = mountCall();
+    try {
+      await call.start(true);
+      await act(async () => { call.sockets.socket.emit('close', { code: 1006 }); await flush(); });
+      expect(call.result.state.phase).toBe('RECONNECTING');
+      call.clock.now += 2000;
+      const appStateCalls = (AppState.addEventListener as jest.Mock).mock.calls;
+      const onAppState = appStateCalls[appStateCalls.length - 1][1];
+      await act(async () => { onAppState('background'); await flush(); });
+      expect(call.onCallRecord).toHaveBeenCalledTimes(1);
+      expect(call.onCallRecord).toHaveBeenCalledWith(expect.objectContaining({
+        callId: CALL_ID, callOutcome: 'connected', durationMs: 500,
+      }));
+      expect(call.result.state.phase).toBe('IDLE');
+      expect(call.result.failureNotice).toBeNull();
+      expect(call.release).toHaveBeenCalledTimes(1);
+    } finally { call.unmount(); }
+  });
+  test('record observer failure cannot interrupt terminal cleanup or return to chat', async () => {
+    const call = mountCall();
+    call.onCallRecord.mockImplementation(() => { throw new Error('view observer failed'); });
+    try {
+      await call.start(true);
+      await call.sendEnded('agent_hangup', true);
+      expect(call.onCallRecord).toHaveBeenCalledTimes(1);
+      expect(call.result.state.phase).toBe('IDLE');
+      expect(call.release).toHaveBeenCalledTimes(1);
+      expect(call.onReturnToChat).toHaveBeenCalledTimes(1);
+    } finally { call.unmount(); }
+  });
   test.each([
     ['setup_timeout', '呼叫超时'],
     ['provider_failed', '通话服务异常'],
@@ -149,6 +184,10 @@ describe('call.ended production composition', () => {
         expect(call.transport.state).toMatchObject({ status: 'closed', endReason: reason,
           outcome: connected ? 'connected' : 'cancelled_before_answer', activeDurationMs: connected ? 500 : 0 });
         expect(call.onFailure).toHaveBeenCalledTimes(1);
+        expect(call.onCallRecord).toHaveBeenCalledTimes(connected ? 1 : 0);
+        if (connected) expect(call.onCallRecord).toHaveBeenCalledWith(expect.objectContaining({
+          callId: CALL_ID, callOutcome: 'connected', durationMs: 500,
+        }));
         expect(call.onReturnToChat).toHaveBeenCalledTimes(1);
         expect(call.release).toHaveBeenCalledTimes(1);
         expect(call.unsubscribeConsumption).toHaveBeenCalledTimes(1);
@@ -174,6 +213,11 @@ describe('call.ended production composition', () => {
       expect(call.result.failureNotice).toBeNull();
       expect(call.rendered()).toBe('');
       expect(call.onFailure).not.toHaveBeenCalled();
+      expect(call.onCallRecord).toHaveBeenCalledTimes(1);
+      expect(call.onCallRecord).toHaveBeenCalledWith(expect.objectContaining({
+        callId: CALL_ID, callOutcome: outcome === 'cancelled_before_answer' ? 'cancelled' : outcome,
+        durationMs: connected ? 500 : 0,
+      }));
       expect(call.onReturnToChat).toHaveBeenCalledTimes(1);
       expect(call.release).toHaveBeenCalledTimes(1);
     } finally { call.unmount(); }
@@ -184,7 +228,12 @@ describe('call.ended production composition', () => {
     try {
       await call.start(connected);
       await act(async () => { call.result.hangup(); await flush(); });
+      expect(call.onCallRecord).toHaveBeenCalledTimes(1);
+      expect(call.onCallRecord).toHaveBeenCalledWith(expect.objectContaining({
+        callId: CALL_ID, callOutcome: connected ? 'connected' : 'cancelled', durationMs: connected ? 500 : 0,
+      }));
       await call.sendEnded('provider_failed', connected);
+      expect(call.onCallRecord).toHaveBeenCalledTimes(1);
       expect(call.result.state.phase).toBe('IDLE');
       expect(call.result.failureNotice).toBeNull();
       expect(call.onFailure).not.toHaveBeenCalled();
@@ -207,6 +256,7 @@ describe('call.ended production composition', () => {
       expect(call.rendered()).toContain('通话失败');
       expect(call.rendered()).not.toMatch(/secret|abc|stack|CALL_SETUP_FAILED/);
       expect(call.transport.state).toMatchObject({ status: 'failed', errorCode: 'CALL_SETUP_FAILED' });
+      expect(call.onCallRecord).not.toHaveBeenCalled();
       expect(call.onFailure).toHaveBeenCalledTimes(1);
       expect(call.onReturnToChat).toHaveBeenCalledTimes(1);
       expect(call.release).toHaveBeenCalledTimes(1);

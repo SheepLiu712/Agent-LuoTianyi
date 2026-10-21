@@ -136,6 +136,7 @@ async def test_history_persists_one_private_call_record_and_progress(monkeypatch
                 "source": "user",
                 "timestamp": "2026-10-11 20:00:00",
                 "type": "call",
+                "call_id": str(call_id),
                 "outcome": "connected",
                 "active_duration_ms": 65_000,
             }

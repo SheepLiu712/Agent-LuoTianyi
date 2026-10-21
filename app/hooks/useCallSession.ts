@@ -7,6 +7,8 @@ import { initialCallState, reduceCallState } from '../utils/call_state';
 import { callMonotonicNowMs } from '../utils/call_clock';
 import type { CallFailureNotice } from '../utils/call_failure';
 import { getCallEndFailureCode, getCallFailureNotice } from '../utils/call_failure';
+import { localCallHistory } from '../utils/call_history';
+import type { ChatMessage } from '../types/chat';
 
 type SessionPort = Pick<CallSession, 'prepare' | 'start' | 'hangup' | 'subscribe' | 'onError' | 'close'>;
 interface SessionOwner {
@@ -27,6 +29,7 @@ export interface CallSessionOptions {
   requestPermission?: () => Promise<'granted' | 'denied' | 'permanently_denied'>;
   now?: () => number;
   onReturnToChat?: () => void;
+  onCallRecord?: (record: ChatMessage) => void;
   onBackConfirmation?: () => void;
   onPermissionSettings?: () => void;
   onCleanupError?: (error: unknown) => void;
@@ -55,6 +58,8 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const generationRef = useRef(0);
   const connectedRef = useRef(false);
   const ownerRef = useRef<SessionOwner | null>(null);
+  const snapshotRef = useRef<Readonly<CallTransportSnapshot> | null>(null);
+  const requestedAtRef = useRef(0);
   const compatibilityConsumedRef = useRef(false);
   stateRef.current = state;
   const now = suppliedNow ?? callMonotonicNowMs;
@@ -123,13 +128,18 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const executeEffects = useCallback((effects: readonly { type: string }[]) => {
     for (const effect of effects) {
       if (effect.type === 'return_to_chat') {
+        const record = localCallHistory(stateRef.current, snapshotRef.current, requestedAtRef.current);
+        if (record) {
+          try { optionsRef.current.onCallRecord?.(record); } catch (error) { reportCleanupError(error); }
+        }
+        snapshotRef.current = null;
         scheduleReturnToChat(generationRef.current);
         stateRef.current = initialCallState;
         dispatch({ type: 'reset_to_idle' });
       }
       if (effect.type === 'show_back_confirmation') optionsRef.current.onBackConfirmation?.();
     }
-  }, [scheduleReturnToChat]);
+  }, [reportCleanupError, scheduleReturnToChat]);
 
   const dispatchEvent = useCallback((event: CallEvent) => {
     if (!mountedRef.current) return;
@@ -143,9 +153,11 @@ export function useCallSession(options: CallSessionOptions = {}) {
     const owner: SessionOwner = { generation, session: owned, cleaned: false };
     ownerRef.current = owner;
     connectedRef.current = false;
+    snapshotRef.current = null;
     try {
       owner.unsubscribe = owned.subscribe((snapshot: Readonly<CallTransportSnapshot>) => {
         if (!mountedRef.current || generation !== generationRef.current) return;
+        snapshotRef.current = snapshot;
         if (snapshot.status === 'starting') dispatchEvent({ type: 'server_state', state: 'PREPARING', callId: snapshot.callId });
         if (snapshot.status === 'connected' && snapshot.callId) {
           if (connectedRef.current) dispatchEvent({ type: 'transport_resumed', nowMs: now() });
@@ -189,6 +201,7 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const start = useCallback(async (requiresChatSwitch = true) => {
     if (!canStart || stateRef.current.phase !== 'IDLE') return false;
     setFailureNotice(null);
+    requestedAtRef.current = Date.now();
     const attemptGeneration = generationRef.current + 1;
     generationRef.current = attemptGeneration;
     let owned: SessionPort | null;

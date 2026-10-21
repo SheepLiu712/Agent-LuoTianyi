@@ -48,14 +48,17 @@ export function mapHistoryMessage(msg: any): ChatMessage {
     const callOutcome = outcome === 'connected' || outcome === 'cancelled_before_answer' || outcome === 'declined'
         ? outcome === 'cancelled_before_answer' ? 'cancelled' : outcome
         : undefined;
+    // Persisted call times use the server's naive Beijing datetime format.
+    const callTimestamp = isCall && typeof msg.timestamp === 'string'
+        ? Date.parse(`${msg.timestamp.replace(' ', 'T')}+08:00`) : msg.timestamp;
     return {
         uuid: msg.uuid || "unknown_id",
         content: isCall ? '[语音通话]' : msg.content || (msg.type === 'audio' ? '[语音消息]' : ''),
         isUser: msg.source === 'user',
         type: isCall ? 'call' : msg.type,
-        timestamp: msg.timestamp,
+        timestamp: isCall && !Number.isFinite(callTimestamp) ? undefined : callTimestamp,
         durationMs: isCall ? msg.active_duration_ms : msg.duration_ms ?? msg.durationMs,
-        ...(isCall ? { callOutcome } : {}),
+        ...(isCall ? { callOutcome, callId: typeof msg.call_id === 'string' ? msg.call_id : undefined } : {}),
         audioAvailable: msg.type === 'audio' ? msg.audio_available !== false : undefined,
         audioPlayState: msg.type === 'audio' ? 'idle' : undefined,
     };

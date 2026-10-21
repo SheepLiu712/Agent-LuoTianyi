@@ -107,6 +107,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     thinking,
     setInputText,
     addHistoryMessage,
+    addLocalCallRecord,
     handleSendText,
     handleSendImage,
     handleWebViewMessage,
@@ -137,6 +138,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     ringtone,
     onBackConfirmation: handleBackConfirmation,
     onReturnToChat: () => { void resumeChat(); },
+    onCallRecord: addLocalCallRecord,
     onPermissionSettings: handlePermissionSettings,
     onCleanupError: handleCallCleanupError,
   });

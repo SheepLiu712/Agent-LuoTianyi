@@ -17,6 +17,8 @@ export interface ChatMessage {
   durationMs?: number;
   audioDownloadState?: AudioDownloadState;
   callOutcome?: 'connected' | 'cancelled' | 'declined' | 'failed' | 'remote_ended';
+  /** Stable identity shared by live call events and persisted history. */
+  callId?: string;
 }
 
 export interface AgentMessagePayload {

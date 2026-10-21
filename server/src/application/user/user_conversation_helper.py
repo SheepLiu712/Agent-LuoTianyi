@@ -77,6 +77,7 @@ class UserConversationHelper:
                     end_reason=CallEndReason(data["end_reason"]),
                 ).render_for_history()
                 extra = {
+                    "call_id": data["call_id"],
                     "outcome": data["outcome"],
                     "active_duration_ms": int(data["active_duration_ms"]),
                 }
