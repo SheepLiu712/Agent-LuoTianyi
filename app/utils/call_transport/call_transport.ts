@@ -327,13 +327,22 @@ export class CallTransportSession {
           payload: frame.audio.payload,
           isFinal: frame.audio.final,
         });
+      } catch (error) {
+        stream.consumedBeforeAcceptance = false;
+        // Stop/close may invalidate native acceptance while its Promise is pending.
+        // Classify cancellation from our stream state, not a native error string.
+        if (stream.stopped || stream.generation !== generation) throw new Error('FRAME_RETIRED');
+        throw error;
       } finally {
         stream.finalEnqueuing = false;
       }
       if (stream.stopped || stream.generation !== generation) throw new Error('FRAME_RETIRED');
       if (frame.audio.final) {
         stream.finalAccepted = true;
-        if (stream.consumedBeforeAcceptance) this.onPlaybackConsumed({ stream: stream.identity });
+        if (stream.consumedBeforeAcceptance) {
+          stream.consumedBeforeAcceptance = false;
+          this.onPlaybackConsumed({ stream: stream.identity });
+        }
       }
       return;
     }
@@ -449,6 +458,8 @@ export class CallTransportSession {
     if (stream.identity.responseId !== message.response_id) throw new Error('STOP_STREAM_MISMATCH');
     stream.stopped = true;
     stream.generation += 1;
+    stream.finalEnqueuing = false;
+    stream.consumedBeforeAcceptance = false;
     await this.options.nativeAudio.tombstone(stream.identity);
     await this.options.nativeAudio.stop(stream.identity);
     if (this.closed) return;
@@ -692,6 +703,8 @@ export class CallTransportSession {
     for (const stream of this.streams.values()) {
       stream.stopped = true;
       stream.generation += 1;
+      stream.finalEnqueuing = false;
+      stream.consumedBeforeAcceptance = false;
     }
     const socket = this.socket;
     this.socket = null;
