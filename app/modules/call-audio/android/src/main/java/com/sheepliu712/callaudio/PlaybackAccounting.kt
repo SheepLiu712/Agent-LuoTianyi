@@ -26,6 +26,9 @@ internal class PlaybackQueue(private val capacityBytes: Int) {
   fun nextStream(): StreamKey? = entries.firstOrNull()?.key
 
   @Synchronized
+  fun hasFor(identity: StreamKey): Boolean = entries.any { it.key == identity }
+
+  @Synchronized
   fun pollFor(identity: StreamKey): PlaybackChunk? {
     val index = entries.indexOfFirst { it.key == identity }
     if (index < 0) return null
@@ -85,9 +88,40 @@ internal class PlaybackLoopAccounting(initialHead: Long) {
     private set
   var finalTarget: Pair<PlaybackChunk, Long>? = null
     private set
+  private data class PcmSpan(val start: Long, val end: Long, val pcm: ByteArray, val offset: Int)
+  private val rmsWindows = ArrayDeque<PcmSpan>()
 
   fun recordSubmitted(frames: Long) {
     submittedFrames += frames
+  }
+
+  fun recordSubmittedPcm(pcm: ByteArray, offset: Int, bytes: Int) {
+    val start = submittedFrames
+    recordSubmitted(bytes / 2L)
+    if (bytes > 0) rmsWindows.addLast(PcmSpan(start, submittedFrames, pcm, offset))
+  }
+
+  /** RMS of the short trailing window actually consumed, never future queued PCM. */
+  fun rmsAtPlayedFrames(windowFrames: Int): Double {
+    val end = minOf(playedFrames, submittedFrames)
+    val start = maxOf(0, end - windowFrames)
+    while (rmsWindows.isNotEmpty() && rmsWindows.first().end <= start) rmsWindows.removeFirst()
+    if (playedFrames >= submittedFrames) return 0.0
+    var squares = 0.0
+    var count = 0
+    for (span in rmsWindows) {
+      val from = maxOf(start, span.start)
+      val through = minOf(end, span.end)
+      for (frame in from until through) {
+        val offset = span.offset + ((frame - span.start) * 2).toInt()
+        val sample = ((span.pcm[offset + 1].toInt() shl 8) or (span.pcm[offset].toInt() and 0xff)).toShort()
+        val normalized = sample / 32768.0
+        squares += normalized * normalized
+        count++
+      }
+      if (span.end >= end) break
+    }
+    return if (count == 0) 0.0 else kotlin.math.sqrt(squares / count)
   }
 
   fun markFinal(chunk: PlaybackChunk) {
@@ -124,6 +158,26 @@ internal class PlaybackLoopAccounting(initialHead: Long) {
     playedFrames = 0L
     submittedFrames = 0L
     finalTarget = null
+    rmsWindows.clear()
+  }
+}
+
+/** Emits one visual idle edge when a non-final stream underruns. */
+internal class PlaybackVisualIdleGate {
+  private var idleEmitted = true
+
+  fun onSubmitted() {
+    idleEmitted = false
+  }
+
+  fun shouldEmitIdle(hasQueuedChunk: Boolean, playedFrames: Long, submittedFrames: Long, finalPending: Boolean): Boolean {
+    if (idleEmitted || hasQueuedChunk || finalPending || playedFrames < submittedFrames) return false
+    idleEmitted = true
+    return true
+  }
+
+  fun reset() {
+    idleEmitted = true
   }
 }
 

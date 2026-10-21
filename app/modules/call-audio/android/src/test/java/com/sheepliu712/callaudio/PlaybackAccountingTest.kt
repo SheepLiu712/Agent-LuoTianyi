@@ -128,4 +128,72 @@ class PlaybackAccountingTest {
     assertTrue(registry.fail().isEmpty())
     assertTrue(registry.isIdle())
   }
+
+  @Test
+  fun nonFinalUnderrunEmitsOneIdleEdgeWithoutCompletingStream() {
+    val gate = PlaybackVisualIdleGate()
+    gate.onSubmitted()
+
+    assertTrue(gate.shouldEmitIdle(false, playedFrames = 4, submittedFrames = 4, finalPending = false))
+    assertFalse(gate.shouldEmitIdle(false, playedFrames = 4, submittedFrames = 4, finalPending = false))
+    assertFalse(gate.shouldEmitIdle(true, playedFrames = 4, submittedFrames = 4, finalPending = false))
+  }
+
+  @Test
+  fun finalPendingAndQueuedAudioDoNotEmitUnderrunIdle() {
+    val gate = PlaybackVisualIdleGate()
+    gate.onSubmitted()
+
+    assertFalse(gate.shouldEmitIdle(false, playedFrames = 4, submittedFrames = 4, finalPending = true))
+    assertFalse(gate.shouldEmitIdle(true, playedFrames = 4, submittedFrames = 4, finalPending = false))
+  }
+
+  @Test
+  fun laterSubmissionRearmsVisualIdleAfterUnderrun() {
+    val gate = PlaybackVisualIdleGate()
+    gate.onSubmitted()
+    assertTrue(gate.shouldEmitIdle(false, 4, 4, false))
+
+    gate.onSubmitted()
+    assertTrue(gate.shouldEmitIdle(false, 8, 8, false))
+  }
+
+  @Test
+  fun playbackRmsUsesConsumedWindowAndClearsAtUnderrun() {
+    val accounting = PlaybackLoopAccounting(initialHead = 0)
+    accounting.recordSubmittedPcm(byteArrayOf(0, 64, 0, 64, 0, 0, 0, 0), 0, 8)
+    accounting.observeHead(2)
+    assertEquals(0.5, accounting.rmsAtPlayedFrames(2), 0.0001)
+    accounting.observeHead(3)
+    assertEquals(0.0, accounting.rmsAtPlayedFrames(1), 0.0001)
+    accounting.observeHead(4)
+    assertEquals(0.0, accounting.rmsAtPlayedFrames(2), 0.0001)
+  }
+
+  @Test
+  fun longChunkRmsFollowsSilenceAndSoundAcrossWriteBoundaries() {
+    val pcm = ByteArray(16384)
+    for (index in 0 until 8192 step 2) pcm[index + 1] = 64
+    val accounting = PlaybackLoopAccounting(0)
+    for (offset in pcm.indices step 960) {
+      accounting.recordSubmittedPcm(pcm, offset, minOf(960, pcm.size - offset))
+    }
+    accounting.observeHead(480)
+    assertEquals(0.5, accounting.rmsAtPlayedFrames(64), 0.0001)
+    accounting.observeHead(4200)
+    assertEquals(0.0, accounting.rmsAtPlayedFrames(64), 0.0001)
+    accounting.applyStop(true, 0)
+    accounting.recordSubmittedPcm(byteArrayOf(0, 32, 0, 32, 0, 0), 0, 6)
+    accounting.observeHead(2)
+    assertEquals(0.25, accounting.rmsAtPlayedFrames(64), 0.0001)
+  }
+
+  @Test
+  fun trailingWindowCrossesPcmChunksWithoutIncludingFutureSamples() {
+    val accounting = PlaybackLoopAccounting(0)
+    accounting.recordSubmittedPcm(byteArrayOf(0, 64, 0, 64), 0, 4)
+    accounting.recordSubmittedPcm(byteArrayOf(0, 0, 0, 0), 0, 4)
+    accounting.observeHead(3)
+    assertEquals(kotlin.math.sqrt(0.125), accounting.rmsAtPlayedFrames(2), 0.0001)
+  }
 }

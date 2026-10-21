@@ -15,6 +15,7 @@ import { CallTransportSession } from '../call_transport/call_transport';
 import { createPlatformCallSocketFactory } from '../call_transport/websocket_adapter';
 import { AndroidCallAudio, isAndroidCallAudioModuleAvailable } from '../call_audio/native_call_audio';
 import { callMonotonicNowMs } from '../call_clock';
+import type { CallMouthBridge } from '../call_audio/playback_progress';
 
 export type CallCapabilityReason =
   | 'available'
@@ -50,6 +51,7 @@ export interface ProductionCallResolverOptions {
   nativeInitializeTimeoutMs?: number;
   nativeOwnership?: NativeCallOwnership;
   credentials?: { username: string; token: string };
+  mouthBridge?: CallMouthBridge;
 }
 
 export class NativeCallOwnership {
@@ -168,6 +170,21 @@ export class ProductionCallResolver {
       void attempt.close();
     };
     nativeAudio.setCoordinatorEvents({ onFailure: fatalNativeFailure, onBackgrounded: fatalNativeFailure });
+    let mouthActive = true;
+    const unsubscribeMouth = nativeAudio.subscribePlaybackProgress?.((progress) => {
+      if (!mouthActive) return;
+      if (progress.kind === 'reset') this.options.mouthBridge?.reset();
+      else this.options.mouthBridge?.update(progress.rms);
+    });
+    const unsubscribeWindow = this.options.mouthBridge?.subscribeAnalysisWindow?.((seconds) => {
+      void nativeAudio.setPlaybackAnalysisWindow(seconds).catch(() => { /* visual-only configuration */ });
+    });
+    const cleanupMouth = () => {
+      if (!mouthActive) return;
+      mouthActive = false;
+      unsubscribeMouth?.();
+      unsubscribeWindow?.();
+    };
     const nativePort: CallNativeAudioPort = {
       getCapability: () => nativeAudio.getCapability(),
       startCapture: (format, onFrame) => nativeAudio.startCapture(format, onFrame),
@@ -192,12 +209,17 @@ export class ProductionCallResolver {
     });
     let attempt!: CallAttemptPorts;
     const session = new CallSession(transport, this.options.switchPort, this.options.characterId, async () => {
+      cleanupMouth();
       if (closed) return;
       closed = true;
+      try {
         if (initialized) {
           await nativeAudio.close();
-          if (this.nativeOwner === attempt) this.nativeOwner = null;
         }
+      } finally {
+        if (this.nativeOwner === attempt) this.nativeOwner = null;
+        cleanupMouth();
+      }
       this.attempts.delete(attempt);
         if (!initializePromise && this.nativeOwner === attempt) this.nativeOwner = null;
         if (!initializePromise || initialized) this.nativeOwnership.release(ownershipToken);
@@ -218,16 +240,21 @@ export class ProductionCallResolver {
               this.attempts.delete(attempt);
               await nativeAudio.close().catch(() => undefined);
             }
+            cleanupMouth();
             return false;
           }).finally(() => {
             if (!initialized && !closed) {
               closed = true;
               this.attempts.delete(attempt);
+              cleanupMouth();
             }
             if ((closed || !initialized) && this.nativeOwner === attempt) this.nativeOwner = null;
             if (closed || !initialized) this.nativeOwnership.release(ownershipToken);
           });
-          initializePromise = settleInitialize(owned, this.options.nativeInitializeTimeoutMs ?? 8_000);
+          initializePromise = settleInitialize(owned, this.options.nativeInitializeTimeoutMs ?? 8_000).then((available) => {
+            if (!available) cleanupMouth();
+            return available;
+          });
         }
         return initializePromise;
       },

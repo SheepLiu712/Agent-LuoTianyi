@@ -6,6 +6,7 @@ import type {
   NativeCapturedFrame,
   NativeLifecycleEvent,
   NativePlaybackCompleted,
+  NativePlaybackProgress,
   NativePlaybackStopped,
   NativeRouteEvent,
 } from './CallAudio.types';
@@ -27,6 +28,7 @@ export interface CallAudioNativeModule {
   stopPlayback(responseId?: string, streamId?: number): Promise<void>;
   tombstone(responseId: string, streamId: number): Promise<void>;
   playReplyFailureTone(): Promise<void>;
+  setPlaybackAnalysisWindow?(seconds: number): Promise<void>;
   addListener(
     eventName: 'onCapturedAudio',
     listener: (event: NativeCapturedFrame) => void,
@@ -37,7 +39,11 @@ export interface CallAudioNativeModule {
   ): { remove(): void };
   addListener(
     eventName: 'onPlaybackStopped',
-    listener: (event: NativePlaybackStopped) => void,
+      listener: (event: NativePlaybackStopped) => void,
+  ): { remove(): void };
+  addListener(
+    eventName: 'onPlaybackProgress',
+    listener: (event: NativePlaybackProgress) => void,
   ): { remove(): void };
   addListener(
     eventName: 'onAudioFailure',

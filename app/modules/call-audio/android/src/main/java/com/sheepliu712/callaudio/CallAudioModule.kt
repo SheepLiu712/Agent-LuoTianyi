@@ -35,6 +35,7 @@ private const val MAX_CAPTURE_IN_FLIGHT = 30
 class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private val captureRunning = AtomicBoolean(false)
   private val playbackRunning = AtomicBoolean(false)
+  @Volatile private var playbackAnalysisFrames = 64 // 128 samples at the default WebAudio 48 kHz.
   private val replyFailureTonePending = AtomicBoolean(false)
   private val generation = AtomicLong(0)
   private val sessionGeneration = AtomicLong(0)
@@ -71,6 +72,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       "onCapturedAudio",
       "onPlaybackCompleted",
       "onPlaybackStopped",
+      "onPlaybackProgress",
       "onAudioFailure",
       "onLifecycle",
       "onRouteChanged",
@@ -100,6 +102,10 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       stopPlayback(responseId, streamId, promise)
     }
     AsyncFunction("playReplyFailureTone") { playReplyFailureTone() }
+    AsyncFunction("setPlaybackAnalysisWindow") { seconds: Double ->
+      require(seconds.isFinite() && seconds > 0 && seconds <= 0.02)
+      playbackAnalysisFrames = kotlin.math.round(seconds * PLAYBACK_RATE).toInt().coerceAtLeast(1)
+    }
 
     OnDestroy { closeSession() }
   }
@@ -378,6 +384,20 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private fun playbackLoop(track: AudioTrack, eventSessionGeneration: Long) {
     val accounting = PlaybackLoopAccounting(track.playbackHeadPosition.toLong() and 0xffffffffL)
     val commandProcessor = PlaybackCommandProcessor(playbackState, accounting)
+    val visualIdleGate = PlaybackVisualIdleGate()
+    var lastProgressNanos = 0L
+    fun observeProgress(active: StreamKey?) {
+      val previousPlayedFrames = accounting.playedFrames
+      accounting.observeHead(track.playbackHeadPosition.toLong() and 0xffffffffL)
+      val nowNanos = System.nanoTime()
+      if (accounting.playedFrames > previousPlayedFrames && active != null &&
+        streamGenerations.containsKey(active) && !tombstonedStreams.contains(active) &&
+        nowNanos - lastProgressNanos >= 16_666_667L
+      ) {
+        emitPlaybackProgress(active, accounting.rmsAtPlayedFrames(playbackAnalysisFrames), eventSessionGeneration)
+        lastProgressNanos = nowNanos
+      }
+    }
     while (playbackRunning.get() || hasPlaybackCommands()) {
       val command = synchronized(playbackCommandLock) {
         if (playbackCommands.isEmpty()) null else playbackCommands.removeFirst()
@@ -417,20 +437,28 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
             }
             break
           }
+          accounting.recordSubmittedPcm(chunk.payload, offset, written)
           offset += written
-          accounting.recordSubmitted(written / 2L)
+          visualIdleGate.onSubmitted()
+          observeProgress(active)
         }
         if (offset == chunk.payload.size && chunk.isFinal && isCurrent(chunk)) {
           accounting.markFinal(chunk)
         }
       }
 
-      val currentHead = track.playbackHeadPosition.toLong() and 0xffffffffL
-      accounting.observeHead(currentHead)
+      observeProgress(active)
+      if (active != null && streamGenerations.containsKey(active) && visualIdleGate.shouldEmitIdle(
+          queue.hasFor(active), accounting.playedFrames, accounting.submittedFrames, accounting.finalTarget != null,
+        )
+      ) {
+        emitPlaybackProgress(active, 0.0, eventSessionGeneration)
+      }
       accounting.finalTarget?.first?.let { finalChunk ->
         if (!isCurrent(finalChunk)) accounting.discardStaleFinal()
         else accounting.takeConsumedFinal()?.let { consumedFinal ->
           completion(consumedFinal, eventSessionGeneration)
+          visualIdleGate.reset()
           playbackState.complete(finalChunk.key)
           accounting.complete(track.playbackHeadPosition.toLong() and 0xffffffffL)
         }
@@ -450,6 +478,20 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
         "streamId" to chunk.key.streamId,
         "generation" to chunk.generation,
         "sessionGeneration" to eventSessionGeneration,
+      ),
+    )
+  }
+
+  private fun emitPlaybackProgress(key: StreamKey, rms: Double, eventSessionGeneration: Long) {
+    if (isReplyFailureTone(key)) return
+    sendEvent(
+      "onPlaybackProgress",
+      mapOf(
+        "responseId" to key.responseId,
+        "streamId" to key.streamId,
+        "generation" to (streamGenerations[key] ?: return),
+        "sessionGeneration" to eventSessionGeneration,
+        "rms" to rms,
       ),
     )
   }

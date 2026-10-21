@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CallCapabilities, CallSwitchPort } from '../types/call_transport';
 import type { CallSession } from '../utils/call_session/call_session';
 import { ProductionCallResolver } from '../utils/call_session/production_resolver';
+import type { CallMouthBridge } from '../utils/call_audio/playback_progress';
 
 const unavailable: CallCapabilities = { serverAvailable: false, nativeAvailable: false };
 
@@ -13,6 +14,7 @@ export function useProductionCallComposition(options: {
   switchPort: CallSwitchPort;
   onAuthRequired(): void;
   onError(error: unknown): void;
+  mouthBridge?: CallMouthBridge;
 }) {
   const [capabilities, setCapabilities] = useState<CallCapabilities>(unavailable);
   const resolverRef = useRef<ProductionCallResolver | null>(null);
@@ -32,6 +34,7 @@ export function useProductionCallComposition(options: {
       switchPort: {
         prepare: (clientRequestId, characterId) => switchPortRef.current.prepare(clientRequestId, characterId),
       },
+      mouthBridge: options.mouthBridge,
     });
     resolverRef.current = resolver;
     setCapabilities(unavailable);
@@ -50,7 +53,7 @@ export function useProductionCallComposition(options: {
       generationRef.current += 1;
       void resolver.close();
     };
-  }, [options.characterId, options.token, options.username]);
+  }, [options.characterId, options.mouthBridge, options.token, options.username]);
 
   const createSession = useCallback(() => {
     const resolver = resolverRef.current;

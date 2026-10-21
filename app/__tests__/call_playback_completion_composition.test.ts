@@ -5,9 +5,13 @@ import { AndroidCallAudio, CAPTURE_FORMAT, PLAYBACK_FORMAT } from '../utils/call
 import { BinaryAudioFrameCodec } from '../utils/call_protocol/audio_codec';
 import { encodeControlMessage } from '../utils/call_protocol/control';
 import { CallTransportSession } from '../utils/call_transport/call_transport';
+import { NativeCallOwnership, ProductionCallResolver } from '../utils/call_session/production_resolver';
+import { createCallMouthBridge } from '../utils/call_audio/playback_progress';
 
-jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: jest.fn(() => null) }));
+jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: jest.fn(() => ({})) }));
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
+jest.mock('expo-av', () => ({ Audio: { requestPermissionsAsync: jest.fn() } }));
+jest.mock('expo-constants', () => ({ __esModule: true, default: { executionEnvironment: 'standalone' } }));
 
 const CALL_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -38,6 +42,7 @@ class Clock implements CallClock {
 }
 
 class NativeBridge implements CallAudioNativeModule {
+  setPlaybackAnalysisWindow = jest.fn(async (_seconds: number) => {});
   private readonly listeners = new Map<string, Set<(event: any) => void>>();
   private resolveEnqueue?: (generation: number) => void;
   private rejectEnqueue?: (error: Error) => void;
@@ -74,6 +79,11 @@ class NativeBridge implements CallAudioNativeModule {
       responseId, streamId, generation, sessionGeneration: 1,
     };
     this.listeners.get('onPlaybackCompleted')?.forEach((listener) => listener(event));
+  }
+  progress(rms: number, responseId = 'response-1', streamId = 9, generation = 7, sessionGeneration = 1): void {
+    this.listeners.get('onPlaybackProgress')?.forEach((listener) => listener({
+      responseId, streamId, generation, sessionGeneration, rms,
+    }));
   }
   acceptEnqueue(generation = 7): void {
     if (!this.resolveEnqueue) throw new Error('no pending enqueue');
@@ -246,3 +256,73 @@ function wireControls(socket: Socket): any[] {
 function wireCompletions(socket: Socket): any[] {
   return wireControls(socket).filter((message) => message.type === 'playback.completed');
 }
+
+test('production resolver drives live RMS, independent early completion, and stream-scoped reset', async () => {
+  const socket = new Socket();
+  const bridge = new NativeBridge();
+  const audio = new AndroidCallAudio({}, bridge, 'android');
+  const inject = jest.fn();
+  const mouth = createCallMouthBridge(inject);
+  mouth.configureAnalysisWindow(44_100, 128);
+  const resolver = new ProductionCallResolver({
+    characterId: 'luotianyi', credentials: { username: 'u', token: 't' },
+    switchPort: { prepare: jest.fn() }, sockets: { create: () => socket },
+    nativeOwnership: new NativeCallOwnership(), createNativeAudio: () => audio, mouthBridge: mouth,
+    fetchImpl: jest.fn(async () => ({ ok: true, status: 200,
+      json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+    })) as unknown as typeof fetch,
+  });
+  try {
+    await resolver.refreshCapability();
+    const attempt = resolver.createAttempt();
+    await attempt.initializeNative();
+    expect(bridge.setPlaybackAnalysisWindow).toHaveBeenLastCalledWith(128 / 44_100);
+    await attempt.session.start('request-1', 'direct_no_chat');
+    socket.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    socket.message(control({ protocol: 'call.v1', type: 'call.state', seq: 1, call_id: CALL_ID,
+      client_request_id: 'request-1', state: 'preparing' }));
+    socket.message(control({ protocol: 'call.v1', type: 'call.active', seq: 2, call_id: CALL_ID, connected_at_ms: Date.now() }));
+    await flush();
+    await enqueueFinal(socket);
+    bridge.progress(0.5);
+    expect(inject).toHaveBeenLastCalledWith('window.setCallMouthRms(0.5); true;');
+    bridge.progress(0);
+    expect(inject).toHaveBeenLastCalledWith('window.setCallMouthRms(0); true;');
+    bridge.complete();
+    expect(inject).toHaveBeenLastCalledWith('window.resetCallMouth(); true;');
+    expect(wireCompletions(socket)).toHaveLength(0);
+    const beforeAcceptance = inject.mock.calls.length;
+    bridge.acceptEnqueue();
+    await flush();
+    expect(inject).toHaveBeenCalledTimes(beforeAcceptance);
+    expect(wireCompletions(socket)).toHaveLength(1);
+    bridge.progress(0.9);
+    expect(inject).toHaveBeenCalledTimes(beforeAcceptance);
+
+    await enqueueFinal(socket, 5, 'response-2', 10);
+    bridge.progress(0.6, 'response-2', 10, 8);
+    expect(inject).toHaveBeenLastCalledWith('window.setCallMouthRms(0.6); true;');
+    socket.message(control({ protocol: 'call.v1', type: 'playback.stop', seq: 7, call_id: CALL_ID,
+      response_id: 'response-1', stream_id: 9, retire_server_seq: { from: 3, through: 4 }, reason: 'user_interrupted' }));
+    await flush();
+    // A stop for the old completed reply must not close the new reply's mouth.
+    expect(inject).toHaveBeenLastCalledWith('window.setCallMouthRms(0.6); true;');
+    socket.message(control({ protocol: 'call.v1', type: 'playback.stop', seq: 8, call_id: CALL_ID,
+      response_id: 'response-2', stream_id: 10, retire_server_seq: { from: 5, through: 6 }, reason: 'user_interrupted' }));
+    expect(inject).toHaveBeenLastCalledWith('window.resetCallMouth(); true;');
+    const afterStop = inject.mock.calls.length;
+    bridge.failEnqueue();
+    await flush();
+    bridge.progress(0.6, 'response-2', 10, 8);
+    expect(inject).toHaveBeenCalledTimes(afterStop);
+    expect(attempt.session.state.status).toBe('connected');
+    await attempt.close();
+    bridge.progress(0.7);
+    expect(inject).toHaveBeenCalledTimes(afterStop);
+    const configured = bridge.setPlaybackAnalysisWindow.mock.calls.length;
+    mouth.configureAnalysisWindow(48_000, 128);
+    expect(bridge.setPlaybackAnalysisWindow).toHaveBeenCalledTimes(configured);
+  } finally {
+    await resolver.close();
+  }
+});

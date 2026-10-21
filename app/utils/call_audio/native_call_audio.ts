@@ -18,6 +18,7 @@ import type {
   CapturedAudioFrame,
   PlaybackConsumptionReceipt,
 } from '../call_audio_contracts';
+import type { PlaybackProgress } from './playback_progress';
 import type { CallAudioCapability } from '../../types/call';
 import { PlaybackGenerationLedger } from './playback_ledger';
 import { CaptureRecoveryBuffer } from './recovery_buffer';
@@ -76,9 +77,12 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
   readonly recoveryBuffer = new CaptureRecoveryBuffer();
   private readonly ledger = new PlaybackGenerationLedger();
   private readonly streams = new Map<string, CallAudioStreamIdentity>();
+  private readonly visualStreams = new Map<string, { generation?: number; ended: boolean }>();
+  private visualOwner?: string;
   private readonly finalEnqueueReservations = new Map<string, FinalEnqueueReservation>();
   private readonly subscriptions: { remove(): void }[] = [];
   private consumptionListener: (receipt: PlaybackConsumptionReceipt) => void = () => {};
+  private progressListener: (progress: PlaybackProgress) => void = () => {};
   private captureListener: ((frame: CapturedAudioFrame) => void) | undefined;
   private capturePaused = false;
   private sessionGeneration: number | undefined;
@@ -161,6 +165,8 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
     if (existing && existing.callId !== chunk.stream.callId) throw new Error('playback_stream_identity_conflict');
     if (chunk.isFinal && this.finalEnqueueReservations.has(key)) throw new Error('playback_final_enqueue_pending');
     this.streams.set(key, chunk.stream);
+    if (!this.visualStreams.has(key)) this.visualStreams.set(key, { ended: false });
+    const visual = this.visualStreams.get(key);
     const reservation: FinalEnqueueReservation | undefined = chunk.isFinal ? {
       stream: chunk.stream,
     } : undefined;
@@ -176,11 +182,13 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
       if (this.sessionGeneration !== enqueueSessionGeneration) throw new Error('stale_playback_session');
       if (reservation && this.finalEnqueueReservations.get(key) !== reservation) throw new Error('stale_playback_session');
       this.ledger.register(chunk.stream, generation);
+      if (visual && !visual.ended && visual.generation === undefined) visual.generation = generation;
       if (reservation) {
         this.finalEnqueueReservations.delete(key);
         if (reservation.earlyCompletionGeneration === generation) this.emitCompletion(chunk.stream, generation);
       }
     } catch (error) {
+      if (this.visualStreams.get(key) === visual) this.endVisual(chunk.stream);
       const ownsReservation = reservation !== undefined && this.finalEnqueueReservations.get(key) === reservation;
       if (ownsReservation) this.finalEnqueueReservations.delete(key);
       if (!existing && ownsReservation && this.streams.get(key) === chunk.stream) this.streams.delete(key);
@@ -196,12 +204,14 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
   async stop(stream?: CallAudioStreamIdentity): Promise<void> {
     const native = this.requireNative();
     if (stream) {
+      this.endVisual(stream);
       const key = this.key(stream.responseId, stream.streamId);
       this.finalEnqueueReservations.delete(key);
       this.ledger.tombstone(stream, Number.MAX_SAFE_INTEGER);
       await native.stopPlayback(stream.responseId, stream.streamId);
     } else {
       this.streams.forEach((knownStream) => {
+        this.endVisual(knownStream);
         this.ledger.tombstone(knownStream, Number.MAX_SAFE_INTEGER);
       });
       this.finalEnqueueReservations.clear();
@@ -211,6 +221,7 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
 
   async tombstone(stream: CallAudioStreamIdentity): Promise<void> {
     const native = this.requireNative();
+    this.endVisual(stream);
     const key = this.key(stream.responseId, stream.streamId);
     this.finalEnqueueReservations.delete(key);
     this.ledger.tombstone(stream, Number.MAX_SAFE_INTEGER);
@@ -232,11 +243,27 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
     };
   }
 
+  subscribePlaybackProgress(listener: (progress: PlaybackProgress) => void): () => void {
+    this.progressListener = listener;
+    return () => {
+      if (this.progressListener === listener) this.progressListener = () => {};
+    };
+  }
+
+  async setPlaybackAnalysisWindow(seconds: number): Promise<void> {
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 0.02) return;
+    await this.native?.setPlaybackAnalysisWindow?.(seconds);
+  }
+
   async close(): Promise<void> {
+    this.streams.forEach((stream) => this.endVisual(stream));
     this.subscriptions.splice(0).forEach((subscription) => subscription.remove());
+    this.progressListener = () => {};
     this.captureListener = undefined;
     this.recoveryBuffer.clear();
     this.streams.clear();
+    this.visualStreams.clear();
+    this.visualOwner = undefined;
     this.finalEnqueueReservations.clear();
     this.ledger.clear();
     this.sessionGeneration = undefined;
@@ -268,6 +295,7 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
         const key = this.key(event.responseId, event.streamId);
         const stream = this.streams.get(key);
         if (stream && sameStream(stream, event.responseId, event.streamId)) {
+          if (this.acceptVisual(stream, event.generation)) this.endVisual(stream);
           const reservation = this.finalEnqueueReservations.get(key);
           if (reservation && reservation.stream === stream) reservation.earlyCompletionGeneration = event.generation;
           else this.emitCompletion(stream, event.generation);
@@ -276,7 +304,23 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
       this.native.addListener('onPlaybackStopped', (event) => {
         if (!this.isCurrentSession(event.sessionGeneration)) return;
         const stream = this.streams.get(this.key(event.responseId, event.streamId));
-        if (stream) this.ledger.tombstone(stream, event.generation);
+        if (stream) {
+          this.endVisual(stream);
+          this.ledger.tombstone(stream, event.generation);
+        }
+      }),
+      this.native.addListener('onPlaybackProgress', (event) => {
+        if (!this.isCurrentSession(event.sessionGeneration)) return;
+        const key = this.key(event.responseId, event.streamId);
+        const stream = this.streams.get(key);
+        if (!stream || !sameStream(stream, event.responseId, event.streamId)) return;
+        if (!this.acceptVisual(stream, event.generation)) return;
+        this.visualOwner = key;
+        this.progressListener({
+          stream,
+          kind: 'rms',
+          rms: Number.isFinite(event.rms) ? Math.max(0, Math.min(1, event.rms)) : 0,
+        });
       }),
       this.native.addListener('onAudioFailure', (event) => {
         if (this.isCurrentSession(event.sessionGeneration)) this.events.onFailure?.(event);
@@ -309,9 +353,28 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
   private resetSessionState(sessionGeneration: number): void {
     this.recoveryBuffer.clear();
     this.streams.clear();
+    this.visualStreams.clear();
+    this.visualOwner = undefined;
     this.finalEnqueueReservations.clear();
     this.ledger.clear();
     this.sessionGeneration = sessionGeneration;
+  }
+
+  private acceptVisual(stream: CallAudioStreamIdentity, generation: number): boolean {
+    const state = this.visualStreams.get(this.key(stream.responseId, stream.streamId));
+    if (!state || state.ended || !Number.isSafeInteger(generation) || generation < 0) return false;
+    // Native progress is a real-time observation, independent of enqueue acceptance.
+    if (state.generation === undefined) state.generation = generation;
+    return state.generation === generation;
+  }
+
+  private endVisual(stream: CallAudioStreamIdentity): void {
+    const key = this.key(stream.responseId, stream.streamId);
+    const state = this.visualStreams.get(key);
+    if (state) state.ended = true;
+    if (this.visualOwner !== key) return;
+    this.visualOwner = undefined;
+    this.progressListener({ stream, kind: 'reset' });
   }
 
   private emitCompletion(stream: CallAudioStreamIdentity, generation: number): void {
