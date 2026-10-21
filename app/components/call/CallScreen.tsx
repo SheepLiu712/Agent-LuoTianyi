@@ -5,6 +5,7 @@ import type { AppTheme } from '../../utils/theme';
 import type { CallState } from '../../types/call';
 import { getCallActiveDurationMs } from '../../utils/call_state';
 import { callMonotonicNowMs } from '../../utils/call_clock';
+import { useCallKeepAwake } from '../../hooks/useCallKeepAwake';
 
 interface Props {
   state: CallState;
@@ -18,6 +19,7 @@ const labels: Record<string, string> = { REQUESTING_PERMISSION: '需要麦克风
 function clock(ms: number) { const seconds = Math.floor(ms / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; }
 
 export function CallScreen({ state, theme, onHangup, onBack, now = callMonotonicNowMs }: Props) {
+  useCallKeepAwake(state.phase);
   const insets = useSafeAreaInsets();
   const [, refreshClock] = useReducer((tick: number) => tick + 1, 0);
   useEffect(() => {
