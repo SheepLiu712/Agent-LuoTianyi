@@ -4,6 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from src.gui.agreement_sign_dialog import (  # noqa: E402
@@ -315,3 +316,75 @@ def test_bottom_scroll_is_stable(app, dialog):
     app.processEvents()
     assert bar.maximum() == stable_maximum
     assert bar.value() == bar.maximum()
+
+
+def _top_block_number(dialog) -> int:
+    return dialog.view.cursorForPosition(QPoint(0, 1)).block().blockNumber()
+
+
+def test_resize_keeps_the_paragraph_at_viewport_top(app):
+    """改宽度引起重排时，视口顶部那段正文必须留在原位（scroll anchoring）。
+
+    此前按像素保存滚动位置：上方换行数一变，正在读的段落就被顶走。三档宽度往复切换，
+    顶部段落编号都应保持不变。
+    """
+    widget = AgreementSignDialog(document=_wrapping_document())
+    widget.show()
+    try:
+        widget.resize(640, 520)
+        app.processEvents()
+        bar = widget.view.verticalScrollBar()
+        bar.setValue(int(bar.maximum() * 0.5))
+        app.processEvents()
+        anchor = _top_block_number(widget)
+
+        for width in (1000, 520, 1400, 640, 900):
+            widget.resize(width, 520)
+            app.processEvents()
+            assert _top_block_number(widget) == anchor, f"宽度 {width} 下顶部段落漂移"
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_resize_keeps_bottom_pinned(app):
+    """停在底部时改宽度，仍应停在底部而不是被重排顶离。"""
+    widget = AgreementSignDialog(document=_wrapping_document())
+    widget.show()
+    try:
+        widget.resize(640, 520)
+        app.processEvents()
+        bar = widget.view.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        app.processEvents()
+
+        for width in (1000, 520, 1400):
+            widget.resize(width, 520)
+            app.processEvents()
+            assert bar.value() == bar.maximum(), f"宽度 {width} 下未停到底部"
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_resize_at_top_keeps_first_paragraph(app):
+    """未滚动时改宽度，仍应停在第一段。"""
+    widget = AgreementSignDialog(document=_wrapping_document())
+    widget.show()
+    try:
+        widget.resize(640, 520)
+        app.processEvents()
+        bar = widget.view.verticalScrollBar()
+        bar.setValue(0)
+        app.processEvents()
+
+        for width in (1000, 520, 1400):
+            widget.resize(width, 520)
+            app.processEvents()
+            assert bar.value() == 0
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()

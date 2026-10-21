@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Mapping, Optional
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -96,6 +96,8 @@ class AgreementSignDialog(QDialog):
         self.gate = SigningGate()
         self.version: str = ""
         self.last_error: str = ""
+        self._pending_anchor: Optional[tuple] = None
+        self._tracking_anchor = True
 
         self.setWindowTitle("用户协议")
         self.setModal(True)
@@ -107,6 +109,12 @@ class AgreementSignDialog(QDialog):
         self._timer = QTimer(self)
         self._timer.setInterval(TICK_INTERVAL_MS)
         self._timer.timeout.connect(self._on_tick)
+
+        # 重排补偿要等布局算完，0ms 单次定时器让同一次事件循环内连续 resize 只补偿最后结果。
+        self._anchor_restore_timer = QTimer(self)
+        self._anchor_restore_timer.setSingleShot(True)
+        self._anchor_restore_timer.setInterval(0)
+        self._anchor_restore_timer.timeout.connect(self._restore_scroll_anchor)
 
         if document is not None:
             self.set_document(document)
@@ -155,6 +163,7 @@ class AgreementSignDialog(QDialog):
         self.view.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.view.verticalScrollBar().rangeChanged.connect(lambda *_: self._on_scroll())
         column.addWidget(self.view, 1)
+        self.view.installEventFilter(self)
         return body
 
     def _build_actions(self) -> QWidget:
@@ -282,6 +291,63 @@ class AgreementSignDialog(QDialog):
     def _on_tick(self) -> None:
         self.gate.tick(self._clock())
         self._refresh_actions()
+
+    # ── 重排时保持阅读位置（scroll anchoring）────────────────────
+    #
+    # 与 CSS scroll anchoring（Chrome 56+ 默认开启）同一思路：滚动位置是像素值，宽度变化
+    # 引起重排后，视口上方行数变化会把正在读的段落顶走。这里把"顶部可见段落 + 段内偏移"
+    # 当作锚点，重排后按锚点重新算滚动量。停在顶部/底部是用户的明确意图，保持不动。
+    #
+    # 锚点必须在重排**之前**取：Qt 的 resize 先到子控件、再到对话框，等对话框 resizeEvent
+    # 时 QTextEdit 已按新宽度排完，读到的"顶部段落"已是漂移后的结果。所以在 view 上装
+    # 事件过滤器，在它处理 Resize 之前抓锚点。
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt 命名
+        if watched is self.view and event.type() == event.Type.Resize:
+            anchor = self._capture_scroll_anchor()
+            if anchor is not None:
+                # 补偿期间暂停跟踪，避免恢复动作本身把锚点记成"漂移后的位置"。
+                self._tracking_anchor = False
+                self._pending_anchor = anchor
+                self._anchor_restore_timer.start()
+        return super().eventFilter(watched, event)
+
+    def _capture_scroll_anchor(self) -> Optional[tuple]:
+        view = self.view
+        bar = view.verticalScrollBar()
+        if not view.isVisible() or bar.maximum() <= 0:
+            return None
+        value = bar.value()
+        if value <= 0:
+            return ("top",)
+        if value >= bar.maximum():
+            return ("bottom",)
+        block = view.cursorForPosition(QPoint(0, 1)).block()
+        if not block.isValid():
+            return None
+        rect = view.document().documentLayout().blockBoundingRect(block)
+        height = rect.height()
+        offset = 0.0 if height <= 0 else min(max((value - rect.top()) / height, 0.0), 1.0)
+        return ("block", block.blockNumber(), offset)
+
+    def _restore_scroll_anchor(self) -> None:
+        anchor = self._pending_anchor
+        self._pending_anchor = None
+        self._tracking_anchor = True
+        if anchor is None:
+            return
+        bar = self.view.verticalScrollBar()
+        if anchor[0] == "top":
+            bar.setValue(0)
+        elif anchor[0] == "bottom":
+            bar.setValue(bar.maximum())
+        else:
+            _, block_number, offset = anchor
+            block = self.view.document().findBlockByNumber(block_number)
+            if block.isValid():
+                rect = self.view.document().documentLayout().blockBoundingRect(block)
+                target = rect.top() + offset * rect.height()
+                bar.setValue(max(0, min(int(round(target)), bar.maximum())))
 
     def _on_scroll(self, *_args) -> None:
         self._sync_scroll_state()
