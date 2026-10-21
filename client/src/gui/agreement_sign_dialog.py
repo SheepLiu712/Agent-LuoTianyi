@@ -97,7 +97,6 @@ class AgreementSignDialog(QDialog):
         self.version: str = ""
         self.last_error: str = ""
         self._pending_anchor: Optional[tuple] = None
-        self._tracking_anchor = True
 
         self.setWindowTitle("用户协议")
         self.setModal(True)
@@ -306,8 +305,6 @@ class AgreementSignDialog(QDialog):
         if watched is self.view and event.type() == event.Type.Resize:
             anchor = self._capture_scroll_anchor()
             if anchor is not None:
-                # 补偿期间暂停跟踪，避免恢复动作本身把锚点记成"漂移后的位置"。
-                self._tracking_anchor = False
                 self._pending_anchor = anchor
                 self._anchor_restore_timer.start()
         return super().eventFilter(watched, event)
@@ -333,7 +330,6 @@ class AgreementSignDialog(QDialog):
     def _restore_scroll_anchor(self) -> None:
         anchor = self._pending_anchor
         self._pending_anchor = None
-        self._tracking_anchor = True
         if anchor is None:
             return
         bar = self.view.verticalScrollBar()
