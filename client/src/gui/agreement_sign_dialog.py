@@ -97,6 +97,7 @@ class AgreementSignDialog(QDialog):
         self.version: str = ""
         self.last_error: str = ""
         self._pending_anchor: Optional[tuple] = None
+        self._anchor_restoring = False
 
         self.setWindowTitle("用户协议")
         self.setModal(True)
@@ -332,18 +333,26 @@ class AgreementSignDialog(QDialog):
         self._pending_anchor = None
         if anchor is None:
             return
-        bar = self.view.verticalScrollBar()
-        if anchor[0] == "top":
-            bar.setValue(0)
-        elif anchor[0] == "bottom":
-            bar.setValue(bar.maximum())
-        else:
-            _, block_number, offset = anchor
-            block = self.view.document().findBlockByNumber(block_number)
-            if block.isValid():
-                rect = self.view.document().documentLayout().blockBoundingRect(block)
-                target = rect.top() + offset * rect.height()
-                bar.setValue(max(0, min(int(round(target)), bar.maximum())))
+        # 恢复期间不把门禁喂给滚动状态：重排的中间瞬态会让 value 暂时等于 maximum，
+        # 若照常 observe_scroll，"改窗口宽度"就会被误判成"读过底部"。
+        self._anchor_restoring = True
+        try:
+            # 先强制排版再算目标，避免用重排前的旧尺寸把读者顶到（或夹到）底部。
+            self.view.document().documentLayout().documentSize()
+            bar = self.view.verticalScrollBar()
+            if anchor[0] == "top":
+                bar.setValue(0)
+            elif anchor[0] == "bottom":
+                bar.setValue(bar.maximum())
+            else:
+                _, block_number, offset = anchor
+                block = self.view.document().findBlockByNumber(block_number)
+                if block.isValid():
+                    rect = self.view.document().documentLayout().blockBoundingRect(block)
+                    target = rect.top() + offset * rect.height()
+                    bar.setValue(max(0, min(int(round(target)), bar.maximum())))
+        finally:
+            self._anchor_restoring = False
 
     def _on_scroll(self, *_args) -> None:
         self._sync_scroll_state()
@@ -355,6 +364,9 @@ class AgreementSignDialog(QDialog):
         # 于是窗口缩放时不再重排（右侧留白/窄窗裁切），且滚动中反复改文档尺寸会让滚动范围与真实
         # 内容高度不一致（滚到底后仍差一截、继续下滑先超出再弹回）。
         self.view.document().documentLayout().documentSize()
+        if self._anchor_restoring or self._pending_anchor is not None:
+            # 重排/锚点补偿期间不判定阅读状态；交给补偿完成后的用户操作。
+            return
         self.gate.observe_scroll(bar.value(), bar.maximum())
 
     def _on_confirm_clicked(self) -> None:

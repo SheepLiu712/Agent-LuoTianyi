@@ -388,3 +388,26 @@ def test_resize_at_top_keeps_first_paragraph(app):
         widget.close()
         widget.deleteLater()
         app.processEvents()
+
+
+def test_resize_does_not_satisfy_bottom_gate(app):
+    """改窗口宽度不得把"到过底部"标记为满足：重排的中间瞬态不能喂给门禁。"""
+    widget = AgreementSignDialog(document=_wrapping_document())
+    widget.show()
+    try:
+        widget.resize(640, 520)
+        app.processEvents()
+        bar = widget.view.verticalScrollBar()
+        bar.setValue(int(bar.maximum() * 0.5))
+        app.processEvents()
+        assert widget.gate.reached_bottom is False
+
+        for width in (1400, 520, 1000, 560):
+            widget.resize(width, 520)
+            app.processEvents()
+            app.processEvents()
+            assert widget.gate.reached_bottom is False, f"宽度 {width} 下门禁被重排误满足"
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
