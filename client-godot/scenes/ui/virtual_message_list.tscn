@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/ui/virtual_message_list.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[node name="VirtualMessageList" type="ScrollContainer"]
+theme = ExtResource("2_theme")
+horizontal_scroll_mode = 0
+script = ExtResource("1_script")
+
+[node name="Canvas" type="Control" parent="."]
+unique_name_in_owner = true
+size_flags_horizontal = 3

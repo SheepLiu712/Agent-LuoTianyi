@@ -1,0 +1,66 @@
+[gd_scene load_steps=4 format=3]
+[ext_resource type="Script" path="res://src/ui/decision_dialog.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[node name="DecisionDialog" type="Window"]
+size = Vector2i(580, 240)
+min_size = Vector2i(480, 220)
+visible = false
+borderless = true
+unresizable = true
+transparent_bg = true
+transient = true
+exclusive = true
+theme = ExtResource("theme")
+script = ExtResource("script")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_type_variation = &"DialogSurface"
+
+[node name="Column" type="VBoxContainer" parent="Panel"]
+theme_override_constants/separation = 16
+
+[node name="Header" type="HBoxContainer" parent="Panel/Column"]
+
+[node name="DecisionTitle" type="Label" parent="Panel/Column/Header"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 19
+
+[node name="CloseDecision" type="Button" parent="Panel/Column/Header"]
+unique_name_in_owner = true
+text = "×"
+tooltip_text = "取消并关闭"
+flat = true
+custom_minimum_size = Vector2(36,36)
+
+[node name="MessageScroll" type="ScrollContainer" parent="Panel/Column"]
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Message" type="Label" parent="Panel/Column/MessageScroll"]
+unique_name_in_owner = true
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="Actions" type="HBoxContainer" parent="Panel/Column"]
+alignment = 2
+theme_override_constants/separation = 8
+
+[node name="SaveAndClose" type="Button" parent="Panel/Column/Actions"]
+unique_name_in_owner = true
+visible = false
+text = "保存并关闭"
+custom_minimum_size = Vector2(0,36)
+theme_type_variation = &"PrimaryButton"
+
+[node name="Confirm" type="Button" parent="Panel/Column/Actions"]
+unique_name_in_owner = true
+text = "确认"
+custom_minimum_size = Vector2(0,36)
+
+[node name="Cancel" type="Button" parent="Panel/Column/Actions"]
+unique_name_in_owner = true
+text = "取消"
+custom_minimum_size = Vector2(0,36)

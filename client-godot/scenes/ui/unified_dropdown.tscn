@@ -1,0 +1,32 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+
+[ext_resource type="Script" path="res://src/ui/unified_dropdown.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[node name="UnifiedDropdown" type="Button"]
+custom_minimum_size = Vector2(140, 40)
+alignment = 0
+clip_text = true
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+window_system = ExtResource("isolation_window_system")
+
+[node name="Menu" type="PopupPanel" parent="."]
+unique_name_in_owner = true
+visible = false
+force_native = false
+transparent_bg = true
+theme = ExtResource("2_theme")
+theme_type_variation = &"DropdownPopup"
+
+[node name="Scroll" type="ScrollContainer" parent="Menu"]
+unique_name_in_owner = true
+horizontal_scroll_mode = 0
+
+[node name="Rows" type="VBoxContainer" parent="Menu/Scroll"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
