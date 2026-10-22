@@ -364,9 +364,16 @@ class AgreementSignDialog(QDialog):
         # 于是窗口缩放时不再重排（右侧留白/窄窗裁切），且滚动中反复改文档尺寸会让滚动范围与真实
         # 内容高度不一致（滚到底后仍差一截、继续下滑先超出再弹回）。
         self.view.document().documentLayout().documentSize()
-        if self._anchor_restoring or self._pending_anchor is not None:
-            # 重排/锚点补偿期间不判定阅读状态；交给补偿完成后的用户操作。
+        if self._anchor_restoring:
+            # 锚点恢复正在写入滚动位置，此时的值不代表用户意图。
             return
+        if self._pending_anchor is not None:
+            if self._anchor_restore_timer.isActive():
+                # 重排/锚点补偿排期中：不判定阅读状态，交给补偿完成后的用户操作。
+                return
+            # 补偿定时器已被停掉（窗口隐藏/关闭等）：清掉残留锚点，
+            # 否则之后的滚动会一直被跳过，"到过底部"再也记不到。
+            self._pending_anchor = None
         self.gate.observe_scroll(bar.value(), bar.maximum())
 
     def _on_confirm_clicked(self) -> None:
