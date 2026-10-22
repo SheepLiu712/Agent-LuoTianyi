@@ -411,3 +411,26 @@ def test_resize_does_not_satisfy_bottom_gate(app):
         widget.close()
         widget.deleteLater()
         app.processEvents()
+
+
+def test_hint_sits_below_divider(app, dialog):
+    """按草图顺序：分隔线在正文与提示之间，提示不再紧贴正文。"""
+    from PySide6.QtWidgets import QFrame
+
+    layout = dialog.hint_label.parentWidget().layout()
+    widgets = [layout.itemAt(i).widget() for i in range(layout.count())]
+    divider_index = next(
+        i for i, widget in enumerate(widgets) if isinstance(widget, QFrame) and widget.height() == 1
+    )
+    assert divider_index < layout.indexOf(dialog.hint_label)
+
+
+def test_reject_stops_the_ticker(app, dialog):
+    """拒绝路径也要停计时器（此前只有标题栏 X 与成功路径会停）。"""
+    dialog.show()
+    app.processEvents()
+    assert dialog._timer.isActive()
+
+    dialog.reject()
+
+    assert dialog._timer.isActive() is False

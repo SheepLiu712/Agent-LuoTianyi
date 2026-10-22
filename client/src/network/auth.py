@@ -129,6 +129,22 @@ class AuthApi:
         outcome = self.register_with_agreement(username, password, invite_code)
         return outcome.ok, outcome.message
 
+    def _encrypt_password(self, password: str) -> Optional[str]:
+        """加密密码；失败时刷新一次公钥再试（服务端换钥后旧缓存会一直失败）。"""
+        encrypted = encrypt_pwd.encrypt_password(
+            password,
+            base_url=self.base_url,
+            verify_ssl=self.verify_ssl,
+        )
+        if encrypted:
+            return encrypted
+        encrypt_pwd.invalidate_public_key()
+        return encrypt_pwd.encrypt_password(
+            password,
+            base_url=self.base_url,
+            verify_ssl=self.verify_ssl,
+        )
+
     def register_with_agreement(
         self,
         username: str,
@@ -144,11 +160,7 @@ class AuthApi:
         旧调用方（不带协议字段）仍走同一入口：服务端会返回 AGREEMENT_REQUIRED，
         客户端据此打开协议窗口。
         """
-        encrypted_password = encrypt_pwd.encrypt_password(
-            password,
-            base_url=self.base_url,
-            verify_ssl=self.verify_ssl,
-        )
+        encrypted_password = self._encrypt_password(password)
         if not encrypted_password:
             return RegisterOutcome(False, "Failed to encrypt password. Check server connection.")
 

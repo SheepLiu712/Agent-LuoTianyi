@@ -299,3 +299,41 @@ def test_transport_error_becomes_visible_failure(dialog):
     assert token == "tok"
     assert outcome.ok is False
     assert "read timeout" in outcome.message
+
+
+def test_version_change_starts_new_request_with_new_version(dialog):
+    """换版后不能继续重放旧版本：清掉旧版本绑定并换新的请求 ID。"""
+    dialog.widget.fill_register_form()
+    dialog.widget.do_register()
+    sign = FakeSignDialog.last_instance
+    dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
+    old_id = dialog.widget._submit_context["request_id"]
+    dialog.widget._submit_context["resume_agreement_version"] = "terms-v1"
+    registration_resume.save_pending(old_id, "newbie", "terms-v1")
+
+    dialog.widget._on_register_finished(
+        sign.submit_token,
+        RegisterOutcome(False, "用户协议已更新，请重新阅读", code="AGREEMENT_CHANGED", agreement_version="terms-v2"),
+    )
+
+    context = dialog.widget._submit_context
+    assert context["resume_agreement_version"] == ""
+    assert context["request_id"] != old_id
+    assert registration_resume.load_pending() is None
+    outcome = dialog.widget._register_with_agreement(context, "terms-v2")
+    assert outcome.ok is True
+    assert dialog.binder.calls[-1]["agreement_version"] == "terms-v2"
+    assert dialog.binder.calls[-1]["registration_request_id"] == context["request_id"]
+
+
+def test_changing_username_before_confirming_previous_request_is_blocked(dialog):
+    """旧请求结果未确认时，不允许换用户名开始新请求（否则会覆盖恢复记录）。"""
+    registration_resume.save_pending("req-old", "alice", "terms-v1")
+    dialog.widget.fill_register_form(username="bob")
+
+    dialog.widget.do_register()
+
+    assert FakeSignDialog.last_instance is None  # 没有打开协议窗口
+    assert dialog.messages.warnings
+    assert registration_resume.load_pending()["registration_request_id"] == "req-old"

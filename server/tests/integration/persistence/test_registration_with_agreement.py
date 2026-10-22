@@ -340,3 +340,41 @@ def test_duplicate_username_unique_conflict_is_business_failure(env):
     assert "注册失败" in message
 
 
+def test_replay_after_account_reset_does_not_accept_new_credentials(env):
+    """账号重置后，用新用户名/新密码无法确认原注册操作（spec：不能以当前凭据替代原操作）。"""
+    service = env.build()
+    submit(service, registration_request_id="req-reset")
+
+    ok, _ = env.manager.credential_service.reset_account(INVITE, "renamed", "brand-new-password")
+    assert ok is True
+
+    with pytest.raises(RegistrationRequestConflictError):
+        submit(
+            service,
+            username="renamed",
+            password="brand-new-password",
+            registration_request_id="req-reset",
+        )
+
+
+def test_concurrent_same_request_id_different_content_returns_conflict(env, monkeypatch):
+    """并发同 ID、不同内容：恢复阶段发现的冲突要作为 409 返回，而不是原始数据库异常（500）。"""
+    service = env.build()
+    submit(service, username="newbie", registration_request_id="req-conflict")
+
+    calls = 0
+    original_replay = service._replay
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        return None if calls == 1 else original_replay(db, **kwargs)
+
+    def fail_with_integrity(*args, **kwargs):
+        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    monkeypatch.setattr(service._credentials, "create_account_with_invite", fail_with_integrity)
+
+    with pytest.raises(RegistrationRequestConflictError):
+        submit(service, username="other", registration_request_id="req-conflict")

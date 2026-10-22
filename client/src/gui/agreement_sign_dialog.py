@@ -31,8 +31,6 @@ from .agreement_dialog import (
     COLOR_MUTED,
     COLOR_PRIMARY,
     COLOR_SECONDARY_BG,
-    COLOR_SCROLL_HANDLE,
-    COLOR_SCROLL_HANDLE_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     TEXT_RETRY,
@@ -41,6 +39,9 @@ from .agreement_dialog import (
 from .signing_gate import STATUS_LOAD_FAILED, STATUS_SUBMITTING, SigningGate
 
 COLOR_DISABLED = "#D1D5DB"
+# 签署窗口自己的滚动条配色（与白底对比度 4.76:1；只读查阅窗口保持原样式，不在本 PR 内改动）。
+COLOR_SCROLL_HANDLE = "#64748b"
+COLOR_SCROLL_HANDLE_HOVER = "#475569"
 TEXT_REJECT = "不同意，返回注册"
 TEXT_REJECT_READONLY = "关闭"
 
@@ -169,17 +170,18 @@ class AgreementSignDialog(QDialog):
     def _build_actions(self) -> QWidget:
         actions = QWidget()
         column = QVBoxLayout(actions)
-        column.setContentsMargins(BODY_SIDE_MARGIN, 0, BODY_SIDE_MARGIN, 16)
+        column.setContentsMargins(BODY_SIDE_MARGIN, 8, BODY_SIDE_MARGIN, 16)
         column.setSpacing(8)
 
-        self.hint_label = QLabel("")
-        self.hint_label.setStyleSheet(f"font-size: 12px; color: {COLOR_MUTED};")
-        column.addWidget(self.hint_label)
-
+        # 顺序与草图一致：正文 → 分隔线 → 提示 → 按钮（提示不再紧贴正文）。
         divider = QFrame()
         divider.setFixedHeight(1)
         divider.setStyleSheet(f"background-color: {COLOR_DIVIDER}; border: none;")
         column.addWidget(divider)
+
+        self.hint_label = QLabel("")
+        self.hint_label.setStyleSheet(f"font-size: 12px; color: {COLOR_MUTED};")
+        column.addWidget(self.hint_label)
 
         row = QHBoxLayout()
         row.setSpacing(10)
@@ -429,6 +431,7 @@ class AgreementSignDialog(QDialog):
         # 提交期间禁止 Esc/代码调用 reject；否则后台结果可能串到后续注册窗口。
         if self.gate.status == STATUS_SUBMITTING and not self._allow_close:
             return
+        self._timer.stop()
         super().reject()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名

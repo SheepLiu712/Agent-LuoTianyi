@@ -28,8 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.agreement_dialog import COLOR_SCROLL_HANDLE  # noqa: E402
-from src.gui.agreement_sign_dialog import AgreementSignDialog  # noqa: E402
+from src.gui.agreement_sign_dialog import COLOR_SCROLL_HANDLE, AgreementSignDialog  # noqa: E402
 
 WIDTHS = (1400, 900, 640, 560)
 

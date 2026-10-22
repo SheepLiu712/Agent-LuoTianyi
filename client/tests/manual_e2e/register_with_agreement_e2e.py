@@ -46,6 +46,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.network.auth import AuthApi  # noqa: E402
 
+# 服务端“邀请码/用户名不可用”的既有 400 文案（无稳定 code）。
+RACE_LOSS_DETAIL = "注册失败，请检查邀请码或用户名"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="UA-2 桌面注册链路手工端到端")
@@ -76,10 +79,11 @@ def run_race_peer(api: AuthApi, args: argparse.Namespace, username: str, request
     if outcome.ok:
         print(f"[PASS] 竞争结果：本进程赢得竞争（创建账号 {username}）")
         return 0
-    message = outcome.message or ""
-    # 竞争失败方走的是“邀请码/用户名不可用”的既有 400：只有 detail、没有稳定 code。
-    # 带 code 的失败（换版、请求冲突、缺同意字段等）不属于竞争预期，判 FAIL。
-    if not outcome.code:
+    message = (outcome.message or "").strip()
+    # 竞争失败方只会得到“邀请码/用户名不可用”的既有 400 文案（无 code）。
+    # 必须精确匹配这条业务文案：429、500、公钥获取失败等基础设施错误同样没有 code，
+    # 按“无 code 即预期失败”会把它们误判为 PASS（审查 N8）。
+    if not outcome.code and message == RACE_LOSS_DETAIL:
         print(f"[PASS] 竞争结果：本进程按预期失败（{message}），未创建账号")
         return 0
     print(f"[FAIL] 竞争结果：非预期失败（code={outcome.code}, message={message}）")

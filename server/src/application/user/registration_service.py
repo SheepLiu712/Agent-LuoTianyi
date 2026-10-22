@@ -200,6 +200,9 @@ class RegistrationService:
                 registration_request_id=registration_request_id,
                 agreement_version=agreement_version,
             )
+        except RegistrationError:
+            # 冲突 / 无法核验是确定的业务结论，必须原样返回（409），不能回退成 500。
+            raise
         except Exception:
             return None
         finally:
@@ -240,6 +243,11 @@ class RegistrationService:
         user = db.query(User).filter(User.uuid == request.user_uuid).first()
         if user is None:
             raise RegistrationRequestUnverifiableError()
+        # 核验“原操作”，而不是账号当前状态：账号被重置后 username 可能已经改掉，
+        # 只有原响应里记录的用户名才代表这次注册提交的内容。
+        original_payload = json.loads(request.response_json)
+        if original_payload.get("user_id") != username:
+            raise RegistrationRequestConflictError()
         if user.username != username:
             raise RegistrationRequestConflictError()
         if request.agreement_version != agreement_version:

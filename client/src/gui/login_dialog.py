@@ -210,10 +210,10 @@ class LoginDialog(QDialog):
             QMessageBox.critical(self, "登录失败", msg)
 
     def do_register(self):
-        username = self.r_username.text().strip()
+        username = self.r_username.text()
         password = self.r_password.text()
         confirm_password = self.r_confirm_password.text()
-        invite = self.r_invite.text().strip()
+        invite = self.r_invite.text()
 
         if not username or not password or not confirm_password or not invite:
             QMessageBox.warning(self, "错误", "请填写所有信息")
@@ -225,6 +225,14 @@ class LoginDialog(QDialog):
 
         # 本地校验通过后才打开协议窗口：此时不建账号、不占用邀请码。
         pending = registration_resume.load_pending()
+        if pending and pending.get("username") and pending["username"] != username:
+            # spec：旧提交结果未知时应先以原提交确认，不能直接开始新请求覆盖恢复记录。
+            QMessageBox.warning(
+                self,
+                "还有未确认的注册",
+                f"上一次注册（用户名 {pending['username']}）结果尚未确认，请先用原用户名重试一次。",
+            )
+            return
         request_id = registration_resume.request_id_for(username)
         resume_version = ""
         if pending and pending.get("username") == username and pending.get("registration_request_id") == request_id:
@@ -280,6 +288,19 @@ class LoginDialog(QDialog):
         )
         dialog.submit_token = flow_token
 
+    def _start_new_request_after_version_change(self) -> None:
+        """协议换版后开始新请求：不再重放旧版本，也不复用旧请求 ID。
+
+        spec：协议版本改变后开始新请求；原请求已成功时由服务端 replay 返回原结果，
+        走到 AGREEMENT_CHANGED 的只可能是未成功的旧请求。
+        """
+        context = self._submit_context
+        if not context:
+            return
+        context["resume_agreement_version"] = ""
+        context["request_id"] = registration_resume.new_request_id()
+        registration_resume.clear_pending()
+
     def _register_with_agreement(self, context: dict, agreement_version: str) -> RegisterOutcome:
         submit = getattr(self.binder, "on_register_with_agreement", None)
         outcome = submit(
@@ -306,6 +327,7 @@ class LoginDialog(QDialog):
             return
         if outcome.code == "AGREEMENT_CHANGED":
             # 服务端已换版：提示重读并拉取最新正文，阅读计时与"到过底部"随之重置。
+            self._start_new_request_after_version_change()
             dialog.finish_submit(False, "用户协议已更新，请重新阅读")
             dialog.reload_document()
             return

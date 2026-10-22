@@ -132,3 +132,28 @@ def test_encryption_failure_returns_outcome(monkeypatch):
     outcome = instance.register_with_agreement("newbie", "pw", "INVITE")
 
     assert outcome == RegisterOutcome(False, "Failed to encrypt password. Check server connection.")
+
+
+def test_register_refreshes_public_key_when_encryption_fails(api, monkeypatch):
+    """服务端换钥后旧缓存会一直失败：注册入口应刷新一次公钥再试（审查 N7）。"""
+    calls = {"encrypt": 0, "invalidate": 0}
+
+    def fake_encrypt(*args, **kwargs):
+        calls["encrypt"] += 1
+        return None if calls["encrypt"] == 1 else "ciphertext"
+
+    monkeypatch.setattr(auth_module.encrypt_pwd, "encrypt_password", fake_encrypt)
+    monkeypatch.setattr(
+        auth_module.encrypt_pwd,
+        "invalidate_public_key",
+        lambda: calls.__setitem__("invalidate", calls["invalidate"] + 1),
+    )
+    api._next_response = FakeResponse(200, {"message": "注册成功"})
+
+    outcome = api.register_with_agreement(
+        "newbie", "pw", "INVITE", registration_request_id="req-1", agreement_version="v1", accepted=True
+    )
+
+    assert outcome.ok is True
+    assert calls["encrypt"] == 2
+    assert calls["invalidate"] == 1

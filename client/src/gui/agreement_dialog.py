@@ -64,8 +64,7 @@ COLOR_TEXT = "#17283d"
 COLOR_MUTED = "#64748b"
 COLOR_DIVIDER = "#e2e8f0"
 COLOR_SURFACE = "#ffffff"
-COLOR_SCROLL_HANDLE = "#64748b"  # 与白底对比度 4.76:1，满足 WCAG 非文本组件 ≥3:1
-COLOR_SCROLL_HANDLE_HOVER = "#475569"
+COLOR_SCROLL_HANDLE = "#cbd5e1"
 COLOR_PRIMARY = "#93C5FD"
 COLOR_SECONDARY_BG = "#f1f5f9"
 COLOR_ERROR = "#b91c1c"
@@ -254,10 +253,9 @@ class AgreementDialog(QDialog):
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.view.setStyleSheet(
             f"QTextEdit {{ background: transparent; color: {COLOR_TEXT}; border: none; }}"
-            "QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }"
+            "QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }"
             f"QScrollBar::handle:vertical {{ background: {COLOR_SCROLL_HANDLE}; min-height: 40px;"
-            " border-radius: 3px; }"
-            f"QScrollBar::handle:vertical:hover {{ background: {COLOR_SCROLL_HANDLE_HOVER}; }}"
+            " border-radius: 2px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
         column.addWidget(self.view, 1)
