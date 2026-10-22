@@ -311,7 +311,13 @@ class CredentialService:
             password=_hash_password(password),
         )
         db.add(new_user)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            # 并发注册同名账号时，前面的存在性检查会同时通过，唯一约束在这里才暴露。
+            # 转成与"用户名已存在"一致的业务错误，由调用方回滚；不要让 IntegrityError 冒泡成 500。
+            logger.info("Register failed: username unique conflict: %s", username)
+            return False, "注册失败，请检查邀请码或用户名", None
 
         claimed = (
             db.query(InviteCode)

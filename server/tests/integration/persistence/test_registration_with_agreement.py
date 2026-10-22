@@ -261,6 +261,19 @@ def test_same_request_id_race_replays_the_committed_result(env, monkeypatch):
     assert state["invite"].is_used is True
 
 
+class _FlushRaisesIntegrityError:
+    """把 flush 换成唯一约束冲突，其余委托真实会话（模拟并发同名注册的时序）。"""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def flush(self):
+        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
+
+
 def test_concurrent_same_request_id_unique_violation_replays_committed_result(env, monkeypatch):
     """另一方已提交、本事务撞唯一约束时，应返回原成功结果而不是抛 IntegrityError（HTTP 500）。"""
     service = env.build()
@@ -309,3 +322,21 @@ def test_accepted_time_uses_injected_clock_and_second_precision(env):
 
     row = snapshot(env.manager)["signatures"][0]
     assert row.accepted_at == "2027-01-01T07:59:59+08:00"
+
+
+def test_duplicate_username_unique_conflict_is_business_failure(env):
+    """并发同名注册：唯一约束冲突要变成业务失败，而不是 IntegrityError 冒泡成 500。"""
+    session = env.manager.open_sql_session()
+    try:
+        ok, message, user_uuid = env.manager.credential_service.create_account_with_invite(
+            _FlushRaisesIntegrityError(session), "racer", "pw", INVITE
+        )
+    finally:
+        session.rollback()
+        session.close()
+
+    assert ok is False
+    assert user_uuid is None
+    assert "注册失败" in message
+
+
