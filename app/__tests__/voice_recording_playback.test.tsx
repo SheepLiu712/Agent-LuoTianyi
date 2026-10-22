@@ -4,12 +4,15 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { Audio } from 'expo-av';
 import { AppState, GestureResponderEvent } from 'react-native';
 import { useChatLogic } from '../hooks/useChatLogic';
+import { useCallSession } from '../hooks/useCallSession';
+import { useHistoryLogic } from '../hooks/useHistoryLogic';
+import type { CallTransportListener } from '../types/call_transport';
 import { NetworkClient } from '../utils/network_client';
 import { VoiceFileSystem } from './helpers/voice_filesystem';
 import { VoicePlaybackManager, voicePlaybackManager } from '../utils/voice_playback_manager';
 import { voiceRecorder } from '../utils/voice_recorder';
 
-jest.mock('react-native', () => ({ AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
+jest.mock('react-native', () => ({ Platform: { OS: 'android' }, BackHandler: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) }, AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
@@ -33,7 +36,7 @@ describe('recording and playback through chat, processor and native voice manage
   const injectJavaScript = jest.fn();
   const webview = { current: { injectJavaScript } } as any;
   const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
-  function Harness() { state = useChatLogic(webview, 'user', 'token'); return null; }
+  function Harness() { state = useChatLogic(webview, 'user', 'token', 'luotianyi'); return null; }
   const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
   beforeEach(async () => {
     await voicePlaybackManager.clear();
@@ -46,13 +49,77 @@ describe('recording and playback through chat, processor and native voice manage
     (Audio.Sound as unknown as jest.Mock).mockImplementation(() => sound);
     (voiceRecorder.start as jest.Mock).mockResolvedValue({ recordingId: 'recording', localUri: 'file://recording.m4a' });
     (NetworkClient as jest.Mock).mockImplementation(() => ({
-      connectWs: jest.fn((_user, _token, callbacks) => { incoming = callbacks.onAgentMessage; }),
+      connectWs: jest.fn((_user, _token, _character, callbacks) => { incoming = callbacks.onAgentMessage; }),
       disconnectWs: jest.fn(), sendVoicePhase: jest.fn().mockResolvedValue({ ok: true, message_uuid: 'server-recording' }),
       sendVoiceRecordingStarted: jest.fn(), sendVoiceRecordingCancelled: jest.fn(),
     }));
     await act(async () => { root = create(<Harness />); });
   });
   afterEach(async () => { await act(async () => root.unmount()); now.mockRestore(); });
+
+  it('hangup inserts one local call immediately, then real history loading calibrates it without losing chat or changing its position', async () => {
+    await act(async () => root.unmount());
+    let listener!: CallTransportListener;
+    let call!: ReturnType<typeof useCallSession>;
+    let history!: ReturnType<typeof useHistoryLogic>;
+    let finishClose!: () => void;
+    const closing = new Promise<void>((resolve) => { finishClose = resolve; });
+    const session = {
+      prepare: jest.fn(async () => {}), start: jest.fn(async () => {}), hangup: jest.fn(async () => {}),
+      close: jest.fn(() => closing),
+      subscribe: (callback: CallTransportListener) => { listener = callback; return () => {}; },
+      onError: () => () => {},
+    };
+    const onReturnToChat = jest.fn();
+    const monotonicNow = () => 1100;
+    function Combined() {
+      state = useChatLogic(webview, 'user', 'token', 'luotianyi');
+      call = useCallSession({ session, requestPermission: async () => 'granted',
+        capabilities: { serverAvailable: true, nativeAvailable: true }, now: monotonicNow,
+        onCallRecord: state.addLocalCallRecord, onReturnToChat });
+      history = useHistoryLogic(state.addHistoryMessage);
+      return null;
+    }
+    const originalFetch = global.fetch;
+    const fetchHistory = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ start_index: 0, history: [
+      { uuid: 'old', type: 'text', source: 'agent', content: 'stale server copy' },
+      { uuid: 'persisted-uuid', call_id: 'call-1', type: 'call', source: 'user',
+        content: '[语音通话] 00:02', timestamp: '2026-10-21 12:00:00', outcome: 'connected', active_duration_ms: 2500 },
+    ] }) });
+    global.fetch = fetchHistory as unknown as typeof fetch;
+    try {
+      await act(async () => { root = create(<Combined />); });
+      act(() => state.addHistoryMessage([{ uuid: 'old', type: 'text', isUser: false, content: 'live local copy', audioPlayState: 'playing' }]));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const scrollToIndex = jest.fn();
+      const scrollToOffset = jest.fn();
+      (state.flatListRef as any).current = { scrollToIndex, scrollToOffset };
+      await act(async () => { await call.start(false); });
+      act(() => listener({ status: 'connected', callId: 'call-1', connectedAtMonotonicMs: 100, activeDurationMs: 1000 }));
+      act(() => call.hangup());
+      // Neither closure, reconnection nor server settlement needs to complete first.
+      expect(state.messages[0]).toMatchObject({ uuid: 'call:call-1', callId: 'call-1', callOutcome: 'connected', durationMs: 1000 });
+      expect(fetchHistory).not.toHaveBeenCalled();
+      expect(call.state.phase).toBe('IDLE');
+      const local = state.messages[0];
+      await act(async () => { await flush(); });
+      expect(onReturnToChat).toHaveBeenCalledTimes(1);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(scrollToIndex).not.toHaveBeenCalled();
+      expect(scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: false });
+      await act(async () => { await history.loadHistory('user', 'token'); });
+      expect(state.messages).toHaveLength(2);
+      expect(state.messages[0]).toMatchObject({ uuid: 'persisted-uuid', callId: 'call-1', durationMs: 2500,
+        timestamp: Date.UTC(2026, 9, 21, 4) });
+      expect(state.messages[1]).toMatchObject({ uuid: 'old', content: 'live local copy', audioPlayState: 'playing' });
+      expect(history.history_start_index).toBe(0);
+      act(() => { state.addLocalCallRecord(local); listener({ status: 'closed', callId: 'call-1', activeDurationMs: 3000 }); });
+      expect(state.messages).toHaveLength(2);
+      expect(state.messages[0].durationMs).toBe(2500);
+      act(() => state.addHistoryMessage([state.messages[0]]));
+      expect(state.messages).toHaveLength(2);
+    } finally { global.fetch = originalFetch; finishClose(); }
+  });
 
   it('sends recording cancellation before disconnecting on chat unmount', async () => {
     await act(async () => { state.voiceInput.toggleMode(); });

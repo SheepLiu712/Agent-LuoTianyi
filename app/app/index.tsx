@@ -18,6 +18,9 @@ import {
   useColorScheme,
   useWindowDimensions,
   View,
+  Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -33,6 +36,13 @@ import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } fr
 import DynamicsScreen from './dynamics';
 import PreferencesScreen from './preferences';
 import LlmSettingsScreen from './llm_settings';
+import { useCallSession } from '../hooks/useCallSession';
+import { CallScreen } from '../components/call/CallScreen';
+import { CallFailureBanner } from '../components/call/CallFailureBanner';
+import { requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
+import { ExpoCallRingtone } from '../utils/call_session/ringtone';
+import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
+import { createCallMouthBridge } from '../utils/call_audio/playback_progress';
 
 const THINKING_BUBBLE_FRAMES = [
   require('../assets/images/thinking_bubble1.png'),
@@ -61,9 +71,24 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [hasDynamicsUnread, setHasDynamicsUnread] = useState(false);
   const [dynamicsUnreadCount, setDynamicsUnreadCount] = useState(0);
   const webviewRef = useRef<WebView>(null);
+  const callMouthBridge = useMemo(() => createCallMouthBridge((code) => webviewRef.current?.injectJavaScript(code)), []);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
-
+  const callHangupRef = useRef<() => void>(() => {});
+  const onLogoutRef = useRef(onLogout);
+  onLogoutRef.current = onLogout;
+  const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
+    { text: '继续通话', style: 'cancel' },
+    { text: '结束', style: 'destructive', onPress: () => callHangupRef.current() },
+  ]), []);
+  const handlePermissionSettings = useCallback(() => { void Linking.openSettings(); }, []);
+  const handleCallCleanupError = useCallback((error: unknown) => {
+    addDebugTrace('call', 'call resource cleanup failed', { error: String(error) });
+  }, []);
+  const callSwitchRef = useRef<{ prepare(clientRequestId: string, characterId: string): Promise<void> }>({
+    prepare: async () => { throw new Error('CHAT_TRANSPORT_UNAVAILABLE'); },
+  });
+  const ringtone = useMemo(() => new ExpoCallRingtone(), []);
   const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
   const live2dAssetRoot = 'file:///android_asset/public/';
   const live2dRoot = __DEV__ ? `http://${debuggerHost}/` : live2dAssetRoot;
@@ -82,6 +107,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     thinking,
     setInputText,
     addHistoryMessage,
+    addLocalCallRecord,
     handleSendText,
     handleSendImage,
     handleWebViewMessage,
@@ -89,7 +115,36 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     toggleVoicePlayback,
     retryVoice,
     voiceInput,
-  } = useChatLogic(webviewRef, username, message_token, !showPreferences && !showLlmSettings && !showDynamics);
+    callSwitch,
+    resumeChat,
+  } = useChatLogic(webviewRef, username, message_token, 'luotianyi', !showPreferences && !showLlmSettings && !showDynamics);
+  callSwitchRef.current = callSwitch;
+
+  const callComposition = useProductionCallComposition({
+    username,
+    token: message_token,
+    characterId: 'luotianyi',
+    switchPort: { prepare: (clientRequestId, characterId) => callSwitchRef.current.prepare(clientRequestId, characterId) },
+    onAuthRequired: () => onLogoutRef.current?.(),
+    onError: (error) => addDebugTrace('call', 'capability probe failed', { error: String(error) }),
+    mouthBridge: callMouthBridge,
+  });
+
+  const call = useCallSession({
+    capabilities: callComposition.capabilities,
+    createSession: callComposition.createSession,
+    initializeAttempt: (session) => callComposition.initializeSession(session as never),
+    requestPermission: requestCallMicrophonePermission,
+    ringtone,
+    onBackConfirmation: handleBackConfirmation,
+    onReturnToChat: () => { void resumeChat(); },
+    onCallRecord: addLocalCallRecord,
+    onPermissionSettings: handlePermissionSettings,
+    onCleanupError: handleCallCleanupError,
+  });
+  callHangupRef.current = call.hangup;
+
+  useEffect(() => () => ringtone.stop(), [ringtone]);
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
 
@@ -180,6 +235,9 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     (event: any) => {
       try {
         const data = JSON.parse(event.nativeEvent.data);
+        if (data.type === 'mouthAnalysisWindow') {
+          callMouthBridge.configureAnalysisWindow(data.sampleRate, data.samples);
+        }
         if (data.type === 'modelLoaded') {
           setLive2dReady(Boolean(data.success));
           addDebugTrace('live2d', data.success ? 'model loaded' : 'model load failed', data.error ? { error: data.error } : undefined);
@@ -189,7 +247,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       }
       handleWebViewMessage(event);
     },
-    [handleWebViewMessage],
+    [callMouthBridge, handleWebViewMessage],
   );
 
   useEffect(() => {
@@ -304,7 +362,17 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
   const handleLogout = () => {
     closeDrawer();
+    void callComposition.closeCurrent();
     onLogout?.();
+  };
+
+  const openCall = () => {
+    if (!call.canStart) {
+      Alert.alert('通话暂不可用', '服务端或设备音频能力尚未就绪。请完成后续配置后再试。');
+      return;
+    }
+    closeDrawer();
+    void call.start(true);
   };
 
   const handleColorMode = (mode: ColorMode) => {
@@ -318,7 +386,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     <View style={[styles.root, { backgroundColor: theme.root }]}>
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
-      <View style={[styles.live2dFixedLayer, { top: insets.top, height: live2dHeight }]}>
+      {call.state.phase !== 'IDLE' ? <CallScreen state={call.state} theme={theme} onHangup={call.hangup} onBack={handleBackConfirmation} /> : null}
+      {call.failureNotice ? <CallFailureBanner notice={call.failureNotice} theme={theme} onDismiss={call.dismissFailure} /> : null}
+
+      <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
         <Image
           source={require('../assets/live2d/backgrounds/bg2.jpg')}
           style={[StyleSheet.absoluteFillObject, styles.backgroundImage]}
@@ -512,6 +583,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         </TouchableOpacity>
 
+         {Platform.OS === 'android' ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={call.canStart ? '给天依打电话' : '语音通话，暂不可用'} accessibilityState={{ disabled: !call.canStart }} disabled={!call.canStart} style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt, opacity: call.canStart ? 1 : 0.58 }]} onPress={call.canStart ? openCall : undefined} activeOpacity={0.78}>
+          <View style={styles.drawerItemRow}>
+            <Text style={[styles.drawerItemText, { color: theme.text }]}>语音通话</Text>
+             {!call.canStart ? <Text style={[styles.callUnavailable, { color: theme.textMuted }]}>暂不可用</Text> : null}
+          </View>
+         </TouchableOpacity> : null}
+
         <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.drawerSectionLabel, { color: theme.textMuted }]}>颜色模式</Text>
           {(Object.keys(COLOR_MODE_LABELS) as ColorMode[]).map((mode) => (
@@ -561,6 +639,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     zIndex: 10,
     overflow: 'hidden',
+  },
+  live2dCallLayer: {
+    zIndex: 20,
   },
   thinkingBubble: {
     position: 'absolute',
@@ -714,6 +795,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#243447',
+  },
+  callUnavailable: {
+    fontSize: 12,
   },
   drawerItemRow: {
     flexDirection: 'row',

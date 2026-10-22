@@ -6,12 +6,13 @@ import { WebView } from 'react-native-webview';
 import { setExpression } from '../utils/live2d_helper';
 import { AgentBinder } from '../utils/binder';
 import { MessageProcessor } from '../utils/message_processor';
-import { NetworkClient } from '../utils/network_client';
+import { NetworkClient, type ConnectCallbacks } from '../utils/network_client';
 import { AgentMessagePayload, ChatMessage, createSystemChatMessage } from '../types/chat';
 import { addDebugTrace } from '../utils/debug_trace';
 import { useVoiceInput } from './useVoiceInput';
 import { voicePlaybackManager } from '../utils/voice_playback_manager';
 import { runImageSelection } from '../utils/image_selection';
+import { mergeLoadedHistory } from '../utils/call_history';
 
 function createUuid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -21,6 +22,7 @@ export const useChatLogic = (
   webviewRef: React.RefObject<WebView | null>,
   username: string,
   messageToken: string,
+  characterId: string,
   active = true,
 ) => {
   const [inputText, setInputText] = useState('');
@@ -29,6 +31,8 @@ export const useChatLogic = (
   const flatListRef = useRef<FlatList>(null);
 
   const networkClientRef = useRef<NetworkClient | null>(null);
+  const chatCallbacksRef = useRef<ConnectCallbacks | null>(null);
+  const chatConnectionGenerationRef = useRef(0);
   const binderRef = useRef<AgentBinder | null>(null);
   const messageProcessorRef = useRef<MessageProcessor | null>(null);
   const recordingAudioRef = useRef(false);
@@ -141,6 +145,7 @@ export const useChatLogic = (
     }
 
     const networkClient = new NetworkClient();
+    chatConnectionGenerationRef.current += 1;
     networkClientRef.current = networkClient;
 
     const binder = new AgentBinder(
@@ -241,7 +246,7 @@ export const useChatLogic = (
     void voicePlaybackManager.initialize().catch((error) =>
       addDebugTrace('audio', 'initialize voice cache failed', { error: String(error) }));
 
-    networkClient.connectWs(username, messageToken, {
+    const callbacks: ConnectCallbacks = {
       onAgentMessage: (payload) => {
         processor.onAgentMessage(payload);
       },
@@ -253,17 +258,21 @@ export const useChatLogic = (
       },
       onLlmRequest: (payload) => processor.processLlmRequest(payload),
       getLlmMode: () => processor.getLlmMode(),
-    });
+    };
+    chatCallbacksRef.current = callbacks;
+    networkClient.connectWs(username, messageToken, characterId, callbacks);
 
     return () => {
+      chatConnectionGenerationRef.current += 1;
       processor.stop();
       void stopUserVoicePlayback();
       networkClient.disconnectWs();
+      chatCallbacksRef.current = null;
       messageProcessorRef.current = null;
       binderRef.current = null;
       networkClientRef.current = null;
     };
-  }, [appendOrMergeAgentMessage, appendSystemMessage, messageToken, onVoiceUploadStatus, stopUserVoicePlayback, updateMessageByUuid, username, webviewRef]);
+  }, [appendOrMergeAgentMessage, appendSystemMessage, characterId, messageToken, onVoiceUploadStatus, stopUserVoicePlayback, updateMessageByUuid, username, webviewRef]);
 
   const canSend = useMemo(() => inputText.trim().length > 0, [inputText]);
   const canSendImage = true;
@@ -432,6 +441,13 @@ export const useChatLogic = (
   const handleToggleAgentAudio = toggleHistoryAudio;
   const toggleVoicePlayback = toggleHistoryAudio;
 
+  const addLocalCallRecord = useCallback((record: ChatMessage) => {
+    setMessages((previous) => previous.some((message) => message.uuid === record.uuid
+      || (message.type === 'call' && record.callId && message.callId === record.callId))
+      ? previous : [record, ...previous]);
+    setTimeout(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: false }), 10);
+  }, []);
+
   const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
     for (const msg of newMessages) {
       if (!msg.isUser && msg.audioAvailable && msg.audioLocalUri) {
@@ -449,16 +465,14 @@ export const useChatLogic = (
           .map(([uploadId]) => uploadId),
       );
       const retained = prev.filter((msg) => !optimisticToReplace.has(msg.uuid));
-      const existingUuids = new Set(retained.map((msg) => msg.uuid));
       const normalized = newMessages
-        .filter((msg) => !existingUuids.has(msg.uuid))
         .map((msg) => ({
           ...msg,
           sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
           audioPlayState: msg.audioPlayState || 'idle',
           audioDownloadState: msg.type === 'audio' ? 'idle' : msg.audioDownloadState,
         }));
-      const next = [...retained, ...normalized.reverse()];
+      const next = mergeLoadedHistory(retained, normalized.reverse());
 
       if (nowScrollIndex >= 0) {
         // 快速滑动时目标 index 可能尚未渲染，scrollToIndex 会抛 invariant violation 导致应用闪退。
@@ -505,6 +519,7 @@ export const useChatLogic = (
     thinking,
     setInputText: handleInputChange,
     addHistoryMessage,
+    addLocalCallRecord,
     handleSendText,
     handleSendImage,
     handleWebViewMessage,
@@ -512,5 +527,21 @@ export const useChatLogic = (
     toggleVoicePlayback,
     retryVoice,
     voiceInput,
+    callSwitch: {
+      prepare: async (clientRequestId: string, characterId: string) => {
+        const client = networkClientRef.current;
+        if (!client) throw new Error('CHAT_TRANSPORT_UNAVAILABLE');
+        await client.prepareCallSwitch(clientRequestId, characterId);
+      },
+    },
+    resumeChat: async () => {
+      const client = networkClientRef.current;
+      const callbacks = chatCallbacksRef.current;
+      if (!client || !callbacks || !username || !messageToken) return false;
+      const generation = ++chatConnectionGenerationRef.current;
+      const ready = await client.reconnectWs(username, messageToken, characterId, callbacks);
+      return ready && generation === chatConnectionGenerationRef.current
+        && client === networkClientRef.current;
+    },
   };
 };

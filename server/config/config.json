@@ -1,5 +1,8 @@
 {
     "is_debug": true,
+    "call_transport": {
+        "enabled": false
+    },
     "llm_service": {
         "client_llm_timeout_seconds": 120,
         "prompt_manager": {
@@ -234,6 +237,10 @@
         "stage": {
             "proactive_idle_seconds": 30,
             "login_reminder_wait": 1
+        },
+        "call_stage": {
+            "time_limit_seconds": 1800,
+            "time_limit_warning_seconds": 30
         }
     },
     "agent_runtime": {
@@ -482,6 +489,20 @@
                         "client_model_type": "main_chat"
                     },
                     "prompt_name": "topic_reply_prompt"
+                }
+            },
+            "call_summary": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {
+                            "max_tokens": 300
+                        },
+                        "client_model_type": "assistance"
+                    },
+                    "prompt_name": "call_summary_prompt"
                 }
             }
         }

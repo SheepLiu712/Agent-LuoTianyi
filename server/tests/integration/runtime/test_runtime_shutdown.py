@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,11 +8,11 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.application.admin import admin_shell as admin_shell_module
-from src.application.admin.admin_shell import AdminShell
-from src.application.admin.runtime_supervisor import RuntimeSupervisor
-from src.server_runtime import ServerRuntime
-from src.adapter.websocket.client_model_executor import ClientLLMExecutor
+from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor  # noqa: E402
+from src.application.admin import admin_shell as admin_shell_module  # noqa: E402
+from src.application.admin.admin_shell import AdminShell  # noqa: E402
+from src.application.admin.runtime_supervisor import RuntimeSupervisor  # noqa: E402
+from src.server_runtime import ServerRuntime  # noqa: E402
 
 
 class OrderedAsyncService:
@@ -61,7 +62,54 @@ async def test_server_runtime_shutdown_is_ordered_idempotent_and_retryable():
 
 
 @pytest.mark.asyncio
-async def test_admin_shell_keeps_retry_handle_until_runtime_cleanup_succeeds(monkeypatch):
+async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks():
+    import asyncio
+
+    from src.adapter.websocket.call_v1 import CallWebSocketAdapter
+
+    calls = []
+    world = OrderedAsyncService(calls, "world", "stop_background_services")
+    agent = OrderedAsyncService(calls, "agent", "shutdown")
+    database = OrderedAsyncService(calls, "database", "shutdown")
+    adapter = CallWebSocketAdapter(manager=SimpleNamespace())
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def release():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    task = asyncio.create_task(release(), name="call-transport-release")
+    adapter._release_tasks.add(task)
+    await entered.wait()
+    runtime = ServerRuntime(
+        user_interface=object(),
+        websocket_service=object(),
+        world=world,
+        database_manager=database,
+        agent_runtime=agent,
+        media_resolver=object(),
+        llm_service=object(),
+        observability=object(),
+        client_llm_executor=ClientLLMExecutor(),
+        owns_observability=False,
+        call_adapter=adapter,
+    )
+
+    await runtime.shutdown()
+
+    assert task.cancelled()
+    assert cancelled.is_set()
+    assert calls == ["world", "agent", "database"]
+
+
+@pytest.mark.asyncio
+async def test_admin_shell_keeps_retry_handle_until_runtime_cleanup_succeeds(
+    monkeypatch,
+):
     events = []
 
     class FlakySupervisor:

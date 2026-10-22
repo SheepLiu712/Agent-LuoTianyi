@@ -7,16 +7,18 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from support.chat_connection import StubChatConnection
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat._messages import WSMessage
 from src.agent import Agent
+from src.agent.context import ConversationMode
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.domain.stage import StageState
-from src.stage import ChatStage, StageManager
-from src.web.websocket import WSMessage
-from src.web.websocket.service import WebSocketConnection
+from src.stage import ChatStage
 
 
 class Socket:
@@ -97,6 +99,26 @@ def plan(request, *, ordinal=0, thinking=False):
     )
 
 
+async def ending_plan(request, sink):
+    value = d.ActionPlan(
+        plan_id=str(uuid4()),
+        origin_request_id=request.request_id,
+        plan_ordinal=0,
+        target_character_id="luotianyi",
+        interaction_id=request.interaction.interaction_id,
+        basis_interaction_revision=request.interaction.interaction_revision,
+        source_stimulus_ids=(request.stimulus.stimulus_id,),
+        actions=(
+            d.CognitiveMaintenance(
+                action_id=str(uuid4()),
+                reason=d.MaintenanceReason.INTERACTION_ENDING,
+            ),
+        ),
+    )
+    await sink.emit(value)
+    return report(request, plans=(value.plan_id,))
+
+
 class RecordingAgent:
     def __init__(self, handle=None, realize=None):
         self.requests = asyncio.Queue()
@@ -114,6 +136,8 @@ class RecordingAgent:
         self.requests.put_nowait(request)
         if self.handle is not None:
             return await self.handle(request, sink)
+        if isinstance(request.stimulus, d.InteractionEnding):
+            return await ending_plan(request, sink)
         return report(
             request,
             consumed=(
@@ -134,12 +158,17 @@ async def take(queue):
     return await asyncio.wait_for(queue.get(), 1)
 
 
+def test_interaction_ending_reason_includes_switch_to_call():
+    assert d.InteractionEndingReason.SWITCH_TO_CALL.value == "switch_to_call"
+
+
 class StageContextFactory:
     def __init__(self, character_id="luotianyi"):
         self.character_id = character_id
         self.created = []
 
-    async def create(self, interaction_id, *, user_id):
+    async def create(self, interaction_id, *, mode: ConversationMode, user_id):
+        assert mode is ConversationMode.CHAT
         context = SimpleNamespace(
             identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id=self.character_id),
             closed=False,
@@ -170,24 +199,24 @@ class StageContextFactory:
 
 async def setup(agent=None, config=None):
     socket = Socket()
-    connection = WebSocketConnection(socket, "user", "用户")
+    connection = StubChatConnection(socket, "user", "用户")
     adapter = WebSocketAdapter()
     agent = agent or RecordingAgent()
     stage = await ChatStage.create(
         user_id="user",
         character_id="luotianyi",
         agent=agent,
-        adapter=adapter,
+        output_sink=adapter.output_sink,
         config={"response_wait": 0.02, **(config or {})},
         context_factory=StageContextFactory(),
     )
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     return stage, agent, adapter, connection, socket
 
 
 async def cleanup(stage, adapter):
     await stage.terminate(d.InteractionEndingReason.SHUTDOWN)
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -213,14 +242,14 @@ async def test_disconnect_waits_agent_cleanup_and_reconnect_reuses_sink():
     owned_context = stage.context
     stage.stimulus_input_sink.submit(stimulus())
     _, context, _ = await take(agent.executions)
-    disconnect = asyncio.create_task(adapter.disconnect(stage, old))
+    disconnect = asyncio.create_task(adapter.detach_stage_binding(stage, old))
     await cleanup_entered.wait()
     assert not disconnect.done() and context.cancellation.reason is d.CancellationReason.NO_LONGER_NEEDED
     cleanup_gate.set()
     await disconnect
     assert stage.state is StageState.OFFLINE
     assert not stage.stimulus_input_sink.submit(stimulus())
-    await adapter.bind(stage, WebSocketConnection(Socket(), "user", "用户"))
+    await adapter._bind(stage, StubChatConnection(Socket(), "user", "用户"))
     assert stage.agent_output_sink is sink and stage.state is StageState.ONLINE
     assert stage.context is owned_context and not owned_context.closed
     await cleanup(stage, adapter)
@@ -242,8 +271,8 @@ async def test_ending_fresh_token_and_rejection_after_termination():
     assert await stage.terminate(d.InteractionEndingReason.SHUTDOWN) is result
     assert not stage.stimulus_input_sink.submit(stimulus())
     with pytest.raises(ValueError):
-        await adapter.bind(stage, WebSocketConnection(Socket(), "user", "用户"))
-    await adapter.disconnect(stage)
+        await adapter._bind(stage, StubChatConnection(Socket(), "user", "用户"))
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -255,7 +284,57 @@ async def test_ending_timeout_releases_stage():
     result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
     assert result.error == "interaction ending timed out"
     assert stage.state is StageState.TERMINATED and stage.context.closed
-    await adapter.disconnect(stage)
+    await adapter.detach_stage_binding(stage)
+
+
+@pytest.mark.asyncio
+async def test_ending_maintenance_failure_is_reported_and_context_closes():
+    async def realize(value, context, sink):
+        return SimpleNamespace(status=d.ExecutionStatus.FAILED, error_code=d.ExecutionErrorCode.INTERNAL_ERROR)
+
+    stage, _, adapter, _, _ = await setup(RecordingAgent(realize=realize))
+    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
+
+    assert result.error == "interaction ending maintenance failed"
+    assert stage.state is StageState.TERMINATED
+    assert stage.context.closed
+    await adapter.detach_stage_binding(stage)
+
+
+@pytest.mark.asyncio
+async def test_termination_drops_old_plan_and_realizes_only_ending_maintenance():
+    old_started, old_cancelled = asyncio.Event(), asyncio.Event()
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            return await ending_plan(request, sink)
+        value = plan(request)
+        await sink.emit(value)
+        return report(request, plans=(value.plan_id,))
+
+    async def realize(value, context, sink):
+        if isinstance(value.actions[0], d.Say):
+            old_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                old_cancelled.set()
+        return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
+
+    stage, agent, adapter, _, _ = await setup(RecordingAgent(handle, realize))
+    stage.stimulus_input_sink.submit(stimulus())
+    await asyncio.wait_for(old_started.wait(), 1)
+
+    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
+    assert result.error is None
+    assert old_cancelled.is_set()
+    executed = []
+    while not agent.executions.empty():
+        executed.append((await agent.executions.get())[0])
+    assert isinstance(executed[-1].actions[0], d.CognitiveMaintenance)
+    assert sum(isinstance(value.actions[0], d.CognitiveMaintenance) for value in executed) == 1
+    assert stage.context.closed
+    await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
@@ -281,24 +360,26 @@ async def test_input_capacity_identity_and_inactive_output_rejection():
 @pytest.mark.asyncio
 async def test_manager_reconnect_old_disconnect_and_offline_expiry():
     adapter, agent = WebSocketAdapter(), RecordingAgent()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_context_factory=StageContextFactory,
         get_agent=lambda _: agent,
         adapter=adapter,
         config={"offline_timeout": 0.15},
     )
-    old = WebSocketConnection(Socket(), "user", "用户")
-    stage = await manager.connect(old, "luotianyi")
-    other = await manager.connect(old, "miku")
-    await manager.disconnect(old)
-    new = WebSocketConnection(Socket(), "user", "用户")
-    assert await manager.connect(new, "luotianyi") is stage
-    await manager.disconnect(old)
+    old = StubChatConnection(Socket(), "user", "用户")
+    stage = await manager._test_chat_adapter._open(old, "luotianyi")
+    other_connection = StubChatConnection(Socket(), "user", "用户")
+    other = await manager._test_chat_adapter._open(other_connection, "miku")
+    await manager._test_chat_adapter._close_connection(other_connection)
+    await manager._test_chat_adapter._close_connection(old)
+    new = StubChatConnection(Socket(), "user", "用户")
+    assert await manager._test_chat_adapter._open(new, "luotianyi") is stage
+    await manager._test_chat_adapter._close_connection(old)
     assert stage.state is StageState.ONLINE
     ending = await take(agent.requests)
     assert ending.interaction.interaction_id == other.interaction_id
     assert isinstance(ending.stimulus, d.InteractionEnding)
-    assert await adapter.receive_event(
+    assert await adapter._receive_event(
         new, WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"})
     )
     await take(agent.requests)
@@ -307,7 +388,7 @@ async def test_manager_reconnect_old_disconnect_and_offline_expiry():
 
 
 @pytest.mark.asyncio
-async def test_reconnect_during_ending_creates_new_interaction():
+async def test_reconnect_during_ending_is_rejected_until_finalization_finishes():
     ending_started, gate = asyncio.Event(), asyncio.Event()
 
     async def handle(request, sink):
@@ -320,19 +401,22 @@ async def test_reconnect_during_ending_creates_new_interaction():
         return report(request)
 
     adapter = WebSocketAdapter()
-    manager = StageManager(
+    manager = make_stage_manager(
         get_context_factory=StageContextFactory,
         get_agent=lambda _: RecordingAgent(handle),
         adapter=adapter,
         config={"offline_timeout": 0},
     )
-    old = WebSocketConnection(Socket(), "user", "用户")
-    stage = await manager.connect(old, "luotianyi")
-    await manager.disconnect(old)
+    old = StubChatConnection(Socket(), "user", "用户")
+    stage = await manager._test_chat_adapter._open(old, "luotianyi")
+    await manager._test_chat_adapter._close_connection(old)
     await asyncio.wait_for(ending_started.wait(), 1)
-    new = await manager.connect(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")
-    assert new is not stage and new.interaction_id != stage.interaction_id
+    with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
+        await manager._test_chat_adapter._open(StubChatConnection(Socket(), "user", "用户"), "luotianyi")
     gate.set()
+    await manager._finalizations.close()
+    new = await manager._test_chat_adapter._open(StubChatConnection(Socket(), "user", "用户"), "luotianyi")
+    assert new is not stage and new.interaction_id != stage.interaction_id
     await manager.close()
     assert stage.state is new.state is StageState.TERMINATED
 
@@ -351,10 +435,30 @@ async def test_stage_releases_context_after_ending_handler():
             return await super().handle(request, plans)
 
     agent = Agent(
-        character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.INTERACTION_ENDING, Ending())])
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter([(d.StimulusKind.INTERACTION_ENDING, Ending())]),
+        action_router=__import__("src.agent.handlers.action.router", fromlist=["ActionRouter"]).ActionRouter(
+            [
+                (
+                    d.ActionKind.COGNITIVE_MAINTENANCE,
+                    SimpleNamespace(
+                        realize=lambda action, context, outputs: asyncio.sleep(
+                            0,
+                            result=d.ActionResult(
+                                action_id=action.action_id,
+                                status=d.ActionExecutionStatus.COMPLETED,
+                                error_code=None,
+                                irreversible_effect_committed=False,
+                                effect_ref=None,
+                            ),
+                        )
+                    ),
+                )
+            ]
+        ),
     )
     stage = await ChatStage.create(
-        user_id="user", character_id="luotianyi", agent=agent, adapter=adapter, context_factory=factory
+        user_id="user", character_id="luotianyi", agent=agent, output_sink=adapter.output_sink, context_factory=factory
     )
     termination = asyncio.create_task(stage.terminate(d.InteractionEndingReason.USER_LEFT))
     await entered.wait()
@@ -472,7 +576,7 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
         ),
     )
     stage, _, adapter, connection, socket = await setup(agent)
-    assert await adapter.receive_event(
+    assert await adapter._receive_event(
         connection, WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"})
     )
 
@@ -496,7 +600,7 @@ async def test_stage_construction_failure_closes_created_context():
             user_id="user",
             character_id="luotianyi",
             agent=RecordingAgent(),
-            adapter=WebSocketAdapter(),
+            output_sink=WebSocketAdapter(),
             context_factory=factory,
             config={"max_stimuli": 0},
         )

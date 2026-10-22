@@ -111,7 +111,7 @@ async def test_committed_reply_is_preserved_at_every_stage(kind, phase):  # noqa
         old_ids = tuple(p.plan_id for p in accepted)
         expected_pending = phase in ("handle_running", "plans_done")
         assert (original.stimulus_id in stage._pending) == expected_pending
-        with patch.object(adapter, "submit_output", wraps=adapter.submit_output) as submit:
+        with patch.object(adapter, "_submit_output", wraps=adapter._submit_output) as submit:
             stage.stimulus_input_sink.submit(trigger(kind))
             await asyncio.sleep(0)
             assert not old.cancellation.is_cancelled
@@ -161,7 +161,7 @@ async def test_thinking_notification_does_not_prevent_cancelling_chat_handle(kin
         await until(lambda: stage._deadline is not None)
         stage._on_deadline(stage._schedule_revision)
         await until(lambda: bool(replies))
-        with patch.object(adapter, "submit_output", wraps=adapter.submit_output) as submit:
+        with patch.object(adapter, "_submit_output", wraps=adapter._submit_output) as submit:
             stage.stimulus_input_sink.submit(trigger(kind))
             await asyncio.wait_for(cancelled.wait(), 1)
             assert replies[0].cancellation.reason is d.CancellationReason.SUPERSEDED

@@ -5,15 +5,27 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
+from src.agent.handlers.action.call import AnswerCallHandler, EndCallHandler
+from src.agent.handlers.action.call_settlement import FinalizeCallHandler
+from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
-from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.action.write_diary import WriteDiaryHandler
+from src.agent.handlers.stimulus.call import (
+    CallAnswerRequestedHandler,
+    CallEndingHandler,
+    CallReplyConfirmedHandler,
+    CallReplyRequestedHandler,
+    CallSilenceElapsedHandler,
+    CallStartedHandler,
+    CallTimeLimitWarningHandler,
+    CallTurnCompletedHandler,
+)
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReplyHandler,
@@ -69,6 +81,25 @@ class AgentRuntime:
         """Expose the shared singing port only to the application composition root."""
         return self.skills.singing.backend
 
+    @property
+    def call_tts_character_ids(self) -> tuple[str, ...]:
+        """Return characters whose Agent-owned realtime call speech is ready."""
+        return tuple(
+            character_id
+            for character_id in self.character_ids
+            if self.skills.speaking.supports_call_audio(character_id)
+            and self.skills.prepared_speech.supports_call_apology(character_id)
+        )
+
+    @property
+    def call_summary_character_ids(self) -> tuple[str, ...]:
+        """Return characters whose Agent-owned call summary capability is ready."""
+        return tuple(
+            character_id
+            for character_id in self.character_ids
+            if self.skills.call_summary.supports_character(character_id)
+        )
+
     def __init__(
         self,
         config: dict[str, Any],
@@ -123,7 +154,9 @@ class AgentRuntime:
                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
                 reply_composition_config=self.config.get("reply_composition", {}),
                 topic_extraction_config=self.config.get("agent", {}).get("topic_extractor", {}),
-                reflection_config=self.config.get("reflection", {}),
+                call_recall_model=self._shared_call_recall_model(llm_service),
+                call_summary_models=self._call_summary_models(llm_service),
+                call_maintenance_batches=getattr(database_manager, "call_maintenance_batches", None),
                 song_knowledge_config=self.config.get("agent", {}).get("song_knowledge", {}),
                 database_manager=database_manager,
                 media_resolver=media_resolver,
@@ -184,6 +217,20 @@ class AgentRuntime:
             self.skills.audio_understanding,
         )
         registrations = [
+            (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
+            (StimulusKind.CALL_STARTED, CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech)),
+            (
+                StimulusKind.CALL_REPLY_REQUESTED,
+                CallReplyRequestedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
+            ),
+            (
+                StimulusKind.CALL_SILENCE_ELAPSED,
+                CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
+            ),
+            (StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+            (StimulusKind.CALL_TIME_LIMIT_WARNING, CallTimeLimitWarningHandler()),
+            (StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
+            (StimulusKind.CALL_ENDING, CallEndingHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),
             (
@@ -275,15 +322,40 @@ class AgentRuntime:
                 ),
                 (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary_writing)),
                 (
-                    ActionKind.REFLECTION,
-                    ReflectionActionHandler(
-                        character_id,
-                        self.skills.reflection,
-                        self.skills.conversation_compaction,
-                    ),
+                    ActionKind.COGNITIVE_MAINTENANCE,
+                    CognitiveMaintenanceActionHandler(character_id, self.skills.cognitive_maintenance),
+                ),
+                (ActionKind.ANSWER_CALL, AnswerCallHandler()),
+                (ActionKind.END_CALL, EndCallHandler()),
+                (
+                    ActionKind.FINALIZE_CALL,
+                    FinalizeCallHandler(character_id, self.skills.call_maintenance, self.skills.call_summary),
                 ),
             )
         )
+
+    def _shared_call_recall_model(self, llm_service: LLMService) -> object | None:
+        config = self.config.get("agent", {}).get("call_recall", {})
+        if not isinstance(config, dict):
+            raise TypeError("agent.call_recall must be a dictionary")
+        module_config = config.get("llm_module")
+        if module_config is None:
+            return None
+        return llm_service.register_llm_module("call_recall", module_config)
+
+    def _call_summary_models(self, llm_service: LLMService) -> dict[str, object]:
+        config = self.config.get("agent", {}).get("call_summary")
+        if config is None:
+            return {}
+        if not isinstance(config, dict):
+            raise TypeError("agent.call_summary must be a dictionary")
+        module_config = config.get("llm_module")
+        if not isinstance(module_config, dict):
+            raise TypeError("agent.call_summary.llm_module must be a dictionary")
+        return {
+            character_id: llm_service.register_llm_module(f"{character_id}_call_summary", module_config)
+            for character_id in self.character_memories
+        }
 
     def _abort_initialization(self) -> None:
         skills = getattr(self, "skills", None)

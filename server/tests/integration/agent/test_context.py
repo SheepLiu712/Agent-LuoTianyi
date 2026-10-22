@@ -9,9 +9,20 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.agent.context import (
-    ContextFactory, ConversationCompaction, ConversationEntry, ConversationSummary,
-    ImageContent, JargonExplanation, RecallEntry, RecalledMemoryContext,
-    SongContent, TextContent, UserPreferences, UserProfile,
+    ContextFactory,
+    ConversationCompaction,
+    ConversationEntry,
+    ConversationMode,
+    ConversationSnapshot,
+    ConversationSummary,
+    ImageContent,
+    JargonExplanation,
+    RecalledMemoryContext,
+    RecallEntry,
+    SongContent,
+    TextContent,
+    UserPreferences,
+    UserProfile,
 )
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
 from src.infrastructure.persistence.database.services.conversation_service import ConversationService
@@ -39,14 +50,21 @@ def factory(database, **kwargs):
 
 
 def entry(number, content=None):
-    return ConversationEntry(str(number), datetime(2026, 9, 7) + timedelta(seconds=number),
-                             "user", content or TextContent(f"消息{number}", ("关键词",)))
+    return ConversationEntry(
+        str(number),
+        datetime(2026, 9, 7) + timedelta(seconds=number),
+        "user",
+        content or TextContent(f"消息{number}", ("关键词",)),
+    )
 
 
 @pytest.mark.asyncio
 async def test_factory_creates_independent_contexts_without_registry(database):
     contexts = factory(database)
-    a, b = await asyncio.gather(contexts.create("i", user_id="u"), contexts.create("i", user_id="u"))
+    a, b = await asyncio.gather(
+        contexts.create("i", mode=ConversationMode.CHAT, user_id="u"),
+        contexts.create("i", mode=ConversationMode.CHAT, user_id="u"),
+    )
     assert a is not b
     assert a.user.read().profile == UserProfile("画像")
     assert a.recalled_memory.read() == ()
@@ -60,13 +78,15 @@ async def test_factory_creates_independent_contexts_without_registry(database):
 async def test_failed_initialization_does_not_cache_partial_context(database, monkeypatch):
     contexts = factory(database)
     original = database.get_conversation_context_state
+
     def fail(*args, **kwargs):
         raise RuntimeError("load failed")
+
     monkeypatch.setattr(database, "get_conversation_context_state", fail)
     with pytest.raises(RuntimeError):
-        await contexts.create("i", user_id="u")
+        await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     monkeypatch.setattr(database, "get_conversation_context_state", original)
-    restored = await contexts.create("i", user_id="u")
+    restored = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     assert restored.user.read().profile == UserProfile("画像")
 
 
@@ -74,9 +94,10 @@ async def test_failed_initialization_does_not_cache_partial_context(database, mo
 async def test_userless_context_never_accesses_database(database, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("world interaction accessed user database")
+
     monkeypatch.setattr(database, "get_user_description", forbidden)
     monkeypatch.setattr(database, "get_conversation_context_state", forbidden)
-    context = await factory(database).create("world", user_id=None)
+    context = await factory(database).create("world", mode=ConversationMode.CHAT, user_id=None)
     assert context.conversation.read().entries == ()
     with pytest.raises(ValueError):
         await context.user.update_profile(UserProfile("不应写入"))
@@ -88,14 +109,14 @@ async def test_userless_context_never_accesses_database(database, monkeypatch):
 async def test_profile_preferences_persist_without_overwriting_each_other(database, monkeypatch):
     database.save_user_preferences("u", {"future_field": "保留"})
     contexts = factory(database)
-    context = await contexts.create("i", user_id="u")
+    context = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     await context.user.update_profile(UserProfile("新画像"))
     preferences = UserPreferences(relationship="朋友", personality_traits=("耐心",))
     await context.user.update_preferences(preferences)
     assert context.user.read().profile.description == "新画像"
     assert database.get_user_preferences("u")["future_field"] == "保留"
     await context.close()
-    restored = await contexts.create("i", user_id="u")
+    restored = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     assert restored.user.read().preferences == preferences
     assert restored.user.read().profile.description == "新画像"
     monkeypatch.setattr(database, "save_user_preferences", lambda *args: False)
@@ -107,7 +128,7 @@ async def test_profile_preferences_persist_without_overwriting_each_other(databa
 
 @pytest.mark.asyncio
 async def test_profile_write_failure_keeps_memory(database, monkeypatch):
-    context = await factory(database).create("i", user_id="u")
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     monkeypatch.setattr(database, "update_user_description", lambda *args: False)
     with pytest.raises(RuntimeError):
         await context.user.update_profile(UserProfile("失败"))
@@ -117,24 +138,62 @@ async def test_profile_write_failure_keeps_memory(database, monkeypatch):
 @pytest.mark.asyncio
 async def test_history_round_trip_and_character_isolation(database):
     contexts = factory(database)
-    context = await contexts.create("i", user_id="u")
-    entries = (entry(1), entry(2, ImageContent("图片", "client", "server", "image/png", ("树",))),
-               entry(3, SongContent("唱歌", "歌曲", "副歌")))
+    context = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
+    entries = (
+        entry(1),
+        entry(2, ImageContent("图片", "client", "server", "image/png", ("树",))),
+        entry(3, SongContent("唱歌", "歌曲", "副歌")),
+    )
     await context.conversation.append(entries)
     assert context.conversation.read().entries == entries
     await context.close()
     # 清空缓存后从 SQL 重新构建，覆盖数据库 JSON 和缓存 JSON 两种格式。
     database._redis.delete("user_context:u:luotianyi")
-    restored = await contexts.create("i", user_id="u")
+    restored = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     assert restored.conversation.read().entries == entries
-    other = await ContextFactory(character_id="miku", database=database).create("i", user_id="u")
+    other = await ContextFactory(character_id="miku", database=database).create(
+        "i", mode=ConversationMode.CHAT, user_id="u"
+    )
     assert other.conversation.read().entries == ()
+
+
+@pytest.mark.asyncio
+async def test_call_factory_uses_read_only_seed_and_ephemeral_working_copy(database):
+    contexts = factory(database)
+    chat = await contexts.create("chat", mode=ConversationMode.CHAT, user_id="u")
+    recent = ConversationEntry(
+        "recent",
+        datetime(2026, 10, 10, 12, 0),
+        "user",
+        TextContent("通话前内容"),
+    )
+    await chat.conversation.append((recent,))
+    before = database.get_conversation_context_state("u", character_id="luotianyi")
+
+    call = await contexts.create(
+        "call",
+        mode=ConversationMode.CALL,
+        user_id="u",
+        requested_at=datetime(2026, 10, 10, 12, 2),
+    )
+    assert call.user.read().profile == UserProfile("画像")
+    assert call.conversation.read().entries == (recent,)
+
+    local = ConversationEntry("local", datetime(2026, 10, 10, 12, 2, 1), "agent", TextContent("通话内回复"))
+    await call.conversation.append((local,))
+    assert database.get_conversation_context_state("u", character_id="luotianyi") == before
+
+    store = call.conversation._store
+    await call.close()
+    assert store.load()[0] == ConversationSnapshot()
+    with pytest.raises(RuntimeError):
+        call.conversation.read()
 
 
 @pytest.mark.asyncio
 async def test_conversation_read_orders_parallel_appends_by_fact_time(database):
     contexts = factory(database)
-    context = await contexts.create("i", user_id="u")
+    context = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     earlier = entry(1, ImageContent("", mime_type="image/png", media_id="image"))
     later = entry(2)
 
@@ -143,23 +202,25 @@ async def test_conversation_read_orders_parallel_appends_by_fact_time(database):
 
     assert context.conversation.read().entries == (earlier, later)
     assert [item.content for item in database.get_history_from_db("u", 0, 2)] == [
-        earlier.content.text, later.content.text]
+        earlier.content.text,
+        later.content.text,
+    ]
     database._redis.delete("user_context:u:luotianyi")
-    restored = await contexts.create("restored", user_id="u")
+    restored = await contexts.create("restored", mode=ConversationMode.CHAT, user_id="u")
     assert restored.conversation.read().entries == (earlier, later)
 
 
 def compaction_for(snapshot, covered=1, text="新的总结"):
-    return ConversationCompaction(snapshot.summary,
-                                 tuple(e.entry_id for e in snapshot.entries[:covered]),
-                                 ConversationSummary(text))
+    return ConversationCompaction(
+        snapshot.summary, tuple(e.entry_id for e in snapshot.entries[:covered]), ConversationSummary(text)
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("keep", [0, 1])
 async def test_compact_preserves_history_and_uncovered_entries(database, keep):
     contexts = factory(database)
-    context = await contexts.create("i", user_id="u")
+    context = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     entries = tuple(entry(i) for i in range(3))
     await context.conversation.append(entries)
     result = compaction_for(context.conversation.read(), 3 - keep)
@@ -169,14 +230,14 @@ async def test_compact_preserves_history_and_uncovered_entries(database, keep):
     assert len(database.get_history_from_db("u", 0, 10, "luotianyi")) == 3
     await context.close()
     database._redis.delete("user_context:u:luotianyi")
-    restored = await contexts.create("i", user_id="u")
+    restored = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     assert restored.conversation.read().summary == result.summary
     assert restored.conversation.read().entries == (entries[-keep:] if keep else ())
 
 
 @pytest.mark.asyncio
 async def test_append_after_external_snapshot_is_preserved(database):
-    context = await factory(database).create("i", user_id="u")
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     await context.conversation.append((entry(1), entry(2)))
     result = compaction_for(context.conversation.read())
     await context.conversation.append((entry(3),))
@@ -187,7 +248,7 @@ async def test_append_after_external_snapshot_is_preserved(database):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ids", [("2",), ("2", "1"), ("1", "missing"), ("1", "2", "3")])
 async def test_compaction_rejects_non_prefix_records(database, ids):
-    context = await factory(database).create("i", user_id="u")
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     await context.conversation.append((entry(1), entry(2)))
     before = context.conversation.read()
     result = ConversationCompaction(before.summary, ids, ConversationSummary("总结"))
@@ -200,10 +261,10 @@ async def test_compaction_rejects_non_prefix_records(database, ids):
 @pytest.mark.asyncio
 async def test_compaction_rejects_changed_summary_from_another_interaction(database):
     contexts = factory(database)
-    a = await contexts.create("a", user_id="u")
+    a = await contexts.create("a", mode=ConversationMode.CHAT, user_id="u")
     await a.conversation.append((entry(1), entry(2)))
     stale = ConversationCompaction(ConversationSummary(), ("2",), ConversationSummary("过时总结"))
-    b = await contexts.create("b", user_id="u")
+    b = await contexts.create("b", mode=ConversationMode.CHAT, user_id="u")
     await b.conversation.compact(compaction_for(b.conversation.read()))
     with pytest.raises(ValueError):
         await a.conversation.compact(stale)
@@ -212,7 +273,7 @@ async def test_compaction_rejects_changed_summary_from_another_interaction(datab
 
 @pytest.mark.asyncio
 async def test_none_is_handled_by_caller_and_is_not_a_compaction(database):
-    context = await factory(database).create("i", user_id="u")
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     with pytest.raises(TypeError):
         await context.conversation.compact(None)
     assert context.conversation.read().entries == ()
@@ -246,8 +307,8 @@ def test_recall_stimulus_cleanup_and_generic_removal():
 @pytest.mark.asyncio
 async def test_release_closes_existing_references_and_isolates_interactions(database):
     contexts = factory(database)
-    a = await contexts.create("a", user_id="u")
-    b = await contexts.create("b", user_id="u")
+    a = await contexts.create("a", mode=ConversationMode.CHAT, user_id="u")
+    b = await contexts.create("b", mode=ConversationMode.CHAT, user_id="u")
     a.recalled_memory.append((RecallEntry("r", "s", JargonExplanation("词", "解释")),))
     assert b.recalled_memory.read() == ()
     await a.close()
@@ -262,13 +323,15 @@ async def test_release_closes_existing_references_and_isolates_interactions(data
 @pytest.mark.asyncio
 async def test_cancellation_waits_for_write_and_memory_sync(database, monkeypatch):
     contexts = factory(database)
-    context = await contexts.create("i", user_id="u")
+    context = await contexts.create("i", mode=ConversationMode.CHAT, user_id="u")
     started, proceed = threading.Event(), threading.Event()
     original = database.update_user_description
+
     def write(*args):
         started.set()
         assert proceed.wait(5)
         return original(*args)
+
     monkeypatch.setattr(database, "update_user_description", write)
     task = asyncio.create_task(context.user.update_profile(UserProfile("完成写入")))
     assert await asyncio.to_thread(started.wait, 5)
@@ -290,20 +353,24 @@ def test_database_profile_update_reports_missing_user(database):
 @pytest.mark.asyncio
 async def test_cancelled_creation_waits_and_closes_unclaimed_context(database, monkeypatch):
     from src.agent.context import InteractionContext
+
     started, proceed = threading.Event(), threading.Event()
     original = database.get_user_description
     closed = []
     close = InteractionContext.close
+
     async def record_close(self):
         closed.append(self)
         await close(self)
+
     def load(*args):
         started.set()
         assert proceed.wait(5)
         return original(*args)
+
     monkeypatch.setattr(database, "get_user_description", load)
     monkeypatch.setattr(InteractionContext, "close", record_close)
-    task = asyncio.create_task(factory(database).create("i", user_id="u"))
+    task = asyncio.create_task(factory(database).create("i", mode=ConversationMode.CHAT, user_id="u"))
     assert await asyncio.to_thread(started.wait, 5)
     task.cancel()
     await asyncio.sleep(0)
@@ -318,7 +385,7 @@ async def test_cancelled_creation_waits_and_closes_unclaimed_context(database, m
 
 @pytest.mark.asyncio
 async def test_failed_append_and_failed_summary_save_preserve_window(database, monkeypatch):
-    context = await factory(database).create("i", user_id="u")
+    context = await factory(database).create("i", mode=ConversationMode.CHAT, user_id="u")
     await context.conversation.append((entry(1),))
     before = context.conversation.read()
     monkeypatch.setattr(database, "add_conversations", lambda *args, **kwargs: [])
@@ -344,15 +411,35 @@ def test_recall_duplicate_batch_is_rejected_without_partial_append():
 @pytest.mark.asyncio
 async def test_real_stage_owns_and_closes_loaded_context(database):
     import src.domain.agent as d
+    from src.adapter.websocket.chat import WebSocketAdapter
     from src.agent import Agent
-    from src.stage import ChatStage
-    from src.adapter.websocket import WebSocketAdapter
-    from src.agent.handlers.stimulus.router import StimulusRouter
+    from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
-    agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())]))
-    stage = await ChatStage.create(user_id="u", character_id="luotianyi", agent=agent,
-        adapter=WebSocketAdapter(), context_factory=factory(database))
+    from src.agent.handlers.stimulus.router import StimulusRouter
+    from src.stage import ChatStage
+
+    class Maintenance:
+        async def realize(self, action, execution_context, outputs):
+            return d.ActionResult(
+                action_id=action.action_id,
+                status=d.ActionExecutionStatus.COMPLETED,
+                error_code=None,
+                irreversible_effect_committed=False,
+                effect_ref=None,
+            )
+
+    agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter([(d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())]),
+        action_router=ActionRouter([(d.ActionKind.COGNITIVE_MAINTENANCE, Maintenance())]),
+    )
+    stage = await ChatStage.create(
+        user_id="u",
+        character_id="luotianyi",
+        agent=agent,
+        output_sink=WebSocketAdapter(),
+        context_factory=factory(database),
+    )
     context = stage.context
     assert context.identity.interaction_id == stage.interaction_id
     assert context.user.read().profile == UserProfile("画像")
@@ -361,3 +448,74 @@ async def test_real_stage_owns_and_closes_loaded_context(database):
     with pytest.raises(RuntimeError):
         context.user.read()
     assert database.get_user_description("u") == "画像"
+
+
+@pytest.mark.asyncio
+async def test_same_user_call_windows_are_independent_and_close_preserves_chat(database):
+    contexts = factory(database)
+    chat = await contexts.create("chat", mode=ConversationMode.CHAT, user_id="u")
+    seed = ConversationEntry("e1", datetime(2026, 10, 10, 12), "user", TextContent("persisted chat"))
+    await chat.conversation.append((seed,))
+    calls = await asyncio.gather(
+        *(
+            contexts.create(name, mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10, 12, 1))
+            for name in ("call-a", "call-b")
+        )
+    )
+    a, b = calls
+    local = ConversationEntry("c1", datetime(2026, 10, 10, 12, 1), "user", TextContent("private call"))
+    await a.conversation.append((local,))
+    await a.conversation.compact(
+        ConversationCompaction(ConversationSummary(), ("e1",), ConversationSummary("local summary"))
+    )
+    assert a.conversation.read().entries == (local,)
+    assert b.conversation.read() == ConversationSnapshot(entries=(seed,))
+    await a.close()
+    assert b.conversation.read() == ConversationSnapshot(entries=(seed,))
+    await b.close()
+    await chat.close()
+    restored = await contexts.create("restored", mode=ConversationMode.CHAT, user_id="u")
+    assert restored.conversation.read() == ConversationSnapshot(entries=(seed,))
+    await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
+    from types import SimpleNamespace
+
+    from src.agent.context.memory_pool import CallMemory
+    from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill
+
+    contexts = factory(database)
+    first = await contexts.create("a", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
+    second = await contexts.create("b", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
+    pool = first.call_memory
+    pool.remember(CallMemory("one", "private memory"))
+    assert second.call_memory.snapshot() == ()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Memory:
+        async def search_memory_context_for_topic(self, user_id, queries):
+            entered.set()
+            await release.wait()
+            return SimpleNamespace(hits=(SimpleNamespace(rendered_text="late", memory_record_id="late"),))
+
+    skill = CallRecallDecisionSkill(memories={"luotianyi": Memory()})
+    recall = asyncio.create_task(
+        skill.recall_once(
+            SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),
+            memory_pool=pool,
+            queries=("query",),
+        )
+    )
+    await entered.wait()
+    await first.close()
+    await first.close()
+    release.set()
+    with pytest.raises(RuntimeError):
+        await recall
+    with pytest.raises(RuntimeError):
+        pool.snapshot()
+    assert not pool._items
+    assert second.call_memory.snapshot() == ()
+    await second.close()

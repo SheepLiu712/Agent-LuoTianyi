@@ -10,12 +10,14 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import pytest
 from fastapi import WebSocketDisconnect
 from PIL import Image
+from support.adapter_connection import receive_events as _receive_events
 from support.audio_samples import recorded_aac_bytes
+from support.chat_connection import StubChatConnection
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
-from src.web.websocket.endpoint import _receive_events
-from src.web.websocket.service import WebSocketConnection, WebSocketService
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat._messages import WSMessage
+from src.web.websocket.service import WebSocketService
 
 
 def _atom(atom_type: bytes, payload: bytes = b"") -> bytes:
@@ -57,6 +59,8 @@ class Socket:
 
 
 class Stage:
+    input_suspended = False
+
     def __init__(self, user_id="user-1"):
         self.interaction_id = str(uuid4())
         self.user_id = user_id
@@ -66,7 +70,7 @@ class Stage:
         self.available = True
 
     def can_accept(self, stimulus):
-        return self.available
+        return self.available and not self.input_suspended
 
     def submit(self, stimulus):
         if not self.available:
@@ -76,6 +80,47 @@ class Stage:
 
     async def connection_changed(self, state):
         pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["suspend", "disconnect", "rebind"])
+async def test_voice_finalize_rechecks_original_binding_and_stage_admission(tmp_path, monkeypatch, change):
+    adapter = WebSocketAdapter({"media_store": {"root": str(tmp_path)}})
+    connection = StubChatConnection(Socket([]), "user", "user")
+    stage = Stage("user")
+    await adapter._bind(stage, connection)
+    _, events = upload_events(m4a_bytes())
+    messages = [
+        WSMessage(event_type=e["type"], client_msg_id=e["client_msg_id"], payload=e["payload"]) for e in events
+    ]
+    for message in messages[:-1]:
+        await adapter._receive(connection, message)
+    entered, release = asyncio.Event(), asyncio.Event()
+    persist = adapter._voice_uploads._validate_and_persist
+
+    async def blocked(*args):
+        result = await persist(*args)
+        entered.set()
+        await release.wait()
+        return result
+
+    monkeypatch.setattr(adapter._voice_uploads, "_validate_and_persist", blocked)
+    receiving = asyncio.create_task(adapter._receive(connection, messages[-1]))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        if change == "suspend":
+            stage.input_suspended = True
+        elif change == "disconnect":
+            await adapter.detach_stage_binding(stage)
+        else:
+            await adapter._bind(stage, StubChatConnection(Socket([]), "user", "replacement"))
+        release.set()
+        assert (await receiving).code == "OVERLOADED"
+        assert not any(isinstance(item, d.VoiceMessage) for item in stage.stimuli)
+    finally:
+        release.set()
+        await asyncio.gather(receiving, return_exceptions=True)
+        await adapter.detach_stage_binding(stage)
 
 
 def event(phase, upload_id, payload=None):
@@ -88,11 +133,11 @@ def event(phase, upload_id, payload=None):
 
 async def run_events(tmp_path, events, *, adapter=None, user_id="user-1"):
     socket = Socket(events)
-    connection = WebSocketConnection(socket, user_id, user_id)
+    connection = StubChatConnection(socket, user_id, user_id)
     connection.capabilities.add("negative_ack_v1")
     adapter = adapter or WebSocketAdapter({"media_store": {"root": str(tmp_path / "media")}})
     stage = Stage(user_id)
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     runtime = SimpleNamespace(
         websocket_service=WebSocketService(),
         chat_adapter=adapter,
@@ -103,7 +148,7 @@ async def run_events(tmp_path, events, *, adapter=None, user_id="user-1"):
             await _receive_events(runtime, connection)
         return socket.sent, stage, adapter
     finally:
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 def upload_events(data, upload_id=None, *, order=None):
@@ -277,10 +322,10 @@ async def test_global_limit_and_user_isolation(tmp_path):
     assert sent[0]["payload"]["ok"] is True
     second = str(uuid4())
     socket = Socket([event("begin", second, begin_payload)])
-    connection = WebSocketConnection(socket, "user-b", "user-b")
+    connection = StubChatConnection(socket, "user-b", "user-b")
     connection.capabilities.add("negative_ack_v1")
     stage = Stage("user-b")
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     runtime = SimpleNamespace(
         websocket_service=WebSocketService(),
         chat_adapter=adapter,
@@ -291,13 +336,15 @@ async def test_global_limit_and_user_isolation(tmp_path):
             await _receive_events(runtime, connection)
         assert socket.sent[0]["payload"]["code"] == "OVERLOADED"
     finally:
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path, monkeypatch):
     clock = [100.0]
-    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        "src.adapter.websocket.chat._voice_upload_helper.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
     adapter = WebSocketAdapter(
         {
             "media_store": {"root": str(tmp_path / "media")},
@@ -330,19 +377,9 @@ async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path, monkeypatch):
         [event("begin", second, {**begin_payload, "byte_length": 48 * 1024 + 1}), oversized_chunk],
         adapter=adapter,
     )
-    assert any(isinstance(item, d.VoiceUploadFailed) and item.reason == "expired" for item in stage.stimuli)
+    assert not any(isinstance(item, d.VoiceUploadFailed) for item in stage.stimuli)  # old binding is detached
     assert sent[-1]["payload"]["code"] == "VOICE_TOO_LARGE"
     assert not any(isinstance(item, d.VoiceMessage) for item in next_stage.stimuli)
-
-
-@pytest.mark.asyncio
-async def test_inbound_frame_size_is_enforced_explicitly():
-    socket = Socket([{"type": "user_text", "client_msg_id": "large", "payload": {"text": "x" * 200}}])
-    connection = WebSocketConnection(socket, "user-1", "user-1")
-    service = WebSocketService(max_inbound_frame_bytes=128)
-
-    assert await service.try_recv_client_msg(connection) is None
-    assert socket.sent[0]["payload"]["code"] == "BAD_MESSAGE"
 
 
 @pytest.mark.asyncio
@@ -363,7 +400,9 @@ async def test_same_upload_id_is_isolated_between_users(tmp_path):
 @pytest.mark.parametrize("restart", [False, True])
 async def test_completed_receipt_survives_ttl_and_runtime_recreation(tmp_path, monkeypatch, restart):
     clock = [100.0]
-    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        "src.adapter.websocket.chat._voice_upload_helper.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
     _, events = upload_events(m4a_bytes())
     first, stage, adapter = await run_events(tmp_path, events)
     receipt_paths = list((tmp_path / "media").glob("*/ingress_receipt.json"))
@@ -395,9 +434,9 @@ async def test_rebuilt_receipt_rejects_changed_chunk(tmp_path):
 
 @pytest.mark.asyncio
 async def test_saved_media_without_stage_admission_is_not_completed(tmp_path):
-    from src.adapter.websocket.voice_upload import VoiceUploadAssembler, VoiceUploadError
+    from src.adapter.websocket.chat._messages import WSMessage
+    from src.adapter.websocket.chat._voice_upload_helper import VoiceUploadAssembler, VoiceUploadError
     from src.infrastructure.media import PermanentMediaStore
-    from src.web.websocket import WSMessage
 
     store = PermanentMediaStore({"root": str(tmp_path / "media")})
     assembler = VoiceUploadAssembler(store)
@@ -405,12 +444,17 @@ async def test_saved_media_without_stage_admission_is_not_completed(tmp_path):
     _, events = upload_events(m4a_bytes())
 
     async def send(assembler, value):
-        return await assembler.process(
+        stimulus, status = await assembler.process(
             event=WSMessage(event_type=value["type"], payload=value["payload"], client_msg_id=value["client_msg_id"]),
             user_id=sink.user_id,
             character_id=sink.character_id,
-            sink=sink,
         )
+        if stimulus is not None:
+            if not sink.can_accept(stimulus) or not sink.submit(stimulus):
+                assembler.discard_prepared()
+                raise VoiceUploadError("OVERLOADED", "stage rejected", True)
+            await assembler.commit(sink)
+        return status
 
     for value in events[:-1]:
         await send(assembler, value)
@@ -433,7 +477,9 @@ async def test_receipt_write_failure_keeps_live_deduplication_past_ttl(tmp_path,
     from src.infrastructure.media import PermanentMediaStore
 
     clock = [100.0]
-    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        "src.adapter.websocket.chat._voice_upload_helper.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
     original = PermanentMediaStore.write_audio_receipt
 
     def unavailable(*args, **kwargs):
@@ -461,13 +507,15 @@ async def test_receipt_write_failure_keeps_live_deduplication_past_ttl(tmp_path,
 async def test_expired_and_rebuilt_upload_does_not_repeat_chat_preprocessing_or_reply(tmp_path, monkeypatch):
     from support.stage_support import RecordingAgent, cleanup, report, setup
 
-    from src.adapter.websocket.voice_upload import VoiceUploadAssembler
+    from src.adapter.websocket.chat._messages import WSMessage
+    from src.adapter.websocket.chat._voice_upload_helper import VoiceUploadAssembler
     from src.infrastructure.media import PermanentMediaStore
-    from src.web.websocket import WSMessage
 
     calls = {"preprocess": 0, "reply": 0}
     clock = [100.0]
-    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        "src.adapter.websocket.chat._voice_upload_helper.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
 
     async def handle(request, sink):
         if isinstance(request.stimulus, d.VoiceMessage):
@@ -484,14 +532,16 @@ async def test_expired_and_rebuilt_upload_does_not_repeat_chat_preprocessing_or_
 
     async def send_batch(target):
         for value in events:
-            await target.process(
+            stimulus, status = await target.process(
                 event=WSMessage(
                     event_type=value["type"], payload=value["payload"], client_msg_id=value["client_msg_id"]
                 ),
                 user_id=stage.user_id,
                 character_id=stage.character_id,
-                sink=stage.stimulus_input_sink,
             )
+            if stimulus is not None:
+                assert stage.stimulus_input_sink.submit(stimulus)
+                await target.commit(stage.stimulus_input_sink)
 
     async def settled():
         while stage._pending or stage._handles:
@@ -588,12 +638,20 @@ async def test_image_frame_reaches_adapter_with_original_image_budget(tmp_path, 
 @pytest.mark.parametrize("negative_ack", [False, True])
 async def test_oversized_frames_report_correlated_permanent_failure(kind, limit, negative_ack):
     frame = {"type": kind, "client_msg_id": "oversized", "payload": {"data": "x" * limit}}
-    socket = Socket([frame])
-    connection = WebSocketConnection(socket, "user-1", "user-1")
-    if negative_ack:
-        connection.capabilities.add("negative_ack_v1")
-    assert await WebSocketService().try_recv_client_msg(connection) is None
-    reply = socket.sent[-1]
+    from tests.integration.websocket.test_adapter_network_boundary import _Manager
+
+    adapter = WebSocketAdapter()
+    adapter.initialize(_Manager())
+    handle = await adapter.open(
+        user_id="user",
+        connection_id=object(),
+        capabilities=frozenset({"negative_ack_v1"}) if negative_ack else frozenset(),
+    )
+    ready = await adapter.next_output(handle)
+    adapter.complete_output(handle, ready.delivery_id)
+    await adapter.receive(handle, json.dumps(frame))
+    reply = json.loads((await adapter.next_output(handle)).message)
+    await adapter.close()
     assert reply["reply_to"] == "oversized"
     assert reply["type"] == ("server_ack" if negative_ack else "error")
     assert reply["payload"]["retryable"] is False

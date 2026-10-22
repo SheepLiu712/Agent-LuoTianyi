@@ -4,14 +4,18 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Final
 
-from src.adapter.websocket import WebSocketAdapter
-from src.adapter.websocket.client_model_executor import ClientLLMExecutor
+from src.adapter.websocket.call_v1 import CallCapabilityStatus, CallWebSocketAdapter, parse_call_transport_enabled
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
+from src.application.host_context import ServerHostContext
+from src.application.user import UserResetFence, UserResetService
 from src.domain.stage import StageState
-from src.infrastructure.media import MediaResolver, create_media_resolver
+from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
+from src.infrastructure.models.realtime_speech import AliyunRealtimeSpeechSessionFactory
 from src.infrastructure.models.service import LLMService
-from src.infrastructure.observability import ObservabilityService, set_observability_service
+from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
@@ -20,6 +24,7 @@ from src.utils.logger import (
     install_observability_log_handler,
     uninstall_observability_log_handler,
 )
+from src.utils.owned_operation import complete_owned
 from src.web.http import UserInterface
 from src.web.websocket import WebSocketService
 from src.world import WorldRuntime
@@ -44,6 +49,13 @@ class ServerRuntime:
     owns_observability: bool = field(default=True)
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
+    call_adapter: CallWebSocketAdapter | None = None
+    call_metrics: CallMetrics | None = None
+    user_reset_fence: UserResetFence | None = None
+    realtime_speech_factory: AliyunRealtimeSpeechSessionFactory | None = None
+    user_reset_service: UserResetService | None = None
+    _call_transport_requested: bool = field(default=False, repr=False)
+    _host_context: ServerHostContext = field(default_factory=ServerHostContext, repr=False)
     default_world_id: str = DEFAULT_WORLD_ID
     world_stage_config: dict = field(default_factory=dict, repr=False)
     _world_stages: dict[tuple[str, str], WorldStage] = field(default_factory=dict, init=False, repr=False)
@@ -53,7 +65,12 @@ class ServerRuntime:
     _shutdown_completed_stages: set[str] = field(default_factory=set, init=False, repr=False)
 
     @classmethod
-    async def initialize(cls, config: dict, observability: ObservabilityService | None = None) -> ServerRuntime:
+    async def initialize(
+        cls,
+        config: dict,
+        observability: ObservabilityService | None = None,
+        host_context: ServerHostContext | None = None,
+    ) -> ServerRuntime:
         owns_observability = observability is None
         database_manager: DatabaseManager | None = None
         media_resolver: MediaResolver | None = None
@@ -107,6 +124,20 @@ class ServerRuntime:
             )
 
             # 7. 组装系统运行时
+            call_transport_config = config.get("call_transport", {})
+            if not isinstance(call_transport_config, dict):
+                raise ValueError("call_transport must be an object")
+            call_requested = parse_call_transport_enabled(config)
+            resolved_host_context = host_context or ServerHostContext()
+            call_metrics = CallMetrics(observability)
+            speech_factory = (
+                AliyunRealtimeSpeechSessionFactory.from_mapping(
+                    call_transport_config.get("realtime_speech", {}), call_metrics=call_metrics
+                )
+                if call_requested and resolved_host_context.supports_single_process_calls
+                else AliyunRealtimeSpeechSessionFactory(None, call_metrics=call_metrics)
+            )
+            reset_fence = UserResetFence()
             runtime = cls(
                 user_interface=UserInterface(database_manager, media_resolver),
                 websocket_service=WebSocketService(),
@@ -127,34 +158,106 @@ class ServerRuntime:
                 ),
                 default_world_id=str(config.get("world", {}).get("world_id", DEFAULT_WORLD_ID)),
                 world_stage_config=config.get("world_stage", {}),
+                call_metrics=call_metrics,
+                user_reset_fence=reset_fence,
+                realtime_speech_factory=speech_factory,
+                _call_transport_requested=call_requested,
+                _host_context=resolved_host_context,
             )
 
             event_store = database_manager.event_store
             if event_store is None:
                 raise RuntimeError("EventStore is required for due-event dispatch")
+
+            if (
+                database_manager.call_sessions is None
+                or database_manager.call_maintenance_batches is None
+                or database_manager.conversation_service is None
+                or database_manager.memory_store is None
+                or database_manager.user_store is None
+            ):
+                raise RuntimeError("Call runtime persistence dependencies are required")
+
+            async def call_output_sink(call_id, output):
+                await runtime.call_adapter.submit_output(call_id, output)
+
             runtime.stage_manager = StageManager(
                 get_agent=agent_runtime.get_agent,
-                adapter=runtime.chat_adapter,
+                chat_output_sink=runtime.chat_adapter.output_sink,
+                call_output_sink=call_output_sink,
+                detach_stage_binding=runtime.chat_adapter.detach_stage_binding,
                 get_context_factory=agent_runtime.context_factories.__getitem__,
                 due_event_provider=EventStoreDueEventProvider(event_store),
+                call_sessions=database_manager.call_sessions,
+                conversation_service=database_manager.conversation_service,
+                call_maintenance_batches=database_manager.call_maintenance_batches,
+                call_metrics=call_metrics,
+                realtime_speech_factory=speech_factory,
+                user_reset_fence=reset_fence,
                 config=config.get("stage_manager", {}),
             )
+            runtime.chat_adapter.initialize(runtime.stage_manager, client_executor=runtime.client_llm_executor)
+            runtime.call_adapter = CallWebSocketAdapter(
+                manager=runtime.stage_manager,
+                user_reset_fence=reset_fence,
+                call_metrics=call_metrics,
+                enabled=call_requested,
+                trusted_host=resolved_host_context.supports_single_process_calls,
+                provider_ready=speech_factory.is_configured,
+                call_tts_character_ids=lambda: agent_runtime.call_tts_character_ids,
+                call_summary_character_ids=lambda: agent_runtime.call_summary_character_ids,
+            )
 
+            media_store = PermanentMediaStore(media_config) if media_config.get("root") else None
+            if media_store is None:
+                raise RuntimeError("Configured permanent media storage is required for user data reset")
+            runtime.user_reset_service = UserResetService(
+                interactions=runtime.stage_manager,
+                conversation_service=database_manager.conversation_service,
+                memory_store=database_manager.memory_store,
+                user_store=database_manager.user_store,
+                vector_store=agent_runtime.vector_store,
+                redis_buffer=database_manager.redis,
+                media_store=media_store,
+                call_sessions=database_manager.call_sessions,
+                call_maintenance_batches=database_manager.call_maintenance_batches,
+            )
             runtime._wire_dependencies()
+            # No new call admission until all previous-runtime candidates converge.
+            await runtime.stage_manager.initialize()
             runtime._start_background_services()
             runtime.user_interface.generate_rsa_keys()
             return runtime
         except BaseException:
             logger.error("ServerRuntime initialization failed, starting rollback...")
-            await cls._rollback_failed_initialization(
-                runtime=runtime,
-                world=world,
-                database_manager=database_manager,
-                agent_runtime=agent_runtime,
-                observability=observability,
-                owns_observability=owns_observability,
+            await complete_owned(
+                cls._rollback_failed_initialization(
+                    runtime=runtime,
+                    world=world,
+                    database_manager=database_manager,
+                    agent_runtime=agent_runtime,
+                    observability=observability,
+                    owns_observability=owns_observability,
+                )
             )
             raise
+
+    @property
+    def call_transport_available(self) -> bool:
+        return self.call_capability_status.available
+
+    @property
+    def call_capability(self) -> CallCapabilityStatus:
+        return self.call_capability_status
+
+    @property
+    def call_capability_status(self) -> CallCapabilityStatus:
+        if self.call_adapter is None:
+            return CallCapabilityStatus(False, False, False, False, False, False, False, False, ())
+        return self.call_adapter.capability_status
+
+    def supports_call_character(self, character_id: str) -> bool:
+        return self.call_adapter is not None and self.call_adapter.supports_call_character(character_id)
 
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
@@ -185,6 +288,42 @@ class ServerRuntime:
         owns_observability: bool,
     ) -> None:
         """在初始化失败的情况下，尝试回滚初始化失败的系统运行时，关闭已启动的后台服务和资源。"""
+        rollback = asyncio.create_task(
+            cls._rollback_failed_initialization_owned(
+                runtime=runtime,
+                world=world,
+                database_manager=database_manager,
+                agent_runtime=agent_runtime,
+                observability=observability,
+                owns_observability=owns_observability,
+            ),
+            name="server-runtime-initialization-rollback",
+        )
+        cancelled = False
+        while not rollback.done():
+            try:
+                await asyncio.shield(rollback)
+            except asyncio.CancelledError:
+                cancelled = True
+            except Exception:
+                break
+        result = rollback.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
+
+    @classmethod
+    async def _rollback_failed_initialization_owned(
+        cls,
+        *,
+        runtime: ServerRuntime | None,
+        world: WorldRuntime | None,
+        database_manager: DatabaseManager | None,
+        agent_runtime: AgentRuntime | None,
+        observability: ObservabilityService | None,
+        owns_observability: bool,
+    ) -> None:
+        """Run every rollback step to completion independently of caller cancellation."""
         errors: list[str] = []
 
         async def _clear_refs() -> None:
@@ -204,9 +343,14 @@ class ServerRuntime:
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
             ("world stages", runtime.close_world_stages if runtime is not None else None),
+            ("chat adapter", runtime.chat_adapter.close if runtime is not None else None),
             (
                 "chat stages",
                 runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None,
+            ),
+            (
+                "call adapter",
+                (runtime.call_adapter.close if runtime is not None and runtime.call_adapter is not None else None),
             ),
             ("world runtime", world.stop_background_services if world is not None else None),
             (
@@ -222,8 +366,10 @@ class ServerRuntime:
                 continue
             try:
                 await stop()
-            except BaseException as error:  # noqa: BLE001 - rollback must continue through all owned resources
-                errors.append(f"{name}: {type(error).__name__}: {error}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:  # noqa: BLE001 - rollback must continue through all owned resources
+                errors.append(f"{name}: {type(error).__name__}")
 
         if errors:
             logger.error("ServerRuntime initialization rollback had errors: " + "; ".join(errors))
@@ -258,7 +404,9 @@ class ServerRuntime:
             shutdown_steps = (
                 ("world runtime", self.world.stop_background_services),
                 ("world stages", self.close_world_stages),
+                ("chat adapter", self.chat_adapter.close),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
+                ("call adapter", self.call_adapter.close if self.call_adapter is not None else None),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
                 ("database manager", self.database_manager.shutdown),
                 ("global references", self._shutdown_clear_global_references),

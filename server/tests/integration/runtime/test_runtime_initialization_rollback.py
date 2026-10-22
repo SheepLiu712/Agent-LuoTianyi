@@ -1,9 +1,12 @@
 import asyncio
 import threading
+from types import SimpleNamespace
 
 import pytest
+from support.stage_manager import make_stage_manager
 
 import src.server_runtime as runtime_module
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.infrastructure.persistence.database import vector_store as vector_store_module
@@ -21,6 +24,14 @@ class FakeLLM:
 class FakeMediaResolver:
     def ensure_dependencies(self):
         pass
+
+
+class EmptyCallSessions:
+    def list_termination_pending(self):
+        return []
+
+    def find_by_id(self, _call_id):
+        return None
 
 
 class FakeWorld:
@@ -45,6 +56,9 @@ class FakeAgentRuntime:
         self.default_character_id = "luotianyi"
         self.context_factories = {"luotianyi": object()}
         self.singing_backend = object()
+        self.vector_store = object()
+        self.call_tts_character_ids = ()
+        self.call_summary_character_ids = ()
 
     def get_agent(self, _character_id=None):
         return object()
@@ -57,7 +71,7 @@ class FakeAgentRuntime:
 
 
 @pytest.mark.asyncio
-async def test_late_initialization_failure_rolls_back_resources_and_globals(monkeypatch):
+async def test_late_initialization_failure_rolls_back_resources_and_globals(monkeypatch, tmp_path):
     calls = []
     database_ref = {"value": None}
     observability_ref = {"value": None}
@@ -73,6 +87,12 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         def __init__(self, _config):
             calls.append("database_created")
             self.event_store = object()
+            self.call_sessions = EmptyCallSessions()
+            self.call_maintenance_batches = object()
+            self.conversation_service = object()
+            self.memory_store = object()
+            self.user_store = object()
+            self.redis = object()
 
         def wire_dependencies(self, **_kwargs):
             pass
@@ -106,7 +126,9 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "DatabaseManager", FakeDatabase)
     monkeypatch.setattr(runtime_module, "create_media_resolver", lambda _config: FakeMediaResolver())
     monkeypatch.setattr(
-        runtime_module, "WorldRuntime", lambda config, **kwargs: FakeWorld(config, calls=calls, **kwargs)
+        runtime_module,
+        "WorldRuntime",
+        lambda config, **kwargs: FakeWorld(config, calls=calls, **kwargs),
     )
     monkeypatch.setattr(runtime_module, "AgentRuntime", FakeAgentRuntime)
     monkeypatch.setattr(runtime_module, "UserInterface", FailingUserInterface)
@@ -125,7 +147,9 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "_server_runtime", None)
 
     with pytest.raises(RuntimeError, match="late initialization failure"):
-        await runtime_module.ServerRuntime.initialize({})
+        await runtime_module.ServerRuntime.initialize(
+            {"infrastructure": {"media_resolution": {"root": str(tmp_path / "media")}}}
+        )
 
     assert calls.index("world_started") < calls.index("rsa_generation_failed")
     assert calls.index("world_stopped") < calls.index("database_stopped")
@@ -133,6 +157,192 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     assert observability_ref["value"] is None
     assert "observability_closed" in calls
     assert "observability_handler_uninstalled" in calls
+
+
+@pytest.mark.asyncio
+async def test_initialization_rollback_waits_for_stage_manager_before_agent_and_database():
+    calls = []
+    stage_release = asyncio.Event()
+
+    class Runtime:
+        async def close_world_stages(self):
+            calls.append("world_stages")
+
+        stage_manager = SimpleNamespace(
+            close=lambda: _record_wait(calls, "stage_manager_started", "stage_manager_stopped", stage_release)
+        )
+        chat_adapter = SimpleNamespace(close=lambda: _record(calls, "chat_adapter"))
+        call_adapter = SimpleNamespace(close=lambda: _record(calls, "transport"))
+
+    world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
+    agent = SimpleNamespace(shutdown=lambda: _record(calls, "agent"))
+    database = SimpleNamespace(shutdown=lambda: _record(calls, "database"))
+    rollback = asyncio.create_task(
+        runtime_module.ServerRuntime._rollback_failed_initialization(
+            runtime=Runtime(),
+            world=world,
+            database_manager=database,
+            agent_runtime=agent,
+            observability=None,
+            owns_observability=False,
+        )
+    )
+    for _ in range(100):
+        if "stage_manager_started" in calls:
+            break
+        await asyncio.sleep(0)
+    assert "agent" not in calls and "database" not in calls
+    stage_release.set()
+    await rollback
+    assert calls.index("stage_manager_stopped") < calls.index("agent") < calls.index("database")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_cancelled_runtime_rollback_drains_real_manager_termination_before_dependencies(
+    cancel_count,
+):
+    calls = []
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    manager = make_stage_manager(
+        get_agent=lambda _character: object(),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _character: object(),
+    )
+
+    class Termination:
+        async def reconcile(self):
+            def blocking_termination():
+                loop.call_soon_threadsafe(entered.set)
+                release.wait()
+                calls.append("termination_stopped")
+                return None
+
+            return await asyncio.to_thread(blocking_termination)
+
+    initializing = manager._finalizations.start("call", ("user", "luotianyi"), Termination().reconcile)
+    await entered.wait()
+
+    runtime = SimpleNamespace(
+        close_world_stages=lambda: _record(calls, "world_stages"),
+        stage_manager=manager,
+        chat_adapter=SimpleNamespace(close=lambda: _record(calls, "chat_adapter")),
+        call_adapter=SimpleNamespace(close=lambda: _record(calls, "transport")),
+    )
+    world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
+    agent = SimpleNamespace(shutdown=lambda: _record(calls, "agent"))
+    database = SimpleNamespace(shutdown=lambda: _record(calls, "database"))
+    rollback = asyncio.create_task(
+        runtime_module.ServerRuntime._rollback_failed_initialization(
+            runtime=runtime,
+            world=world,
+            database_manager=database,
+            agent_runtime=agent,
+            observability=None,
+            owns_observability=False,
+        )
+    )
+    for _ in range(100):
+        if manager._closing is not None:
+            break
+        await asyncio.sleep(0)
+    for _ in range(cancel_count):
+        rollback.cancel()
+        await asyncio.sleep(0)
+
+    done_before_release = rollback.done()
+    result_before_release = None
+    if done_before_release:
+        result_before_release = type(rollback.exception()).__name__ if rollback.exception() is not None else "success"
+    dependencies_closed_before_release = "agent" in calls or "database" in calls
+    release.set()
+    result = await asyncio.gather(rollback, return_exceptions=True)
+    await initializing
+    assert done_before_release is False
+    assert dependencies_closed_before_release is False
+    assert result_before_release is None
+    assert isinstance(result[0], asyncio.CancelledError)
+    assert calls.index("termination_stopped") < calls.index("agent") < calls.index("database")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_failures(
+    caplog,
+):
+    calls = []
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    manager = make_stage_manager(
+        get_agent=lambda _character: object(),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _character: object(),
+    )
+
+    class Termination:
+        async def reconcile(self):
+            def blocking_termination():
+                loop.call_soon_threadsafe(entered.set)
+                release.wait()
+                calls.append("termination_stopped")
+                raise RuntimeError("termination internal detail")
+
+            return await asyncio.to_thread(blocking_termination)
+
+    initializing = manager._finalizations.start("call", ("user", "luotianyi"), Termination().reconcile)
+    await entered.wait()
+
+    async def failing_world_stop():
+        calls.append("world")
+        raise RuntimeError("world internal detail")
+
+    runtime = SimpleNamespace(
+        close_world_stages=lambda: _record(calls, "world_stages"),
+        stage_manager=manager,
+        chat_adapter=SimpleNamespace(close=lambda: _record(calls, "chat_adapter")),
+        call_adapter=SimpleNamespace(close=lambda: _record(calls, "transport")),
+    )
+    rollback = asyncio.create_task(
+        runtime_module.ServerRuntime._rollback_failed_initialization(
+            runtime=runtime,
+            world=SimpleNamespace(stop_background_services=failing_world_stop),
+            database_manager=SimpleNamespace(shutdown=lambda: _record(calls, "database")),
+            agent_runtime=SimpleNamespace(shutdown=lambda: _record(calls, "agent")),
+            observability=None,
+            owns_observability=False,
+        )
+    )
+    for _ in range(100):
+        if manager._closing is not None:
+            break
+        await asyncio.sleep(0)
+    rollback.cancel()
+    await asyncio.sleep(0)
+    done_before_release = rollback.done()
+    dependencies_closed_before_release = "agent" in calls or "database" in calls
+    release.set()
+
+    result = await asyncio.gather(rollback, return_exceptions=True)
+    with pytest.raises(RuntimeError, match="termination internal detail"):
+        await initializing
+    assert dependencies_closed_before_release is False
+    assert done_before_release is False
+    assert isinstance(result[0], asyncio.CancelledError)
+    assert calls.index("termination_stopped") < calls.index("agent") < calls.index("database")
+    assert "world internal detail" not in caplog.text
+    assert "Task exception was never retrieved" not in caplog.text
+
+
+async def _record(calls, value):
+    calls.append(value)
+
+
+async def _record_wait(calls, started, stopped, release):
+    calls.append(started)
+    await release.wait()
+    calls.append(stopped)
 
 
 @pytest.mark.asyncio

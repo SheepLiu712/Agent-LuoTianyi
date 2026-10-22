@@ -14,7 +14,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
-from src.agent.context import ContextFactory, InteractionContext
+from src.agent.context import ContextFactory, ConversationMode, InteractionContext
 from src.domain.stage import (
     AgentPresentationChanged,
     AgentPresentationState,
@@ -24,14 +24,14 @@ from src.domain.stage import (
     StageTerminationResult,
 )
 from src.domain.stage.due_events import DueEvent, DueEventProvider
+from src.domain.stage.transport import StageOutputSink
 from src.utils.logger import get_logger
 
 from ._config import _StageConfig
 from ._models import _InputStatus, _PendingInput, _ReplyAttempt
-from ._sinks import StimulusInputSink, _AgentOutputSink, _PlanSink
+from ._sinks import StimulusInputSink, _AgentOutputSink, _NoOutputSink, _PlanSink, _TerminationPlanSink
 
 if TYPE_CHECKING:
-    from src.adapter.websocket import WebSocketAdapter
     from src.agent.facade import Agent
 
 
@@ -67,7 +67,7 @@ class ChatStage:
         user_id: str,
         character_id: str,
         agent: Agent,
-        adapter: WebSocketAdapter,
+        output_sink: StageOutputSink,
         context: InteractionContext,
         config: dict | None = None,
         timezone_name: str = "Asia/Shanghai",
@@ -81,7 +81,8 @@ class ChatStage:
             raise ValueError("context identity does not match stage")
         self._context = context
         self._interaction_id = context.identity.interaction_id
-        self._agent, self._adapter = agent, adapter
+        self._agent, self._output_transport = agent, output_sink
+        self._input_suspended = False
         self._due_event_provider = due_event_provider
         self._config = _StageConfig.from_dict({} if config is None else config)
         self._timezone = ZoneInfo(timezone_name)
@@ -125,20 +126,20 @@ class ChatStage:
         user_id: str,
         character_id: str,
         agent: Agent,
-        adapter: WebSocketAdapter,
+        output_sink: StageOutputSink,
         context_factory: ContextFactory,
         config: dict | None = None,
         timezone_name: str = "Asia/Shanghai",
         due_event_provider: DueEventProvider | None = None,
     ) -> ChatStage:
         """通过 context_factory 加载新上下文，返回持有它的 Stage；构造失败时关闭上下文。"""
-        context = await context_factory.create(str(uuid4()), user_id=user_id)
+        context = await context_factory.create(str(uuid4()), mode=ConversationMode.CHAT, user_id=user_id)
         try:
             return cls(
                 user_id=user_id,
                 character_id=character_id,
                 agent=agent,
-                adapter=adapter,
+                output_sink=output_sink,
                 context=context,
                 config=config,
                 timezone_name=timezone_name,
@@ -288,10 +289,19 @@ class ChatStage:
         """返回当前生命周期状态。"""
         return self._state
 
+    @property
+    def input_suspended(self) -> bool:
+        return self._input_suspended
+
+    def set_input_suspended(self, suspended: bool) -> None:
+        """切换准备只关闭新刺激准入，不取消已接纳的工作。"""
+        self._input_suspended = suspended
+
     def _can_accept(self, stimulus: d.Stimulus) -> bool:
         return (
             isinstance(stimulus, d.Stimulus)
             and not isinstance(stimulus, (d.InteractionEnding, d.InteractionDeadline))
+            and not self._input_suspended
             and self._state is StageState.ONLINE
             and stimulus.user_id == self.user_id
             and self.character_id in stimulus.target_character_ids
@@ -661,7 +671,7 @@ class ChatStage:
                 self._on_execution_finished(plan, report)
 
     def _send(self, output: StageOutput) -> asyncio.Future[None]:
-        return self._adapter.submit_output(output)
+        return self._output_transport.submit_output(output)
 
     def _send_control(self, output: StageOutput) -> None:
         try:
@@ -853,18 +863,10 @@ class ChatStage:
         report, error = None, None
         try:
             await self._stop_work()
-            report = await asyncio.wait_for(
-                self._handle(
-                    self._make_request(
-                        d.InteractionEnding(reason=reason, **self._stage_stimulus_fields()),
-                        tuple(e.stimulus for e in self._pending.values()),
-                        tuple(e.prepared for e in self._pending.values()),
-                    )
-                ),
+            report, error = await asyncio.wait_for(
+                self._run_termination_maintenance(reason),
                 timeout=self._config.termination_timeout,
             )
-            if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED:
-                error = "interaction ending handler failed"
         except asyncio.TimeoutError:
             error = "interaction ending timed out"
             self._logger.error("Stage termination timed out interaction=%s", self.interaction_id)
@@ -873,3 +875,46 @@ class ChatStage:
             self._pending.clear()
             self._state = StageState.TERMINATED
         return StageTerminationResult(report=report, error=error)
+
+    async def _run_termination_maintenance(
+        self, reason: d.InteractionEndingReason
+    ) -> tuple[d.HandlingReport | None, str | None]:
+        request = self._make_request(
+            d.InteractionEnding(reason=reason, **self._stage_stimulus_fields()),
+            tuple(e.stimulus for e in self._pending.values()),
+            tuple(e.prepared for e in self._pending.values()),
+        )
+        sink = _TerminationPlanSink(self, request)
+        try:
+            report = await self._agent.handle_stimulus(request, sink, context=self.context)
+        finally:
+            sink.closed = True
+        if (
+            report.request_id != request.request_id
+            or report.trigger_stimulus_id != request.stimulus.stimulus_id
+            or report.basis_interaction_revision != request.interaction.interaction_revision
+            or report.emitted_plan_ids != tuple(sink.ids)
+            or report.request_status is not d.HandlingRequestStatus.COMPLETED
+            or sink.plan is None
+        ):
+            return report, "interaction ending handler failed"
+        execution = d.ExecutionContext(
+            execution_id=str(uuid4()),
+            interaction_id=self.interaction_id,
+            current_interaction_revision=self._revision,
+            cancellation=d.CancellationToken(),
+            interaction_context=self.context,
+        )
+        try:
+            realized = await self._agent.realize_action_plan(sink.plan, execution, _NoOutputSink())
+        except asyncio.CancelledError:
+            execution.cancellation.cancel(d.CancellationReason.NO_LONGER_NEEDED)
+            raise
+        if realized.status is not d.ExecutionStatus.COMPLETED:
+            self._logger.error(
+                "Stage termination maintenance failed interaction=%s code=%s",
+                self.interaction_id,
+                realized.error_code,
+            )
+            return report, "interaction ending maintenance failed"
+        return report, None

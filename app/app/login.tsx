@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   registerButton: {
-    backgroundColor: '#66CCFF',
+    backgroundColor: '#88EDFF',
   },
   buttonDisabled: {
     opacity: 0.6,

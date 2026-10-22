@@ -15,8 +15,11 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
     TopicExtractionSkill,
 )
+from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
+from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
+from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression._diary_operations import DiaryOperations
@@ -31,7 +34,6 @@ from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchReactionSkill
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
 from src.agent.skills.mutation import IntentionalMemoryCommit
-from src.agent.skills.reflection import ReflectionSkill
 from src.infrastructure.media import MediaResolver
 
 if TYPE_CHECKING:
@@ -61,7 +63,9 @@ class SharedSkills:
         explicit_memory_config: dict[str, Any] | None,
         reply_composition_config: dict[str, Any],
         topic_extraction_config: dict[str, Any],
-        reflection_config: dict[str, Any],
+        call_recall_model: object | None,
+        call_summary_models: Mapping[str, object],
+        call_maintenance_batches: object | None,
         song_knowledge_config: dict[str, Any],
         database_manager: DatabaseManager,
         media_resolver: MediaResolver | None = None,
@@ -109,7 +113,15 @@ class SharedSkills:
                 topic_extraction_config, llm_service, understanding=self.text_preprocessing
             ),
         )
-        self.reflection = ReflectionSkill(reflection_config, memories)
+        self.call_recall = CallRecallDecisionSkill(memories=memories, model=call_recall_model)
+        self.call_reply = CallReplySkill(reply_generators)
+        self.call_summary = CallSummarySkill(dict(call_summary_models))
+        self.call_maintenance = CallMaintenanceSkill(dict(memories), call_maintenance_batches)
+        self.cognitive_maintenance = CognitiveMaintenanceSkill(
+            memories=memories,
+            compaction=self.conversation_compaction,
+            call_maintenance=self.call_maintenance,
+        )
         self.intentional_memory = IntentionalMemoryCommit(lambda character_id: memories[character_id])
         self.dynamic_topic_memory = DynamicTopicMemorySkill(memories)
         self.learned_song_experience = LearnedSongExperienceSkill(memories)

@@ -1,0 +1,372 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+from support.call_apology import _Plans, _request, _stimulus
+
+import src.domain.agent as d
+from src.agent import Agent
+from src.agent.context import ConversationSnapshot
+from src.agent.context.memory_pool import CallMemoryPool
+from src.agent.handlers.action.call import EndCallHandler
+from src.agent.handlers.action.router import ActionRouter
+from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.stimulus.call import (
+    CallEndingHandler,
+    CallReplyConfirmedHandler,
+    CallReplyRequestedHandler,
+    CallSilenceElapsedHandler,
+    CallTimeLimitWarningHandler,
+    CallTurnCompletedHandler,
+)
+from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.processing.plan_identity import decode_plan, encode_plan
+from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
+from src.agent.skills.contracts import ReplyDraft
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+from src.domain import MemoryContext, MemoryHit
+from src.domain.call import (
+    AckStyle,
+    CallAnswerDecision,
+    CallAudioSemantic,
+    CallEndReason,
+    CallFinalSnapshot,
+    CallOutcome,
+    CallRecallDecision,
+    CallTerminalFacts,
+    RecallMode,
+)
+
+
+class _Conversation:
+    def __init__(self):
+        self.entries = []
+
+    def read(self):
+        return ConversationSnapshot(entries=tuple(self.entries))
+
+    async def append(self, entries):
+        self.entries.extend(entries)
+
+
+class _PlanSink:
+    def __init__(self):
+        self.plans = []
+
+    async def emit(self, plan):
+        self.plans.append(plan)
+        return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
+
+
+class _SpeechStream:
+    def __init__(self):
+        self._chunks = iter((SimpleNamespace(data=b"pcm!"),))
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._chunks)
+        except StopIteration as error:
+            raise StopAsyncIteration from error
+
+    async def aclose(self):
+        return None
+
+
+class _Speaking:
+    def speak(self, invocation, *, text, tone, output_format=None):
+        _ = invocation, text, tone
+        assert output_format == d.CALL_PCM_FORMAT
+        return _SpeechStream()
+
+
+class _OutputSink:
+    def __init__(self):
+        self.outputs = []
+
+    async def emit(self, output):
+        self.outputs.append(output)
+        return d.OutputReceipt(
+            execution_id=output.execution_id,
+            sequence_no=output.sequence_no,
+            status=d.OutputAcceptanceStatus.ACCEPTED,
+        )
+
+
+class _ResponseScopedPermit:
+    def __init__(self, response_id):
+        self._response_id = response_id
+        self._active = True
+
+    def allows(self, response_id):
+        return self._active and response_id == self._response_id
+
+    def revoke(self):
+        self._active = False
+
+
+class _Memory:
+    def __init__(self):
+        self.calls = []
+
+    async def search_memory_context_for_topic(self, user_id, queries):
+        self.calls.append((user_id, queries))
+        return MemoryContext(
+            (
+                MemoryHit("旧记忆", 0.9, queries[0], vector_id="one"),
+                MemoryHit("新记忆", 0.8, queries[0], vector_id="two"),
+            )
+        )
+
+
+class _Generator:
+    async def generate(self, **kwargs):
+        return (
+            ReplyDraft("正式回答", "正式回答", "normal", None),
+            ReplyDraft("不应演唱", "不应演唱", "normal", None, sing=("song", "segment")),
+        )
+
+
+def test_answer_call_uuid_plan_round_trips_without_string_coercion():
+    call_id = uuid4()
+    plan = d.ActionPlan(
+        plan_id="plan",
+        origin_request_id="request",
+        plan_ordinal=0,
+        target_character_id="luotianyi",
+        interaction_id="call",
+        basis_interaction_revision=0,
+        source_stimulus_ids=("stimulus",),
+        actions=(d.AnswerCall(action_id="answer", call_id=call_id, decision=CallAnswerDecision.ACCEPT),),
+    )
+
+    decoded = decode_plan(encode_plan(plan))
+
+    assert decoded == plan
+    assert decoded.actions[0].call_id is not None
+    assert isinstance(decoded.actions[0].call_id, type(call_id))
+
+
+@pytest.mark.asyncio
+async def test_time_limit_warning_uses_fixed_agent_plan_without_generation():
+    handler = CallTimeLimitWarningHandler()
+    request = _request(_stimulus(d.CallTimeLimitWarning, call_id=uuid4(), remaining_ms=30_000))
+    plans = _Plans()
+
+    report = await handler.handle(request, plans)
+
+    assert report.emitted_plan_ids == ("plan-1",)
+    action = plans.drafts[0].actions[0]
+    assert isinstance(action, d.Say)
+    assert action.content == "通话时间快到了，我们很快就要结束啦。"
+    assert action.call_delivery.display_in_chat is False
+    assert action.call_delivery.provisional is False
+
+
+@pytest.mark.asyncio
+async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_updates_pool_once():
+    memory = _Memory()
+    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+
+    async def decide(*args, **kwargs):
+        return CallRecallDecision(RecallMode.RECALL, ("喜欢什么",), AckStyle.THINKING)
+
+    recall.decide = decide
+    handler = CallReplyRequestedHandler(recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({}))
+    call_id = uuid4()
+    request = _request(
+        _stimulus(
+            d.CallReplyRequested,
+            call_id=call_id,
+            turn_seq=1,
+            audio_content=CallAudioSemantic(transcript="你还记得吗"),
+        )
+    )
+    plans = _Plans()
+
+    report = await handler.handle(request, plans)
+
+    assert report.emitted_plan_ids == ("plan-1", "plan-2")
+    assert len(memory.calls) == 1
+    assert tuple(item.content for item in plans.context.call_memory.snapshot()) == ("旧记忆", "新记忆")
+    provisional = plans.drafts[0].actions[0]
+    formal = plans.drafts[1].actions[0]
+    assert provisional.call_delivery.provisional is True
+    assert formal.call_delivery.provisional is False
+    assert formal.call_delivery.display_in_chat is False
+    assert formal.call_delivery.is_ephemeral is True
+    assert formal.message_id is None
+    assert all(isinstance(action, d.Say) for draft in plans.drafts[:2] for action in draft.actions)
+    # Neither generated replies nor provisional acknowledgements are confirmed facts.
+    assert plans.context.conversation.entries == []
+
+
+@pytest.mark.asyncio
+async def test_silence_end_call_places_farewell_before_end_action():
+    recall = CallRecallDecisionSkill(memories={"luotianyi": _Memory()})
+
+    async def decide_silence(*args, **kwargs):
+        return SilenceDecision.END_CALL
+
+    recall.decide_silence = decide_silence
+    handler = CallSilenceElapsedHandler(recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({}))
+    request = _request(_stimulus(d.CallSilenceElapsed, call_id=uuid4(), silence_ms=5000))
+    plans = _Plans()
+
+    await handler.handle(request, plans)
+
+    assert isinstance(plans.drafts[0].actions[0], d.Say)
+    assert isinstance(plans.drafts[0].actions[-1], d.EndCall)
+    assert plans.drafts[0].actions[-1].reason is CallEndReason.AGENT_HANGUP
+
+
+@pytest.mark.asyncio
+async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow():
+    recall = CallRecallDecisionSkill(memories={"luotianyi": _Memory()})
+
+    async def decide_silence(*args, **kwargs):
+        return SilenceDecision.END_CALL
+
+    recall.decide_silence = decide_silence
+    agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            (
+                (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+                (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
+                (
+                    d.StimulusKind.CALL_SILENCE_ELAPSED,
+                    CallSilenceElapsedHandler(
+                        recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({})
+                    ),
+                ),
+            )
+        ),
+        action_router=ActionRouter(
+            (
+                (d.ActionKind.SAY, SayHandler("luotianyi", _Speaking(), SimpleNamespace())),
+                (d.ActionKind.END_CALL, EndCallHandler()),
+            )
+        ),
+    )
+    request = _request(_stimulus(d.CallSilenceElapsed, call_id=uuid4(), silence_ms=5000))
+    plan_sink = _PlanSink()
+    interaction_context = _Plans().context
+
+    handling = await agent.handle_stimulus(request, plan_sink, context=interaction_context)
+
+    assert handling.request_status is d.HandlingRequestStatus.COMPLETED
+    assert len(plan_sink.plans) == 1
+    assert isinstance(plan_sink.plans[0].actions[-1], d.EndCall)
+    output_sink = _OutputSink()
+    response_id = plan_sink.plans[0].actions[0].call_delivery.response_id
+    permit = _ResponseScopedPermit(response_id)
+    assert permit.allows(response_id)
+    assert not permit.allows("another-response")
+    execution = await agent.realize_action_plan(
+        plan_sink.plans[0],
+        d.ExecutionContext(
+            execution_id="execution",
+            interaction_id="call",
+            current_interaction_revision=1,
+            cancellation=d.CancellationToken(),
+            interaction_context=interaction_context,
+            call_output_permit=permit,
+        ),
+        output_sink,
+    )
+
+    assert execution.status is d.ExecutionStatus.COMPLETED
+    assert [result.status for result in execution.action_results] == [
+        d.ActionExecutionStatus.COMPLETED,
+        d.ActionExecutionStatus.COMPLETED,
+    ]
+    assert [type(output) for output in output_sink.outputs] == [
+        d.TextFinalOutput,
+        d.AudioChunkOutput,
+        d.MessageEndOutput,
+    ]
+    assert all(output.call_delivery.audio_route.value == "CALL" for output in output_sink.outputs)
+    permit.revoke()
+    assert not permit.allows(response_id)
+
+
+@pytest.mark.asyncio
+async def test_call_ending_emits_one_finalize_action_and_keeps_context_alive():
+    memory = _Memory()
+    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    call_id = uuid4()
+    plans = _Plans()
+    await recall.recall_once(
+        SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "user"),
+        memory_pool=plans.context.call_memory,
+        queries=("query",),
+    )
+    ending = _stimulus(
+        d.CallEnding,
+        call_id=call_id,
+        reason=CallEndReason.USER_HANGUP,
+        final_snapshot=CallFinalSnapshot(
+            terminal=CallTerminalFacts(
+                call_id,
+                CallOutcome.CONNECTED,
+                CallEndReason.USER_HANGUP,
+                1000,
+                datetime.now(timezone.utc),
+            ),
+            completed_turns=(),
+            maintenance_turn_seq=0,
+        ),
+    )
+    report = await CallEndingHandler().handle(_request(ending), plans)
+
+    assert report.emitted_plan_ids == ("plan-1",)
+    assert len(plans.drafts) == 1
+    assert len(plans.drafts[0].actions) == 1
+    assert isinstance(plans.drafts[0].actions[0], d.FinalizeCall)
+    assert plans.drafts[0].actions[0].final_snapshot is ending.final_snapshot
+    assert tuple(item.content for item in plans.context.call_memory.snapshot()) == ("旧记忆", "新记忆")
+
+
+@pytest.mark.asyncio
+async def test_shared_recall_skill_uses_only_the_supplied_interaction_pool():
+    memory = _Memory()
+    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    first, second = CallMemoryPool(), CallMemoryPool()
+    invocation = SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "user")
+    await recall.recall_once(invocation, memory_pool=first, queries=("first",))
+    assert second.snapshot() == ()
+    await recall.recall_once(invocation, memory_pool=second, queries=("second",))
+    first.clear()
+    assert first.snapshot() == ()
+    assert tuple(item.content for item in second.snapshot()) == ("旧记忆", "新记忆")
+
+
+@pytest.mark.asyncio
+async def test_provisional_ack_is_not_appended_to_ephemeral_formal_facts():
+    memory = _Memory()
+    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+
+    async def decide(*args, **kwargs):
+        return CallRecallDecision(RecallMode.RECALL, ("query",), AckStyle.EMPATHY)
+
+    recall.decide = decide
+    plans = _Plans()
+    request = _request(
+        _stimulus(
+            d.CallReplyRequested,
+            call_id=uuid4(),
+            turn_seq=1,
+            audio_content=CallAudioSemantic(transcript="继续说"),
+        )
+    )
+
+    await CallReplyRequestedHandler(
+        recall, CallReplySkill({"luotianyi": _Generator()}), PreparedSpeechCatalog({})
+    ).handle(request, plans)
+
+    assert plans.drafts[0].actions[0].call_delivery.provisional is True
+    assert plans.context.conversation.entries == []

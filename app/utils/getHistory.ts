@@ -42,6 +42,28 @@ async function attachLocalAudioIfExists(msg: any, baseMessage: ChatMessage): Pro
     return baseMessage;
 }
 
+export function mapHistoryMessage(msg: any): ChatMessage {
+    const isCall = msg.type === 'call' || msg.type === 'voice_call';
+    const outcome = msg.outcome ?? msg.call_outcome;
+    const callOutcome = outcome === 'connected' || outcome === 'cancelled_before_answer' || outcome === 'declined'
+        ? outcome === 'cancelled_before_answer' ? 'cancelled' : outcome
+        : undefined;
+    // Persisted call times use the server's naive Beijing datetime format.
+    const callTimestamp = isCall && typeof msg.timestamp === 'string'
+        ? Date.parse(`${msg.timestamp.replace(' ', 'T')}+08:00`) : msg.timestamp;
+    return {
+        uuid: msg.uuid || "unknown_id",
+        content: isCall ? '[语音通话]' : msg.content || (msg.type === 'audio' ? '[语音消息]' : ''),
+        isUser: msg.source === 'user',
+        type: isCall ? 'call' : msg.type,
+        timestamp: isCall && !Number.isFinite(callTimestamp) ? undefined : callTimestamp,
+        durationMs: isCall ? msg.active_duration_ms : msg.duration_ms ?? msg.durationMs,
+        ...(isCall ? { callOutcome, callId: typeof msg.call_id === 'string' ? msg.call_id : undefined } : {}),
+        audioAvailable: msg.type === 'audio' ? msg.audio_available !== false : undefined,
+        audioPlayState: msg.type === 'audio' ? 'idle' : undefined,
+    };
+}
+
 export async function getHistory(username: string, token: string, count: number, end_index: number): Promise<HistoryResponse> {
     try {
         const params = new URLSearchParams({
@@ -69,16 +91,7 @@ export async function getHistory(username: string, token: string, count: number,
         // 尝试把history中的消息转换为ChatMessage格式
         
         const messages: ChatMessage[] = await Promise.all(data.history.map(async (msg: any) => {
-            const baseMessage: ChatMessage = {
-                uuid: msg.uuid || "unknown_id",
-                content: msg.content || (msg.type === 'audio' ? '[语音消息]' : ''),
-                isUser: msg.source === 'user',
-                type: msg.type,
-                timestamp: msg.timestamp,
-                durationMs: msg.duration_ms ?? msg.durationMs,
-                audioAvailable: msg.type === 'audio' ? msg.audio_available !== false : undefined,
-                audioPlayState: msg.type === 'audio' ? 'idle' : undefined,
-            };
+            const baseMessage = mapHistoryMessage(msg);
 
             return attachLocalAudioIfExists(msg, baseMessage);
         }));

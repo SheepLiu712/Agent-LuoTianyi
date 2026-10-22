@@ -4,7 +4,9 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
+from src.domain.call import CallContent, CallEndReason, CallOutcome
 from src.domain.conversation_type import ConversationItem
 
 from .models import (
@@ -79,10 +81,32 @@ class _Storage:
         entries = tuple(
             sorted(
                 (_decode_entry(item) for item in data["conversations"]),
-                key=lambda entry: entry.timestamp,
+                key=lambda entry: (entry.timestamp, entry.entry_id),
             )
         )
         return ConversationSnapshot(ConversationSummary(data["summary"]), entries), data["context_count"]
+
+    def load_call_conversation_seed(self, *, requested_at: datetime) -> ConversationSnapshot:
+        """读取通话只读种子；窗口判定和最多 30 条限制由持久化服务负责。"""
+        data = self.database.get_call_conversation_seed_state(
+            self.require_user(),
+            character_id=self.identity.character_id,
+            requested_at=requested_at,
+        )
+        summary = data.get("summary")
+        conversations = data.get("conversations")
+        if not isinstance(summary, str) or not isinstance(conversations, list):
+            return ConversationSnapshot()
+        try:
+            entries = tuple(
+                sorted(
+                    (_decode_entry(item) for item in conversations),
+                    key=lambda entry: (entry.timestamp, entry.entry_id),
+                )
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return ConversationSnapshot()
+        return ConversationSnapshot(ConversationSummary(summary), entries)
 
     def append(self, entries: tuple[ConversationEntry, ...]) -> None:
         items = [_encode_entry(entry) for entry in entries]
@@ -135,18 +159,41 @@ def _decode_entry(item: dict) -> ConversationEntry:
             raise ValueError("音频历史内容与结构化元数据不一致")
     elif kind == "sing":
         content = SongContent(text, data["song"], data.get("segment"))
+    elif kind == "call":
+        content = _decode_call_content(data, text)
     else:
         raise ValueError(f"不支持的历史对话类型：{kind}")
     return ConversationEntry(item["uuid"], datetime.fromisoformat(item["timestamp"]), item["source"], content)
 
 
+def _decode_call_content(data: dict, text: str) -> CallContent:
+    content = CallContent(
+        call_id=UUID(data["call_id"]),
+        outcome=CallOutcome(data["outcome"]),
+        active_duration_ms=data["active_duration_ms"],
+        summary=data.get("summary"),
+        end_reason=CallEndReason(data["end_reason"]),
+    )
+    if content.text != text:
+        raise ValueError("通话历史内容与结构化元数据不一致")
+    return content
+
+
 def _encode_entry(entry: ConversationEntry) -> ConversationItem:
     content = entry.content
-    kinds = {TextContent: "text", ImageContent: "image", AudioContent: "audio", SongContent: "sing"}
+    kinds = {
+        TextContent: "text",
+        ImageContent: "image",
+        AudioContent: "audio",
+        SongContent: "sing",
+        CallContent: "call",
+    }
     data = asdict(content)
     text = data.pop("text")
     if isinstance(content, AudioContent):
         data["understanding_status"] = content.understanding_status.value
+    elif isinstance(content, CallContent):
+        data.update(call_id=str(content.call_id), outcome=content.outcome.value, end_reason=content.end_reason.value)
     return ConversationItem(
         entry.entry_id,
         entry.timestamp.isoformat(sep=" ", timespec="microseconds"),

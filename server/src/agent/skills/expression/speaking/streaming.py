@@ -7,8 +7,9 @@ import threading
 from collections.abc import AsyncIterator, Generator
 from typing import TYPE_CHECKING
 
-from src.domain.agent import CancellationToken
+from src.domain.agent import CALL_PCM_FORMAT, AudioFormat, CancellationToken
 
+from .call_pcm import UnsupportedCallAudioError
 from .errors import TTSStreamCancelled
 
 if TYPE_CHECKING:
@@ -46,7 +47,13 @@ class AsyncTTS:
     # Reviewed exception: this is one cancellation-safe generator lifecycle;
     # splitting ownership of pending reads and close would weaken cleanup.
     async def stream(  # noqa: C901
-        self, *, character_id: str, text: str, tone: str, cancellation: CancellationToken
+        self,
+        *,
+        character_id: str,
+        text: str,
+        tone: str,
+        cancellation: CancellationToken,
+        output_format: AudioFormat | None = None,
     ) -> AsyncIterator[bytes]:
         """按角色、文本和语调生成字节片段；取消或关闭时释放本次生成器。"""
         if cancellation.is_cancelled:
@@ -58,7 +65,15 @@ class AsyncTTS:
 
         # 创建和推进同步生成器都在工作线程执行。
         def generate() -> Generator[bytes, None, None]:
-            yield from module.stream_synthesize_speech_with_tone(text, tone, cancel_event=stop)
+            if output_format is None:
+                yield from module.stream_synthesize_speech_with_tone(text, tone, cancel_event=stop)
+                return
+            if output_format != CALL_PCM_FORMAT:
+                raise UnsupportedCallAudioError("Only the canonical CALL PCM format is supported")
+            generator = getattr(module, "stream_synthesize_call_pcm_with_tone", None)
+            if generator is None:
+                raise UnsupportedCallAudioError("TTS backend does not support verified CALL PCM")
+            yield from generator(text, tone, cancel_event=stop)
 
         stream = generate()
         pending: asyncio.Task | None = None
@@ -73,6 +88,8 @@ class AsyncTTS:
                         raise TTSStreamCancelled()
                 chunk = pending.result()
                 pending = None
+                if cancellation.is_cancelled:
+                    raise TTSStreamCancelled()
                 if chunk is _END:
                     return
                 if not isinstance(chunk, bytes):

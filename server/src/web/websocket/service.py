@@ -1,39 +1,32 @@
 import asyncio
 import json
 import time
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
-
-from src.utils.logger import get_logger
-
-from .messages import WSEventType, WSMessage
 
 if TYPE_CHECKING:
     from src.infrastructure.persistence.database.database_service import DatabaseManager
 
 
-NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
+_NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
 
 
 class WebSocketService:
+    """Shared pre-admission authentication; business protocol handling belongs to the adapters."""
+
     def __init__(
         self,
         *,
         max_inbound_frame_bytes: int = 128 * 1024,
-        max_image_frame_bytes: int = 8 * 1024 * 1024 + 128 * 1024,
     ):
         if type(max_inbound_frame_bytes) is not int or max_inbound_frame_bytes <= 0:
             raise ValueError("max_inbound_frame_bytes must be a positive integer")
-        if type(max_image_frame_bytes) is not int or max_image_frame_bytes <= 0:
-            raise ValueError("max_image_frame_bytes must be a positive integer")
-        self.max_image_frame_bytes = max_image_frame_bytes
-        self.logger = get_logger(__name__)
         self.max_inbound_frame_bytes = max_inbound_frame_bytes
 
-    async def try_recv_client_msg(self, websocket_connection: "WebSocketConnection") -> WSMessage | None:
+    async def _receive_auth_message(self, websocket_connection: "WebSocketConnection") -> dict[str, Any] | None:
         """
-        尝试接收一条WebSocket消息并解析为JSON对象。
+        仅在鉴权阶段读取 JSON 消息；鉴权后由 Adapter 接收原始消息。
         如果解析失败，返回None。
         """
         websocket = websocket_connection.websocket
@@ -42,7 +35,7 @@ class WebSocketService:
         except WebSocketDisconnect:
             raise
         except Exception:
-            await self.send_error_event(
+            await self._send_error_event(
                 websocket=websocket,
                 payload={
                     "code": "BAD_JSON",
@@ -52,7 +45,7 @@ class WebSocketService:
             return None
 
         if not isinstance(event, dict):
-            await self.send_error_event(
+            await self._send_error_event(
                 websocket=websocket,
                 payload={
                     "code": "BAD_MESSAGE",
@@ -61,13 +54,15 @@ class WebSocketService:
             )
             return None
         encoded_size = len(json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-        limit = self.max_image_frame_bytes if event.get("type") == "user_image" else self.max_inbound_frame_bytes
+        limit = self.max_inbound_frame_bytes
         if encoded_size > limit:
-            await self._reject_oversized_frame(websocket_connection, event)
+            await self._send_error_event(
+                websocket, {"code": "BAD_MESSAGE", "message": "message exceeds the inbound frame limit"}
+            )
             return None
 
         if "type" not in event:
-            await self.send_error_event(
+            await self._send_error_event(
                 websocket=websocket,
                 payload={
                     "code": "BAD_MESSAGE",
@@ -75,48 +70,28 @@ class WebSocketService:
                 },
             )
             return None
-        return WSMessage(
-            event_type=event.get("type"),
-            payload=event.get("payload", {}),
-            client_msg_id=event.get("client_msg_id"),
-            ts=event.get("ts"),
-        )
+        return event
 
-    async def _reject_oversized_frame(self, connection: "WebSocketConnection", event: dict) -> None:
-        client_msg_id = event.get("client_msg_id")
-        if isinstance(client_msg_id, str) and 0 < len(client_msg_id) <= 128:
-            await self.send_nack_event(
-                connection,
-                WSMessage(event_type=str(event.get("type", ""))[:128], payload={}, client_msg_id=client_msg_id),
-                code="BAD_MESSAGE",
-                message="message exceeds the inbound frame limit",
-                retryable=False,
-            )
-        else:
-            await self.send_error_event(
-                websocket=connection.websocket,
-                payload={"code": "BAD_MESSAGE", "message": "message exceeds the inbound frame limit"},
-            )
-
-    async def handle_auth_event(
+    async def _authenticate_message(
         self,
         ws_connection: "WebSocketConnection",
         database: "DatabaseManager",
-        event: WSMessage,
+        event: dict[str, Any],
     ) -> bool:
         websocket = ws_connection.websocket
-        payload = event.payload if isinstance(event.payload, dict) else {}
+        payload = event.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
         username = payload.get("username", "")
         token = payload.get("token", "")
         if not username or not token:
             await websocket.send_json(
                 self._make_event(
-                    WSEventType.AUTH_ERROR,
+                    "auth_error",
                     {
                         "code": "MISSING_AUTH_FIELDS",
                         "message": "username and token are required in auth payload",
                     },
-                    reply_to=event.client_msg_id,
+                    reply_to=event.get("client_msg_id"),
                 )
             )
             return False
@@ -126,12 +101,12 @@ class WebSocketService:
         if not is_valid:
             await websocket.send_json(
                 self._make_event(
-                    WSEventType.AUTH_ERROR,
+                    "auth_error",
                     {
                         "code": "INVALID_TOKEN",
                         "message": "invalid or expired message token",
                     },
-                    reply_to=event.client_msg_id,
+                    reply_to=event.get("client_msg_id"),
                 )
             )
             return False
@@ -140,141 +115,41 @@ class WebSocketService:
         authed_username = username
         raw_capabilities = payload.get("capabilities", [])
         negotiated_capabilities = (
-            {NEGATIVE_ACK_CAPABILITY}
-            if isinstance(raw_capabilities, list) and NEGATIVE_ACK_CAPABILITY in raw_capabilities[:32]
+            {_NEGATIVE_ACK_CAPABILITY}
+            if isinstance(raw_capabilities, list) and _NEGATIVE_ACK_CAPABILITY in raw_capabilities[:32]
             else set()
         )
         ws_connection.capabilities = negotiated_capabilities
         await websocket.send_json(
             self._make_event(
-                WSEventType.AUTH_OK,
+                "auth_ok",
                 {
                     "message": "authentication successful for user " + authed_username,
                     "capabilities": sorted(negotiated_capabilities),
                 },
-                reply_to=event.client_msg_id,
+                reply_to=event.get("client_msg_id"),
             )
         )
         ws_connection.set_user(authed_user_uuid, authed_username)
         return True
-
-    async def handle_ping_event(self, ws_connection: "WebSocketConnection", event: WSMessage) -> None:
-        websocket = ws_connection.websocket
-        payload = event.payload if isinstance(event.payload, dict) else {}
-        event_ping_id = payload.get("ping_id")
-        if event_ping_id is None:
-            await self.send_error_event(
-                websocket=websocket,
-                payload={
-                    "code": "MISSING_PING_ID",
-                    "message": "ping event must have a ping_id in payload",
-                },
-            )
-            return
-
-        if ws_connection.last_ping_id is None or ws_connection.last_ping_id < event_ping_id:
-            ws_connection.last_ping_id = event_ping_id
-            ws_connection.last_ping_time = int(time.time() * 1000)
-            await websocket.send_json(
-                self._make_event(
-                    WSEventType.HB_PONG,
-                    {"ping_id": event_ping_id, "server_ts": ws_connection.last_ping_time},
-                    reply_to=event.client_msg_id,
-                )
-            )
 
     async def send_system_ready_event(self, websocket: WebSocket) -> None:
         """
         发送系统就绪事件，提示客户端进行认证
         """
         event = self._make_event(
-            WSEventType.SYSTEM_READY,
+            "system_ready",
             {"message": "WebSocket connected. Please send auth first.", "require_auth_before_chat": True},
         )
         await websocket.send_json(event)
 
-    async def send_error_event(self, websocket: WebSocket, payload: Dict) -> None:
-        event = self._make_event(WSEventType.SERVER_ERROR, payload)
+    async def _send_error_event(self, websocket: WebSocket, payload: dict) -> None:
+        event = self._make_event("error", payload)
         await websocket.send_json(event)
 
-    async def send_agent_state_event(self, websocket: WebSocket, state: str) -> None:
-        event = self._make_event(
-            WSEventType.AGENT_STATE_CHANGED,
-            {"state": state},
-        )
-        await websocket.send_json(event)
-
-    async def send_ack_event(
-        self,
-        websocket_connection: "WebSocketConnection",
-        event: WSMessage,
-        *,
-        payload: dict[str, object] | None = None,
-        duplicate: bool = False,
-    ) -> None:
-        if event.client_msg_id is None:
-            self.logger.warning("Received event without client_msg_id, cannot send ACK")
-            return
-        ack_payload = {
-            "ok": True,
-            "received_event_type": event.event_type,
-        }
-        if payload:
-            ack_payload.update(payload)
-        if duplicate:
-            ack_payload["duplicate"] = True
-        ack_event = self._make_event(
-            WSEventType.SERVER_ACK,
-            ack_payload,
-            reply_to=event.client_msg_id,
-        )
-        await websocket_connection.websocket.send_json(ack_event)
-
-    async def send_nack_event(
-        self,
-        websocket_connection: "WebSocketConnection",
-        event: WSMessage,
-        *,
-        code: str,
-        message: str,
-        retryable: bool,
-    ) -> None:
-        """Report that a client event was not accepted for processing."""
-        supports_negative_ack = NEGATIVE_ACK_CAPABILITY in websocket_connection.capabilities
-        payload = {
-            "received_event_type": event.event_type,
-            "code": code,
-            "message": message,
-            "retryable": retryable,
-        }
-        if supports_negative_ack:
-            payload["ok"] = False
-        nack_event = self._make_event(
-            WSEventType.SERVER_ACK if supports_negative_ack else WSEventType.SERVER_ERROR,
-            payload,
-            reply_to=event.client_msg_id,
-        )
-        await websocket_connection.websocket.send_json(nack_event)
-
-    async def send_duplicate_ack_event(self, websocket_connection: "WebSocketConnection", event: WSMessage) -> None:
-        """对重复客户端消息返回 ACK，但不让上游再次处理同一条业务消息。"""
-        if event.client_msg_id is None:
-            self.logger.warning("Received duplicate event without client_msg_id, cannot send ACK")
-            return
-        ack_event = self._make_event(
-            WSEventType.SERVER_ACK,
-            {
-                "ok": True,
-                "received_event_type": event.event_type,
-                "duplicate": True,
-            },
-            reply_to=event.client_msg_id,
-        )
-        await websocket_connection.websocket.send_json(ack_event)
-
-    def _make_event(self, event_type: WSEventType, payload: Dict, reply_to: str = None) -> Dict:
+    def _make_event(self, event_type: str, payload: dict, reply_to: str | None = None) -> dict:
         event = {
-            "type": event_type.value,
+            "type": event_type,
             "ts": int(time.time() * 1000),
             "payload": payload,
         }
@@ -284,6 +159,8 @@ class WebSocketService:
 
 
 class WebSocketConnection:
+    """Authentication state for one socket; no Stage binding or business delivery state."""
+
     AUTH_TIMEOUT_SECONDS = 15.0
     AUTH_MAX_ATTEMPTS = 5
 
@@ -291,42 +168,7 @@ class WebSocketConnection:
         self.websocket = websocket
         self.user_uuid = user_uuid
         self.user_name = user_name
-        self.last_ping_id: int | None = None
-        self.last_ping_time: int | None = None
-        self.client_mode: dict = {"types": []}
         self.capabilities: set[str] = set()
-        self._send_lock = asyncio.Lock()
-        self._closed = False
-
-    @property
-    def is_closed(self) -> bool:
-        """返回本连接是否已断开或发送失败；旧连接不会自动关联到重连后的 socket。"""
-        return self._closed
-
-    async def send_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        """将 event_type 和 payload 封装为事件并串行发送；单包限时十秒，失败抛出且不重试。"""
-        async with self._send_lock:
-            if self._closed:
-                raise ConnectionError("WebSocket connection is closed")
-            try:
-                await asyncio.wait_for(
-                    self.websocket.send_json(
-                        {
-                            "type": event_type,
-                            "ts": int(time.time() * 1000),
-                            "payload": payload,
-                        }
-                    ),
-                    timeout=10.0,
-                )
-            except BaseException:
-                # 发送被中断时交付结果也不确定，禁止继续使用这条连接发送。
-                self._closed = True
-                raise
-
-    def mark_disconnected(self) -> None:
-        """由连接接入层标记断开，使旧连接上的业务输出立即失效。"""
-        self._closed = True
 
     def set_user(self, user_uuid: str, user_name: str):
         self.user_uuid = user_uuid
@@ -353,8 +195,8 @@ class WebSocketConnection:
                 await self._reject_auth(websocket_service, "AUTH_TIMEOUT", "authentication timed out")
                 return False
             try:
-                client_event: WSMessage | None = await asyncio.wait_for(
-                    websocket_service.try_recv_client_msg(self),
+                client_event: dict[str, Any] | None = await asyncio.wait_for(
+                    websocket_service._receive_auth_message(self),
                     timeout=remaining,
                 )
             except asyncio.TimeoutError:
@@ -362,8 +204,8 @@ class WebSocketConnection:
                 return False
             if client_event is None:
                 continue
-            if client_event.event_type == WSEventType.USER_AUTH.value:
-                ret = await websocket_service.handle_auth_event(self, database, client_event)
+            if client_event.get("type") == "user_auth":
+                ret = await websocket_service._authenticate_message(self, database, client_event)
                 if ret:
                     return True
 
@@ -383,7 +225,7 @@ class WebSocketConnection:
         try:
             await self.websocket.send_json(
                 websocket_service._make_event(
-                    WSEventType.AUTH_ERROR,
+                    "auth_error",
                     {"code": code, "message": message},
                 )
             )

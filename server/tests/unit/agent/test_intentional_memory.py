@@ -151,7 +151,7 @@ async def test_memory_acknowledgement_uses_composition_hint_after_commit():
     assert action.sound_content == "compose-memory-ack-sound"
     assert action.tone.value == "gentle"
     assert action.expression == d.ChangeExpression(expression_id="smile")
-    assert isinstance(sink.values[1].actions[0], d.Reflection)
+    assert isinstance(sink.values[1].actions[0], d.CognitiveMaintenance)
     assert len(composer.calls) == 1
     compose_call = composer.calls[0]
     assert compose_call["invocation"].user_id == "u"

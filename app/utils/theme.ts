@@ -77,7 +77,7 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     accentText: '#1674a3',
     menuButton: 'rgba(255, 255, 255, 0.72)',
     userBubble: '#ffffff',
-    botBubble: '#66CCFF',
+    botBubble: '#88EDFF',
     bubbleText: '#000000',
     userBubbleText: '#000000',
     systemMessageText: '#555555',

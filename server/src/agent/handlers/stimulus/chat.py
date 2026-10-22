@@ -220,24 +220,24 @@ class ChatReplyHandler:
         else:
             report = await self._handle_conversation_reply(request, plans, pending, reply_parts)
         if report.request_status is d.HandlingRequestStatus.COMPLETED:
-            await self._emit_reflection(plans, request, pending)
+            await self._emit_maintenance(plans, request, pending)
             report = replace(report, emitted_plan_ids=tuple(plans.accepted_ids))
         return report
 
     @staticmethod
-    async def _emit_reflection(
+    async def _emit_maintenance(
         plans: PlanEmitter,
         request: d.HandleStimulusRequest,
         pending: tuple[str, ...],
     ) -> None:
-        """在本次 InteractionDeadline 的所有回复计划之后追加认知维护计划。"""
+        """在本次 InteractionDeadline 的所有回复计划之后追加阈值维护计划。"""
         await plans.emit(
             ActionPlanDraft(
                 source_stimulus_ids=pending,
                 actions=(
-                    d.Reflection(
-                        action_id=f"{request.request_id}-reflection",
-                        prepared_inputs=request.prepared_inputs,
+                    d.CognitiveMaintenance(
+                        action_id=f"{request.request_id}-maintenance",
+                        reason=d.MaintenanceReason.COMPACTION_THRESHOLD,
                     ),
                 ),
             )

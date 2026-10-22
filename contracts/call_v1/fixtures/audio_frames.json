@@ -1,0 +1,93 @@
+{
+  "contract": "call.v1.audio-frame",
+  "status": "proposed",
+  "header": {
+    "size_bytes": 15,
+    "byte_order": "big",
+    "fields": [
+      {"name": "version", "offset": 0, "width_bytes": 1, "type": "uint8"},
+      {"name": "route", "offset": 1, "width_bytes": 1, "type": "uint8"},
+      {"name": "flags", "offset": 2, "width_bytes": 1, "type": "uint8"},
+      {"name": "stream_id", "offset": 3, "width_bytes": 4, "type": "uint32"},
+      {"name": "seq", "offset": 7, "width_bytes": 4, "type": "uint32"},
+      {"name": "payload_length", "offset": 11, "width_bytes": 4, "type": "uint32"}
+    ]
+  },
+  "constants": {
+    "version": 1,
+    "routes": {"CHAT": 1, "CALL": 2},
+    "flags": {"FINAL": 1, "allowed_mask": 1},
+    "seq_min": 1,
+    "seq_max": 4294967295,
+    "stream_id_min": 0,
+    "stream_id_max": 4294967295,
+    "max_payload_bytes": 16384,
+    "pcm16_mono_alignment_bytes": 2
+  },
+  "valid": [
+    {
+      "id": "call_nonfinal_min",
+      "frame": {"version": 1, "route": "CALL", "flags": [], "stream_id": 1, "seq": 1, "payload_hex": "0001"},
+      "encoded_hex": "0102000000000100000001000000020001"
+    },
+    {
+      "id": "chat_final",
+      "frame": {"version": 1, "route": "CHAT", "flags": ["FINAL"], "stream_id": 7, "seq": 42, "payload_hex": "ff00"},
+      "encoded_hex": "010101000000070000002a00000002ff00"
+    },
+    {
+      "id": "call_mic_stream_zero",
+      "frame": {"version": 1, "route": "CALL", "flags": [], "stream_id": 0, "seq": 2, "payload_hex": "80007fff"},
+      "encoded_hex": "01020000000000000000020000000480007fff"
+    },
+    {
+      "id": "call_final_seq_max",
+      "frame": {"version": 1, "route": "CALL", "flags": ["FINAL"], "stream_id": 4294967295, "seq": 4294967295, "payload_hex": "0000"},
+      "encoded_hex": "010201ffffffffffffffff000000020000"
+    },
+    {
+      "id": "call_max_payload",
+      "frame": {
+        "version": 1,
+        "route": "CALL",
+        "flags": [],
+        "stream_id": 9,
+        "seq": 99,
+        "payload_pattern": {"repeat_hex": "aa55", "count": 8192}
+      },
+      "encoded_hex_pattern": {
+        "prefix": "010200000000090000006300004000",
+        "repeat_hex": "aa55",
+        "count": 8192
+      }
+    }
+  ],
+  "invalid": [
+    {"id": "truncated_header", "operation": "decode", "encoded_hex": "010200", "error": "HEADER_TRUNCATED"},
+    {"id": "unsupported_version", "operation": "decode", "encoded_hex": "0202000000000100000001000000020001", "error": "UNSUPPORTED_VERSION"},
+    {"id": "invalid_route", "operation": "decode", "encoded_hex": "0103000000000100000001000000020001", "error": "INVALID_ROUTE"},
+    {"id": "unsupported_flags", "operation": "decode", "encoded_hex": "0102020000000100000001000000020001", "error": "UNSUPPORTED_FLAGS"},
+    {"id": "seq_zero", "operation": "decode", "encoded_hex": "0102000000000100000000000000020001", "error": "INVALID_SEQ"},
+    {
+      "id": "stream_id_overflow",
+      "operation": "encode",
+      "frame": {"version": 1, "route": "CALL", "flags": [], "stream_id": 4294967296, "seq": 1, "payload_hex": "0001"},
+      "error": "FIELD_OUT_OF_RANGE"
+    },
+    {
+      "id": "seq_non_integer",
+      "operation": "encode",
+      "frame": {"version": 1, "route": "CALL", "flags": [], "stream_id": 1, "seq": "1", "payload_hex": "0001"},
+      "error": "INVALID_FIELD_TYPE"
+    },
+    {"id": "declared_length_mismatch", "operation": "decode", "encoded_hex": "0102000000000100000001000000040001", "error": "PAYLOAD_LENGTH_MISMATCH"},
+    {
+      "id": "payload_over_limit",
+      "operation": "decode",
+      "encoded_hex_pattern": {"prefix": "010200000000010000000100004002", "repeat_hex": "0000", "count": 8193},
+      "error": "PAYLOAD_TOO_LARGE"
+    },
+    {"id": "empty_payload", "operation": "decode", "encoded_hex": "010200000000010000000100000000", "error": "EMPTY_PAYLOAD"},
+    {"id": "odd_pcm16_payload", "operation": "decode", "encoded_hex": "010200000000010000000100000003000102", "error": "PCM_ALIGNMENT_ERROR"}
+  ]
+}

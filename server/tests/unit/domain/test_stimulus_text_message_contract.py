@@ -89,6 +89,14 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "SONG_KNOWLEDGE_DISCOVERED": "song_knowledge_discovered",
         "SONG_LEARNED": "song_learned",
         "NEW_RELATIONSHIP_PROPOSE": "new_relationship_propose",
+        "CALL_ANSWER_REQUESTED": "call_answer_requested",
+        "CALL_STARTED": "call_started",
+        "CALL_TURN_COMPLETED": "call_turn_completed",
+        "CALL_REPLY_REQUESTED": "call_reply_requested",
+        "CALL_REPLY_CONFIRMED": "call_reply_confirmed",
+        "CALL_SILENCE_ELAPSED": "call_silence_elapsed",
+        "CALL_TIME_LIMIT_WARNING": "call_time_limit_warning",
+        "CALL_ENDING": "call_ending",
     }
     assert {item.name: item.value for item in agent_domain.StimulusSource} == {
         "USER": "user",

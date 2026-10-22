@@ -14,10 +14,10 @@ import uvicorn
 from fastapi import FastAPI
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent import Agent
 from src.agent.context import ContextFactory
-from src.agent.handlers.action.reflection import ReflectionActionHandler
+from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler
@@ -30,18 +30,18 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
     TopicExtractionSkill,
 )
+from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking import SpeakingSkill
-from src.agent.skills.reflection import ReflectionSkill
 from src.domain import CharacterProfile
 from src.infrastructure.media import PermanentMediaStore, create_media_resolver
 from src.infrastructure.persistence.database import DatabaseManager, InviteCode
-from src.stage import StageManager
 from src.web.http import routes
 from src.web.http.user_interface import UserInterface
 from src.web.websocket import endpoint
 from src.web.websocket.service import WebSocketService
+from support.stage_manager import make_stage_manager
 
 
 class OfflineModels:
@@ -68,10 +68,13 @@ class OfflineModels:
 
 
 class OfflineMemory:
-    async def write_topic_memories(self, **kwargs):
-        return {}
+    async def extract_maintenance_candidates(self, **kwargs):
+        return ()
 
-    async def update_user_profile_by_context(self, **kwargs):
+    async def propose_user_profile(self, **kwargs):
+        return None
+
+    async def write_maintenance_candidates(self, **kwargs):
         return None
 
 
@@ -114,9 +117,10 @@ def make_agent(root, resolver, models):
                     SayHandler("luotianyi", SpeakingSkill({}, tts_engine=models), PreparedSpeechCatalog({})),
                 ),
                 (
-                    d.ActionKind.REFLECTION,
-                    ReflectionActionHandler(
-                        "luotianyi", ReflectionSkill({}, memory), ConversationCompactionSkill({}, None)
+                    d.ActionKind.COGNITIVE_MAINTENANCE,
+                    CognitiveMaintenanceActionHandler(
+                        "luotianyi",
+                        CognitiveMaintenanceSkill(memories=memory, compaction=ConversationCompactionSkill({}, None)),
                     ),
                 ),
             )
@@ -142,7 +146,7 @@ def make_runtime(root):
     agent = make_agent(root, resolver, models)
     adapter = WebSocketAdapter(config)
     factory = ContextFactory(character_id="luotianyi", database=database.conversation_service)
-    manager = StageManager(get_agent=lambda _: agent, adapter=adapter, get_context_factory=lambda _: factory)
+    manager = make_stage_manager(get_agent=lambda _: agent, adapter=adapter, get_context_factory=lambda _: factory)
     interface = UserInterface(database, resolver)
     interface.generate_rsa_keys()
     return SimpleNamespace(
