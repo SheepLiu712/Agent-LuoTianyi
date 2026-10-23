@@ -385,3 +385,22 @@ def test_unknown_result_keeps_pending_record(dialog):
     )
 
     assert registration_resume.load_pending()["registration_request_id"] == request_id
+
+
+def test_rate_limit_keeps_pending_record_for_retry(dialog):
+    """429 是暂不可用，不能清未决请求；限流解除后仍用原 request ID 恢复（spec AC-06）。"""
+    dialog.widget.fill_register_form(username="taken")
+    dialog.widget.do_register()
+    sign = FakeSignDialog.last_instance
+    dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
+    request_id = dialog.widget._submit_context["request_id"]
+    registration_resume.save_pending(request_id, "taken", "terms-2026-10-v1")
+
+    dialog.widget._on_register_finished(
+        sign.submit_token,
+        RegisterOutcome(False, "请求过于频繁，请稍后重试", code="RATE_LIMITED", status_code=429),
+    )
+
+    assert registration_resume.load_pending()["registration_request_id"] == request_id
+    assert registration_resume.request_id_for("taken") == request_id

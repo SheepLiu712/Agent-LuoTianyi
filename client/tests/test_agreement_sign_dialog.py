@@ -225,7 +225,11 @@ def test_load_failure_disables_confirm_and_offers_retry(app, clock):
     widget._load_signals.finished.emit(widget._load_request_id, RuntimeError("boom"))
 
     assert widget.confirm_btn.isEnabled() is False
-    assert widget.retry_btn.isVisible() is True
+    assert widget.reject_btn.text() == "重试"  # N11：复用拒绝按钮，避免底部同时出现三个按钮
+    called = []
+    widget.reload_document = lambda: called.append(True)
+    widget._on_reject_clicked()
+    assert called == [True]
 
     widget.gate.mark_load_failed()
     widget._refresh_actions()

@@ -187,17 +187,6 @@ class AgreementSignDialog(QDialog):
         row = QHBoxLayout()
         row.setSpacing(10)
 
-        self.retry_btn = QPushButton(TEXT_RETRY)
-        self.retry_btn.setMinimumHeight(44)
-        self.retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.retry_btn.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: 8px; font-size: 14px; padding: 10px 16px;"
-            f" background-color: {COLOR_SECONDARY_BG}; color: {COLOR_TEXT}; }}"
-            "QPushButton:focus { outline: none; }"
-        )
-        self.retry_btn.clicked.connect(self.reload_document)
-        self.retry_btn.setVisible(False)
-
         self.reject_btn = QPushButton(TEXT_REJECT)
         self.reject_btn.setMinimumHeight(44)
         self.reject_btn.setMinimumWidth(150)
@@ -207,7 +196,7 @@ class AgreementSignDialog(QDialog):
             f" background-color: {COLOR_SECONDARY_BG}; color: {COLOR_TEXT}; }}"
             "QPushButton:focus { outline: none; }"
         )
-        self.reject_btn.clicked.connect(self.reject)
+        self.reject_btn.clicked.connect(self._on_reject_clicked)
 
         self.confirm_btn = QPushButton("")
         self.confirm_btn.setMinimumHeight(44)
@@ -215,7 +204,6 @@ class AgreementSignDialog(QDialog):
         self.confirm_btn.clicked.connect(self._on_confirm_clicked)
 
         row.addWidget(self.reject_btn)
-        row.addWidget(self.retry_btn)
         row.addWidget(self.confirm_btn, 1)
         column.addLayout(row)
         self._reject_text = TEXT_REJECT
@@ -234,7 +222,6 @@ class AgreementSignDialog(QDialog):
         self.version_label.setText(f"版本：{self.version}" if self.version else "")
         self.view.setDocument(render_agreement_document(payload, self.font().family()))
         self._set_error("")
-        self.retry_btn.setVisible(False)
         self.gate.begin_loading()
         self.gate.mark_loaded()
         # 异步正文可能在窗口已经显示且仍处于前台时返回；加载重置门禁后要从此刻继续累计。
@@ -250,7 +237,6 @@ class AgreementSignDialog(QDialog):
         self.gate.begin_loading()
         self._set_error("")
         self._refresh_actions()
-        self.retry_btn.setVisible(False)
         self._load_request_id += 1
         self._load_in_flight = True
         self._thread_pool.start(_LoadTask(self._load_request_id, self._load_document, self._load_signals))
@@ -390,11 +376,18 @@ class AgreementSignDialog(QDialog):
         self.begin_submit()
         self.submit_requested.emit(self.version)
 
+    def _on_reject_clicked(self) -> None:
+        # 加载失败时复用左侧按钮作为重试；关闭仍可用标题栏，符合 AC-07。
+        if self.gate.status == STATUS_LOAD_FAILED:
+            self.reload_document()
+            return
+        self.reject()
+
     def _refresh_actions(self) -> None:
         status = self.gate.status
         self.confirm_btn.setText(self.gate.confirm_text)
         self.hint_label.setText(self.gate.hint_text)
-        self.retry_btn.setVisible(status == STATUS_LOAD_FAILED)
+        self.reject_btn.setText(TEXT_RETRY if status == STATUS_LOAD_FAILED else self._reject_text)
         self.reject_btn.setEnabled(status != "submitting")
         self.confirm_btn.setEnabled(self.gate.can_confirm)
         enabled_color = COLOR_PRIMARY if self.gate.can_confirm else COLOR_DISABLED

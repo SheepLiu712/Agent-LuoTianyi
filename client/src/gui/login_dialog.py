@@ -331,9 +331,9 @@ class LoginDialog(QDialog):
             dialog.finish_submit(False, "用户协议已更新，请重新阅读")
             dialog.reload_document()
             return
-        if outcome.status_code and 400 <= outcome.status_code < 500:
-            # 服务端已明确拒绝（业务 4xx）：本次确定没有成功，结束未决状态，
-            # 允许用户修正用户名/邀请码后直接开始新请求；只有结果未知（超时/断线）才保留记录。
+        if outcome.status_code and 400 <= outcome.status_code < 500 and outcome.status_code != 429:
+            # 明确业务失败时可结束未决请求并修正资料；429 是限流/暂不可用，
+            # AC-06 将其列为结果未确认，必须保留原 request ID 以便稍后恢复。
             registration_resume.clear_pending()
         dialog.finish_submit(False, outcome.message)
 
