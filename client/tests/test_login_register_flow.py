@@ -339,26 +339,34 @@ def test_changing_username_before_confirming_previous_request_is_blocked(dialog)
     assert registration_resume.load_pending()["registration_request_id"] == "req-old"
 
 
-def test_definitive_business_failure_allows_new_username(dialog):
-    """服务端明确 4xx 拒绝后，用户可以改用户名继续注册（审查 N17）。"""
+def test_definitive_business_failure_allows_new_username(dialog, app):
+    """服务端明确 4xx 拒绝后，用户可以改用户名继续注册（审查 N17）。
+
+    走真实提交链路：_start_registration_submit → _RegisterTask → 线程池 → 信号 → 结果处理。
+    """
+    from PySide6.QtCore import QThreadPool
+
     dialog.widget.fill_register_form(username="taken")
     dialog.widget.do_register()
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
-    dialog.widget._active_register_token = sign.submit_token
-    request_id = dialog.widget._submit_context["request_id"]
-    registration_resume.save_pending(request_id, "taken", "terms-2026-10-v1")
+    old_request_id = dialog.widget._submit_context["request_id"]
+    dialog.binder.outcome = RegisterOutcome(False, "注册失败，请检查邀请码或用户名", status_code=400)
 
-    dialog.widget._on_register_finished(
-        sign.submit_token,
-        RegisterOutcome(False, "注册失败，请检查邀请码或用户名", status_code=400),
-    )
+    dialog.widget._start_registration_submit("terms-2026-10-v1")
+    QThreadPool.globalInstance().waitForDone(5000)
+    app.processEvents()
+    app.processEvents()
 
+    assert dialog.binder.calls[-1]["registration_request_id"] == old_request_id
     assert registration_resume.load_pending() is None  # 明确失败：结束未决状态
+
     FakeSignDialog.last_instance = None
     dialog.widget.fill_register_form(username="available")
     dialog.widget.do_register()
     assert FakeSignDialog.last_instance is not None  # 新用户名可以继续注册
+    new_request_id = dialog.widget._submit_context["request_id"]
+    assert new_request_id != old_request_id  # 开始新的请求，而不是复用已失败的那次
 
 
 def test_unknown_result_keeps_pending_record(dialog):
