@@ -107,7 +107,9 @@ def test_reaching_bottom_enables_confirm(dialog, clock):
 
     assert dialog.confirm_btn.isEnabled() is True
     assert confirm_color(dialog) == COLOR_PRIMARY
-    assert dialog.hint_label.isVisible() is False
+    # 提示条不再隐藏，而是保留占位（避免拖动滚动条时正文高度变化，见 N19）。
+    assert dialog.hint_label.text() == ""
+    assert dialog.hint_label.height() == 18
 
 
 def test_confirm_emits_submit_request_with_version_and_shows_progress(dialog, clock):
@@ -434,3 +436,46 @@ def test_reject_stops_the_ticker(app, dialog):
     dialog.reject()
 
     assert dialog._timer.isActive() is False
+
+
+def test_widening_until_document_fits_satisfies_bottom(app, clock):
+    """正文由"需要滚动"变为"一屏完整可见"后，应按最终尺寸满足底部条件（审查 N18）。"""
+    from src.gui.agreement_sign_dialog import AgreementSignDialog as Dialog
+
+    fits_after_widening = {
+        "version": "terms-2026-10-v1",
+        "title": "用户协议",
+        "format": "agreement.richtext.v1",
+        "blocks": [{"font_size": 16, "align": "justify", "runs": [{"text": "甲" * 400, "bold": False}]}],
+    }
+    widget = Dialog(document=fits_after_widening, clock=clock)
+    widget.show()
+    try:
+        widget.resize(640, 520)
+        app.processEvents()
+        bar = widget.view.verticalScrollBar()
+        assert bar.maximum() > 0  # 初始需要滚动
+
+        widget.resize(1400, 520)
+        app.processEvents()
+        app.processEvents()
+
+        assert bar.maximum() == 0  # 拉宽后一屏完整可见
+        assert widget.gate.reached_bottom is True
+        clock.advance(5.0)
+        widget._on_tick()
+        assert widget.confirm_btn.isEnabled() is True
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_hint_reserves_space_when_hidden(app, dialog):
+    """提示条隐藏时保留占位，避免拖动滚动条时正文高度变化（审查 N19）。"""
+    assert dialog.hint_label.height() == 18
+    dialog.gate.observe_scroll(0, 0)  # 一屏放得下：提示文案应为空
+    dialog._refresh_actions()
+    assert dialog.gate.hint_text == ""
+    assert dialog.hint_label.isVisible() is True
+    assert dialog.hint_label.height() == 18

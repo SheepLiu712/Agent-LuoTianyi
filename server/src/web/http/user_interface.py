@@ -139,7 +139,12 @@ class UserInterface:
         """用户注册"""
         if request is not None:
             enforce_rate_limit(request, "auth_register", req.username)
-        decrypted_password = self.decrypt_user_password(req.password)
+        try:
+            decrypted_password = self.decrypt_user_password(req.password)
+        except HTTPException as error:
+            # 服务端换钥后旧客户端仍能用旧公钥生成密文，只有到这里才会失败；
+            # 给稳定 code 让客户端刷新公钥后重试（同一 request_id，保持幂等）。
+            return agreement_error_response(400, str(error.detail), code="PASSWORD_DECRYPT_FAILED")
         try:
             return await self._run_auth_work(
                 functools.partial(

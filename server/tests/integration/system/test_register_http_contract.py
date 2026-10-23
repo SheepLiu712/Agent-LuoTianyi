@@ -295,3 +295,31 @@ def test_registration_is_rate_limited_per_username(register_http, monkeypatch):
 
     assert codes[0] == 200
     assert 429 in codes[1:]
+
+
+def test_undecryptable_password_returns_stable_code(register_http, monkeypatch):
+    """旧公钥密文无法解密：返回稳定 code，客户端据此刷新公钥重试（审查 N7）。"""
+    from fastapi import HTTPException
+
+    register_http.build()
+
+    def fail_decrypt(password):  # noqa: ANN001 - 测试桩
+        raise HTTPException(status_code=400, detail="Encryption error")
+
+    monkeypatch.setattr(register_http.runtime.user_interface, "decrypt_user_password", fail_decrypt)
+
+    response = register_http.client.post(
+        "/auth/register",
+        json={
+            "username": "newbie",
+            "password": "stale-key-ciphertext",
+            "invite_code": INVITE,
+            "registration_request_id": "req-decrypt",
+            "agreement_version": V1,
+            "accepted": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "PASSWORD_DECRYPT_FAILED"
+    assert counts(register_http.manager) == {"users": 0, "signatures": 0, "requests": 0, "invite_used": False}

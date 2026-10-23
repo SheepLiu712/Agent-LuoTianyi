@@ -331,6 +331,10 @@ class LoginDialog(QDialog):
             dialog.finish_submit(False, "用户协议已更新，请重新阅读")
             dialog.reload_document()
             return
+        if outcome.status_code and 400 <= outcome.status_code < 500:
+            # 服务端已明确拒绝（业务 4xx）：本次确定没有成功，结束未决状态，
+            # 允许用户修正用户名/邀请码后直接开始新请求；只有结果未知（超时/断线）才保留记录。
+            registration_resume.clear_pending()
         dialog.finish_submit(False, outcome.message)
 
     def open_reset_account_dialog(self):

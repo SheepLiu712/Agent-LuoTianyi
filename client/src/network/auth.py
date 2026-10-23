@@ -16,6 +16,7 @@ class RegisterOutcome:
     message: str
     code: str = ""
     agreement_version: str = ""
+    status_code: int = 0  # 0 表示没有拿到 HTTP 响应（传输失败，结果未知）
 
 
 def _error_code(response: requests.Response) -> str:
@@ -160,38 +161,51 @@ class AuthApi:
         旧调用方（不带协议字段）仍走同一入口：服务端会返回 AGREEMENT_REQUIRED，
         客户端据此打开协议窗口。
         """
-        encrypted_password = self._encrypt_password(password)
-        if not encrypted_password:
-            return RegisterOutcome(False, "Failed to encrypt password. Check server connection.")
+        # 服务端换钥后，本地仍能用旧公钥生成合法密文，失败只会在服务端解密时暴露；
+        # 收到 PASSWORD_DECRYPT_FAILED 时刷新公钥重试一次（同一 payload，保持幂等）。
+        for attempt in range(2):
+            encrypted_password = self._encrypt_password(password)
+            if not encrypted_password:
+                return RegisterOutcome(False, "Failed to encrypt password. Check server connection.")
 
-        payload: dict = {
-            "username": username,
-            "password": encrypted_password,
-            "invite_code": invite_code,
-        }
-        if registration_request_id is not None:
-            payload["registration_request_id"] = registration_request_id
-        if agreement_version is not None:
-            payload["agreement_version"] = agreement_version
-        if accepted is not None:
-            payload["accepted"] = accepted
+            payload: dict = {
+                "username": username,
+                "password": encrypted_password,
+                "invite_code": invite_code,
+            }
+            if registration_request_id is not None:
+                payload["registration_request_id"] = registration_request_id
+            if agreement_version is not None:
+                payload["agreement_version"] = agreement_version
+            if accepted is not None:
+                payload["accepted"] = accepted
 
-        resp = self.session.post(
-            f"{self.base_url}/auth/register",
-            json=payload,
-            verify=self.verify_ssl,
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            return RegisterOutcome(True, "Registration Successful")
+            try:
+                resp = self.session.post(
+                    f"{self.base_url}/auth/register",
+                    json=payload,
+                    verify=self.verify_ssl,
+                    timeout=15,
+                )
+            except Exception as error:  # noqa: BLE001 - 传输失败：本次结果未知
+                return RegisterOutcome(False, f"网络异常：{error}", code="NETWORK_ERROR")
+            if resp.status_code == 200:
+                return RegisterOutcome(True, "Registration Successful")
 
-        message = _error_detail(resp, "Registration Failed")
-        return RegisterOutcome(
-            False,
-            message,
-            code=_error_code(resp),
-            agreement_version=_agreement_version(resp),
-        )
+            code = _error_code(resp)
+            if code == "PASSWORD_DECRYPT_FAILED" and attempt == 0:
+                encrypt_pwd.invalidate_public_key()
+                continue
+
+            return RegisterOutcome(
+                False,
+                _error_detail(resp, "Registration Failed"),
+                code=code,
+                agreement_version=_agreement_version(resp),
+                status_code=resp.status_code,
+            )
+
+        return RegisterOutcome(False, "Registration Failed")
 
     def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
         """通过邀请码重置账号的用户名和密码。"""

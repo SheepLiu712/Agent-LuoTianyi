@@ -133,6 +133,7 @@ class RegistrationService:
                 RegistrationRequest(
                     registration_request_id=registration_request_id,
                     user_uuid=user_uuid,
+                    password_fingerprint=self._credentials.password_fingerprint(password),
                     agreement_version=agreement_version,
                     response_json=json.dumps(payload, ensure_ascii=False),
                     created_at=accepted_at,
@@ -259,7 +260,11 @@ class RegistrationService:
         if owned_invite is None:
             raise RegistrationRequestConflictError()
 
-        if not self._credentials.verify_password(password, user.password or ""):
+        # 必须核验"原注册操作"：账号重置会改掉 users.password，不能拿当前密码当原操作证据。
+        # 指纹缺失（旧记录或服务端无密钥）时按无法核验处理，不创建替代账号。
+        if not request.password_fingerprint or not self._credentials.password_matches_fingerprint(
+            password, request.password_fingerprint
+        ):
             raise RegistrationRequestUnverifiableError()
 
         return json.loads(request.response_json)

@@ -337,3 +337,43 @@ def test_changing_username_before_confirming_previous_request_is_blocked(dialog)
     assert FakeSignDialog.last_instance is None  # 没有打开协议窗口
     assert dialog.messages.warnings
     assert registration_resume.load_pending()["registration_request_id"] == "req-old"
+
+
+def test_definitive_business_failure_allows_new_username(dialog):
+    """服务端明确 4xx 拒绝后，用户可以改用户名继续注册（审查 N17）。"""
+    dialog.widget.fill_register_form(username="taken")
+    dialog.widget.do_register()
+    sign = FakeSignDialog.last_instance
+    dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
+    request_id = dialog.widget._submit_context["request_id"]
+    registration_resume.save_pending(request_id, "taken", "terms-2026-10-v1")
+
+    dialog.widget._on_register_finished(
+        sign.submit_token,
+        RegisterOutcome(False, "注册失败，请检查邀请码或用户名", status_code=400),
+    )
+
+    assert registration_resume.load_pending() is None  # 明确失败：结束未决状态
+    FakeSignDialog.last_instance = None
+    dialog.widget.fill_register_form(username="available")
+    dialog.widget.do_register()
+    assert FakeSignDialog.last_instance is not None  # 新用户名可以继续注册
+
+
+def test_unknown_result_keeps_pending_record(dialog):
+    """结果未知（传输失败）时仍保留恢复记录，不能被当成明确失败清掉。"""
+    dialog.widget.fill_register_form(username="taken")
+    dialog.widget.do_register()
+    sign = FakeSignDialog.last_instance
+    dialog.widget._sign_dialog = sign
+    dialog.widget._active_register_token = sign.submit_token
+    request_id = dialog.widget._submit_context["request_id"]
+    registration_resume.save_pending(request_id, "taken", "terms-2026-10-v1")
+
+    dialog.widget._on_register_finished(
+        sign.submit_token,
+        RegisterOutcome(False, "网络异常：read timeout", code="NETWORK_ERROR", status_code=0),
+    )
+
+    assert registration_resume.load_pending()["registration_request_id"] == request_id

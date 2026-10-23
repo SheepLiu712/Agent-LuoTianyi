@@ -345,6 +345,16 @@ class CredentialService:
         """把用户名到 uuid 的映射写入缓存；注册与登录共用。"""
         self._cache_user_uuid(username, user_uuid)
 
+    def password_fingerprint(self, password: str) -> Optional[str]:
+        """返回密码指纹（HMAC-SHA256，不可逆）；用于核验原注册操作。"""
+        if not self.jwt_secret:
+            return None
+        return hmac.new(self.jwt_secret.encode("utf-8"), password.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def password_matches_fingerprint(self, password: str, fingerprint: str) -> bool:
+        candidate = self.password_fingerprint(password)
+        return bool(candidate) and hmac.compare_digest(candidate, fingerprint)
+
     def verify_password(self, password: str, stored_hash: str) -> bool:
         """校验明文密码与已存 bcrypt 哈希是否相符。"""
         return _verify_password(password, stored_hash)

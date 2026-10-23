@@ -416,6 +416,8 @@ class RegistrationRequest(Base):
 
     registration_request_id = Column(String, primary_key=True)
     user_uuid = Column(String, ForeignKey("users.uuid"), nullable=False)
+    # 原注册密码的指纹（HMAC，非明文）：账号重置改密后仍能核验"原操作"。
+    password_fingerprint = Column(String, nullable=True)
     agreement_version = Column(String, ForeignKey("agreement_versions.version"), nullable=False)
     response_json = Column(Text, nullable=False)
     created_at = Column(String, nullable=False)

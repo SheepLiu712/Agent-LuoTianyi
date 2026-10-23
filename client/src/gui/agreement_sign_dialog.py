@@ -180,6 +180,7 @@ class AgreementSignDialog(QDialog):
         column.addWidget(divider)
 
         self.hint_label = QLabel("")
+        self.hint_label.setFixedHeight(18)  # 常驻占位：显隐不改变正文可视高度，避免拖动滚动条时页面回退
         self.hint_label.setStyleSheet(f"font-size: 12px; color: {COLOR_MUTED};")
         column.addWidget(self.hint_label)
 
@@ -355,6 +356,11 @@ class AgreementSignDialog(QDialog):
                     bar.setValue(max(0, min(int(round(target)), bar.maximum())))
         finally:
             self._anchor_restoring = False
+            # 重排可能让正文从"需要滚动"变成"一屏完整可见"（或相反），
+            # 补一次最终尺寸的判定，并刷新按钮状态；过程中的临时值仍被跳过。
+            bar = self.view.verticalScrollBar()
+            self.gate.observe_scroll(bar.value(), bar.maximum())
+            self._refresh_actions()
 
     def _on_scroll(self, *_args) -> None:
         self._sync_scroll_state()
@@ -388,7 +394,6 @@ class AgreementSignDialog(QDialog):
         status = self.gate.status
         self.confirm_btn.setText(self.gate.confirm_text)
         self.hint_label.setText(self.gate.hint_text)
-        self.hint_label.setVisible(bool(self.gate.hint_text))
         self.retry_btn.setVisible(status == STATUS_LOAD_FAILED)
         self.reject_btn.setEnabled(status != "submitting")
         self.confirm_btn.setEnabled(self.gate.can_confirm)

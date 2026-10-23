@@ -157,3 +157,33 @@ def test_register_refreshes_public_key_when_encryption_fails(api, monkeypatch):
     assert outcome.ok is True
     assert calls["encrypt"] == 2
     assert calls["invalidate"] == 1
+
+
+def test_password_decrypt_failure_refreshes_key_and_retries_once(api, monkeypatch):
+    """服务端换钥后解密失败：刷新公钥并重试一次，两次都用同一 request ID（审查 N7）。"""
+    calls = {"invalidate": 0}
+    monkeypatch.setattr(
+        auth_module.encrypt_pwd,
+        "invalidate_public_key",
+        lambda: calls.__setitem__("invalidate", calls["invalidate"] + 1),
+    )
+    responses = [
+        FakeResponse(400, {"detail": "密码解密失败", "code": "PASSWORD_DECRYPT_FAILED"}),
+        FakeResponse(200, {"message": "注册成功", "user_id": "newbie"}),
+    ]
+
+    def post(url, json=None, **kwargs):
+        api.sent.append({"url": url, "json": json})
+        return responses.pop(0)
+
+    api.session = SimpleNamespace(post=post)
+
+    outcome = api.register_with_agreement(
+        "newbie", "pw", "INVITE", registration_request_id="req-1", agreement_version="v1", accepted=True
+    )
+
+    assert outcome.ok is True
+    assert calls["invalidate"] == 1
+    assert len(api.sent) == 2
+    assert api.sent[0]["json"]["registration_request_id"] == "req-1"
+    assert api.sent[1]["json"]["registration_request_id"] == "req-1"

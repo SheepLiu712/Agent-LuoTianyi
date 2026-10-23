@@ -378,3 +378,21 @@ def test_concurrent_same_request_id_different_content_returns_conflict(env, monk
 
     with pytest.raises(RegistrationRequestConflictError):
         submit(service, username="other", registration_request_id="req-conflict")
+
+
+def test_replay_after_password_only_reset_is_unverifiable(env):
+    """只重置密码（用户名不变）时，新密码不能证明原注册操作；原密码仍可确认原结果。"""
+    service = env.build()
+    submit(service, registration_request_id="req-pw-reset")
+
+    ok, _ = env.manager.credential_service.reset_account(INVITE, "newbie", "brand-new-password")
+    assert ok is True
+
+    with pytest.raises(RegistrationRequestUnverifiableError):
+        submit(service, password="brand-new-password", registration_request_id="req-pw-reset")
+
+    replay = submit(service, password="plain-password", registration_request_id="req-pw-reset")
+    assert replay == {"message": "注册成功", "user_id": "newbie"}
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["requests"]) == 1
