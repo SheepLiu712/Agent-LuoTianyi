@@ -117,7 +117,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     voiceInput,
     callSwitch,
     resumeChat,
-  } = useChatLogic(webviewRef, username, message_token, 'luotianyi', !showPreferences && !showLlmSettings && !showDynamics);
+  } = useChatLogic(webviewRef, username, message_token, 'luotianyi');
   callSwitchRef.current = callSwitch;
 
   const callComposition = useProductionCallComposition({

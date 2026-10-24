@@ -10,15 +10,14 @@ jest.mock('../utils/voice_permission', () => ({ showMicrophoneSettings: jest.fn(
 const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
 let tree: ReactTestRenderer;
 let state: ReturnType<typeof useVoiceInput>;
-let active: boolean;
 let options: any;
-function Harness() { state = useVoiceInput({ ...options, active }); return null; }
+function Harness() { state = useVoiceInput(options); return null; }
 const mount = async () => {
   await act(async () => { tree = create(<Harness />); });
   await act(async () => { state.toggleMode(); });
 };
 beforeEach(() => {
-  jest.clearAllMocks(); active = true;
+  jest.clearAllMocks();
   options = {
     recorder: { getPermission: jest.fn().mockResolvedValue('granted'), requestPermission: jest.fn().mockResolvedValue('granted'),
       start: jest.fn().mockResolvedValue({ recordingId: 'one', localUri: 'file://one.m4a' }),
@@ -32,11 +31,10 @@ async function endCapture(end: string) {
   await act(async () => {
     if (end === 'release') await state.pressOut();
     if (end === 'background') (AppState.addEventListener as jest.Mock).mock.calls[0][1]('background');
-    if (end === 'navigation') { active = false; tree.update(<Harness />); }
     if (end === 'unmount') tree.unmount();
   });
 }
-it.each(['permission', 'playback', 'native'].flatMap((phase) => ['release', 'background', 'navigation', 'unmount'].map((end) => [phase, end])))
+it.each(['permission', 'playback', 'native'].flatMap((phase) => ['release', 'background', 'unmount'].map((end) => [phase, end])))
 ('invalidates startup during %s after %s', async (phase, end) => {
   let finish!: (value: any) => void;
   const gate = new Promise((resolve) => { finish = resolve; });
@@ -55,7 +53,7 @@ it.each(['permission', 'playback', 'native'].flatMap((phase) => ['release', 'bac
   expect(options.recorder.cancel).toHaveBeenCalled();
   if (end !== 'unmount') expect(state.captureState).toBe('VoiceReady');
 });
-it.each(['native', 'background', 'navigation', 'unmount'])('cancels active recording once on %s', async (end) => {
+it.each(['native', 'background', 'unmount'])('cancels active recording once on %s', async (end) => {
   await mount(); await act(async () => { await state.pressIn(event); });
   if (end === 'native') await act(async () => { const notify = options.recorder.start.mock.calls[0][0].onInterrupted; notify(); notify(); });
   else await endCapture(end);
