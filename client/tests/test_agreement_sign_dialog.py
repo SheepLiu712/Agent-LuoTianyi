@@ -21,6 +21,7 @@ from src.gui.signing_gate import (  # noqa: E402
     TEXT_SUBMITTING,
 )
 
+
 def long_document(version: str = "terms-2026-10-v1") -> dict:
     """足够长的正文：不滚动就看不到底部，用来验证"必须读过底部"。"""
     return {
@@ -237,6 +238,7 @@ def test_load_failure_disables_confirm_and_offers_retry(app, clock):
     widget.close()
     widget.deleteLater()
 
+
 def test_document_that_fits_on_one_screen_satisfies_bottom_after_five_seconds(app, clock):
     """正文一屏完整显示时，读满五秒即可同意，不需要真的去滚动。"""
     widget = AgreementSignDialog(document=SHORT_DOC, clock=clock)
@@ -264,8 +266,7 @@ def _wrapping_document() -> dict:
         "title": "用户协议",
         "format": "agreement.richtext.v1",
         "blocks": [
-            {"font_size": 16, "align": "justify", "runs": [{"text": "甲" * 400, "bold": False}]}
-            for _ in range(20)
+            {"font_size": 16, "align": "justify", "runs": [{"text": "甲" * 400, "bold": False}]} for _ in range(20)
         ],
     }
 
@@ -425,9 +426,7 @@ def test_hint_sits_below_divider(app, dialog):
 
     layout = dialog.hint_label.parentWidget().layout()
     widgets = [layout.itemAt(i).widget() for i in range(layout.count())]
-    divider_index = next(
-        i for i, widget in enumerate(widgets) if isinstance(widget, QFrame) and widget.height() == 1
-    )
+    divider_index = next(i for i, widget in enumerate(widgets) if isinstance(widget, QFrame) and widget.height() == 1)
     assert divider_index < layout.indexOf(dialog.hint_label)
 
 
@@ -477,9 +476,18 @@ def test_widening_until_document_fits_satisfies_bottom(app, clock):
 
 def test_hint_reserves_space_when_hidden(app, dialog):
     """提示条隐藏时保留占位，避免拖动滚动条时正文高度变化（审查 N19）。"""
-    assert dialog.hint_label.height() == 18
-    dialog.gate.observe_scroll(0, 0)  # 一屏放得下：提示文案应为空
+    viewport = dialog.view.viewport()
+    vbar = dialog.view.verticalScrollBar()
+
+    # 初始未读到底：记录此时正文视口尺寸和最大滚动范围
+    initial_vp_height = viewport.height()
+    initial_scroll_max = vbar.maximum()
+
+    # 读到底部：提示条文字清空，断言视口和滚动几何保持稳定
+    dialog.gate.observe_scroll(initial_scroll_max, initial_scroll_max)
     dialog._refresh_actions()
+    app.processEvents()
+
     assert dialog.gate.hint_text == ""
-    assert dialog.hint_label.isVisible() is True
-    assert dialog.hint_label.height() == 18
+    assert viewport.height() == initial_vp_height
+    assert vbar.maximum() == initial_scroll_max

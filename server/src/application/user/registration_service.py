@@ -189,8 +189,6 @@ class RegistrationService:
         边界：复核时若另一方尚未提交，返回 None，调用方仍抛原错误——
         因此"并发相同 ID 归一"保证的是重试后结果一致，而不是单次请求必然返回原结果。
         """
-        if not registration_request_id:
-            return None
         db = self._credentials.new_session()
         try:
             return self._replay(

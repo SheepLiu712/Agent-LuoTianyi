@@ -101,7 +101,7 @@ def dialog(app, monkeypatch, tmp_path, messages):
     FakeSignDialog.next_result = QDialog.DialogCode.Accepted
     binder = FakeBinder(outcome=RegisterOutcome(True, "Registration Successful"))
     widget = LoginDialog(binder)
-    widget.fill_register_form = lambda username="newbie", password="pw", invite="INVITE" : (
+    widget.fill_register_form = lambda username="newbie", password="pw", invite="INVITE": (
         widget.r_username.setText(username),
         widget.r_password.setText(password),
         widget.r_confirm_password.setText(password),
@@ -234,11 +234,18 @@ def test_conflict_shows_error_without_reload(dialog):
 
     dialog.widget._on_register_finished(
         sign.submit_token,
-        RegisterOutcome(False, "该注册请求与先前提交的内容不一致，请勿盲目重试", code="REGISTRATION_REQUEST_CONFLICT"),
+        RegisterOutcome(
+            False,
+            "该注册请求与先前提交的内容不一致，请勿盲目重试",
+            code="REGISTRATION_REQUEST_CONFLICT",
+            status_code=409,
+        ),
     )
 
     assert sign.submissions == [(False, "该注册请求与先前提交的内容不一致，请勿盲目重试")]
     assert sign.reloads == 0
+    assert dialog.messages.errors
+    assert "不一致" in dialog.messages.errors[-1][1]
 
 
 def test_network_failure_keeps_window_open(dialog):
@@ -360,6 +367,8 @@ def test_definitive_business_failure_allows_new_username(dialog, app):
 
     assert dialog.binder.calls[-1]["registration_request_id"] == old_request_id
     assert registration_resume.load_pending() is None  # 明确失败：结束未决状态
+    assert dialog.messages.errors  # N10: 明确失败提示
+    assert "注册失败" in dialog.messages.errors[-1][1]
 
     FakeSignDialog.last_instance = None
     dialog.widget.fill_register_form(username="available")
@@ -397,9 +406,10 @@ def test_rate_limit_keeps_pending_record_for_retry(dialog):
     request_id = dialog.widget._submit_context["request_id"]
     registration_resume.save_pending(request_id, "taken", "terms-2026-10-v1")
 
+    # 服务端 429 不保证带特定业务 code，按 HTTP 状态码 429 区分
     dialog.widget._on_register_finished(
         sign.submit_token,
-        RegisterOutcome(False, "请求过于频繁，请稍后重试", code="RATE_LIMITED", status_code=429),
+        RegisterOutcome(False, "Too Many Requests", status_code=429),
     )
 
     assert registration_resume.load_pending()["registration_request_id"] == request_id

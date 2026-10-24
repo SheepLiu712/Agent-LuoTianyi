@@ -43,7 +43,6 @@ COLOR_DISABLED = "#D1D5DB"
 COLOR_SCROLL_HANDLE = "#64748b"
 COLOR_SCROLL_HANDLE_HOVER = "#475569"
 TEXT_REJECT = "不同意，返回注册"
-TEXT_REJECT_READONLY = "关闭"
 
 TICK_INTERVAL_MS = 100
 
@@ -91,14 +90,13 @@ class AgreementSignDialog(QDialog):
         self._load_signals.finished.connect(self._on_load_finished)
         self._load_request_id = 0
         self._load_in_flight = False
-        self._document_payload: Optional[Mapping[str, Any]] = None
         self.submit_token = ""
-        self._allow_close = False
         self.gate = SigningGate()
         self.version: str = ""
         self.last_error: str = ""
         self._pending_anchor: Optional[tuple] = None
         self._anchor_restoring = False
+        self._reject_text = reject_text
 
         self.setWindowTitle("用户协议")
         self.setModal(True)
@@ -187,7 +185,7 @@ class AgreementSignDialog(QDialog):
         row = QHBoxLayout()
         row.setSpacing(10)
 
-        self.reject_btn = QPushButton(TEXT_REJECT)
+        self.reject_btn = QPushButton(self._reject_text)
         self.reject_btn.setMinimumHeight(44)
         self.reject_btn.setMinimumWidth(150)
         self.reject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -206,7 +204,6 @@ class AgreementSignDialog(QDialog):
         row.addWidget(self.reject_btn)
         row.addWidget(self.confirm_btn, 1)
         column.addLayout(row)
-        self._reject_text = TEXT_REJECT
         return actions
 
     # ── 公共接口 ─────────────────────────────────────────────────
@@ -216,7 +213,6 @@ class AgreementSignDialog(QDialog):
 
     def set_document(self, payload: Mapping[str, Any]) -> None:
         """装载一份协议正文；换版或重新打开都会重置阅读计时与"到过底部"。"""
-        self._document_payload = payload
         self.version = str(payload.get("version", "") or "")
         self.setWindowTitle(str(payload.get("title", "") or "用户协议"))
         self.version_label.setText(f"版本：{self.version}" if self.version else "")
@@ -252,11 +248,9 @@ class AgreementSignDialog(QDialog):
         """提交结果：成功关闭窗口；失败恢复可操作状态并保留本窗口的阅读状态。"""
         if success:
             self._timer.stop()
-            self._allow_close = True
             self.accept()
             return
         self.gate.end_submit()
-        self._allow_close = False
         self.last_error = message
         self._set_error(message or "提交失败，请重试")
         self._refresh_actions()
@@ -427,17 +421,17 @@ class AgreementSignDialog(QDialog):
 
     def reject(self) -> None:  # noqa: N802 - Qt 命名
         # 提交期间禁止 Esc/代码调用 reject；否则后台结果可能串到后续注册窗口。
-        if self.gate.status == STATUS_SUBMITTING and not self._allow_close:
+        if self.gate.status == STATUS_SUBMITTING:
             return
         self._timer.stop()
         super().reject()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
-        if self.gate.status == STATUS_SUBMITTING and not self._allow_close:
+        if self.gate.status == STATUS_SUBMITTING:
             event.ignore()
             return
         self._timer.stop()
         super().closeEvent(event)
 
 
-__all__ = ["AgreementSignDialog", "COLOR_DISABLED", "TEXT_REJECT", "TEXT_REJECT_READONLY"]
+__all__ = ["AgreementSignDialog", "COLOR_DISABLED", "TEXT_REJECT"]

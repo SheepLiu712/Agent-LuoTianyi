@@ -1,7 +1,16 @@
 import uuid
 
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QMessageBox, QTabWidget, QWidget, QCheckBox)
+from PySide6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QMessageBox,
+    QTabWidget,
+    QWidget,
+    QCheckBox,
+)
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from .agreement_sign_dialog import AgreementSignDialog
@@ -198,11 +207,11 @@ class LoginDialog(QDialog):
         username = self.l_username.text()
         password = self.l_password.text()
         do_auto_login = self.l_auto_login.isChecked()
-        
+
         if not username or not password:
             QMessageBox.warning(self, "错误", "请输入用户名和密码")
             return
-            
+
         success, msg = self.binder.on_login(username, password, do_auto_login=do_auto_login)
         if success:
             self.accept()
@@ -254,6 +263,7 @@ class LoginDialog(QDialog):
             accepted = dialog.exec() == QDialog.DialogCode.Accepted
         finally:
             self._sign_dialog = None
+            dialog.deleteLater()
         if not accepted:
             # 不同意只回注册表单：输入保留，不创建账号、不消耗邀请码、不退出客户端。
             return
@@ -303,25 +313,27 @@ class LoginDialog(QDialog):
 
     def _register_with_agreement(self, context: dict, agreement_version: str) -> RegisterOutcome:
         submit = getattr(self.binder, "on_register_with_agreement", None)
-        outcome = submit(
-            username=context["username"],
-            password=context["password"],
-            invite_code=context["invite"],
-            registration_request_id=context["request_id"],
-            agreement_version=agreement_version,
-            accepted=True,
-        ) if submit else None
+        outcome = (
+            submit(
+                username=context["username"],
+                password=context["password"],
+                invite_code=context["invite"],
+                registration_request_id=context["request_id"],
+                agreement_version=agreement_version,
+                accepted=True,
+            )
+            if submit
+            else None
+        )
         if outcome is None:
             self.logger.error("Register with agreement callback is not wired")
             return RegisterOutcome(False, "当前客户端未接线协议注册")
         return outcome
 
-    def _on_register_finished(self, token: str, outcome) -> None:
+    def _on_register_finished(self, token: str, outcome: RegisterOutcome) -> None:
         dialog = self._sign_dialog
         if dialog is None or token != self._active_register_token or getattr(dialog, "submit_token", "") != token:
             return
-        if not isinstance(outcome, RegisterOutcome):
-            outcome = RegisterOutcome(bool(outcome and outcome[0]), str(outcome[1]) if outcome else "")
         if outcome.ok:
             dialog.finish_submit(True)
             return
@@ -332,9 +344,14 @@ class LoginDialog(QDialog):
             dialog.reload_document()
             return
         if outcome.status_code and 400 <= outcome.status_code < 500 and outcome.status_code != 429:
-            # 明确业务失败时可结束未决请求并修正资料；429 是限流/暂不可用，
-            # AC-06 将其列为结果未确认，必须保留原 request ID 以便稍后恢复。
+            # 服务端已明确拒绝（业务 4xx）：本次确定没有成功，结束未决状态，
+            # 允许用户修正用户名/邀请码后直接开始新请求；只有结果未知（超时/断线）才保留记录。
             registration_resume.clear_pending()
+            dialog.finish_submit(False, outcome.message)
+            # N10: 明确业务失败时关闭协议窗口并弹窗提示失败，避免按钮仍显示“不同意，返回注册”
+            dialog.reject()
+            QMessageBox.critical(self, "注册失败", outcome.message or "注册信息无效，请检查后重试")
+            return
         dialog.finish_submit(False, outcome.message)
 
     def open_reset_account_dialog(self):
