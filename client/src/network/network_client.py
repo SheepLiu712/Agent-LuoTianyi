@@ -4,6 +4,7 @@ from dataclasses import fields
 from typing import Callable, List, Tuple
 
 from . import AuthApi, WsTransport
+from .auth import RegisterOutcome
 from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
@@ -93,6 +94,29 @@ class NetworkClient:
             return self.auth_api.register(username, password, invite_code)
         except Exception as exc:
             return False, str(exc)
+
+    def register_with_agreement(
+        self,
+        username: str,
+        password: str,
+        invite_code: str,
+        *,
+        registration_request_id: str | None = None,
+        agreement_version: str | None = None,
+        accepted: bool | None = None,
+    ):
+        """带协议同意的注册；返回带错误码的结果对象（UA-2）。"""
+        try:
+            return self.auth_api.register_with_agreement(
+                username,
+                password,
+                invite_code,
+                registration_request_id=registration_request_id,
+                agreement_version=agreement_version,
+                accepted=accepted,
+            )
+        except Exception as exc:
+            return RegisterOutcome(False, str(exc))
 
     def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
         """通过邀请码重置账号的用户名和密码。"""

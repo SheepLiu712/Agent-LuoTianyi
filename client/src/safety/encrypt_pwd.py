@@ -27,6 +27,14 @@ def get_public_key(base_url="http://127.0.0.1:8000", verify_ssl: bool = True) ->
         logger.error(f"Error fetching public key: {e}")
     return None
 
+def invalidate_public_key() -> None:
+    """丢弃缓存的公钥；服务端换钥后，下一次加密会重新拉取。"""
+    global public_key
+    global public_key_cache_key
+    public_key = None
+    public_key_cache_key = None
+
+
 def encrypt_password(password: str, base_url="http://127.0.0.1:8000", verify_ssl: bool = True) -> str | None:
     key = get_public_key(base_url=base_url, verify_ssl=verify_ssl)
     if not key:

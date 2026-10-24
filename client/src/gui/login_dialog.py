@@ -1,11 +1,46 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QMessageBox, QTabWidget, QWidget, QCheckBox)
-from PySide6.QtCore import Qt
+import uuid
 
+from PySide6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QMessageBox,
+    QTabWidget,
+    QWidget,
+    QCheckBox,
+)
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+
+from .agreement_sign_dialog import AgreementSignDialog
 from .binder import AgentBinder
+from ..network.auth import RegisterOutcome
 from ..safety import credential
+from ..utils import registration_resume
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
+
+
+class _RegisterSignals(QObject):
+    finished = Signal(str, object)
+
+
+class _RegisterTask(QRunnable):
+    """在后台线程提交注册，避免阻塞界面（"正在提交…" 期间界面仍可响应）。"""
+
+    def __init__(self, token: str, submit, signals: _RegisterSignals):
+        super().__init__()
+        self._token = token
+        self._submit = submit
+        self._signals = signals
+
+    def run(self) -> None:  # pragma: no cover - 由线程池调用
+        try:
+            outcome = self._submit()
+        except Exception as error:  # noqa: BLE001 - 统一转成可显示的结果
+            outcome = RegisterOutcome(False, str(error))
+        self._signals.finished.emit(self._token, outcome)
 
 
 class LoginDialog(QDialog):
@@ -16,6 +51,12 @@ class LoginDialog(QDialog):
         self.user_id = None
         self.saved_token = None
         self.custom_base_url = None  # 自定义服务器地址
+        self._thread_pool = QThreadPool.globalInstance()
+        self._register_signals = _RegisterSignals()
+        self._register_signals.finished.connect(self._on_register_finished)
+        self._sign_dialog: AgreementSignDialog | None = None
+        self._submit_context: dict | None = None
+        self._active_register_token: str | None = None
 
         self.setWindowTitle("ChatWithLuoTianyi - 登录/注册")
         self.setFixedSize(420, 380)
@@ -166,11 +207,11 @@ class LoginDialog(QDialog):
         username = self.l_username.text()
         password = self.l_password.text()
         do_auto_login = self.l_auto_login.isChecked()
-        
+
         if not username or not password:
             QMessageBox.warning(self, "错误", "请输入用户名和密码")
             return
-            
+
         success, msg = self.binder.on_login(username, password, do_auto_login=do_auto_login)
         if success:
             self.accept()
@@ -182,7 +223,7 @@ class LoginDialog(QDialog):
         password = self.r_password.text()
         confirm_password = self.r_confirm_password.text()
         invite = self.r_invite.text()
-        
+
         if not username or not password or not confirm_password or not invite:
             QMessageBox.warning(self, "错误", "请填写所有信息")
             return
@@ -190,13 +231,128 @@ class LoginDialog(QDialog):
         if password != confirm_password:
             QMessageBox.warning(self, "错误", "两次输入的密码不一致")
             return
-            
-        success, msg = self.binder.on_register(username, password, invite)
-        if success:
-            QMessageBox.information(self, "成功", "注册成功，请登录")
-            self.tabs.setCurrentIndex(0)
-        else:
-            QMessageBox.critical(self, "注册失败", msg)
+
+        # 本地校验通过后才打开协议窗口：此时不建账号、不占用邀请码。
+        pending = registration_resume.load_pending()
+        if pending and pending.get("username") and pending["username"] != username:
+            # spec：旧提交结果未知时应先以原提交确认，不能直接开始新请求覆盖恢复记录。
+            QMessageBox.warning(
+                self,
+                "还有未确认的注册",
+                f"上一次注册（用户名 {pending['username']}）结果尚未确认，请先用原用户名重试一次。",
+            )
+            return
+        request_id = registration_resume.request_id_for(username)
+        resume_version = ""
+        if pending and pending.get("username") == username and pending.get("registration_request_id") == request_id:
+            resume_version = pending.get("agreement_version", "")
+        self._submit_context = {
+            "username": username,
+            "password": password,
+            "invite": invite,
+            "request_id": request_id,
+            "resume_agreement_version": resume_version,
+        }
+        dialog = AgreementSignDialog(self, load_document=self._load_agreement)
+        dialog.submit_token = uuid.uuid4().hex
+        self._active_register_token = None
+        dialog.set_reject_text("不同意，返回注册")
+        dialog.submit_requested.connect(self._start_registration_submit)
+        self._sign_dialog = dialog
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            self._sign_dialog = None
+            dialog.deleteLater()
+        if not accepted:
+            # 不同意只回注册表单：输入保留，不创建账号、不消耗邀请码、不退出客户端。
+            return
+        registration_resume.clear_pending()
+        QMessageBox.information(self, "成功", "注册成功，请登录")
+        self.l_username.setText(username)
+        self.tabs.setCurrentIndex(0)
+
+    def _load_agreement(self):
+        """协议正文加载器；与只读窗口共用 (ok, detail, payload) 契约。"""
+        fetch = getattr(self.binder, "on_fetch_agreement", None)
+        if fetch is None:
+            return False, "当前客户端未接线协议接口", None
+        return fetch()
+
+    def _start_registration_submit(self, agreement_version: str) -> None:
+        context = self._submit_context or {}
+        dialog = self._sign_dialog
+        if not context or dialog is None:
+            return
+        # 未决请求恢复必须重放原协议版本；没有原版本时才使用当前窗口版本。
+        submit_version = context.get("resume_agreement_version") or agreement_version
+        registration_resume.save_pending(context["request_id"], context["username"], submit_version)
+        flow_token = dialog.submit_token
+        self._active_register_token = flow_token
+        self._thread_pool.start(
+            _RegisterTask(
+                flow_token,
+                lambda: self._register_with_agreement(context, submit_version),
+                self._register_signals,
+            )
+        )
+        dialog.submit_token = flow_token
+
+    def _start_new_request_after_version_change(self) -> None:
+        """协议换版后开始新请求：不再重放旧版本，也不复用旧请求 ID。
+
+        spec：协议版本改变后开始新请求；原请求已成功时由服务端 replay 返回原结果，
+        走到 AGREEMENT_CHANGED 的只可能是未成功的旧请求。
+        """
+        context = self._submit_context
+        if not context:
+            return
+        context["resume_agreement_version"] = ""
+        context["request_id"] = registration_resume.new_request_id()
+        registration_resume.clear_pending()
+
+    def _register_with_agreement(self, context: dict, agreement_version: str) -> RegisterOutcome:
+        submit = getattr(self.binder, "on_register_with_agreement", None)
+        outcome = (
+            submit(
+                username=context["username"],
+                password=context["password"],
+                invite_code=context["invite"],
+                registration_request_id=context["request_id"],
+                agreement_version=agreement_version,
+                accepted=True,
+            )
+            if submit
+            else None
+        )
+        if outcome is None:
+            self.logger.error("Register with agreement callback is not wired")
+            return RegisterOutcome(False, "当前客户端未接线协议注册")
+        return outcome
+
+    def _on_register_finished(self, token: str, outcome: RegisterOutcome) -> None:
+        dialog = self._sign_dialog
+        if dialog is None or token != self._active_register_token or getattr(dialog, "submit_token", "") != token:
+            return
+        if outcome.ok:
+            dialog.finish_submit(True)
+            return
+        if outcome.code == "AGREEMENT_CHANGED":
+            # 服务端已换版：提示重读并拉取最新正文，阅读计时与"到过底部"随之重置。
+            self._start_new_request_after_version_change()
+            dialog.finish_submit(False, "用户协议已更新，请重新阅读")
+            dialog.reload_document()
+            return
+        if outcome.status_code and 400 <= outcome.status_code < 500 and outcome.status_code != 429:
+            # 服务端已明确拒绝（业务 4xx）：本次确定没有成功，结束未决状态，
+            # 允许用户修正用户名/邀请码后直接开始新请求；只有结果未知（超时/断线）才保留记录。
+            registration_resume.clear_pending()
+            dialog.finish_submit(False, outcome.message)
+            # N10: 明确业务失败时关闭协议窗口并弹窗提示失败，避免按钮仍显示“不同意，返回注册”
+            dialog.reject()
+            QMessageBox.critical(self, "注册失败", outcome.message or "注册信息无效，请检查后重试")
+            return
+        dialog.finish_submit(False, outcome.message)
 
     def open_reset_account_dialog(self):
         """打开重置账号对话框"""
