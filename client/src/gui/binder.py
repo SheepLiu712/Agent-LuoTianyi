@@ -39,6 +39,8 @@ class AgentBinder(QObject):
         send_image_selecting_callback: Callable[[], None] | None = None,
         send_image_selecting_cancel_callback: Callable[[], None] | None = None,
         is_server_audio_active_callback: Callable[[], bool] | None = None,
+        register_with_agreement_callback: Callable[..., object] | None = None,
+        fetch_agreement_callback: Callable[[], tuple] | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -61,6 +63,8 @@ class AgentBinder(QObject):
         self.send_image_selecting_callback = send_image_selecting_callback
         self.send_image_selecting_cancel_callback = send_image_selecting_cancel_callback
         self.is_server_audio_active_callback = is_server_audio_active_callback
+        self.register_with_agreement_callback = register_with_agreement_callback
+        self.fetch_agreement_callback = fetch_agreement_callback
 
         self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
         # 将跨线程的更新请求通过 Qt 信号转发到主线程执行
@@ -135,6 +139,18 @@ class AgentBinder(QObject):
             return self.register_callback(username, password, invite_code)
         self.logger.error("Register callback not set")
         return False, "Register callback not set"
+
+    def on_register_with_agreement(self, **kwargs):
+        """带协议同意的注册提交；未接线时返回 None，由调用方回退到旧路径。"""
+        if self.register_with_agreement_callback:
+            return self.register_with_agreement_callback(**kwargs)
+        return None
+
+    def on_fetch_agreement(self):
+        """拉取当前协议正文；返回 (ok, detail, payload)。"""
+        if self.fetch_agreement_callback:
+            return self.fetch_agreement_callback()
+        return False, "当前客户端未接线协议接口", None
 
     def on_set_model(self, model: Live2dModel):
         self.set_model_callback(model)

@@ -1,5 +1,5 @@
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, StrictBool
 
 
 class ChatRequest(BaseModel):
@@ -28,9 +28,15 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     username: str
     password: str
     invite_code: str
+    # 新客户端在同意协议后提交；旧客户端不带这三个字段，由业务层返回 AGREEMENT_REQUIRED。
+    registration_request_id: str | None = None
+    agreement_version: str | None = None
+    accepted: StrictBool | None = None
 
 
 class ResetAccountRequest(BaseModel):

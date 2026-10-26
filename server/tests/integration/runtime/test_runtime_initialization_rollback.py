@@ -2,6 +2,7 @@ import asyncio
 import json
 import threading
 from importlib.resources import files
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -76,6 +77,8 @@ class FakeDatabase:
         self.calls = calls
         self.session_factory = session_factory
         self.event_store = object()
+        # 注册用例需要凭据服务；这里只要求属性存在，测试用不到它的行为。
+        self.credential_service = SimpleNamespace()
         calls.append("database_created")
 
     def open_sql_session(self):
