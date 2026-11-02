@@ -3,8 +3,10 @@
 import asyncio
 
 import pytest
+from support.stage_lifecycle import finish_call, wait_call_finished
 
-from src.domain.call import CallAudioSemantic, CallEndReason, CallReplyStatus
+from src.domain.call import CallAudioSemantic, CallReplyStatus
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.models.realtime_speech import SpeechStarted, SpeechStopped, TurnCompleted, TurnInvalid
 from tests.integration.stage import test_call_stage as base
 from tests.integration.stage.test_call_stage import _create, _eventually
@@ -58,13 +60,13 @@ async def test_back_to_back_speech_never_cancels_input_acceptance_and_merges_rep
         await finish_reply(stage)
         assert [t.status for t in stage._turns.values()] == [CallReplyStatus.COMPLETED] * 2
         assert len(stage.context.conversation.read_working().entries) == 3
-        snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+        snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
         assert len(snapshot.completed_turns) == 2
         assert snapshot.completed_turns[0].reply_turn_seq == 2
         assert snapshot.completed_turns[1].confirmed_agent_text == "正式回答"
     finally:
         release.set()
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -93,7 +95,7 @@ async def test_resume_waits_for_final_transcript_then_replies_once_to_all_pendin
         assert len(handler.requests) == 1
         assert len(stage._turns) == 2
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -110,7 +112,7 @@ async def test_invalid_speech_after_resume_releases_previous_unanswered_input(ca
         await _eventually(lambda: len(handler.requests) == 1)
         await finish_reply(stage)
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -134,7 +136,7 @@ async def test_generation_and_send_do_not_consume_inputs_or_append_unheard_reply
         await _eventually(lambda: not stage._inputs.pending)
         assert len(stage.context.conversation.read_working().entries) == 2
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -158,7 +160,7 @@ async def test_interrupted_delivery_keeps_pending_and_late_completion_cannot_ans
         assert [i.turn_seq for i in handler.requests[-1].interaction.pending_stimuli] == [1, 2]
         await finish_reply(stage)
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -178,14 +180,14 @@ async def test_complete_termination_drains_accepted_fact_even_when_waiter_is_can
     monkeypatch.setattr(context.conversation, "append", blocked)
     await provider.emit(completed("must survive hangup", "a"))
     await entered.wait()
-    waiter = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    waiter = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
     await _eventually(lambda: stage.termination_requested)
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
-    assert not stage._termination.done()
+    assert not stage._lifetime.termination.done()
     release.set()
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
     assert captured == ["用户说：“must survive hangup”"]
     assert snapshot.completed_turns[0].user_semantic == captured[0]
     assert handler.requests == []
@@ -229,9 +231,9 @@ async def test_failed_context_append_still_runs_ending_and_history_before_releas
     if with_later_input:
         await stage._on_turn(completed("later successful fact", "b"))
     release.set()
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
-    with pytest.raises(RuntimeError, match="call fact could not be accepted"):
-        await stage.terminate()
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+    result = await stage.terminate(StageEndReason.SYSTEM_FAILURE)
+    assert result.finalization_error is not None and result.resources_released
     assert endings == saved == [snapshot]
     assert snapshot.completed_turns[0].user_semantic == "用户说：“accepted despite write failure”"
     assert len(snapshot.completed_turns) == (2 if with_later_input else 1)

@@ -6,7 +6,7 @@ import asyncio
 import random
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -24,10 +24,19 @@ from src.domain.stage import (
     StageTerminationResult,
 )
 from src.domain.stage.due_events import DueEvent, DueEventProvider
+from src.domain.stage.lifecycle import (
+    StageEndReason,
+    StageInitializationOwner,
+    StageLifecycleState,
+    StageRetentionChanged,
+    StageShutdownFailed,
+    StageTerminationOwner,
+)
 from src.domain.stage.transport import StageOutputSink
 from src.utils.logger import get_logger
 
-from ._config import _StageConfig
+from .._config import _StageConfig
+from .._lifecycle import StageLifetime
 from ._models import _InputStatus, _PendingInput, _ReplyAttempt
 from ._sinks import StimulusInputSink, _AgentOutputSink, _NoOutputSink, _PlanSink, _TerminationPlanSink
 
@@ -68,7 +77,13 @@ class ChatStage:
         character_id: str,
         agent: Agent,
         output_sink: StageOutputSink,
-        context: InteractionContext,
+        context: InteractionContext | None = None,
+        context_factory: ContextFactory | None = None,
+        own_initialization: StageInitializationOwner | None = None,
+        own_termination: StageTerminationOwner | None = None,
+        retention_changed: StageRetentionChanged | None = None,
+        offline_timeout: float = 60.0,
+        monotonic=time.monotonic,
         config: dict | None = None,
         timezone_name: str = "Asia/Shanghai",
         due_event_provider: DueEventProvider | None = None,
@@ -77,10 +92,18 @@ class ChatStage:
         if any(not isinstance(value, str) or not value.strip() for value in (user_id, character_id)):
             raise ValueError("user_id and character_id must be nonblank")
         self._user_id, self._character_id = user_id, character_id
-        if context.identity.user_id != user_id or context.identity.character_id != character_id:
+        if context is not None and (
+            context.identity.user_id != user_id or context.identity.character_id != character_id
+        ):
             raise ValueError("context identity does not match stage")
         self._context = context
-        self._interaction_id = context.identity.interaction_id
+        self._interaction_id = context.identity.interaction_id if context is not None else str(uuid4())
+        self._context_factory = context_factory
+        self._retention_changed = retention_changed
+        self._offline_timeout = offline_timeout
+        self._monotonic = monotonic
+        self._connection_generation = 0
+        self._offline_deadline = None
         self._agent, self._output_transport = agent, output_sink
         self._input_suspended = False
         self._due_event_provider = due_event_provider
@@ -114,10 +137,16 @@ class ChatStage:
         self._proactive_claims: dict[str, tuple[DueEvent, ...]] = {}
         self._proactive_expected_plans: dict[str, set[str]] = {}
         self._proactive_plan_results: dict[str, dict[str, bool]] = {}
-        self._termination: asyncio.Task[StageTerminationResult] | None = None
         self._stimulus_sink = StimulusInputSink(self)
         self._output_sink = _AgentOutputSink(self)
         self._logger = get_logger(__name__)
+        self._lifetime = StageLifetime(
+            self, own_initialization=own_initialization, own_termination=own_termination, ready=context is not None
+        )
+        if context is None:
+            if context_factory is None:
+                raise ValueError("context factory is required")
+            self._lifetime.initialize(self._initialize)
 
     @classmethod
     async def create(
@@ -131,27 +160,50 @@ class ChatStage:
         config: dict | None = None,
         timezone_name: str = "Asia/Shanghai",
         due_event_provider: DueEventProvider | None = None,
+        **lifecycle,
     ) -> ChatStage:
-        """通过 context_factory 加载新上下文，返回持有它的 Stage；构造失败时关闭上下文。"""
-        context = await context_factory.create(str(uuid4()), mode=ConversationMode.CHAT, user_id=user_id)
-        try:
-            return cls(
-                user_id=user_id,
-                character_id=character_id,
-                agent=agent,
-                output_sink=output_sink,
-                context=context,
-                config=config,
-                timezone_name=timezone_name,
-                due_event_provider=due_event_provider,
-            )
-        except BaseException:
-            await context.close()
-            raise
+        """创建并启动初始化，不等待上下文加载。"""
+        return cls(
+            user_id=user_id,
+            character_id=character_id,
+            agent=agent,
+            output_sink=output_sink,
+            context_factory=context_factory,
+            config=config,
+            timezone_name=timezone_name,
+            due_event_provider=due_event_provider,
+            **lifecycle,
+        )
+
+    async def _initialize(self):
+        self._context = await self._context_factory.create(
+            self.interaction_id, mode=ConversationMode.CHAT, user_id=self.user_id
+        )
+
+    async def start(self) -> None:
+        await self._lifetime.start()
+
+    @property
+    def lifecycle_state(self) -> StageLifecycleState:
+        return self._lifetime.state
+
+    @property
+    def interaction_ended(self) -> bool:
+        return self._lifetime.interaction_ended
+
+    @property
+    def offline_deadline(self):
+        return self._offline_deadline
+
+    @property
+    def connection_generation(self):
+        return self._connection_generation
 
     @property
     def context(self) -> InteractionContext:
         """返回本交互独占持有的上下文；断线保留期间复用，最终结束时关闭。"""
+        if self._context is None:
+            raise RuntimeError("stage context is not ready")
         return self._context
 
     @property
@@ -164,27 +216,53 @@ class ChatStage:
         """返回供当前 realize 使用的唯一输出接收器。"""
         return self._output_sink
 
-    async def connection_changed(self, state: d.ConnectionState) -> None:
+    async def connection_changed(self, available: bool, generation: int) -> bool:
         """应用连接状态；断线停止当前处理和执行，保留 pending 供重连后的刺激处理。"""
-        if not isinstance(state, d.ConnectionState):
-            raise TypeError("state must be ConnectionState")
-        if self._state in (StageState.TERMINATING, StageState.TERMINATED):
-            if state is d.ConnectionState.CONNECTED:
-                raise ValueError("stage is ending")
-            self._connection_state = state
-            return
+        if self.lifecycle_state in (StageLifecycleState.TERMINATING, StageLifecycleState.TERMINATED):
+            return False
+        if generation < self._connection_generation or (not available and generation != self._connection_generation):
+            return False
+        if available and self._offline_deadline is not None and self._monotonic() >= self._offline_deadline:
+            self.begin_termination(StageEndReason.IDLE_TIMEOUT)
+            return False
+        self._connection_generation = generation
+        state = d.ConnectionState.CONNECTED if available else d.ConnectionState.DISCONNECTED
         if self._connection_state is state:
-            return
+            return True
         self._connection_state = state
         self._last_activity_at = datetime.now(timezone.utc)
         self._revision += 1
         self._state = StageState.ONLINE if state is d.ConnectionState.CONNECTED else StageState.OFFLINE
         if self._state is StageState.OFFLINE:
+            self._offline_deadline = self._monotonic() + self._offline_timeout
+            self._report_retention()
             await self._stop_work()
-        elif self._first_login_pending:
-            self._schedule_first_login()
-        elif self._login_reminder_pending:
-            self._schedule_login_reminders()
+        else:
+            self._offline_deadline = None
+            self._report_retention()
+            self._resume_proactive()
+        return True
+
+    def _report_retention(self):
+        if self._retention_changed:
+            self._retention_changed(self, self._offline_deadline, self._connection_generation)
+
+    def retain_unbound(self):
+        if self._offline_deadline is None:
+            self._offline_deadline = self._monotonic() + self._offline_timeout
+            self._report_retention()
+
+    async def expire_retention(self, deadline, generation):
+        if (deadline, generation) == (self._offline_deadline, self._connection_generation):
+            if self._state is StageState.OFFLINE and self._monotonic() >= deadline:
+                self.begin_termination(StageEndReason.IDLE_TIMEOUT)
+
+    def _resume_proactive(self):
+        if not self._input_suspended and self._state is StageState.ONLINE:
+            if self._first_login_pending:
+                self._schedule_first_login()
+            elif self._login_reminder_pending:
+                self._schedule_login_reminders()
 
     def schedule_first_login(self) -> None:
         """记录首次登录，并在 Stage 已上线后从当前时刻开始同步窗口计时。"""
@@ -260,14 +338,18 @@ class ChatStage:
         self._launch_handle(request, self._on_proactive_handled)
         return True
 
-    async def terminate(self, reason: d.InteractionEndingReason) -> StageTerminationResult:
-        """停止普通工作，向 Agent 发送 reason 对应的结束刺激；返回处理报告或失败说明。"""
-        if not isinstance(reason, d.InteractionEndingReason):
-            raise TypeError("reason must be InteractionEndingReason")
-        if self._termination is None:
+    def begin_termination(self, reason: StageEndReason) -> None:
+        if not isinstance(reason, StageEndReason):
+            raise TypeError("reason must be StageEndReason")
+        if self._lifetime.termination is None:
             self._state = StageState.TERMINATING
-            self._termination = asyncio.create_task(self._terminate(reason), name="stage-terminate")
-        return await asyncio.shield(self._termination)
+            self._offline_deadline = None
+            self._report_retention()
+        self._lifetime.begin(reason, lambda: self._terminate(reason))
+
+    async def terminate(self, reason: StageEndReason) -> StageTerminationResult:
+        self.begin_termination(reason)
+        return await asyncio.shield(self._lifetime.termination)
 
     @property
     def interaction_id(self) -> str:
@@ -296,12 +378,45 @@ class ChatStage:
     def set_input_suspended(self, suspended: bool) -> None:
         """切换准备只关闭新刺激准入，不取消已接纳的工作。"""
         self._input_suspended = suspended
+        if not suspended:
+            self._resume_proactive()
+
+    async def restore_after_handoff(
+        self,
+        *,
+        restore_ownership: Callable[[], Awaitable[bool]],
+        refresh_history: bool = False,
+    ) -> bool:
+        """同步切换产生的历史后请求恢复占用，再校验原期限并恢复输入和主动调度。
+
+        返回值表示占用是否已交还本实例；过期或停机时仍由本实例的终止任务释放占用。
+        """
+        if refresh_history:
+            try:
+                await self.context.conversation.refresh()
+            except Exception:
+                get_logger(__name__).exception("Chat rollback refresh failed interaction=%s", self.interaction_id)
+                result = await self.terminate(StageEndReason.SYSTEM_FAILURE)
+                if not result.resources_released:
+                    raise StageShutdownFailed("source stage refresh and cleanup failed")
+                return False
+        if not await restore_ownership():
+            return False
+        if self.lifecycle_state in (StageLifecycleState.TERMINATING, StageLifecycleState.TERMINATED):
+            return True
+        if self._offline_deadline is not None and self._monotonic() >= self._offline_deadline:
+            self.begin_termination(StageEndReason.IDLE_TIMEOUT)
+        else:
+            self.set_input_suspended(False)
+            self._report_retention()
+        return True
 
     def _can_accept(self, stimulus: d.Stimulus) -> bool:
         return (
             isinstance(stimulus, d.Stimulus)
             and not isinstance(stimulus, (d.InteractionEnding, d.InteractionDeadline))
             and not self._input_suspended
+            and self.lifecycle_state is StageLifecycleState.RUNNING
             and self._state is StageState.ONLINE
             and stimulus.user_id == self.user_id
             and self.character_id in stimulus.target_character_ids
@@ -708,6 +823,8 @@ class ChatStage:
         self._first_login_timer = None
         if not self._first_login_pending or self._state is not StageState.ONLINE:
             return
+        if self._input_suspended or self.lifecycle_state is not StageLifecycleState.RUNNING:
+            return
         if len(self._handles) >= self._config.max_stimuli:
             self._schedule_first_login()
             return
@@ -747,7 +864,11 @@ class ChatStage:
         )
 
     def _can_dispatch_proactive(self, *, require_idle: bool = True) -> bool:
-        if self._state is not StageState.ONLINE:
+        if (
+            self._state is not StageState.ONLINE
+            or self._input_suspended
+            or self.lifecycle_state is not StageLifecycleState.RUNNING
+        ):
             return False
         busy = bool(
             self._handles
@@ -859,22 +980,41 @@ class ChatStage:
                 entry.status = _InputStatus.READY
         self._pending = {sid: e for sid, e in self._pending.items() if e.status is _InputStatus.READY}
 
-    async def _terminate(self, reason: d.InteractionEndingReason) -> StageTerminationResult:
-        report, error = None, None
+    async def _terminate(self, reason: StageEndReason) -> StageTerminationResult:
+        error = cleanup_error = None
         try:
+            await self._lifetime.stop_initialization()
             await self._stop_work()
-            report, error = await asyncio.wait_for(
-                self._run_termination_maintenance(reason),
-                timeout=self._config.termination_timeout,
+            self._lifetime.interaction_ended = True
+            if self._context is not None:
+                business_reason = {
+                    StageEndReason.SWITCH: d.InteractionEndingReason.SWITCH_TO_CALL,
+                    StageEndReason.SHUTDOWN: d.InteractionEndingReason.SHUTDOWN,
+                }.get(reason, d.InteractionEndingReason.USER_LEFT)
+                _, error = await asyncio.wait_for(
+                    self._run_termination_maintenance(business_reason), timeout=self._config.termination_timeout
+                )
+        except Exception as failure:
+            error = (
+                "interaction ending timed out" if isinstance(failure, asyncio.TimeoutError) else type(failure).__name__
             )
-        except asyncio.TimeoutError:
-            error = "interaction ending timed out"
-            self._logger.error("Stage termination timed out interaction=%s", self.interaction_id)
         finally:
-            await self._context.close()
+            try:
+                if self._context is not None:
+                    await self._context.close()
+            except Exception as failure:
+                cleanup_error = type(failure).__name__
             self._pending.clear()
-            self._state = StageState.TERMINATED
-        return StageTerminationResult(report=report, error=error)
+            self._lifetime.interaction_ended = True
+            if cleanup_error is None:
+                self._state = StageState.TERMINATED
+        return StageTerminationResult(
+            interaction_id=self.interaction_id,
+            reason=reason,
+            finalization_error=error,
+            cleanup_error=cleanup_error,
+            resources_released=cleanup_error is None,
+        )
 
     async def _run_termination_maintenance(
         self, reason: d.InteractionEndingReason

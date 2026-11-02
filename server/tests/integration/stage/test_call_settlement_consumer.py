@@ -35,7 +35,7 @@ from src.infrastructure.persistence.database.sql_database import (
     Conversation,
     User,
 )
-from src.stage._call_history import CallHistory
+from src.stage.call._call_history import CallHistory
 
 
 @pytest.mark.asyncio

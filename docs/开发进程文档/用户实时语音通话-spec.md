@@ -1,5 +1,7 @@
 # Android 用户实时语音通话
 
+> 2026-11-02 生命周期与绑定事务已按 [Stage 生命周期 spec](Stage生命周期与聊天通话切换-spec.md) 同步；该文定义公共接口、切换提交点、初始化期间挂断、重连和终态驱动协议清理。本文件保留音频、认知与产品规则，验证边界见该文第十四节。
+
 > 状态：实现已随 [PR #361](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/361) 集成到 `dev@7d19a9aa`；保留本 Spec 承接尚未完成的真实环境验收，不表示已发布或全部 AC 已验收。
 > 平台：仅 Android 手机端  
 > 协议版本：`call.v1`  
@@ -50,7 +52,7 @@
 
 **状态**：同一用户与同一角色已有活动 `chat_ws` 或 `call_ws` 交互。  
 **输入**：任意设备再次发起聊天或通话。  
-**输出**：服务端原子地拒绝新交互，不抢占已有交互，不允许聊天和通话并存。唯一例外是当前已绑定聊天客户端预先登记、并由同一 `client_request_id` 关联的主动切换；该切换必须先完整回收旧 ChatStage，再创建 CallStage，任意其他设备不得借此终止已有聊天。
+**输出**：服务端原子地拒绝冲突的新交互，不抢占已有交互。唯一例外是当前已绑定聊天客户端预先登记、并由同一 `client_request_id` 关联的主动切换；允许先创建 CallStage 并立即反馈响铃，在初始化后段才提交旧 ChatStage 退出。两个 Stage 对象可以短暂重叠，但旧聊天 Context 完全关闭后才能创建通话 Context；其他设备不得借此终止已有聊天。
 
 ### AC-02 权限与呼叫建立
 
@@ -64,19 +66,19 @@
 
 **状态**：`call.start` 命中同一用户、同一角色的现有 ChatStage。  
 **输入**：与 `CallTransitionIntent` 完全匹配的 `client_request_id`。  
-**输出**：StageManager 原子地消费切换意图、以 `client_request_id` 建立 `PREPARING` 状态的呼叫账本并生成稳定 `call_id`，然后把旧 ChatStage 从可复用集合移除，以新增的 `InteractionEndingReason.SWITCH_TO_CALL` 立即终止。此时 `PREPARING` 包含回收旧聊天资源的阶段，但尚未创建 CallStage。终止过程取消正在进行的 handle/realize、回复期限、未完成输出和未执行计划；`READY` pending 不再产生聊天回复，其已经形成的正式 Conversation 事实参与结束认知维护；尚未完成预处理且未形成正式事实的输入被取消并丢弃。结束处理完成或超时后必须关闭旧 InteractionContext，随后才允许把交互所有权交给 CallStage。
+**输出**：StageManager 原子地消费切换意图，建立 PREPARING 呼叫记录和稳定 `call_id`，创建并登记 CallStage 及其初始化任务。create() 返回后即可反馈响铃，聊天输入保持暂停。通话初始化前段完成后才提交旧 ChatStage 退出并撤销旧绑定；取消旧聊天处理、期限、未完成输出与未执行计划，已形成的正式事实参与结束维护。旧 Context 安全关闭且交接成功后才能创建 Call Context；start() 等待整个初始化与交接完成。
 
 **状态**：旧 ChatStage 的结束认知维护达到终止期限。  
 **输入**：`SWITCH_TO_CALL` 结束处理尚未完成。  
-**输出**：取消结束处理并关闭旧 InteractionContext，认知维护进度保持原值，已落库 Conversation 事实由以后创建的聊天上下文重试维护；不得为了等待维护而让旧 ChatStage 与 CallStage 同时存活。若剩余呼叫准备时间足够则继续初始化 CallStage，否则按 10 秒呼叫建立超时结束且不创建通话记录。
+**输出**：聊天维护达到自身终止期限后按既有规则取消并关闭旧 Context，不因呼叫十秒期限提前截断。维护失败或超时使本次通话建立失败，正式事实保留，维护进度不虚增。呼叫建立到期时及时发出通话终态，已经提交的聊天收尾继续受 Manager 监督；安全释放前仍拒绝冲突交互。
 
-**状态**：切换意图已消费且旧 ChatStage 已回收，但后续 CallStage 或实时语音会话初始化失败，或者用户在接通前挂断。  
+**状态**：切换意图已消费，后续初始化失败或用户在接通前挂断。
 **输入**：客户端返回聊天页并重新连接 `chat_ws`。  
-**输出**：若旧交互仍在收尾，先返回可重试的 `INTERACTION_FINALIZING`；收尾完成后不得恢复已经终止的 ChatStage，StageManager 创建新的 ChatStage 与新的 InteractionContext，并从正式持久化事实恢复聊天上下文。
+**输出**：若尚未提交旧聊天退出，保留旧 Context，在同步正式历史并恢复占用后恢复原聊天，且不延长原离线期限；同步失败不能继续使用旧快照。若已提交退出，则不得复活原 ChatStage；安全收尾前返回可重试的 `INTERACTION_FINALIZING`，完成后新建聊天并从正式事实恢复。
 
 **状态**：`call.start` 没有匹配的切换意图，但同用户、同角色仍有 ChatStage，包括普通网络断线后保留 60 秒的 `OFFLINE` Stage。  
 **输入**：其他设备或未完成准备流程的客户端尝试发起通话。  
-**输出**：拒绝 `call.start`，不得回收或抢占旧 ChatStage。普通意外断线仍沿用现有 60 秒离线保留和重连行为，只有经过 `call.switch_prepare` 的主动切换才立即回收。
+**输出**：拒绝 `call.start`，不得回收或抢占旧 ChatStage。普通意外断线仍沿用现有 60 秒离线保留和重连行为；只有匹配 `call.switch_prepare` 的主动切换可以进入交接流程。
 
 **状态**：用户拒绝麦克风权限。  
 **输入**：普通拒绝或永久拒绝。  
@@ -360,7 +362,7 @@
 
 **输入**：`await call.terminate(reason)`，包括重复调用。
 
-**输出**：CallStage 在可取消的等待前创建并持有唯一完整终止任务，Manager 登记同一任务，重复调用等待同一次结束，不重复执行资源关闭或业务结算，也不改写已确定的终态。成功返回表示：新音频与普通 Agent 工作不再被接纳，实时语音、回复生成和相关初始化任务已停止，实时资源已关闭，终态已确定，后续收尾和 Context 关闭已完成。完成不等于每项业务均成功，既有失败降级与诊断规则不变；该返回不保证客户端收到终止消息。初始化中结束也不能留下随后补建资源的后台任务。若保留 close 便捷入口，遵循同一契约；不得用完成范围不明的 wait_closed 判断全部业务完成。
+**输出**：CallStage 在可取消的等待前创建并持有唯一完整终止任务，Manager 登记同一任务，重复调用等待同一次结束，不重复执行资源关闭或业务结算，也不改写已确定的终态。成功返回表示：新音频与普通 Agent 工作不再被接纳，实时语音、回复生成和相关初始化任务已停止，实时资源已关闭，终态已确定，后续收尾和 Context 关闭已完成。完成不等于每项业务均成功，既有失败降级与诊断规则不变；该返回不保证客户端收到终止消息。初始化中结束也不能留下随后补建资源的后台任务。Stage 不保留 close 或 wait_closed 便捷入口；Manager.close 负责整体停止接入、排空任务及资源释放核验。
 
 **状态**：实时停止后，概要、认知维护或持久写入仍未结束。
 
@@ -460,7 +462,7 @@ async def maintain(
 
 **输入**：旧 ChatStage 的最终持久化聊天上下文与 `READY` pending 对应的已落库 Conversation 事实。
 
-**输出**：Agent 先执行旧聊天的结束认知维护，不产生用户可见输出；无论维护成功、失败还是超时，旧 InteractionContext 都必须关闭后才创建通话 InteractionContext，因此两个上下文不得同时存活。维护失败或超时时不推进认知维护进度，后续聊天上下文可以根据持久化进度重试；通话 `base_snapshot` 只用于回答，不得把旧聊天事实再次作为本次通话的新维护内容。
+**输出**：提交旧聊天退出后，Agent 执行结束认知维护，不产生用户可见输出；旧 InteractionContext 安全关闭且维护成功后才能创建通话 Context，两个上下文不得同时存活。维护失败或超时使通话建立失败，不虚增维护进度；后续聊天可根据持久化进度重试。通话 `base_snapshot` 只用于回答，不把旧聊天事实再次作为本次通话的新维护内容。
 
 **状态**：向量记忆或画像写入失败。  
 **输入**：维护批次。  
@@ -517,7 +519,7 @@ async def maintain(
 - 服务端集成测试：鉴权、进程内交互租约、混合帧协议、统一连续结算游标、ACK/NACK、重传、3 秒恢复、打断、异步结算、账户重置；覆盖控制/音频交错时的缺口恢复、取消范围越过音频缺口立即停止、推进游标并释放 payload，以及 TTS 快于播放、多话语排队、完成 ACK 丢失和重复完成时只在最后实际播放完成后启动一次沉默时钟；通话中及结算后断言 Conversation、ConversationContext、Redis、呼叫账本和媒体库均不存在逐轮转录或工作摘要。
 - 上下文初始化测试：最新 Conversation 记录在 3 分钟边界内时按时间正序加载最新最多 30 条及现有摘要；超过边界、属于其他用户或角色时不加载；初始化读取不产生任何写操作。
 - ChatStage 切换测试：只有当前已绑定聊天客户端登记的 `CallTransitionIntent` 能触发 `SWITCH_TO_CALL`；其他设备、错误角色、重复或缺失意图均不能抢占现有 ChatStage。
-- ChatStage 回收测试：匹配的 `call.start` 立即取消旧 Stage 的处理、期限、计划和输出，`READY` pending 不再回复但已落库事实参与结束维护；旧 InteractionContext 关闭后才创建 CallStage。维护失败或超时时进度不推进，且任何时刻不得同时存在聊天与通话两个 InteractionContext。
+- ChatStage 回收测试：匹配的 `call.start` 先创建 CallStage 并反馈响铃，初始化前段失败可恢复旧聊天；后段提交退出后取消旧 Stage 的处理、期限、计划和输出，已落库事实参与结束维护。旧 Context 安全关闭且维护成功后才创建 Call Context；维护失败或超时使通话建立失败，且不得同时存在两个 Context。
 - 普通断线回归测试：没有 `call.switch_prepare` 的 `chat_ws` 意外断开仍保留 ChatStage 60 秒并支持原有重连，不得被误判为主动切换。
 - Agent 集成测试：`DIRECT`、`RECALL`、回忆过渡语、沉默决策、结束维护动作。
 - 结束/取消契约测试：阻塞结算时 terminate 保持等待，新接入/重置仍被拒绝，终态消息与挂断 ACK 不等待结算；取消首次及重复等待者不取消底层唯一结束/收尾任务；生命周期超时后延迟写入或清理期间仍保持占用；初始化中终止后无晚到资源；成功或失败清理结束才解除占用；Adapter 先释放不影响收尾；关闭和回滚必须在业务排空后关闭 Agent/数据库。
@@ -624,7 +626,7 @@ stateDiagram-v2
 
 主动切换不是普通 WebSocket 断线。当前已鉴权并绑定 ChatStage 的 `chat_ws` 必须先提交 `call.switch_prepare`；StageManager 据此创建一次性、短期 `CallTransitionIntent`，并把同用户、同角色的交互所有权标记为正在切换。收到 `call.switch_ready` 后，该聊天绑定不再接受新的业务输入，只允许完成断连或等待意图过期。意图只能由同一用户、同一角色、同一 `client_request_id` 的 `call.start` 消费，不能作为恢复令牌，也不能被其他设备用于抢占。
 
-匹配的 `call.start` 必须先把旧 ChatStage 从可复用集合移除，以 `SWITCH_TO_CALL` 执行终止和结束认知维护，并关闭旧 InteractionContext；只有这些步骤完成或达到本次切换期限后，StageManager 才能把交互所有权交给新的 CallStage。该终止不得沿用 ChatStage 默认 30 秒终止等待，而必须受 `call.start` 起算的 10 秒呼叫建立总期限约束；超时即取消维护、保持维护进度不变并关闭旧 Context。聊天 Context 与通话 Context 不得同时存活。旧 Stage 一旦进入该终止路径便不可恢复；通话初始化失败或接通前取消后，重新连接聊天必须创建新 ChatStage。
+匹配的 `call.start` 先建立轻量 CallStage 并启动受监督的初始化，不等待旧聊天收尾即可反馈响铃。前段准备完成后才提交旧聊天退出、撤销绑定并等待完整终止结果；聊天维护遵循自身期限，呼叫十秒期限到达时可先发终态，但不能截断已提交的聊天收尾或提前释放占用。提交前失败可同步正式历史并恢复原聊天；提交后不得复活旧实例，安全释放后才能新建。旧 Context 完全关闭且维护成功后才创建 Call Context。
 
 未经过 `call.switch_prepare` 的 `chat_ws` 意外断开不属于主动切换，继续沿用现有 60 秒离线保留和重连行为。有效意图过期且原聊天连接仍在时，Adapter 解除切换状态并恢复接收聊天输入；原连接已经断开时，StageManager 按普通离线行为处理。第一版仅支持单一 ServerRuntime；若配置为多 worker，启动检查必须禁用通话或拒绝启动通话能力，不能静默依赖进程内互斥。分布式协调属于极远期且低概率需求。
 
@@ -884,10 +886,10 @@ CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知
 ### 数据一致性与结算顺序
 
 1. 当前聊天绑定提交 `call.switch_prepare` 后，StageManager 建立一次性 `CallTransitionIntent` 并保留同用户、同角色的过渡所有权；此时不创建呼叫账本，也不释放所有权给其他设备。
-2. `call.start` 先按 `client_request_id` 读取既有呼叫账本；命中且身份一致时返回原 `call_id` 与当前建立状态。未命中且存在 ChatStage 时，必须原子消费匹配意图、建立 `PREPARING` 呼叫账本，再把旧 ChatStage 从可复用集合移除并以 `SWITCH_TO_CALL` 终止；结束认知维护完成或耗尽 10 秒呼叫建立期限时关闭旧 InteractionContext。未匹配的 `call.start` 不能改变旧 Stage。不存在 ChatStage 且所有权空闲时可直接幂等建立 `PREPARING` 账本。
+2. `call.start` 先按 `client_request_id` 查询已有记录，命中且身份一致时复用原呼叫。未命中且存在聊天时，原子消费匹配意图、准备记录并创建 CallStage，先反馈响铃；初始化后段再提交聊天退出并等待完整收尾。提交前失败可恢复旧聊天，提交后失败须完成收尾，不重置十秒建立期限，也不以该期限截断聊天维护。未匹配意图不能改变旧 Stage。
 3. 旧 Context 关闭后，StageManager 才把交互所有权交给 CallStage；随后创建使用 `EphemeralCallConversationStore` 的 InteractionContext 和实时语音会话。账本继续处于 `PREPARING`，最近 3 分钟上下文检查只读取 ConversationService，不写入任何对话数据。
 4. 进入 `ACTIVE` 时持久化 `connected_at`；所有终止路径先冻结不可变终态快照。
-5. CallStage 先登记唯一完整终止任务，关闭实时媒体资源并冻结快照，发送终态后标记实时停止；随后投递唯一的 CallEnding 并等待 Agent，保留业务占用。客户端可退出通话页，终止消息按有限投递策略处理；同一用户角色的新聊天/通话在业务收尾完成前返回 INTERACTION_FINALIZING，完成后才创建新的 ChatStage。
+5. CallStage 先登记唯一完整终止任务，关闭实时媒体资源并冻结快照，发布明确终态，由协议侧独立接纳并清理；随后投递唯一的 CallEnding 并等待 Agent，保留业务占用。客户端可退出通话页，终止消息按有限投递策略处理；同一用户角色的新聊天/通话在业务收尾完成前返回 INTERACTION_FINALIZING，完成后才创建新的 ChatStage。
 6. 概要或固定回退文本准备好后，以稳定 UUID 写 Conversation，并关联 `conversation_id`。
 7. 同一个终止任务等待概要与维护结果落库、Context 关闭和临时内容清除后才完成并解除收尾接入限制。协议会话可先释放；释放实时资源不等于业务收尾完成。
 
@@ -942,7 +944,7 @@ CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知
 
 聊天与通话保留独立 Adapter。Adapter 负责信道协议转换、去重、上传装配、输出投递，以及连接与交互的 binding；通话 Session、Delivery、Binding 均为 CallWebSocketAdapter 内部实现。Web 负责鉴权和物理连接，不解析业务切换命令。普通聊天消息、语音上传各阶段及切换命令统一进入聊天 Adapter 的 `receive`；上传分片 ACK 与最终刺激接纳 ACK 保持各自的含义和幂等性。
 
-Adapter 通过 StageManager 的多参数 `try_to_get_stage` 获取交互：参数明确用户、角色、交互类型、连接和已有交互或请求身份，不专门创建接入 Request 类型。Manager 按内部规则复用、恢复、创建或给出明确拒绝；通话建立直接返回 PREPARING CallStage，Context 和供应商由该 Stage 异步初始化。恢复指定 call_id 只能恢复该交互，不能隐式新建。通话身份返回后，由 Adapter 自行注册协议会话并排入 PREPARING 与首 ACK，再启动 Stage 自有初始化；Manager 不调用传输对象的 prepare 或 bind_stage。相同建立请求的身份发布与协议注册串行化，不阻塞其他请求。绑定建立后，普通刺激直接投递 Stage；生命周期请求交给 Manager，PCM、播放确认和实时打断保持投递通话交互。两类 Adapter 统一网络接口；业务输出 sink 保持类型化，不要求相同业务协议或共同基类。
+Adapter 通过 StageManager 的多参数 `try_to_get_stage` 获取交互：参数明确用户、角色、交互类型、连接和已有交互或请求身份，不专门创建接入 Request 类型。Manager 按内部规则复用、恢复、创建或给出明确拒绝；通话建立直接返回 PREPARING CallStage，Context 和供应商由该 Stage 异步初始化。恢复指定 call_id 只能恢复该交互，不能隐式新建。通话身份返回后，由 Adapter 自行注册协议会话并排入 PREPARING 与首 ACK，再放行已启动初始化产生的暂存输出；Manager 不调用传输对象的 prepare 或 bind_stage。相同建立请求的身份发布与协议注册串行化，不阻塞其他请求。绑定建立后，普通刺激直接投递 Stage；生命周期请求交给 Manager，PCM、播放确认和实时打断保持投递通话交互。两类 Adapter 统一网络接口；业务输出 sink 保持类型化，不要求相同业务协议或共同基类。
 
 输入准入属于交互侧。binding 有效只代表连接仍关联该 Stage，不代表 Stage 此刻允许业务输入。切换准备期间由 Stage 的输入门禁拒绝普通消息、语音以及迟到的异步媒体投递；Adapter 不复制暂停业务状态。异步转换完成后必须重新验证原 binding 仍有效和 Stage 仍准入，然后才能接纳刺激。先前已经接纳的工作保持既有执行语义，不因为准备切换新增取消行为。
 
@@ -1038,11 +1040,11 @@ Adapter 维护连接句柄到 Binding 的集合，以及用于 Stage 输出路�
 
 ### 通话 Adapter、Session 与 Binding 的组合契约
 
-CallStage 在 PREPARING 状态下即创建并纳入 StageManager 管理，接入返回该 Stage 本身；Adapter 同次建立 Session 和 Binding，不等待 Context 或语音供应商准备。Manager 保证旧聊天 Context 关闭后才创建通话 Context。Adapter 先排入 PREPARING 与首 ACK，再放行 Stage 自有的异步初始化任务。初始化中挂断、断线、超时由该 Stage 处理；不再使用等待 Stage 出现的 CallControl 或 PreparedTransport。重复 start/resume 不创建第二个 Stage、不重置建立期限。
+CallStage 在 PREPARING 状态下即创建并纳入 StageManager 管理；create() 启动唯一初始化任务，不等待 Context 或供应商准备，start() 只等待任务完成。Adapter 在首次握手前有限暂存 Stage 输出，先排入 PREPARING 和首 ACK，再放行后续状态及音频。聊天收尾位于通话初始化后段，旧 Context 安全关闭且维护成功后才创建 Call Context。初始化期间挂断、断线、超时由原 Stage 处理，重复 start/resume 复用原任务且不重置期限。
 
-Adapter 保留 open、receive、next_output、complete_output、disconnect、close 和能力查询接口，增加稳定的 submit_output(call_id, output) 路由。Stage 的类型化输出契约通过该路由投递，不持有连接 Binding。Session 关联唯一 Stage，创建并独占 Delivery；Adapter 只维护 call_id 到 Session、连接句柄到 Binding 的索引。Session 封装 attach、detach、receive、submit_output、drain_terminal、close；Adapter 不访问其 Delivery 或协议容器。
+Adapter 保留 open、receive、next_output、complete_output、disconnect、close 和能力查询接口，增加稳定的 submit_output(call_id, output) 路由。Stage 的类型化输出契约通过该路由投递，不持有连接 Binding。Session 关联唯一 Stage，创建并独占 Delivery；Adapter 只维护 call_id 到 Session、连接句柄到 Binding 的索引。Session 封装 bind、detach、receive、submit_output、drain_terminal、close；bind 负责绑定预留、握手或恢复、准入复核、句柄发布及失败撤销；Adapter 不访问其 Delivery 或协议容器。
 
-Binding 只关联唯一 Session，集中保存本次连接有效性、Outbox、在途发送和网络完成反馈，提供 receive、enqueue、next_output、complete_output、invalidate。断线永久撤销旧 Binding 的权限；旧输入、发送结果及清理不得影响新 Binding。Session 与 Delivery 跨重连保留，Outbox 随连接清理。Session 对应同一次呼叫，实时停止后有限投递终态并释放协议资源，不等待认知维护及持久化收尾。
+Binding 只关联唯一 Session，集中保存本次连接有效性、Outbox、在途发送和网络完成反馈，提供 receive、enqueue、next_output、complete_output、invalidate。断线永久撤销旧 Binding 的权限；旧输入、发送结果及清理不得影响新 Binding。Session 与 Delivery 跨重连保留，Outbox 随连接清理。Session 对应同一次呼叫，接纳 Stage 的明确终态通知后有限投递终态并释放协议资源，不等待认知维护及持久化收尾。
 
 _protocol_translate.py 负责控制/音频帧解析、字段校验与编码，不查询 Stage 或提交游标。_input.py 将可按序投递的帧转换为 Stage 输入，返回 (input 或 None, status 字典)，状态为 complete/error，不新增处理结果类。PCM 是独立可接纳帧，无上传 partial 状态；duplicate、缺口和缓冲属于 Session 的有序接纳机制。接纳成功与上行游标提交保持取消安全。ACK/NACK 不等待业务输入锁，避免输出背压等待 ACK 的循环依赖。
 
@@ -1057,15 +1059,15 @@ StageManager 只协调 Stage 注册、唯一占用、接入、Chat→Call 意图
 
 CallRecords 只管理通话记录的建立、幂等查询、失败补偿，不持有 Agent、ContextFactory、语音 Provider、输出 sink 或结算执行器。不再提供启动恢复与恢复就绪状态。
 
-CallStage.create 负责创建轻量 PREPARING Stage，并在 Stage 内部装配结果写入器 CallHistory。创建不启动 Context 或 Provider，不等待耗时初始化。结算复用本次 Stage 的 Agent 和原会话 Context，执行最终维护与概括，最终由 Stage 关闭 Context。共享存储和 Provider 工厂仍复用，但每次通话的完整终止任务独立。
+CallStage.create 负责创建轻量 PREPARING Stage、装配结果写入器 CallHistory，并启动受 Manager 监督的初始化任务；返回不等待耗时初始化。start() 只等待同一任务。结算复用本次 Stage 的 Agent 与原 Context，执行维护与概括后关闭 Context；每次通话的完整终止任务独立。
 
 StageManager 在构造时通过 CallStage 模块的绑定函数预绑定固定资源；运行时仅传入已准备身份、所有权和生命周期回调。该创建函数是普通函数，不新增 Factory 对象或 ServerRuntime 一级成员。绑定时检查依赖完整性，缺少依赖时不开放通话，不能等到结算才发现缺失；聊天接入不受影响。call_business_ready 要求创建函数可用且 Manager 未关闭，不依赖旧账本恢复。
 
 通话输出使用装配时注入的 call_output_sink(call_id, output)，try_to_get_stage 保持多参数接口但不接收 transport。Stage 尚未建立时以具名异常返回，由 Adapter 编码拒绝；Stage 已建立后由 CallStage 发出失败、状态及结束输出。Manager 不调用 send_failed，也不接收结算快照或 Context。
 
-CallStage 负责初始化、状态机、进程内断线恢复校验、初始化中挂断及最终资源释放；断线保留计时由 StageManager 持有。Stage 通过 own_termination(operation) 登记唯一完整任务，不再使用 own_finalization。任务覆盖实时停止 → CallEnding → FinalizeCall → CallHistory → Context.close → 释放占用。Manager 只跟踪这个任务、去重、阻止冲突接入并等待；不接收快照或 Context。重复终止及等待者取消不改变实际任务和首次结束原因；wait_closed/terminate 等待完整任务，wait_realtime_stopped 仅表示实时停止。
+CallStage 负责初始化、状态机、恢复状态校验、初始化期间挂断及资源释放；Manager 持有离线计时与受监督的初始化、完整终止任务。begin_termination() 登记首次终止决定，terminate() 等待完整结果；不保留 wait_closed() 或 wait_realtime_stopped()。明确的 CallTerminated 终态通知驱动 Session 接纳与 Adapter 独立清理。Manager 核验完整任务的资源释放结果后解除占用，不接收结束快照或 Context。
 
-切换顺序：校验意图并保留占用 → 持久化准备通话 → 提交聊天退出、撤销旧 Binding → 等待旧 Context 完全关闭 → 创建轻量 PREPARING CallStage → Adapter 建立 Session/Binding，排入 PREPARING 与首 ACK → Stage 异步初始化。首次 call.start 的绝对建立期限在交接时延续，不重置；意图期限仍独立由 Manager 管理。准备记录失败须恢复原聊天输入并保留 Binding；提交退出后失败须完成旧聊天清理与通话失败补偿，不能复活旧 Stage。清理尚未结束时不能释放占用。
+切换顺序：校验意图并保留占用 → 准备通话记录 → 创建 CallStage 并启动初始化 → Adapter 完成首握手、立即反馈响铃 → 前段资源准备 → 提交旧聊天退出并撤销绑定 → 等待旧 Context 安全关闭且维护成功 → 创建 Call Context 并完成初始化。首次 start 的绝对建立期限不重置。提交前失败同步正式历史并恢复旧聊天；提交后失败不得复活旧 Stage。清理未完成或无法证明安全释放时不能放行冲突接入。
 
 验收：公开接入验证切换记录失败仍可聊天、提交后失败不复活聊天；初始化中挂断不会迟到接通；取消建立/终止等待者不取消实际工作；结算和 Context 关闭期间新聊天、新通话返回 INTERACTION_FINALIZING，用户重置立即返回 USER_INTERACTION_BUSY；收尾真正完成后解除占用。原有进程内断线恢复、重放和旧 Binding 失效回归必须通过；进程重启不补写旧通话。
 
@@ -1076,10 +1078,10 @@ CallStage 负责初始化、状态机、进程内断线恢复校验、初始化�
 
 - StageManager 统一持有 Chat/Call 的离线保留计时任务。聊天仍按原配置保留，接通后的通话仍保留 3 秒；恢复取消旧计时，旧连接通知和旧计时不能终止新绑定。CallStage 保留业务状态转换及恢复期限校验，不创建离线回收计时任务。准备期断线仍沿用原建立期限，不新增或延长恢复期限。
 - 两种 Stage 的 terminate 均等待全部结束：实时工作停止、业务收尾及 Context 关闭完成后才返回。等待者取消不取消实际任务。Manager 登记任务后可处理其他交互；同一用户角色在整个收尾期间拒绝新聊天、通话及重置。业务结果仍遵循原有成功、失败、超时规则。
-- 通话实时停止的内部通知与完整结束保持独立，客户端结束消息、挂断 ACK 和协议资源释放不等待认知结算；不得将完整 terminate 的等待引入协议输入锁内。
+- 通话明确终态通知与完整结束保持独立，客户端结束消息、挂断 ACK 和协议资源释放不等待认知结算；不得将完整 terminate 的等待引入协议输入锁内。
 - 聊天获取仍等待完整 Context 初始化后返回，但不持有 Manager 或 Adapter 的全局准入锁等待初始化。相同用户角色共用一次创建，创建期间保持占用和重置互斥；取消等待者不得泄漏未交付 Stage。不同用户角色的初始化互不串行。
-- 通话继续在首握手排队后异步初始化，保留初始化中挂断、断线与重绑能力。
-- 停机仍排空完整终止任务；超时预算与不提供崩溃恢复的边界以 AC-12/14 的 2026-10-19 简化为准，不新增阶段性概要存储。
+- 通话 create() 即启动初始化，Adapter 保证首握手先于后续输出；保留初始化期间挂断、断线与重绑能力。
+- 停机关闭准入并排空初始化、切换及完整终止任务；无法证明资源安全释放时抛出停机失败，不允许运行时继续关闭依赖。不提供崩溃恢复，不新增阶段性概要存储。
 
 验收须覆盖：聊天慢初始化不阻塞其他交互、同身份并发仅创建一次、创建失败/等待者取消/重置竞争、Chat/Call 旧计时与重连竞争、通话计时由 Manager 持有、terminate 在结算及 Context 关闭期间保持未完成，及初始化中挂断、重放、旧 Binding 失效回归。
 
@@ -1089,7 +1091,7 @@ CallStage 负责初始化、状态机、进程内断线恢复校验、初始化�
 - 唯一入口：每次终止只处理一次 CallEnding，只发出一个 FinalizeCall；重复终止复用原任务，取消等待者不重复维护或概要。
 - 指数退避：模型请求可用完全部次数及退避间隔；SDK 不叠加重试，耗尽后继续概要回退，不在 15 秒时截断。
 - 三级概要：有效生成结果优先，其次当前通话工作摘要，最后精确文本 `[和用户打了一通电话]`；空白、超长、异常、无模型及只有旧聊天种子均有覆盖。
-- 完整任务：实时资源可以先释放；Agent、SQL 写入、Context.close 任一未完成时，terminate/wait_closed 仍未完成，新交互与用户重置仍被拒绝，正常关闭等待排空。
-- 异常清理：ENDING、DECLINED 或 ENDED 状态写入失败，完整任务仍须停止全部实时任务、关闭 Provider 与 Context、释放占用后才报告失败；不因此补做重启恢复。已提交状态的通知发送失败不阻断后续 CallEnding 和历史写入。完整结算的失败仅由完整任务报告，晚到的实时停止等待者仍应排空终态与挂断 ACK。
+- 完整任务：实时资源可以先释放；Agent、SQL 写入、Context.close 任一未完成时，terminate 仍未完成，新交互与用户重置仍被拒绝，正常关闭等待排空。
+- 异常清理：ENDING、DECLINED 或 ENDED 状态写入失败，完整任务仍须停止全部实时任务并关闭 Provider 与 Context；Manager 核验安全释放后解除占用，无法证明释放时维持阻塞并报告失败；不因此补做重启恢复。已提交状态的通知发送失败不阻断后续 CallEnding 和历史写入。完整结算的失败仅由完整任务报告，Adapter 的独立清理任务仍应有限排空终态与挂断 ACK。
 - 维护幂等：同批次冻结候选、稳定 maintenance_id/candidate_index、输入冲突检测、部分写入重投、画像与进度成功提交继续验证；失败不阻止通话历史保存。
 - 重启边界：重启不扫描或补写未完成通话，既有凭证与普通新交互继续有效。

@@ -65,6 +65,10 @@ class Endpoint:
         self.available = True
         self.stimulus_input_sink = self
         self.states = []
+        self.connection_generation = 0
+
+    async def start(self):
+        pass
 
     def can_accept(self, stimulus):
         return self.available and not self.input_suspended
@@ -73,8 +77,10 @@ class Endpoint:
         self.stimuli.append(stimulus)
         return True
 
-    async def connection_changed(self, state):
-        self.states.append(state)
+    async def connection_changed(self, available, generation):
+        self.connection_generation = generation
+        self.states.append(d.ConnectionState.CONNECTED if available else d.ConnectionState.DISCONNECTED)
+        return True
 
 
 async def setup_output(adapter=None, interaction_id="interaction", user_id="user"):

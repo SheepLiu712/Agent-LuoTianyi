@@ -244,7 +244,7 @@ async def test_nonempty_typing_resets_wait_on_each_event_and_empty_typing_releas
         stage.stimulus_input_sink.submit(original)
         await until(lambda: stage._deadline is not None)
         first = datetime.now(timezone.utc)
-        with patch("src.stage.chat_stage.datetime") as clock:
+        with patch("src.stage.chat.chat_stage.datetime") as clock:
             clock.now.return_value = first
             stage.stimulus_input_sink.submit(stimulus(d.UserTyping, text_length=2))
             assert stage._deadline == first + timedelta(seconds=10)

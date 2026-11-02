@@ -1,7 +1,7 @@
 import pytest
 
 from src.domain.call import CallEndReason, CallOutcome, CallState
-from src.stage.call_lifecycle import CallLifecycle, InvalidCallTransition
+from src.stage.call.call_lifecycle import CallLifecycle, InvalidCallTransition
 
 
 def test_connected_call_can_reconnect_and_end():

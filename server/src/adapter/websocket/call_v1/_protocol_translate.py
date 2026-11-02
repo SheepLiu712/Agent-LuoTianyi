@@ -42,7 +42,7 @@ def make_nack(call_id: str, missing_seq: int):
 def make_state(call_id, item, seq):
     """把 Stage 状态或回复错误转换为控制消息；内部状态不产生线路消息。"""
     from src.domain.call import CallState
-    from src.stage.call_stage import CallOutput, CallReplyFailed, CallStateChanged
+    from src.stage.call.call_stage import CallOutput, CallReplyFailed, CallStateChanged
 
     if isinstance(item, CallReplyFailed):
         return make_error(call_id, "CALL_TTS_FAILED", "call reply audio could not be generated")
@@ -87,9 +87,8 @@ def make_error(call_id, code, message, *, retryable=False, request_seq=None):
     return result
 
 
-def make_ended(call_id, snapshot, seq):
+def make_ended(call_id, terminal, seq):
     """校验呼叫身份并将终态快照转换为通话结束消息。"""
-    terminal = snapshot.terminal
     if str(terminal.call_id) != call_id:
         raise ValueError("terminal snapshot does not match session")
     return {

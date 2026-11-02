@@ -52,21 +52,29 @@ def make_call_adapter(*, manager, **kwargs):
 
 async def create_call_stage(manager, claim, *, transport, speech_factory, call_metrics=None, **kwargs):
     """底层交接测试装配真实通话服务；生产接入不接受逐次资源注入。"""
-    from src.stage.call_stage import bind_call_stage_creator
+    from src.stage.call.call_stage import bind_call_stage_creator
     from support.call_output import output_sink
 
     resources = dict(manager._test_call_resources)
     resources.update(output_sink=output_sink(transport), speech_factory=speech_factory, call_metrics=call_metrics)
     manager._call_stage_creator = bind_call_stage_creator(**resources)
-    return await manager._create_call_stage(claim, **kwargs)
+    stage = await manager._create_call_stage(claim, **kwargs)
+    await stage.start()
+    return stage
 
 
 async def start_call_stage(**kwargs):
     """仅测试底层实时生命周期；生产创建还须装配持久化结算。"""
-    from src.stage.call_stage import CallStage
+    from src.stage.call.call_stage import CallStage
 
     stage = CallStage(**kwargs)
-    await stage.start()
+    try:
+        await stage.start()
+    except Exception:
+        from src.domain.stage.lifecycle import StageEndReason
+
+        await stage.terminate(StageEndReason.INITIALIZATION_FAILED)
+        raise
     return stage
 
 

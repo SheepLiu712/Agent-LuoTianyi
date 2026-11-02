@@ -16,6 +16,7 @@ from support.call_coherent_runtime import (
     runtime_config,
 )
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import finish_call, wait_interaction_end
 from support.stage_manager import create_call_stage, make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
@@ -29,11 +30,12 @@ from src.agent.context import (
 )
 from src.agent_runtime import agent_runtime as runtime_module
 from src.application.user.reset_fence import UserResetFence
-from src.domain.call import CallEndReason, CallReplyStatus, CallState
+from src.domain.call import CallReplyStatus, CallState
+from src.domain.stage.lifecycle import StageEndReason, StageLifecycleState
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage._finalization import InteractionFinalizing
-from src.stage.call_stage import _Turn
+from src.stage.call.call_stage import _Turn
 
 
 class _StrictClock:
@@ -268,13 +270,14 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
             return await original_handle(request, plans, **kwargs)
 
         monkeypatch.setattr(type(stage._agent), "handle_stimulus", observed_handle)
-        ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
-        await stage.wait_realtime_stopped()
+        ending = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
+        await wait_interaction_end(stage)
+        await _eventually(lambda: stage.snapshot is not None)
         snapshot = stage.snapshot
         assert snapshot is not None
         assert not ending.done()
         assert stage.context is context
-        assert not stage._closed.is_set()
+        assert stage.lifecycle_state is not StageLifecycleState.TERMINATED
         assert await asyncio.to_thread(write_entered.wait, 10)
 
         working_during_write = context.conversation.read_working()
@@ -309,7 +312,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
 
         write_release.set()
         assert await ending is snapshot
-        assert await stage.terminate(CallEndReason.SYSTEM_FAILURE) is snapshot
+        assert await finish_call(stage, StageEndReason.SYSTEM_FAILURE) is snapshot
         assert handled == ["call_ending"]
         await manager._finalizations.close()
         order.append("finalizing-release")
@@ -342,7 +345,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
     finally:
         write_release.set()
         if stage is not None and stage.snapshot is None:
-            await stage.close()
+            await stage.terminate(StageEndReason.SHUTDOWN)
         await manager._finalizations.close()
         await manager.close()
         await runtime.shutdown()

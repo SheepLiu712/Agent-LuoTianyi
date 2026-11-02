@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
@@ -42,14 +43,14 @@ class ConversationService:
         return {"conversations": [], "summary": "", "context_count": 0}
 
 
-class Connection:
-    user_uuid = "user-1"
+class Socket:
+    async def send_json(self, event) -> None:
+        pass
 
+
+class Connection(StubChatConnection):
     def __init__(self) -> None:
-        self.is_closed = False
-
-    def mark_disconnected(self) -> None:
-        self.is_closed = True
+        super().__init__(Socket(), "user-1", "user")
 
 
 def make_runtime():

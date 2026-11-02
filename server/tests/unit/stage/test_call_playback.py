@@ -1,7 +1,7 @@
 import pytest
 
 from src.domain.call import CallState
-from src.stage._call_playback import CallPlaybackCoordinator, PlaybackSettlementError
+from src.stage.call._call_playback import CallPlaybackCoordinator, PlaybackSettlementError
 
 
 class Clock:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from functools import partial
 
 import pytest
 from support.call_coherent_runtime import (
@@ -16,6 +17,7 @@ from support.call_coherent_runtime import (
 from support.call_output import output_sink
 from support.call_protocol import ProtocolDriver, StageOutputDriver
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import wait_call_finished
 from support.stage_manager import make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
@@ -32,7 +34,7 @@ from src.infrastructure.models.realtime_speech import (
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage import CallStage
-from src.stage._call_history import CallHistory
+from src.stage.call._call_history import CallHistory
 
 
 async def _eventually(predicate, timeout=2.0):
@@ -143,9 +145,10 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         call_sessions=database.call_sessions,
         speech_factory=provider_factory,
         output_sink=output_sink(binding),
-        release_ownership=manager._release_call,
         save_history=save,
-        own_termination=lambda operation: manager._own_call_operation(ownership, operation),
+        own_initialization=partial(manager._own_initialization, user_id="user", release=manager._release_call_stage),
+        own_termination=manager._own_termination,
+        finish_source_interaction=manager._finish_source_interaction,
     )
     binding.bind(stage=stage, session=session)
 
@@ -272,7 +275,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         )
         assert stage.state is CallState.ACTIVE
         await session.receive_text(_completed(binding.call_id, 4, farewell))
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 2)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 2)
         await manager._finalizations.close()
 
         assert snapshot.terminal.end_reason is CallEndReason.AGENT_HANGUP

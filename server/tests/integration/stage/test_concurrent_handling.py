@@ -157,7 +157,7 @@ async def test_real_preprocessing_persists_slow_image_before_fast_text_in_read_o
 
 @pytest.mark.asyncio
 async def test_failed_real_image_preprocessing_drops_only_image_and_keeps_written_text(caplog, capture_project_log):
-    capture_project_log("src.stage.chat_stage")
+    capture_project_log("src.stage.chat.chat_stage")
 
     class Resolver:
         def resolve(self, media_ref, *, owner_user_id):
