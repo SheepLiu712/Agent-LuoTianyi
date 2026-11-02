@@ -159,7 +159,7 @@ class CallRecallDecisionSkill:
     @staticmethod
     def _fallback(audio_semantic: str) -> CallRecallDecision:
         query = audio_semantic.strip() or "当前通话内容"
-        return CallRecallDecision(RecallMode.RECALL, (query,), AckStyle.THINKING)
+        return CallRecallDecision(RecallMode.RECALL, (query,), AckStyle.NONE)
 
 
 class CallReplySkill:

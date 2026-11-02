@@ -8,7 +8,7 @@ from support.call_apology import _Plans, _request, _stimulus
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.context import ConversationSnapshot
-from src.agent.context.memory_pool import CallMemoryPool
+from src.agent.context.memory_pool import CallMemory, CallMemoryPool
 from src.agent.handlers.action.call import EndCallHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -164,6 +164,49 @@ async def test_time_limit_warning_uses_fixed_agent_plan_without_generation():
     assert action.content == "通话时间快到了，我们很快就要结束啦。"
     assert action.call_delivery.display_in_chat is False
     assert action.call_delivery.provisional is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision_unavailable", ["unconfigured", "invalid_response"])
+async def test_default_recall_replies_without_ack_and_reuses_memory_pool(decision_unavailable):
+    class InvalidDecisionModel:
+        async def generate_response(self, **kwargs):
+            return "invalid decision"
+
+    class CapturingGenerator(_Generator):
+        async def generate(self, **kwargs):
+            self.memory_hits = kwargs["memory_hits"]
+            return await super().generate(**kwargs)
+
+    memory = _Memory()
+    generator = CapturingGenerator()
+    recall = CallRecallDecisionSkill(
+        memories={"luotianyi": memory},
+        model=InvalidDecisionModel() if decision_unavailable == "invalid_response" else None,
+    )
+    handler = CallReplyRequestedHandler(recall, CallReplySkill({"luotianyi": generator}), PreparedSpeechCatalog({}))
+    plans = _Plans()
+    plans.context.call_memory.remember(CallMemory("previous", "前轮记忆"))
+    call_id = uuid4()
+
+    for turn_seq in (1, 2):
+        request = _request(
+            _stimulus(
+                d.CallReplyRequested,
+                call_id=call_id,
+                turn_seq=turn_seq,
+                audio_content=CallAudioSemantic(transcript="你还记得吗"),
+            )
+        )
+        report = await handler.handle(request, plans)
+        assert report.request_status is d.HandlingRequestStatus.COMPLETED
+
+    actions = [action for draft in plans.drafts for action in draft.actions]
+    assert len(memory.calls) == 2
+    assert [action.content for action in actions] == ["正式回答", "正式回答"]
+    assert all(not action.call_delivery.provisional for action in actions)
+    assert generator.memory_hits == ["前轮记忆", "旧记忆", "新记忆"]
+    assert tuple(item.content for item in plans.context.call_memory.snapshot()) == tuple(generator.memory_hits)
 
 
 @pytest.mark.asyncio
