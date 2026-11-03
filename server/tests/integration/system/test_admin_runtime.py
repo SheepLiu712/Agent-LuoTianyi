@@ -275,6 +275,38 @@ def test_validator_uses_custom_llm_api_keys_without_hardcoded_provider_keys(tmp_
     assert _collect_llm_api_key_names(config) == {"CUSTOM_CHAT_API_KEY", "CUSTOM_VISION_API_KEY"}
 
 
+@pytest.mark.parametrize(
+    "kind, collection",
+    [
+        ("llm", "available_llms"),
+        ("vlm", "available_vlms"),
+        ("audio", "available_audio_models"),
+    ],
+)
+@pytest.mark.parametrize("key_name", ["CUSTOM_MODEL_API_KEY", "QWEN_API_KEY"])
+def test_validator_rejects_unresolved_referenced_model_key(tmp_path, monkeypatch, kind, collection, key_name):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    monkeypatch.delenv(key_name, raising=False)
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    config = minimal_config(tmp_path)
+    config["llm_service"][collection] = {
+        "custom": {
+            "api_type": "openai",
+            "model": "custom-model",
+            "base_url": "https://example.invalid/v1",
+            "api_key": f"${key_name}",
+        }
+    }
+
+    result = validator.validate(apply_env_variables(copy.deepcopy(config)))
+
+    assert result["core_ok"] is False
+    item = next(item for item in result["items"] if item["name"] == f"{kind}.custom")
+    assert item["status"] == "error"
+    assert "api_key 环境变量未解析" in item["message"]
+
+
 def test_supervisor_blocks_start_when_core_validation_fails(tmp_path, monkeypatch):
     for key in ["JWT_SECRET", "AMAP_KEY"]:
         monkeypatch.delenv(key, raising=False)
@@ -602,3 +634,11 @@ def test_qq_music_credential_refresh_runs_in_background(tmp_path, monkeypatch):
     assert credential_file.exists()
     assert legacy_file.exists()
     assert learner.qq_credential_valid is True
+
+
+def test_audio_model_secret_references_are_visible():
+    config = {
+        "llm_service": {"available_audio_models": {"audio": {"api_key": "$AUDIO_MODEL_KEY"}}},
+        "call_transport": {"realtime_speech": {"api_key": "$REALTIME_MODEL_KEY"}},
+    }
+    assert _collect_llm_api_key_names(config) == {"AUDIO_MODEL_KEY", "REALTIME_MODEL_KEY"}

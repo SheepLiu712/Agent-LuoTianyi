@@ -66,7 +66,7 @@ def _extract_env_name(value: Any) -> str | None:
 def _collect_llm_api_key_names(config: dict[str, Any]) -> set[str]:
     llm_service = config.get("llm_service", {}) or {}
     names: set[str] = set()
-    for collection_name in ("available_llms", "available_vlms"):
+    for collection_name in ("available_llms", "available_vlms", "available_audio_models"):
         collection = llm_service.get(collection_name, {}) or {}
         for item in collection.values():
             if not isinstance(item, dict):
@@ -74,6 +74,10 @@ def _collect_llm_api_key_names(config: dict[str, Any]) -> set[str]:
             env_name = _extract_env_name(item.get("api_key"))
             if env_name:
                 names.add(env_name)
+    speech = (config.get("call_transport", {}) or {}).get("realtime_speech", {}) or {}
+    env_name = _extract_env_name(speech.get("api_key"))
+    if env_name:
+        names.add(env_name)
     return names
 
 

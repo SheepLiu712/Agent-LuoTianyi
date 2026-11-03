@@ -8,6 +8,7 @@ from typing import Any
 
 from src.infrastructure.config.secrets import SecretStore
 from src.infrastructure.config.skills import SkillsConfig
+from src.infrastructure.models.realtime_speech.config import AliyunRealtimeSpeechConfig, RealtimeSpeechConfigError
 from src.infrastructure.persistence.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
@@ -36,7 +37,7 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY", "QWEN_API_KEY"]
+    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
 
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
@@ -82,6 +83,7 @@ class RuntimeConfigValidator:
         items.extend(self._validate_secrets())
         items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
+        items.extend(self._validate_realtime_speech(config))
         items.extend(self._validate_client_model_types(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
@@ -356,6 +358,21 @@ class RuntimeConfigValidator:
         walk(config, "")
         return bindings
 
+    def _validate_realtime_speech(self, config: dict[str, Any]) -> list[ValidationItem]:
+        transport = config.get("call_transport", {})
+        try:
+            if not isinstance(transport, dict) or type(transport.get("enabled", False)) is not bool:
+                raise RealtimeSpeechConfigError("call_transport.enabled 必须是布尔值")
+            speech = transport.get("realtime_speech", {})
+            if not isinstance(speech, dict) or type(speech.get("enabled", False)) is not bool:
+                raise RealtimeSpeechConfigError("realtime_speech.enabled 必须是布尔值")
+            if speech.get("enabled", False):
+                provider = AliyunRealtimeSpeechConfig.from_mapping(speech)
+                _ = provider.websocket_url
+        except RealtimeSpeechConfigError as error:
+            return [ValidationItem("core", "call_transport.realtime_speech", "error", str(error))]
+        return []
+
     def _validate_core_modules(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
         llms = set((config.get("llm_service", {}).get("available_llms") or {}).keys())
@@ -368,6 +385,11 @@ class RuntimeConfigValidator:
             module = self._get(config, path) or {}
             vlm_name = ((module.get("vlm") or {}).get("name") or "").strip()
             result.append(self._module_item("vlm", name, vlm_name, vlms))
+        audio_names = set((config.get("llm_service", {}).get("available_audio_models") or {}).keys())
+        audio_module = self._get(config, "agent_runtime.skills.audio_understanding.audio_model_module")
+        if isinstance(audio_module, dict):
+            audio_name = str((audio_module.get("audio") or {}).get("name") or "").strip()
+            result.append(self._module_item("audio", "audio_understanding", audio_name, audio_names))
         return result
 
     def _validate_core_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
