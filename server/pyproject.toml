@@ -37,6 +37,7 @@ dependencies = [
     "typing-extensions",
     "tzdata; platform_system == 'Windows'",
     "uvicorn[standard]>=0.30",
+    "websockets>=14",
     "zhconv",
 ]
 

@@ -1097,7 +1097,12 @@ class CallStage:
             self._pending_end_reason = ending.reason
         execution_token = d.CancellationToken()
         self._execution_tokens.add(execution_token)
-        self._playback.set_generation_count(1)
+        set_busy_count = (
+            self._playback.set_maintenance_count
+            if all(isinstance(action, d.CognitiveMaintenance) for action in plan.actions)
+            else self._playback.set_generation_count
+        )
+        set_busy_count(1)
         response_ids = frozenset(
             action.call_delivery.response_id
             for action in plan.actions
@@ -1132,7 +1137,7 @@ class CallStage:
             self._execution_tokens.discard(execution_token)
             self._settle_warning()
             self._settle_attempt()
-            self._playback.set_generation_count(0)
+            set_busy_count(0)
             if turn_seq is not None and not self._turn_has_unsettled_response(turn_seq):
                 self._finish_user_turn(turn_seq)
             self._refresh_silence_task()

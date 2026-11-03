@@ -37,6 +37,7 @@ class CallPlaybackCoordinator:
         self._streams: dict[tuple[str, int], _Stream] = {}
         self._pending_send = 0
         self._generating = 0
+        self._maintaining = 0
         self._user_speaking = False
         self._unfinished_user_turns = 0
         self._state = CallState.ACTIVE
@@ -96,6 +97,11 @@ class CallPlaybackCoordinator:
         if value > 0:
             self._invalidate_silence_qualification()
         self._generating = value
+        self._refresh_silence()
+
+    def set_maintenance_count(self, count: int) -> None:
+        """维护只暂停沉默计时，不撤销实际播放完成的事实。"""
+        self._maintaining = self._count(count, "maintenance_count")
         self._refresh_silence()
 
     def set_user_speaking(self, speaking: bool) -> None:
@@ -159,6 +165,7 @@ class CallPlaybackCoordinator:
         self._streams.clear()
         self._pending_send = 0
         self._generating = 0
+        self._maintaining = 0
         self._user_speaking = False
         self._unfinished_user_turns = 0
         self._silence_started_at = None
@@ -181,6 +188,7 @@ class CallPlaybackCoordinator:
             and not self.pending_streams
             and self._pending_send == 0
             and self._generating == 0
+            and self._maintaining == 0
             and not self._user_speaking
             and self._unfinished_user_turns == 0
         )

@@ -238,3 +238,49 @@ async def test_failed_context_append_still_runs_ending_and_history_before_releas
     assert snapshot.completed_turns[0].user_semantic == "用户说：“accepted despite write failure”"
     assert len(snapshot.completed_turns) == (2 if with_later_input else 1)
     assert stage.context is None and not stage.tasks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_speech", [False, True])
+async def test_played_reply_resumes_silence_after_maintenance_unless_user_speaks(call_setup, monkeypatch, new_speech):
+    from src.domain import agent as d
+
+    silence = base._SilenceHandler()
+    stage, provider, _, handler = await _create(call_setup, silence_handler=silence)
+    entered, release = asyncio.Event(), asyncio.Event()
+    realize = stage._agent.realize_action_plan
+
+    async def blocked_maintenance(self, plan, context, outputs):
+        if all(isinstance(action, d.CognitiveMaintenance) for action in plan.actions):
+            entered.set()
+            await release.wait()
+        return await realize(plan, context, outputs)
+
+    monkeypatch.setattr(type(stage._agent), "realize_action_plan", blocked_maintenance)
+    handler.gate.set()
+    try:
+        await provider.emit(completed("question", "first"))
+        await finish_reply(stage)
+        await asyncio.wait_for(entered.wait(), 1)
+        assert stage._playback.silence_started_at is None
+        call_setup[3].advance(6)
+        assert not stage._playback.silence_elapsed()
+        assert silence.requests == []
+        if new_speech:
+            await provider.emit(SpeechStarted("second"))
+            await _eventually(lambda: stage._user_speaking)
+        release.set()
+        await _eventually(lambda: stage._realize_task.done())
+        if new_speech:
+            assert stage._playback.silence_started_at is None
+            assert silence.requests == []
+        else:
+            assert stage._playback.silence_started_at == call_setup[3].tick()
+            call_setup[3].advance(4.999)
+            assert not stage._playback.silence_elapsed()
+            call_setup[3].advance(0.001)
+            await asyncio.wait_for(stage._silence_task, 6)
+            await _eventually(lambda: len(silence.requests) == 1)
+    finally:
+        release.set()
+        await finish_call(stage)

@@ -5,7 +5,13 @@
         "production_port": 15673
     },
     "call_transport": {
-        "enabled": false
+        "enabled": true,
+        "realtime_speech": {
+            "enabled": true,
+            "api_key": "$QWEN_API_KEY",
+            "model": "qwen-audio-3.1-realtime-plus",
+            "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+        }
     },
     "llm_service": {
         "client_llm_timeout_seconds": 120,

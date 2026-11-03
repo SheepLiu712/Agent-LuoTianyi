@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 from uuid import UUID
 
-import websockets
+from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from src.domain.call import CallAudioSemantic
@@ -76,7 +76,7 @@ class AliyunRealtimeSpeechSession:
         call_metrics=None,
     ) -> None:
         self._config = config
-        self._connector = connector or websockets.connect
+        self._connector = connector or connect
         self._socket: _WebSocket | None = None
         self._writes: asyncio.Queue[dict[str, object] | object] = asyncio.Queue(maxsize=config.write_queue_size)
         self._event_buffer: deque[RealtimeSpeechEvent] = deque()
@@ -114,7 +114,7 @@ class AliyunRealtimeSpeechSession:
         try:
             self._socket = await self._connector(
                 self._config.websocket_url,
-                extra_headers={"Authorization": f"Bearer {self._config.api_key}"},
+                additional_headers={"Authorization": f"Bearer {self._config.api_key}"},
                 open_timeout=self._config.connect_timeout_seconds,
                 close_timeout=self._config.close_timeout_seconds,
                 max_size=1024 * 1024,

@@ -1,9 +1,11 @@
 import asyncio
 import base64
+import json
 from uuid import uuid4
 
 import pytest
 from support.aliyun_realtime_speech import FakeAliyunConnector, FakeAliyunWebSocket
+from websockets.asyncio.server import serve
 
 from src.infrastructure.models.realtime_speech import (
     AliyunRealtimeSpeechConfig,
@@ -42,6 +44,34 @@ async def started_session(socket=None, **config_overrides):
     session = await factory.create(uuid4())
     await session.start(RealtimeSpeechConfig(language="zh"))
     return session, socket
+
+
+@pytest.mark.asyncio
+async def test_default_connector_authenticates_and_completes_session_handshake(monkeypatch):
+    received = []
+
+    async def provider(socket):
+        received.append(socket.request.headers.get("Authorization"))
+        received.append(json.loads(await socket.recv()))
+        await socket.send(json.dumps({"type": "session.updated"}))
+        await socket.wait_closed()
+
+    async with serve(provider, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        # 仅将测试地址替换为本地明文连接，保留真实默认连接器及其参数。
+        monkeypatch.setattr(
+            AliyunRealtimeSpeechConfig,
+            "websocket_url",
+            property(lambda self: f"ws://127.0.0.1:{port}/realtime"),
+        )
+        session = await AliyunRealtimeSpeechSessionFactory(provider_config(session_timeout_seconds=2)).create(uuid4())
+        try:
+            await session.start(RealtimeSpeechConfig(language="zh"))
+            assert received[0] == "Bearer test-only-key"
+            assert received[1]["type"] == "session.update"
+            assert received[1]["session"]["turn_detection"] == {"type": "smart_turn"}
+        finally:
+            await session.close()
 
 
 @pytest.mark.asyncio
