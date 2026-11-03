@@ -1,7 +1,7 @@
 {
     "is_debug": true,
     "server": {
-        "debug_port": 24523,
+        "debug_port": 8317,
         "production_port": 15673
     },
     "call_transport": {
@@ -9,8 +9,9 @@
         "realtime_speech": {
             "enabled": true,
             "api_key": "$QWEN_API_KEY",
-            "model": "qwen-audio-3.1-realtime-plus",
-            "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+            "model": "fun-asr-realtime",
+            "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+            "max_sentence_silence": 800
         }
     },
     "llm_service": {

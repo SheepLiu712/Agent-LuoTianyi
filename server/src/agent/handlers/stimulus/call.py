@@ -78,7 +78,9 @@ class CallAnswerRequestedHandler:
 
 
 class CallStartedHandler:
-    def __init__(self, replies: ReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplyDelivery | None = None) -> None:
+    def __init__(
+        self, replies: ReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplyDelivery | None = None
+    ) -> None:
         self._replies = replies
         self._prepared_speech = prepared_speech
         self._reply = reply or ReplyDelivery()
@@ -181,7 +183,9 @@ class CallReplyRequestedHandler:
         if drafts is None:
             return _failed_report(request, plans)
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
-        return replace(_with_emitted(request, plans), consumed_pending_stimulus_ids=pending, retained_pending_stimulus_ids=())
+        return replace(
+            _with_emitted(request, plans), consumed_pending_stimulus_ids=pending, retained_pending_stimulus_ids=()
+        )
 
 
 class CallSilenceElapsedHandler:
@@ -335,7 +339,7 @@ async def _generate_reply(skill, prepared_speech, reply, scene, plans, request, 
         )
     except Exception as error:
         get_logger(__name__).warning(
-            "Call reply generation failed request_id={} error_type={}", request.request_id, type(error).__name__
+            "Call reply generation failed request_id=%s error_type=%s", request.request_id, type(error).__name__
         )
         if len(plans.accepted_ids) != accepted_before:
             raise
