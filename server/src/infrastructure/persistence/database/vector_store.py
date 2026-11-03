@@ -7,16 +7,19 @@
 import asyncio
 import os
 import threading
+import time
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
 from chromadb.config import Settings
 
 from src.infrastructure.models.llm.embedding import SiliconFlowEmbeddings
+from src.infrastructure.observability.retrieval_timing import record_retrieval_phase, retrieval_phase
 from src.utils.logger import get_logger
 
 # 单用户记录删除的分页大小：避免 n_results 上限造成的静默截断。
@@ -83,6 +86,10 @@ class VectorStore(ABC):
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档"""
         pass
+
+    async def embed_query(self, query: str) -> list[float]:
+        """生成可在本次召回的多个授权范围内复用的查询向量。"""
+        raise NotImplementedError("vector store does not support query embeddings")
 
     @abstractmethod
     def delete_documents(self, doc_ids: List[str]) -> bool:
@@ -169,6 +176,8 @@ class ChromaVectorStore(VectorStore):
                 ),
             )
 
+            self._embedding_function = embedding_function
+
             # 创建客户端
             self.client = chromadb.PersistentClient(
                 path=self.persist_directory, settings=Settings(anonymized_telemetry=False)
@@ -229,21 +238,46 @@ class ChromaVectorStore(VectorStore):
         )
         return list(ids)
 
+    async def embed_query(self, query: str) -> list[float]:
+        if self._closed:
+            raise RuntimeError("Vector store is closed")
+
+        def embed():
+            with retrieval_phase("embedding"):
+                return self._embedding_function.embed_query(query)
+
+        return await self._run_search_work(embed)
+
+    async def _run_search_work(self, work):
+        context = copy_context()
+        queued_at = time.perf_counter()
+
+        def run():
+            record_retrieval_phase("queue", queued_at)
+            return work()
+
+        return await asyncio.get_running_loop().run_in_executor(self._executor, context.run, run)
+
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档 (异步)"""
         try:
             if self._closed:
                 raise RuntimeError("Vector store is closed")
 
-            def _do_query():
-                return self.collection.query(
-                    query_texts=[query],
-                    n_results=k,
-                    where={"user_id": user_id} if "where" not in kwargs else kwargs.get("where"),
-                    **({"ids": kwargs["ids"]} if "ids" in kwargs else {}),
-                )
+            embedding = kwargs.get("query_embedding")
+            if embedding is None:
+                embedding = await self.embed_query(query)
 
-            results = await asyncio.get_event_loop().run_in_executor(self._executor, _do_query)
+            def _do_query():
+                with retrieval_phase("vector_search"):
+                    return self.collection.query(
+                        query_embeddings=[embedding],
+                        n_results=k,
+                        where={"user_id": user_id} if "where" not in kwargs else kwargs.get("where"),
+                        **({"ids": kwargs["ids"]} if "ids" in kwargs else {}),
+                    )
+
+            results = await self._run_search_work(_do_query)
 
             search_results = []
 

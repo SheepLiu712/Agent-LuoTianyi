@@ -54,6 +54,9 @@ class DeterministicLLMService:
 
 
 class DeterministicVectorStore:
+    async def embed_query(self, query):
+        return [1.0]
+
     def __init__(self) -> None:
         self.searches: list[tuple[str, str, int]] = []
         self.closed = False

@@ -1,29 +1,26 @@
 import json
 import os
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
-from src.domain.memory_record import MemoryRecord, MemoryType, MemoryVisibility
-from src.agent.skills.adapters.memory import AgentMemory
 import src.agent.skills.adapters.memory.writer as memory_write_module
+from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.adapters.memory.writer import MemoryWriter
+from src.domain.memory_record import MemoryRecord, MemoryType, MemoryVisibility
+from src.infrastructure.models.service import LLMService
 from src.infrastructure.persistence.database.database_service import DatabaseManager
 from src.infrastructure.persistence.database.vector_store import Document
 from src.utils.helpers import load_config
-from src.infrastructure.models.service import LLMService
 
 
 def service_for(models):
-    return SimpleNamespace(register_llm_module=lambda name, config: models[
-        "memory_writer" if ".extract." in name else "user_profile_updater"
-    ])
+    return SimpleNamespace(
+        register_llm_module=lambda name, config: models[
+            "memory_writer" if ".extract." in name else "user_profile_updater"
+        ]
+    )
 
 
 USER_ID = "memory-test-user"
@@ -58,6 +55,9 @@ class FakeMemoryWriterLogger:
 
 
 class InMemoryVectorStore:
+    async def embed_query(self, query):
+        return [1.0]
+
     """测试用向量库，记录写入文档并按关键字返回候选。"""
 
     def __init__(self):
@@ -129,8 +129,11 @@ class FakeMemoryStore:
         return memory_record.id
 
     def get_scoped_embedding_ids(self, owner, user_id, **kwargs):
-        return [key for key, record in self.embedding_to_record.items()
-                if record.owner_character_id == owner and record.subject_user_id == user_id]
+        return [
+            key
+            for key, record in self.embedding_to_record.items()
+            if record.owner_character_id == owner and record.subject_user_id == user_id
+        ]
 
     def get_agent_memory_records_by_embedding_ids(self, embedding_ids):
         return {
@@ -160,7 +163,7 @@ class FakeDatabaseManager:
 @pytest.fixture(scope="module", autouse=True)
 def server_cwd():
     old_cwd = os.getcwd()
-    os.chdir(server_root)
+    os.chdir(Path(__file__).resolve().parents[3])
     try:
         yield
     finally:
@@ -226,7 +229,10 @@ def real_llm_modules(request):
     config = load_config("config/config.json")
     llm_service = LLMService(config["llm_service"])
     skills = config["agent_runtime"]["skills"]
-    memory_cfg = {"memory_writer": skills["memory_write"], "user_profile": skills["cognitive_maintenance"]["user_profile"]}
+    memory_cfg = {
+        "memory_writer": skills["memory_write"],
+        "user_profile": skills["cognitive_maintenance"]["user_profile"],
+    }
     return {
         "memory_writer": llm_service.register_llm_module(
             "test_memory_writer",
@@ -292,7 +298,9 @@ async def test_search_memory_context_reads_canonical_record_from_real_database(
 
 
 @pytest.mark.asyncio
-async def test_write_user_and_event_memory_records_vector_and_canonical_rows(fake_memory, fake_database_manager, fake_vector_store):
+async def test_write_user_and_event_memory_records_vector_and_canonical_rows(
+    fake_memory, fake_database_manager, fake_vector_store
+):
     """直接写入用户记忆和事件记忆，并验证向量与正本都被写入。"""
     user_written = await fake_memory.write_user_memory(USER_ID, "用户喜欢喝乌龙茶")
     event_written = await fake_memory.write_event_memory(USER_ID, "今天一起聊了演唱会")
@@ -343,7 +351,7 @@ async def test_memory_writer_logs_raw_excerpt_when_json_parse_fails(monkeypatch)
 
     payload = await writer._extract_knowledge(
         history="",
-        current_dialogue="用户提到了\"∞\"发髻",
+        current_dialogue='用户提到了"∞"发髻',
         related_memories=[],
     )
 
@@ -433,7 +441,9 @@ async def test_write_topic_memories_with_fake_llm_does_not_write_without_memory(
 
 
 @pytest.mark.asyncio
-async def test_update_user_profile_with_fake_llm_updates_when_context_has_memory(memory_config, fake_database_manager, fake_vector_store):
+async def test_update_user_profile_with_fake_llm_updates_when_context_has_memory(
+    memory_config, fake_database_manager, fake_vector_store
+):
     """伪装 LLM：长期上下文包含画像变化时，应更新用户画像。"""
 
     def profile_responder(kwargs):
@@ -465,7 +475,9 @@ async def test_update_user_profile_with_fake_llm_updates_when_context_has_memory
 
 
 @pytest.mark.asyncio
-async def test_update_user_profile_with_fake_llm_keeps_profile_without_memory(memory_config, fake_database_manager, fake_vector_store):
+async def test_update_user_profile_with_fake_llm_keeps_profile_without_memory(
+    memory_config, fake_database_manager, fake_vector_store
+):
     """伪装 LLM：长期上下文没有画像变化时，不应写入用户画像。"""
     fake_database_manager.descriptions[USER_ID] = "用户喜欢音乐。"
     llm_modules = {
@@ -492,7 +504,9 @@ async def test_update_user_profile_with_fake_llm_keeps_profile_without_memory(me
 
 @pytest.mark.real_llm
 @pytest.mark.asyncio
-async def test_write_topic_memories_with_real_llm_optional(memory_config, real_llm_modules, fake_database_manager, fake_vector_store):
+async def test_write_topic_memories_with_real_llm_optional(
+    memory_config, real_llm_modules, fake_database_manager, fake_vector_store
+):
     """真实 LLM：明显事实应能触发记忆写入；默认跳过。"""
     memory = AgentMemory(
         memory_config,
@@ -521,7 +535,9 @@ async def test_write_topic_memories_with_real_llm_optional(memory_config, real_l
 
 @pytest.mark.real_llm
 @pytest.mark.asyncio
-async def test_update_user_profile_with_real_llm_optional(memory_config, real_llm_modules, fake_database_manager, fake_vector_store):
+async def test_update_user_profile_with_real_llm_optional(
+    memory_config, real_llm_modules, fake_database_manager, fake_vector_store
+):
     """真实 LLM：明显长期上下文应能更新画像；默认跳过。"""
     memory = AgentMemory(
         memory_config,

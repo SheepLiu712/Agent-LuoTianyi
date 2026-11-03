@@ -117,6 +117,7 @@ async def test_production_vector_adapter_does_not_turn_backend_failure_into_empt
     store = object.__new__(ChromaVectorStore)
     store._closed = False
     store.logger = logging.getLogger(__name__)
+    store._embedding_function = SimpleNamespace(embed_query=lambda query: [1.0])
     with ThreadPoolExecutor(max_workers=1) as executor:
         store._executor = executor
         store.collection = SimpleNamespace(query=lambda **kwargs: {"ids": []})
@@ -224,3 +225,66 @@ async def test_yesterday_citywalk_empty_and_mixed_queries(setup, tmp_path):
     assert all(query == "桂花糕" for query in calls)
     assert any("梧桐落叶" in text for text in result.render_for_prompt())
     assert any("桂花糕" in text for text in result.render_for_prompt())
+
+
+async def test_real_vector_search_reuses_embedding_and_reports_retrieval_details(setup, tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from src.infrastructure.models.llm.embedding import SiliconFlowEmbeddings
+    from src.infrastructure.observability.call_reply_timing import CallReplyTiming, reply_timing_scope
+
+    calls = []
+
+    def embed(self, text):
+        calls.append(text)
+        return [1.0, 0.0, 0.0]
+
+    monkeypatch.setattr(SiliconFlowEmbeddings, "_embed", embed)
+    own = await setup.skill.commit_fact(invocation(), fact=fact("own", content="用户喜欢音乐"))
+    await setup.skill.commit_fact(invocation("miku"), fact=fact("other", content="其他角色的记忆"))
+    store = ChromaVectorStore({"vector_store_path": str(tmp_path / "vectors"), "embedding_model": {"api_key": "test"}})
+    store.collection.add(
+        ids=list(setup.vectors.documents),
+        documents=[d.get_content() for d in setup.vectors.documents.values()],
+        metadatas=[d.get_metadata() for d in setup.vectors.documents.values()],
+    )
+    reader = setup.reader()
+    reader.vector_store = store
+    rows = []
+    timing = CallReplyTiming(
+        call_id=uuid4(),
+        request_id="retrieval-test",
+        turn_seq=1,
+        recognized_at=0,
+        speech_ended_at=None,
+        sink=lambda **row: rows.append(row),
+        wall_clock=lambda: datetime.now(timezone.utc),
+    )
+    calls.clear()
+    try:
+        with reply_timing_scope(timing):
+            result = await reader.search_memory_context_for_topic("u", ["音乐"], similarity_threshold=0)
+        assert len(calls) == 1
+        assert {h.memory_record_id for h in result.hits} == set(own.memory_ids)
+        details = {r["phase"]: r for r in rows if r["phase"].startswith("retrieval.")}
+        assert details["retrieval.embedding"]["metadata"]["operation_count"] == 1
+        assert details["retrieval.vector_search"]["metadata"]["operation_count"] == 2
+        assert details["retrieval.queue"]["metadata"]["operation_count"] == 3
+        assert set(details) == {
+            "retrieval." + p
+            for p in ("authorization", "queue", "embedding", "vector_search", "hydration", "materialization")
+        }
+
+        def unavailable(*args, **kwargs):
+            raise RuntimeError("向量化失败")
+
+        monkeypatch.setattr(store._embedding_function, "embed_query", unavailable)
+        rows.clear()
+        with reply_timing_scope(timing), pytest.raises(RuntimeError, match="向量化失败"):
+            await reader.search_memory_context_for_topic("u", ["音乐"])
+        failed = next(r for r in rows if r["phase"] == "retrieval.embedding")
+        assert failed["status"] == "error"
+        assert not any(r["phase"] == "retrieval.vector_search" for r in rows)
+    finally:
+        store.close()

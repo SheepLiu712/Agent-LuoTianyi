@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 from src.domain import MemoryContext, MemoryHit
 from src.domain.agent.maintenance import MaintenanceCandidate
 from src.domain.memory_record import MemoryType, MemoryVisibility
+from src.infrastructure.observability.retrieval_timing import measure_retrieval, retrieval_phase
 from src.infrastructure.persistence.database.vector_store import VectorStore
 
 from .profile_updater import UserProfileUpdater
@@ -90,6 +91,7 @@ class AgentMemory:
             )
         )
 
+    @measure_retrieval
     async def search_memory_context_for_topic(
         self,
         user_id: str,
@@ -108,26 +110,31 @@ class AgentMemory:
         if not queries:
             return MemoryContext()
 
-        allowed_ids = await asyncio.to_thread(
-            self.memory_store.get_scoped_embedding_ids,
-            self.owner_character_id,
-            user_id,
-            include_user=include_user,
-            include_character=include_character,
-            legacy_ids=self._legacy_character_ids(),
-        )
+        with retrieval_phase("authorization"):
+            allowed_ids = await asyncio.to_thread(
+                self.memory_store.get_scoped_embedding_ids,
+                self.owner_character_id,
+                user_id,
+                include_user=include_user,
+                include_character=include_character,
+                legacy_ids=self._legacy_character_ids(),
+            )
+
         candidate_hits = await self._search_candidates(
             user_id, queries, similarity_threshold, k, allowed_ids, include_user
         )
         vector_ids = [vector_id for _, _, vector_id, _, _ in candidate_hits if vector_id]
-        records_by_vector_id = await asyncio.to_thread(
-            self.memory_store.get_agent_memory_records_by_embedding_ids,
-            vector_ids,
-        )
-        scored_hits = self._materialize_hits(
-            candidate_hits, records_by_vector_id, user_id, include_user, include_character
-        )
-        return MemoryContext(self._top_distinct_hits(scored_hits, k))
+        with retrieval_phase("hydration"):
+            records_by_vector_id = await asyncio.to_thread(
+                self.memory_store.get_agent_memory_records_by_embedding_ids,
+                vector_ids,
+            )
+
+        with retrieval_phase("materialization"):
+            scored_hits = self._materialize_hits(
+                candidate_hits, records_by_vector_id, user_id, include_user, include_character
+            )
+            return MemoryContext(self._top_distinct_hits(scored_hits, k))
 
     async def _search_candidates(
         self,
@@ -143,9 +150,18 @@ class AgentMemory:
             q = (query or "").strip()
             if not q:
                 continue
-            results = await self.vector_store.search(user_id, q, k=max(1, k)) if include_user else []
+            if not include_user and not allowed_ids:
+                continue
+            embedding = await self.vector_store.embed_query(q)
+            results = (
+                await self.vector_store.search(user_id, q, k=max(1, k), query_embedding=embedding)
+                if include_user
+                else []
+            )
             if allowed_ids:
-                results += await self.vector_store.search(user_id, q, k=max(1, k), ids=allowed_ids, where=None)
+                results += await self.vector_store.search(
+                    user_id, q, k=max(1, k), ids=allowed_ids, where=None, query_embedding=embedding
+                )
             for doc, score in results:
                 if score < similarity_threshold:
                     continue
