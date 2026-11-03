@@ -42,7 +42,7 @@ async def run_server(
 
 
 def main() -> None:
-    """按配置选择启动模式和监听端口，环境变量允许显式覆盖监听地址。"""
+    """仅从配置读取启动模式和端口；SERVER_HOST 可覆盖监听主机地址。"""
     try:
         is_debug = config["is_debug"]
         if type(is_debug) is not bool:
