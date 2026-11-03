@@ -199,3 +199,30 @@ it('smooths/clamps metering and restores send after moving back from cancel zone
   await act(async () => { state.pressMove({ nativeEvent: { pageY: 121 } } as GestureResponderEvent); });
   expect(state.captureState).toBe('Recording');
 });
+
+it('取消区继续累计时间和音量，滑回提交一次，下一次录音从零开始', async () => {
+  jest.useFakeTimers({ now: 1000 });
+  try {
+    await mount();
+    await act(async () => { await state.pressIn(event); });
+    const onMetering = options.recorder.start.mock.calls[0][0].onMetering;
+    await act(async () => { await jest.advanceTimersByTimeAsync(2000); onMetering(0); });
+    await act(async () => { state.pressMove({ nativeEvent: { pageY: 121 } } as GestureResponderEvent); });
+    expect(state.captureState).toBe('Recording');
+    await act(async () => { state.pressMove({ nativeEvent: { pageY: 120 } } as GestureResponderEvent); });
+    expect(state.captureState).toBe('CancelZone');
+    await act(async () => { await jest.advanceTimersByTimeAsync(3000); onMetering(0); });
+    expect(state.elapsedMs).toBe(5000);
+    expect(state.smoothedMeter).toBeCloseTo(0.51);
+    await act(async () => { state.pressMove({ nativeEvent: { pageY: 121 } } as GestureResponderEvent); });
+    expect(state.elapsedMs).toBe(5000);
+    expect(state.smoothedMeter).toBeCloseTo(0.51);
+    await act(async () => { await state.pressOut(); await state.pressOut(); });
+    expect(options.onRecordingCommitted).toHaveBeenCalledTimes(1);
+    expect(state.captureState).toBe('Uploading');
+    await act(async () => { state.onUploadStatus('one', 'submitted'); });
+    await act(async () => { await state.pressIn(event); });
+    expect(state.elapsedMs).toBe(0);
+    expect(state.smoothedMeter).toBe(0);
+  } finally { jest.useRealTimers(); }
+});

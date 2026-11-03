@@ -531,7 +531,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
         </View>
       </View>
 
-      {voiceInput.captureState === 'Recording' || voiceInput.captureState === 'CancelZone' ? <VoiceRecordingOverlay elapsedMs={voiceInput.elapsedMs} cancelZone={voiceInput.isCancelZone} meter={voiceInput.smoothedMeter} theme={theme} /> : null}
+      {voiceInput.captureState === 'Recording' || voiceInput.captureState === 'CancelZone' ? <VoiceRecordingOverlay elapsedMs={voiceInput.elapsedMs} cancelZone={voiceInput.isCancelZone} meter={voiceInput.smoothedMeter} theme={theme} topInset={insets.top} bottomInset={insets.bottom} /> : null}
 
       <Animated.View
         pointerEvents={drawerOpen ? 'auto' : 'none'}
