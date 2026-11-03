@@ -21,16 +21,7 @@ class SkillsConfig:
 
     @classmethod
     def from_runtime(cls, runtime: dict[str, Any]) -> "SkillsConfig":
-        obsolete = ("agent", "prepared_speech", "reply_composition")
-        for key in obsolete:
-            if key in runtime:
-                raise ValueError(f"agent_runtime.{key} 已停用，请迁移到 agent_runtime.skills")
-        for character_id, profile in runtime.get("character_registry", {}).get("characters", {}).items():
-            if "touch" in profile.get("reflex", {}):
-                raise ValueError(
-                    f"agent_runtime.character_registry.characters.{character_id}.reflex.touch 已停用，"
-                    "请迁移到 agent_runtime.skills.touch_reaction.characters"
-                )
+        cls._reject_runtime_legacy(runtime)
         values = runtime.get("skills")
         if not isinstance(values, dict):
             raise TypeError("agent_runtime.skills 必须是字典")
@@ -48,11 +39,26 @@ class SkillsConfig:
         for skill, operation in (
             ("dynamic", "dynamic_composer"),
             ("dynamic", "dynamic_replier"),
-            ("diary", "diary_llm"),
+            ("dynamic", "diary_composer"),
         ):
             if operation in values.get(skill, {}):
                 cls.require_model(values[skill][operation], f"agent_runtime.skills.{skill}.{operation}")
+        if "diary_llm" in values.get("diary", {}):
+            raise ValueError("agent_runtime.skills.diary.diary_llm 请迁移到 skills.dynamic.diary_composer")
         return cls(deepcopy(values))
+
+    @staticmethod
+    def _reject_runtime_legacy(runtime):
+        obsolete = ("agent", "prepared_speech", "reply_composition")
+        for key in obsolete:
+            if key in runtime:
+                raise ValueError(f"agent_runtime.{key} 已停用，请迁移到 agent_runtime.skills")
+        for character_id, profile in runtime.get("character_registry", {}).get("characters", {}).items():
+            if "touch" in profile.get("reflex", {}):
+                raise ValueError(
+                    f"agent_runtime.character_registry.characters.{character_id}.reflex.touch 已停用，"
+                    "请迁移到 agent_runtime.skills.touch_reaction.characters"
+                )
 
     @staticmethod
     def require_model(config: dict[str, Any], path: str) -> dict[str, Any]:

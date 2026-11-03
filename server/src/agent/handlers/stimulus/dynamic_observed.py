@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from src.agent.skills.expression.dynamic import DynamicGenerationError, DynamicSkill, DynamicThread
 from src.agent.skills.invocation import handling_invocation
 from src.agent.skills.memory_write import MemoryEvent, MemoryScope, MemoryWriteSkill
 from src.utils.logger import get_logger
@@ -23,7 +23,7 @@ class DynamicObservedHandler:
     def __init__(
         self,
         character_id: str,
-        reply: DynamicReplySkill,
+        reply: DynamicSkill,
         memory: MemoryWriteSkill,
     ) -> None:
         self._character_id = character_id
@@ -42,40 +42,23 @@ class DynamicObservedHandler:
             raise TypeError("DynamicObservedHandler 只处理 DynamicObserved")
         invocation = handling_invocation(request, plans.context)
         await self._write_memory(invocation, stimulus)
-        if self._reply.already_replied(invocation, stimulus):
-            self._logger.info(
-                "线程中已存在角色回复，不再重复发布 dynamic=%s target=%s",
-                stimulus.dynamic_id,
-                stimulus.target_message_id,
+        try:
+            decision = await self._reply.generate_reply(
+                invocation,
+                thread=DynamicThread(stimulus.dynamic_id, stimulus.messages),
+                target_id=stimulus.target_message_id,
             )
-            return self._report(request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,))
-        if not self._reply.available():
-            self._logger.warning("动态回复模型不可用 dynamic=%s", stimulus.dynamic_id)
+        except DynamicGenerationError:
             return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
-        item = self._reply.build_item(invocation, stimulus)
-        is_post = stimulus.target_kind is d.DynamicTargetKind.POST
-        body = await self._reply.compose_for_post(invocation, item) if is_post else ""
-        if not is_post:
-            should_reply, body = await self._reply.compose_for_comment(invocation, item)
-        else:
-            should_reply = bool(body.strip())
-        if not should_reply or not body.strip():
-            self._logger.info(
-                "明确忽略本次动态互动 dynamic=%s target=%s",
-                stimulus.dynamic_id,
-                stimulus.target_message_id,
-            )
+        if decision.draft is None:
+            self._logger.info("明确忽略动态互动 target=%s reason=%s", stimulus.target_message_id, decision.reason)
             return self._report(request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,))
+        draft = decision.draft
         action = d.ReplyDynamic(
             action_id=str(uuid4()),
-            body=body,
-            target=d.DynamicReplyTarget(
-                dynamic_id=stimulus.dynamic_id,
-                parent_comment_id=(
-                    stimulus.target_message_id if stimulus.target_kind is d.DynamicTargetKind.COMMENT else None
-                ),
-            ),
-            owner_user_id=self._reply.target_author_id(stimulus),
+            body=draft.body,
+            target=d.DynamicReplyTarget(dynamic_id=draft.dynamic_id, parent_comment_id=draft.parent_comment_id),
+            owner_user_id=draft.owner_user_id,
         )
         receipt = await plans.emit(
             ActionPlanDraft(

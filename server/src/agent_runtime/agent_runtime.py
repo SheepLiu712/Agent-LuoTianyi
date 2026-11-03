@@ -153,7 +153,7 @@ class AgentRuntime:
     def _build_agents(self, first_login_names: tuple[str, ...]) -> dict[str, Agent]:
         """完整构造所有角色门面后一次性发布，避免暴露半装配状态。"""
         world_activity = WorldActivityHandler(
-            branches={CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.skills.dynamic_publishing)}
+            branches={CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.skills.dynamic)}
         )
         agents: dict[str, Agent] = {}
         for character_id in self.character_ids:
@@ -246,20 +246,20 @@ class AgentRuntime:
                 StimulusKind.DYNAMIC_OBSERVED,
                 DynamicObservedHandler(
                     character_id,
-                    self.skills.dynamic_reply,
+                    self.skills.dynamic,
                     self.skills.memory_write,
                 ),
             ),
             (
                 StimulusKind.DIARY_PLANNING_DUE,
-                DiaryPlanningDueHandler(self.skills.diary_writing),
+                DiaryPlanningDueHandler(self.skills.diary),
             ),
             (
                 StimulusKind.SONG_LEARNED,
                 SongLearnedHandler(
                     character_id,
                     self.skills.memory_write,
-                    self.skills.dynamic_publishing,
+                    self.skills.dynamic,
                     self.skills.memory_retrieval,
                 ),
             ),
@@ -299,16 +299,16 @@ class AgentRuntime:
                 ),
                 (ActionKind.SING, SingHandler(character_id, self.skills.singing)),
                 (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
-                (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(character_id, self.skills.dynamic_publishing)),
+                (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(character_id, self.skills.dynamic)),
                 (
                     ActionKind.REQUEST_SONG_LEARNING,
                     RequestSongLearningHandler(character_id, self.skills.song_learning_tasks),
                 ),
                 (
                     ActionKind.REPLY_DYNAMIC,
-                    ReplyDynamicHandler(character_id, self.skills.dynamic_reply),
+                    ReplyDynamicHandler(character_id, self.skills.dynamic),
                 ),
-                (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary_writing)),
+                (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary)),
                 (
                     ActionKind.COGNITIVE_MAINTENANCE,
                     CognitiveMaintenanceActionHandler(character_id, self.skills.cognitive_maintenance),

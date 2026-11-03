@@ -11,7 +11,7 @@ from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from support.dynamic_skill import make_dynamic
 
 CHARACTER_ID = "luotianyi"
 USER_ID = "user-1"
@@ -159,7 +159,7 @@ def _request(fact: d.DynamicObserved) -> d.HandleStimulusRequest:
 
 def _handler(replier: FakeReplier, *, memory: FakeMemory | None = None, publish_ok: bool = True):
     dynamics = FakeDynamics(replier, publish_ok=publish_ok)
-    reply = DynamicReplySkill(
+    reply = make_dynamic(
         dynamics,
         {CHARACTER_ID: CharacterNarrative(name="洛天依", persona="", speaking_style="")},
     )
@@ -194,7 +194,6 @@ def test_post_observation_delivers_reply_and_publishes_comment():
     assert action.target.parent_comment_id is None
     assert action.owner_user_id == USER_ID
     assert action.body == REPLY_BODY
-    assert replier.post_items[0]["content"].startswith("今天其实有点紧张")
     assert memory.calls[0]["user_id"] == USER_ID
 
     first_plan = sink.plans[0]

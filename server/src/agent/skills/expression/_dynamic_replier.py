@@ -50,7 +50,7 @@ class DynamicReplier:
             item: 动态条目字典，包含 username, user_description, preferences, content 等字段
 
         Returns:
-            回复文本；LLM 不可用时返回兜底文案
+            回复文本；模型不可用或返回无效正文时抛出错误
         """
         message_list, target_message = self._build_message_context(
             dynamic=item,
@@ -72,7 +72,7 @@ class DynamicReplier:
         reply = str(decision.get("reply") or "").strip()
         if reply:
             return reply
-        return "我认真看完啦。谢谢你愿意和我分享这些，之后如果你还想继续说，我会认真听着。"
+        raise ValueError("动态原帖回复缺少正文")
 
     async def generate_reply_for_comment(self, item: dict[str, Any], *, character_name: str) -> dict[str, Any]:
         """为动态评论生成是否回复的判断及回复文本。
@@ -103,7 +103,7 @@ class DynamicReplier:
         reply = str(decision.get("reply") or "").strip()
         should_reply = bool(decision.get("should_reply"))
         if should_reply and not reply:
-            reply = "我看到你的补充啦，这件事我会记在心里。"
+            raise ValueError("动态评论回复缺少正文")
         return {"should_reply": should_reply and bool(reply), "reply": reply}
 
     # ── 内部方法 ───────────────────────────────────────────
@@ -121,7 +121,7 @@ class DynamicReplier:
         target_message: str,
     ) -> dict[str, Any]:
         if self._reply_llm is None:
-            return {"should_reply": must_reply, "reply": "" if not must_reply else "谢谢你的分享~"}
+            raise RuntimeError("动态回复模型未配置")
         response = await self._reply_llm.generate_response(
             character_name=character_name,
             user_name=user_name,
@@ -156,6 +156,8 @@ class DynamicReplier:
         data = json.loads(raw)
         if not isinstance(data, dict):
             raise ValueError("dynamic reply payload must be a JSON object")
+        if type(data.get("should_reply")) is not bool or not isinstance(data.get("reply"), str):
+            raise ValueError("dynamic reply requires boolean should_reply and text reply")
         should_reply = bool(data.get("should_reply"))
         reply = str(data.get("reply") or "").strip()
         if must_reply:

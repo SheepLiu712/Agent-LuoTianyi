@@ -11,7 +11,7 @@ from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.memory_write import MemoryWriteResult, MemoryWriteStatus
 from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from support.dynamic_skill import make_dynamic
 from src.agent.skills.expression.song_learning import SongLearningTasks
 from support.skill_support import invocation
 
@@ -124,7 +124,7 @@ def handler(memory, dynamics, singing=None):
     return SongLearnedHandler(
         "luotianyi",
         memory,
-        DynamicPublishingSkill(
+        make_dynamic(
             dynamics,
             {"luotianyi": CharacterNarrative(name="洛天依", persona="", speaking_style="")},
         ),

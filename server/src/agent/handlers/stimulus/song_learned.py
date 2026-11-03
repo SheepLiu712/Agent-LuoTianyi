@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from src.agent.skills.expression.dynamic import DynamicGenerationError, DynamicSkill, DynamicWritingRequest
 from src.agent.skills.invocation import handling_invocation
 from src.agent.skills.memory_retrieval import MemoryRetrievalSkill
 from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill, MemoryWriteStatus
@@ -26,7 +26,7 @@ class SongLearnedHandler:
         self,
         character_id: str,
         experience: MemoryWriteSkill,
-        publishing: DynamicPublishingSkill,
+        publishing: DynamicSkill,
         retrieval: MemoryRetrievalSkill,
     ) -> None:
         self._character_id = character_id
@@ -45,18 +45,24 @@ class SongLearnedHandler:
         song = await self._retrieval.get_song(invocation, song_id=stimulus.song_id)
         segment_description = song.segments[0] if song.segments else ""
         lyrics = song.lyrics
-        body = await self._publishing.compose(
-            invocation,
-            dynamic_type=SONG_LEARNED_SOURCE_TYPE,
-            instruction=SONG_LEARNED_INSTRUCTION,
-            structured_context="\n".join(
-                (
-                    f"新学会的歌曲：{stimulus.song_id}",
-                    f"可唱唱段：{segment_description or '-'}",
-                    f"唱段歌词：{lyrics or '-'}",
-                )
-            ),
-        )
+        try:
+            draft = await self._publishing.generate(
+                invocation,
+                request=DynamicWritingRequest(
+                    kind=SONG_LEARNED_SOURCE_TYPE,
+                    instruction=SONG_LEARNED_INSTRUCTION,
+                    materials="\n".join(
+                        (
+                            f"新学会的歌曲：{stimulus.song_id}",
+                            f"可唱唱段：{segment_description or '-'}",
+                            f"唱段歌词：{lyrics or '-'}",
+                        )
+                    ),
+                ),
+            )
+        except DynamicGenerationError:
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
+        body = draft.body
         if not body.strip():
             self._logger.error("学歌动态正文生成为空，未交付计划 song=%s", stimulus.song_id)
             return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())

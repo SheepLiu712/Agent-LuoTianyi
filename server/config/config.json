@@ -304,10 +304,8 @@
                         },
                         "prompt_name": "dynamic_reply_prompt"
                     }
-                }
-            },
-            "diary": {
-                "diary_llm": {
+                },
+                "diary_composer": {
                     "llm_module": {
                         "llm": {
                             "name": "dsv4-flash",
@@ -320,6 +318,7 @@
                     }
                 }
             },
+            "diary": {},
             "memory_write": {
                 "recent_update_path": "data/memory/context/recent_update.json",
                 "llm_module": {

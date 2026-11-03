@@ -16,11 +16,8 @@ from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, Cal
 from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
-from src.agent.skills.expression._diary_operations import DiaryOperations
-from src.agent.skills.expression._dynamic_operations import DynamicOperations
-from src.agent.skills.expression.diary_writing import DiaryWritingSkill
-from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
-from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from src.agent.skills.expression.diary import DiarySkill
+from src.agent.skills.expression.dynamic import DynamicSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.song_learning import SongLearningTasks
@@ -67,13 +64,6 @@ class SharedSkills:
         prepared_speech = PreparedSpeechCatalog(config.get("prepared_speech").get("characters", {}))
         touch_configs = config.get("touch_reaction").get("characters", {})
         # 先完成所有可能失败的配置与模型装配，最后创建拥有进程的语音技能。
-        dynamics = DynamicOperations(config.get("dynamic"))
-        dynamics.create_llm_module(llm_service)
-        dynamics.wire_dependencies(database_manager=database_manager)
-        diary = DiaryOperations(config.get("diary"))
-        diary.create_llm_module(llm_service)
-        diary.wire_dependencies(database_manager=database_manager, dynamic_operations=dynamics)
-
         self.singing = SingingSkill(config.get("singing"), llm_service)
         self.conversation_compaction = ConversationCompactionSkill(
             config.get("cognitive_maintenance").get("conversation_compaction", {}),
@@ -129,9 +119,10 @@ class SharedSkills:
             characters=characters,
         )
 
-        self.dynamic_publishing = DynamicPublishingSkill(dynamics, narratives)
-        self.dynamic_reply = DynamicReplySkill(dynamics, narratives)
-        self.diary_writing = DiaryWritingSkill(diary, dynamics, narratives)
+        self.dynamic = DynamicSkill(
+            config.get("dynamic"), llm_service=llm_service, database=database_manager, narratives=narratives
+        )
+        self.diary = DiarySkill(config.get("diary"), dynamic=self.dynamic, database=database_manager)
         self.song_learning_tasks = SongLearningTasks(self.singing.backend)
         self.prepared_speech = prepared_speech
         self.touch_reaction = TouchReactionSkill(touch_configs, prepared_speech)

@@ -114,7 +114,7 @@ def minimal_config(tmp_path: Path) -> dict:
                     }
                 },
                 "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
-                "diary": {"diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
+                "dynamic": {"diary_composer": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
             },
             "character_registry": {
                 "characters": {

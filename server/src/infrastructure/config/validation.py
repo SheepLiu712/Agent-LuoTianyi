@@ -47,7 +47,7 @@ class RuntimeConfigValidator:
         "agent.memory_writer": "agent_runtime.skills.memory_write.llm_module",
         "agent.user_profile": "agent_runtime.skills.cognitive_maintenance.user_profile.llm_module",
         "skill.singing.song_emotion_tagger": "agent_runtime.skills.singing.song_emotion_tagger",
-        "skill.diary": "agent_runtime.skills.diary.diary_llm.llm_module",
+        "skill.diary": "agent_runtime.skills.dynamic.diary_composer.llm_module",
     }
 
     CORE_VLM_MODULE_PATHS = {

@@ -14,7 +14,7 @@ from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.memory_write import MemoryWriteResult, MemoryWriteStatus
 from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from support.dynamic_skill import make_dynamic
 from src.agent.skills.expression.song_learning import SongLearningTasks
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.infrastructure.persistence.database.database_service import DatabaseManager
@@ -40,7 +40,7 @@ NARRATIVES = {"luotianyi": CharacterNarrative(name="洛天依", persona="", spea
 
 
 def _publishing(dynamic_operations):
-    return DynamicPublishingSkill(dynamic_operations, NARRATIVES)
+    return make_dynamic(dynamic_operations, NARRATIVES)
 
 
 def _emitter(request, sink):
@@ -346,37 +346,16 @@ def test_learned_song_dynamic_is_idempotent_by_character_and_song(
     user = _register_and_login(db_manager, "songuser2", "INVITE6B")
     dynamic_operations = DynamicOperations()
     dynamic_operations.wire_dependencies(database_manager=db_manager)
-    compose_calls = []
-
-    async def fake_compose(**kwargs):
-        compose_calls.append(kwargs["song_name"])
-        return f"学会了《{kwargs['song_name']}》"
-
-    dynamic_operations.compose_learned_song_dynamic_content = fake_compose
-
-    first = asyncio.run(
-        dynamic_operations.publish_learned_song_dynamic(
-            character_id="luotianyi",
-            character_name="洛天依",
-            character_persona="",
-            speaking_style="",
-            song_name="告死鸟",
-        )
-    )
-    second = asyncio.run(
-        dynamic_operations.publish_learned_song_dynamic(
-            character_id="luotianyi",
-            character_name="洛天依",
-            character_persona="",
-            speaking_style="",
-            song_name="告死鸟",
-        )
-    )
-
-    assert first["dynamic_id"] == second["dynamic_id"]
-    assert first["created"] is True
-    assert second["created"] is False
-    assert compose_calls == ["告死鸟"]
+    from support.skill_support import invocation
+    from src.agent.skills.expression.dynamic import DynamicDraft, DynamicPublication
+    publishing = _publishing(dynamic_operations)
+    publication = DynamicPublication(d.DynamicSource(source_type="song_learned", source_id="告死鸟"),
+                                     d.Visibility.GLOBAL, None)
+    first = asyncio.run(publishing.publish(invocation(user_id=None), draft=DynamicDraft("学会了《告死鸟》"), publication=publication))
+    second = asyncio.run(publishing.publish(invocation(user_id=None), draft=DynamicDraft("相同来源的新草稿"), publication=publication))
+    assert first.identifier == second.identifier
+    assert first.created is True
+    assert second.created is False
     feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
     learned_items = [
         item for item in feed["items"] if item["source_type"] == "song_learned" and item["source_id"] == "告死鸟"
