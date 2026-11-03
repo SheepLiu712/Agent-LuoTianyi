@@ -1,7 +1,7 @@
 {
   "name": "agent-luotianyi-app",
   "main": "expo-router/entry",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "packageManager": "npm@10.9.9",
   "scripts": {
     "start": "expo start",

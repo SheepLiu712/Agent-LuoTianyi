@@ -312,6 +312,9 @@ function settleInitialize(operation: Promise<boolean>, timeoutMs: number): Promi
 }
 
 export async function requestCallMicrophonePermission(): Promise<'granted' | 'denied' | 'permanently_denied'> {
+  const current = await Audio.getPermissionsAsync();
+  if (current.granted) return 'granted';
+  if (current.canAskAgain === false) return 'permanently_denied';
   const result = await Audio.requestPermissionsAsync();
   if (result.granted) return 'granted';
   return result.canAskAgain === false ? 'permanently_denied' : 'denied';

@@ -40,7 +40,7 @@ import { useCallSession } from '../hooks/useCallSession';
 import { CallScreen } from '../components/call/CallScreen';
 import { CallFailureBanner } from '../components/call/CallFailureBanner';
 import { requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
-import { ExpoCallRingtone } from '../utils/call_session/ringtone';
+import { NativeCallRingtone } from '../utils/call_session/ringtone';
 import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
 import { createCallMouthBridge } from '../utils/call_audio/playback_progress';
 
@@ -88,7 +88,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const callSwitchRef = useRef<{ prepare(clientRequestId: string, characterId: string): Promise<void> }>({
     prepare: async () => { throw new Error('CHAT_TRANSPORT_UNAVAILABLE'); },
   });
-  const ringtone = useMemo(() => new ExpoCallRingtone(), []);
+  const ringtone = useMemo(() => new NativeCallRingtone(), []);
   const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
   const live2dAssetRoot = 'file:///android_asset/public/';
   const live2dRoot = __DEV__ ? `http://${debuggerHost}/` : live2dAssetRoot;
@@ -143,6 +143,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     onCleanupError: handleCallCleanupError,
   });
   callHangupRef.current = call.hangup;
+  const isCallPresentation = call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING';
+  useEffect(() => {
+    if (live2dReady) webviewRef.current?.injectJavaScript(`window.setPresentationMode('${isCallPresentation ? 'call' : 'chat'}'); true;`);
+  }, [isCallPresentation, live2dReady]);
 
   useEffect(() => () => ringtone.stop(), [ringtone]);
 
@@ -392,7 +396,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
         <Image
           source={require('../assets/live2d/backgrounds/bg2.jpg')}
-          style={[StyleSheet.absoluteFillObject, styles.backgroundImage]}
+          style={[StyleSheet.absoluteFillObject, styles.backgroundImage, isCallPresentation && styles.callBackgroundImage]}
           resizeMode="cover"
         />
         <WebView
@@ -429,9 +433,9 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         ) : null}
 
-        <TouchableOpacity style={[styles.menuButton, { backgroundColor: theme.menuButton }]} onPress={openDrawer} activeOpacity={0.75}>
+        {!isCallPresentation ? <TouchableOpacity style={[styles.menuButton, { backgroundColor: theme.menuButton }]} onPress={openDrawer} activeOpacity={0.75}>
           <Image source={require('../assets/images/menu.png')} style={[styles.menuIcon, { tintColor: theme.text }]} />
-        </TouchableOpacity>
+        </TouchableOpacity> : null}
 
         {thinking ? (
           <View style={styles.thinkingBubble}>
@@ -638,6 +642,9 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     transform: [{ scale: 1.1 }, { translateX: 0 }, { translateY: 0 }],
+  },
+  callBackgroundImage: {
+    transform: [{ scale: 1 }],
   },
   live2dFixedLayer: {
     position: 'absolute',

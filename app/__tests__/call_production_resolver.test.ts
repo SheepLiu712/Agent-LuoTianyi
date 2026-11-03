@@ -1,7 +1,8 @@
-import { NativeCallOwnership, ProductionCallResolver } from '../utils/call_session/production_resolver';
+import { NativeCallOwnership, ProductionCallResolver, requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
+import { Audio } from 'expo-av';
 import { auth } from '../components/auth';
 
-jest.mock('expo-av', () => ({ Audio: { requestPermissionsAsync: jest.fn() } }));
+jest.mock('expo-av', () => ({ Audio: { getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn() } }));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { executionEnvironment: 'standalone' } }));
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('../utils/call_audio/native_call_audio', () => {
@@ -41,6 +42,21 @@ class Socket {
 }
 
 describe('production call resolver', () => {
+  it('does not reopen the permission activity when microphone access is already granted', async () => {
+    (Audio.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+    await expect(requestCallMicrophonePermission()).resolves.toBe('granted');
+    expect(Audio.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('requests missing permission and preserves permanent denial', async () => {
+    (Audio.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: true });
+    (Audio.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+    await expect(requestCallMicrophonePermission()).resolves.toBe('granted');
+    expect(Audio.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+    (Audio.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: false });
+    await expect(requestCallMicrophonePermission()).resolves.toBe('permanently_denied');
+    expect(Audio.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
   it('releases native ownership when creating the native adapter throws', async () => {
     const ownership = new NativeCallOwnership();
     const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();

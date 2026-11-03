@@ -1,85 +1,30 @@
-import { ExpoCallRingtone } from '../utils/call_session/ringtone';
+import { NativeCallRingtone } from '../utils/call_session/ringtone';
 
-const createAsync = jest.fn();
-jest.mock('expo-av', () => ({ Audio: { Sound: { createAsync: (...args: unknown[]) => createAsync(...args) } } }));
+const native = { startRingtone: jest.fn(), stopRingtone: jest.fn() };
+jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: () => native }));
+jest.mock('expo-av', () => { throw new Error('呼叫铃声不得创建第二个音频焦点所有者'); });
 
-describe('ExpoCallRingtone', () => {
-  beforeEach(() => createAsync.mockReset());
+describe('NativeCallRingtone', () => {
+  beforeEach(() => jest.clearAllMocks());
 
-  it('does not retry a failed audio backend until a new play request', async () => {
-    createAsync.mockRejectedValue(new Error('audio backend unavailable'));
-    const ringtone = new ExpoCallRingtone();
+  it('starts one native ringtone and stops it when dialing ends', () => {
+    const ringtone = new NativeCallRingtone();
     ringtone.playLoop();
-    // Bounded microtask flushing also catches the old self-scheduling retry loop.
-    for (let index = 0; index < 20; index += 1) await Promise.resolve();
-    const attempts = createAsync.mock.calls.length;
+    ringtone.playLoop();
+    expect(native.startRingtone).toHaveBeenCalledTimes(1);
     ringtone.stop();
-    expect(attempts).toBe(1);
-  });
-
-  it('unloads a sound whose initial playback fails', async () => {
-    const sound = {
-      playAsync: jest.fn(async () => { throw new Error('play failed'); }),
-      stopAsync: jest.fn(), unloadAsync: jest.fn(async () => undefined),
-    };
-    createAsync.mockResolvedValue({ sound });
-    const ringtone = new ExpoCallRingtone();
+    ringtone.stop();
+    expect(native.stopRingtone).toHaveBeenCalledTimes(1);
     ringtone.playLoop();
-    for (let index = 0; index < 20; index += 1) await Promise.resolve();
-    expect(createAsync).toHaveBeenCalledTimes(1);
-    expect(sound.unloadAsync).toHaveBeenCalledTimes(1);
+    expect(native.startRingtone).toHaveBeenCalledTimes(2);
     ringtone.stop();
   });
 
-  it('unloads a late create after stop and never starts playback', async () => {
-    let resolveCreate!: (value: any) => void;
-    const sound = { playAsync: jest.fn(), stopAsync: jest.fn(), unloadAsync: jest.fn(async () => undefined) };
-    createAsync.mockReturnValueOnce(new Promise((resolve) => { resolveCreate = resolve; }));
-    const ringtone = new ExpoCallRingtone();
-    ringtone.playLoop();
+  it('surfaces native playback failure without claiming the ringtone is playing', () => {
+    native.startRingtone.mockImplementationOnce(() => { throw new Error('ringtone_start_failed'); });
+    const ringtone = new NativeCallRingtone();
+    expect(() => ringtone.playLoop()).toThrow('ringtone_start_failed');
     ringtone.stop();
-    resolveCreate({ sound });
-    await Promise.resolve(); await Promise.resolve();
-    expect(sound.playAsync).not.toHaveBeenCalled();
-    expect(sound.unloadAsync).toHaveBeenCalledTimes(1);
-  });
-
-  it('starts only current desired generation and stop owns stop plus unload', async () => {
-    const sound = {
-      playAsync: jest.fn(async () => undefined), stopAsync: jest.fn(async () => undefined),
-      unloadAsync: jest.fn(async () => undefined),
-    };
-    createAsync.mockResolvedValueOnce({ sound });
-    const ringtone = new ExpoCallRingtone();
-    ringtone.playLoop();
-    await Promise.resolve(); await Promise.resolve();
-    expect(sound.playAsync).toHaveBeenCalledTimes(1);
-    ringtone.stop();
-    await Promise.resolve(); await Promise.resolve();
-    expect(sound.stopAsync).toHaveBeenCalledTimes(1);
-    expect(sound.unloadAsync).toHaveBeenCalledTimes(1);
-  });
-
-  it('replaces a stopped pending generation when play is requested again', async () => {
-    let resolveFirst!: (value: any) => void;
-    const first = { playAsync: jest.fn(), stopAsync: jest.fn(), unloadAsync: jest.fn(async () => undefined) };
-    const second = {
-      playAsync: jest.fn(async () => undefined), stopAsync: jest.fn(async () => undefined),
-      unloadAsync: jest.fn(async () => undefined),
-    };
-    createAsync
-      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
-      .mockResolvedValueOnce({ sound: second });
-    const ringtone = new ExpoCallRingtone();
-    ringtone.playLoop();
-    ringtone.stop();
-    ringtone.playLoop();
-    resolveFirst({ sound: first });
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(first.playAsync).not.toHaveBeenCalled();
-    expect(first.unloadAsync).toHaveBeenCalledTimes(1);
-    expect(second.playAsync).toHaveBeenCalledTimes(1);
-    ringtone.stop();
+    expect(native.stopRingtone).not.toHaveBeenCalled();
   });
 });

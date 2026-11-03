@@ -34,7 +34,15 @@ describe('production Live2D call mouth bridge', () => {
         }) },
       },
     };
+    let modelScale = 1;
+    Object.defineProperties(model, {
+      width: { get: () => 100 * modelScale },
+      height: { get: () => 100 * modelScale },
+    });
+    model.scale.set.mockImplementation((value: number) => { modelScale = value; });
     const context: any = {
+      innerWidth: 360,
+      innerHeight: 400,
       console,
       setTimeout,
       clearTimeout,
@@ -83,6 +91,20 @@ describe('production Live2D call mouth bridge', () => {
     vm.runInNewContext(script!, context, { filename: 'public/live2d/live2d.html' });
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
+    const resize = context.addEventListener.mock.calls.find(([name]: [string]) => name === 'resize')[1];
+    expect(model.width).toBeCloseTo(context.innerWidth * 1.2);
+    context.innerHeight = 800;
+    context.setPresentationMode('call');
+    resize();
+    const callWidth = model.width;
+    resize();
+    expect(model.width).toBe(callWidth);
+    expect(model.width).toBeCloseTo(context.innerWidth * 1.75);
+    expect(model.y + model.height * 0.93).toBeCloseTo(context.innerHeight * 0.84);
+    context.innerHeight = 400;
+    context.setPresentationMode('chat');
+    expect(model.width).toBeLessThan(callWidth);
+    expect(model.y + model.height / 2).toBeCloseTo(context.innerHeight / 2);
 
     context.setCallMouthRms(0.5);
     for (let index = 0; index < 20; index++) frame?.();

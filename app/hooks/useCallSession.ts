@@ -1,4 +1,5 @@
 import { AppState, BackHandler, Platform } from 'react-native';
+import { addDebugTrace } from '../utils/debug_trace';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CallSession } from '../utils/call_session/call_session';
 import type { CallCapabilities, CallTransportSnapshot } from '../types/call_transport';
@@ -56,6 +57,9 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const stateRef = useRef(state);
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
+  const permissionPendingRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState ?? 'active');
+  const permissionResumeRef = useRef<(() => void) | undefined>(undefined);
   const connectedRef = useRef(false);
   const ownerRef = useRef<SessionOwner | null>(null);
   const snapshotRef = useRef<Readonly<CallTransportSnapshot> | null>(null);
@@ -102,6 +106,7 @@ export function useCallSession(options: CallSessionOptions = {}) {
   const reportAttemptFailure = useCallback((owner: SessionOwner | null, generation: number, code?: string) => {
     if (generation !== generationRef.current || owner?.failureReported) return false;
     if (owner) owner.failureReported = true;
+    addDebugTrace('call', 'call attempt failed', { code: code ?? 'unknown' });
     const notice = getCallFailureNotice(code);
     setFailureNotice(notice);
     try { optionsRef.current.onFailure?.(notice); } catch (error) { reportCleanupError(error); }
@@ -240,7 +245,9 @@ export function useCallSession(options: CallSessionOptions = {}) {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next) => {
-      if (next !== 'active' && EXIT_PHASES.includes(stateRef.current.phase)) {
+      appStateRef.current = next;
+      if (next === 'active') permissionResumeRef.current?.();
+      if (next !== 'active' && !permissionPendingRef.current && EXIT_PHASES.includes(stateRef.current.phase)) {
         retireAttempt('backgrounded');
         dispatchEvent({ type: 'app_backgrounded', nowMs: now() });
       }
@@ -258,9 +265,14 @@ export function useCallSession(options: CallSessionOptions = {}) {
     let cancelled = false;
     const generation = generationRef.current;
     const { requestPermission, initializeAttempt, onPermissionSettings } = optionsRef.current;
+    permissionPendingRef.current = true;
     const pending = Promise.resolve().then(() => requestPermission?.() ?? 'denied' as const);
-    pending.then((result) => {
+    pending.then(async (result) => {
+      if (appStateRef.current !== 'active' && !cancelled) {
+        await new Promise<void>((resolve) => { permissionResumeRef.current = resolve; });
+      }
       if (cancelled || generation !== generationRef.current) return;
+      permissionPendingRef.current = false;
       if (result === 'permanently_denied') onPermissionSettings?.();
       if (result !== 'granted') {
         dispatchEvent({ type: result === 'permanently_denied' ? 'permission_permanently_denied' : 'permission_denied' });
@@ -286,7 +298,12 @@ export function useCallSession(options: CallSessionOptions = {}) {
     }).catch((error) => {
       if (!cancelled && generation === generationRef.current) { reportCleanupError(error); dispatchEvent({ type: 'permission_denied' }); }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      permissionPendingRef.current = false;
+      permissionResumeRef.current?.();
+      permissionResumeRef.current = undefined;
+    };
   }, [dispatchEvent, now, releaseOwnedSession, reportAttemptFailure, reportCleanupError, state.phase]);
 
   useEffect(() => {

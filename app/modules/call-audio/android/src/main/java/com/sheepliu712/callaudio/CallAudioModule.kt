@@ -10,6 +10,7 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.ToneGenerator
 import android.media.AudioFocusRequest
 import android.media.AudioRecord
 import android.media.AudioTrack
@@ -22,9 +23,12 @@ import android.util.Base64
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
+import expo.modules.kotlin.functions.Coroutine
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 
 private const val CAPTURE_RATE = 16_000
 private const val PLAYBACK_RATE = 24_000
@@ -47,6 +51,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private val playbackState = PlaybackState(queue)
   private var captureThread: Thread? = null
   private var playbackThread: Thread? = null
+  private var ringtone: ToneGenerator? = null
   private var sessionReady = false
   private var audioRecord: AudioRecord? = null
   private var audioTrack: AudioTrack? = null
@@ -87,7 +92,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     AsyncFunction("acknowledgeCapturedAudio") { deviceSequence: Long, eventSessionGeneration: Long ->
       if (eventSessionGeneration == sessionGeneration.get()) captureInFlight.remove(deviceSequence)
     }
-    AsyncFunction("enqueuePlayback") {
+    AsyncFunction("enqueuePlayback") Coroutine {
         responseId: String,
         streamId: Int,
         payloadBase64: String,
@@ -101,6 +106,8 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     AsyncFunction("tombstone") { responseId: String, streamId: Int, promise: Promise ->
       stopPlayback(responseId, streamId, promise)
     }
+    Function("startRingtone") { startRingtone() }
+    Function("stopRingtone") { stopRingtone() }
     AsyncFunction("playReplyFailureTone") { playReplyFailureTone() }
     AsyncFunction("setPlaybackAnalysisWindow") { seconds: Double ->
       require(seconds.isFinite() && seconds > 0 && seconds <= 0.02)
@@ -108,6 +115,25 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     }
 
     OnDestroy { closeSession() }
+  }
+
+  @Synchronized
+  private fun startRingtone() {
+    check(sessionReady && audioFocusGranted) { "call_audio_unavailable" }
+    if (ringtone != null) return
+    val tone = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 22)
+    if (!tone.startTone(ToneGenerator.TONE_SUP_RINGTONE)) {
+      tone.release()
+      error("ringtone_start_failed")
+    }
+    ringtone = tone
+  }
+
+  @Synchronized
+  private fun stopRingtone() {
+    ringtone?.stopTone()
+    ringtone?.release()
+    ringtone = null
   }
 
   private fun startSession(): Map<String, Any?> {
@@ -344,7 +370,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     ).apply { start() }
   }
 
-  private fun enqueuePlayback(
+  private suspend fun enqueuePlayback(
     responseId: String,
     streamId: Int,
     payloadBase64: String,
@@ -358,11 +384,21 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       throw IllegalArgumentException("invalid_base64")
     }
     require(payload.isNotEmpty() && payload.size % 2 == 0) { "invalid_pcm_payload" }
+    require(payload.size <= MAX_PLAYBACK_BUFFER_BYTES) { "playback_chunk_too_large" }
     val key = StreamKey(responseId, streamId)
     check(!tombstonedStreams.contains(key)) { "playback_stream_tombstoned" }
     val currentGeneration = streamGenerations.computeIfAbsent(key) { generation.incrementAndGet() }
-    check(queue.offer(PlaybackChunk(key, currentGeneration, payload, isFinal))) {
-      "playback_buffer_full"
+    val expectedSession = sessionGeneration.get()
+    val chunk = PlaybackChunk(key, currentGeneration, payload, isFinal)
+    // 让接纳 Promise 等待播放器释放容量，协议层在接纳后才确认音频帧。
+    // 协程等待不会阻塞停止、挂断或采集确认所在的模块队列。
+    withTimeout(5_000) {
+      while (true) {
+        check(sessionReady && sessionGeneration.get() == expectedSession) { "stale_playback_session" }
+        check(!tombstonedStreams.contains(key)) { "playback_stream_tombstoned" }
+        if (queue.offer(chunk)) break
+        delay(10)
+      }
     }
     return currentGeneration
   }
@@ -551,6 +587,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun closeSession() {
+    stopRingtone()
     stopCapture()
     if (captureThread?.isAlive == true) {
       cleanupSessionSideEffects()
@@ -709,6 +746,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun cleanupSessionSideEffects() {
+    stopRingtone()
     try {
       unregisterRouteCallback()
     } catch (_: RuntimeException) {
