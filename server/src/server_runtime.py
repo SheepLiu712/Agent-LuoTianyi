@@ -12,6 +12,7 @@ from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.application.host_context import ServerHostContext
 from src.application.user import UserResetFence, UserResetService
 from src.domain.stage import StageState
+from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
 from src.infrastructure.models.realtime_speech import AliyunRealtimeSpeechSessionFactory
 from src.infrastructure.models.service import LLMService
@@ -103,13 +104,8 @@ class ServerRuntime:
             media_resolver = create_media_resolver(media_config)
 
             # 5. 初始化 Agent 运行时
+            SkillsConfig.reject_legacy_summary(config)
             agent_config = dict(config.get("agent_runtime", {}))
-            skills_config = dict(agent_config.get("skills", {}))
-            skills_config.setdefault(
-                "conversation_compaction",
-                config.get("chat_session_manager", {}).get("conversation_service", {}),
-            )
-            agent_config["skills"] = skills_config
             agent_runtime = AgentRuntime(
                 agent_config,
                 llm_service,

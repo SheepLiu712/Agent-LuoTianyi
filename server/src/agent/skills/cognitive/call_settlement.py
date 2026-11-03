@@ -40,8 +40,16 @@ class CallSummaryModel(Protocol):
 
 
 class CallSummarySkill:
-    def __init__(self, models: dict[str, CallSummaryModel]) -> None:
-        self._models = models
+    def __init__(self, config: dict, *, llm_service, characters) -> None:
+        module = config.get("llm_module")
+        self._models = (
+            {
+                character_id: llm_service.register_llm_module(f"skill.call_summary.generate.{character_id}", module)
+                for character_id in characters
+            }
+            if module is not None
+            else {}
+        )
 
     def supports_character(self, character_id: str) -> bool:
         model = self._models.get(character_id)

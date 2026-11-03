@@ -91,12 +91,7 @@ class DiaryOperations:
         """
         module_cfg = self._module_config(self.config.get("diary_llm"))
         if module_cfg:
-            try:
-                # 注册一个名为 "diary_composer" 的 LLM 模块，专门用于日记生成
-                self._diary_llm = llm_service.register_llm_module("diary_composer", module_cfg)
-            except Exception as exc:
-                self._diary_llm = None
-                self.logger.warning(f"Diary LLM module unavailable: {exc}")
+            self._diary_llm = llm_service.register_llm_module("skill.diary.generate", module_cfg)
 
     def wire_dependencies(
         self,

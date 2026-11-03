@@ -183,7 +183,8 @@ async def test_default_recall_replies_without_ack_and_reuses_memory_pool(decisio
     generator = CapturingGenerator()
     recall = CallRecallDecisionSkill(
         memories={"luotianyi": memory},
-        model=InvalidDecisionModel() if decision_unavailable == "invalid_response" else None,
+        config={"llm_module": {"test_model": "test"}} if decision_unavailable == "invalid_response" else {},
+        llm_service=SimpleNamespace(register_llm_module=lambda *args: InvalidDecisionModel()),
     )
     handler = CallReplyRequestedHandler(
         recall, CallReplySkill(make_reply_skill({"luotianyi": generator})), PreparedSpeechCatalog({})

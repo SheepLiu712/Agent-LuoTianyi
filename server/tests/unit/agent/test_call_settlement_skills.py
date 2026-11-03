@@ -1,3 +1,4 @@
+from support.model_service import make_call_summary
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -16,7 +17,6 @@ from src.agent.context import (
 from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.skills.cognitive.call_settlement import (
     CallMaintenanceSkill,
-    CallSummarySkill,
     _maintenance_digest,
     render_call_turns,
 )
@@ -46,7 +46,7 @@ def _invocation():
 
 @pytest.mark.asyncio
 async def test_call_summary_empty_retry_fallback_and_length_limit():
-    empty = await CallSummarySkill({"luotianyi": SimpleNamespace()}).summarize(_invocation(), _snapshot())
+    empty = await make_call_summary({"luotianyi": SimpleNamespace()}).summarize(_invocation(), _snapshot())
     assert empty is None
 
     class Model:
@@ -59,9 +59,9 @@ async def test_call_summary_empty_retry_fallback_and_length_limit():
 
     model = Model()
     snapshot = _snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),))
-    assert await CallSummarySkill({"luotianyi": model}).summarize(_invocation(), snapshot) is None
+    assert await make_call_summary({"luotianyi": model}).summarize(_invocation(), snapshot) is None
     assert model.calls == 1
-    assert await CallSummarySkill({}).summarize(_invocation(), snapshot) is None
+    assert await make_call_summary({}).summarize(_invocation(), snapshot) is None
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_call_summary_combines_working_prefix_and_tail_updates_same_contex
             return "updated complete call summary"
 
     model = Model()
-    result = await CallSummarySkill({"luotianyi": model}).summarize(
+    result = await make_call_summary({"luotianyi": model}).summarize(
         _invocation(),
         _snapshot(turns=(CallFinalTurn(2, "uncompressed call tail", CallReplyStatus.NOT_STARTED, None),)),
         context=context,

@@ -15,5 +15,7 @@ class StubReplySkill:
 
 def make_reply_skill(resources):
     if all(isinstance(resource, ReplyResources) for resource in resources.values()):
-        return ReplySkill(resources)
+        skill = object.__new__(ReplySkill)
+        skill._resources = dict(resources)
+        return skill
     return StubReplySkill(resources)

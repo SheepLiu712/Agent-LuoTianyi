@@ -181,7 +181,7 @@ async def test_image_is_one_user_conversation_with_agent_only_description_text()
     understanding = _ImageUnderstanding()
     handler = ChatPreprocessingHandler(
         _Understanding(("白猫",)),
-        ImageUnderstandingSkill({}, resolver, vlm_module=understanding),
+        ImageUnderstandingSkill({}, resolver, llm_service=SimpleNamespace(register_vlm_module=lambda *args: understanding)),
     )
     runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.IMAGE_MESSAGE, handler)]))
     ctx = context()
@@ -223,7 +223,7 @@ async def test_illegal_media_stops_before_image_understanding(error):
     understanding = _ImageUnderstanding()
     handler = ChatPreprocessingHandler(
         _Understanding(),
-        ImageUnderstandingSkill({}, resolver, vlm_module=understanding),
+        ImageUnderstandingSkill({}, resolver, llm_service=SimpleNamespace(register_vlm_module=lambda *args: understanding)),
     )
     runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.IMAGE_MESSAGE, handler)]))
     ctx = context()

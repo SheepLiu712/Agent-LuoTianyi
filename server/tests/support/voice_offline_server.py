@@ -104,7 +104,7 @@ def make_agent(root, resolver, models):
         topic_extraction=TopicExtractionSkill({}, None, understanding=text),
     )
     preprocessing = ChatPreprocessingHandler(
-        text, audio_understanding=AudioUnderstandingSkill({}, resolver, audio_module=models)
+        text, audio_understanding=AudioUnderstandingSkill({}, resolver, llm_service=SimpleNamespace(register_audio_model_module=lambda *args: models))
     )
     return Agent(
         character_id="luotianyi",

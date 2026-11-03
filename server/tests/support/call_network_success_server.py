@@ -114,11 +114,11 @@ def _runtime_config(root: Path) -> Path:
         (resources / name).mkdir(exist_ok=True)
     (resources / "songs" / "songs").mkdir(exist_ok=True)
     agent = config["agent_runtime"]
-    agent["agent"]["song_knowledge"]["song_database"] = {
+    agent["skills"]["knowledge"]["song_database"] = {
         "db_folder": str(resources),
         "db_file": "knowledge.db",
     }
-    agent["agent"]["preprocessing"]["song_entity_linker"] = {
+    agent["skills"]["jargon_recognition"]["song_entity_linker"] = {
         "songname_file": str(resources / "song_names.txt"),
         "lyric_file": str(resources / "song_lyrics.txt"),
     }
@@ -132,7 +132,7 @@ def _runtime_config(root: Path) -> Path:
         }
     )
     agent["skills"]["singing"]["characters"]["luotianyi"]["resource_path"] = str(resources / "songs")
-    agent["character_registry"]["characters"]["luotianyi"]["reflex"] = {}
+    agent["skills"]["touch_reaction"] = {}
     apology = resources / "call-apology.wav"
     with wave.open(str(apology), "wb") as audio:
         audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
@@ -152,7 +152,7 @@ def _runtime_config(root: Path) -> Path:
         ),
         encoding="utf8",
     )
-    agent["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    agent["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     _resolve_test_environment(config)
     path = root / "config.json"
     path.write_text(json.dumps(config), encoding="utf-8")

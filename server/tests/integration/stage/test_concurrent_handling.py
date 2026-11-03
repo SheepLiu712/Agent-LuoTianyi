@@ -114,7 +114,7 @@ async def test_real_preprocessing_persists_slow_image_before_fast_text_in_read_o
     understanding = _Understanding()
     handler = ChatPreprocessingHandler(
         understanding,
-        ImageUnderstandingSkill({}, Resolver(), vlm_module=Vision()),
+        ImageUnderstandingSkill({}, Resolver(), llm_service=SimpleNamespace(register_vlm_module=lambda *args: Vision())),
     )
     replies = asyncio.Queue()
 
@@ -169,7 +169,7 @@ async def test_failed_real_image_preprocessing_drops_only_image_and_keeps_writte
 
     handler = ChatPreprocessingHandler(
         _Understanding(),
-        ImageUnderstandingSkill({}, Resolver(), vlm_module=Vision()),
+        ImageUnderstandingSkill({}, Resolver(), llm_service=SimpleNamespace(register_vlm_module=lambda *args: Vision())),
     )
     replies = asyncio.Queue()
 

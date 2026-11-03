@@ -38,12 +38,14 @@ class CallRecallDecisionSkill:
         self,
         *,
         memories: Mapping[str, _Memory],
-        model: _DecisionModel | None = None,
+        config: dict | None = None,
+        llm_service=None,
     ) -> None:
         if not memories:
             raise ValueError("call recall requires character memories")
         self._memories = dict(memories)
-        self._model = model
+        module = (config or {}).get("llm_module")
+        self._model = llm_service.register_llm_module("skill.call_recall.decide", module) if module else None
         self._logger = get_logger(__name__)
 
     async def decide(

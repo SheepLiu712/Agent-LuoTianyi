@@ -23,7 +23,6 @@ from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembl
 from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.cognitive._response_parser import StructuredResponseParser
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
-from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive.response_composition import ResponseCompositionSkill
 from src.agent.skills.contracts import ReplyDraft, TopicExtraction
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
@@ -83,7 +82,7 @@ async def test_sentence_threshold_tags_and_spoken_content(chunk_size):
             yield {"content": text[index : index + chunk_size]}
 
     provider.stream_response = chunks
-    skill = ReplySkill({"luotianyi": generator(provider)})
+    skill = make_reply_skill({"luotianyi": generator(provider)})
     result = [
         draft async for draft in skill.generate("luotianyi", reply_topic="测试回复", user_context=UserContextSnapshot())
     ]
@@ -226,7 +225,7 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
 @pytest.mark.asyncio
 async def test_singing_keeps_complete_draft_and_is_not_split_at_punctuation():
     provider = CharacterStream("[开心]一二三四五六七八，九十。\n[sing] 《歌，曲。名》")
-    skill = ReplySkill({"luotianyi": generator(provider)})
+    skill = make_reply_skill({"luotianyi": generator(provider)})
     result = [
         draft
         async for draft in skill.generate(
@@ -259,7 +258,7 @@ async def test_shared_reply_routes_persona_and_isolates_concurrent_drafts(same_c
     second = generator(CharacterStream(""))
     first.character_name, second.character_name = "角色甲", "角色乙"
     first.llm = second.llm = Model()
-    skill = ReplySkill({"a": first, "b": second})
+    skill = make_reply_skill({"a": first, "b": second})
 
     async def collect(character_id, text):
         async with aclosing(
@@ -291,7 +290,7 @@ async def test_shared_reply_routes_persona_and_isolates_concurrent_drafts(same_c
 async def test_closing_reply_stream_stops_provider_before_remaining_reply():
     first = "[开心]今天我们一起去公园散步，"
     provider = CharacterStream(first + "然后去听音乐。", gate_after=len(first))
-    skill = ReplySkill({"luotianyi": generator(provider)})
+    skill = make_reply_skill({"luotianyi": generator(provider)})
     async with aclosing(
         skill.generate("luotianyi", reply_topic="今天做什么", user_context=UserContextSnapshot())
     ) as stream:
@@ -311,7 +310,7 @@ async def test_provider_cancellation_ends_reply_stream_without_hanging():
 
     resource = generator(CharacterStream(""))
     resource.llm = CancelledModel()
-    skill = ReplySkill({"luotianyi": resource})
+    skill = make_reply_skill({"luotianyi": resource})
     async with aclosing(
         skill.generate("luotianyi", reply_topic="测试取消", user_context=UserContextSnapshot())
     ) as stream:
@@ -329,7 +328,7 @@ async def test_complete_and_streaming_models_use_same_draft_rules():
         return text
 
     complete.llm = SimpleNamespace(stream=False, generate_response=response)
-    skill = ReplySkill({"streaming": streaming, "complete": complete})
+    skill = make_reply_skill({"streaming": streaming, "complete": complete})
     results = []
     for character_id in ("streaming", "complete"):
         results.append(

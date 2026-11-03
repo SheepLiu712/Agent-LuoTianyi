@@ -335,7 +335,7 @@ async def test_prepared_say_delivery_and_complete_file(
 ):
     kwargs, _ = runtime_dependencies
     manifest, audio = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    kwargs["config"]["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     module = Module()
     runtime = AgentRuntime(**kwargs)
     runtime.skills.speaking._tts._speech.tts_module["luotianyi"] = module
@@ -378,7 +378,7 @@ async def test_prepared_audio_is_read_at_execution_and_fails_before_output(
 ):
     kwargs, _ = runtime_dependencies
     manifest, audio = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    kwargs["config"]["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     runtime = AgentRuntime(**kwargs)
     try:
         if failure == "deleted":
@@ -425,7 +425,7 @@ async def test_tts_ephemeral_delivery_suppresses_text_and_preserves_terminal_fla
 async def test_prepared_read_cancellation_stops_all_delivery(runtime_dependencies, prepared_manifest, monkeypatch):
     kwargs, _ = runtime_dependencies
     manifest, _ = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    kwargs["config"]["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     runtime = AgentRuntime(**kwargs)
     started, proceed = threading.Event(), threading.Event()
     read = runtime.skills.prepared_speech._read_audio

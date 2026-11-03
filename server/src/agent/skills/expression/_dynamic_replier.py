@@ -34,24 +34,8 @@ class DynamicReplier:
     def create_llm_module(self, llm_service: "LLMService") -> None:
         """从 config 注册 dynamic reply LLM 模块。"""
         llm_cfg = self.config.get("llm_module")
-        if not llm_cfg:
-            # 如果没有配置，尝试使用第一个可用的 LLM 接口
-            llm_interfaces = getattr(llm_service, "llm_interfaces", None) or {}
-            interface_names = list(llm_interfaces.keys())
-            if not interface_names:
-                return
-            llm_cfg = {
-                "llm": {
-                    "name": interface_names[0],
-                    "enable_thinking": False,
-                    "use_json": True,
-                },
-                "prompt_name": "dynamic_reply_prompt",
-            }
-        try:
-            self._reply_llm = llm_service.register_llm_module("dynamic_reply", llm_cfg)
-        except Exception as exc:
-            self.logger.warning(f"Dynamic reply module unavailable: {exc}")
+        if llm_cfg is not None:
+            self._reply_llm = llm_service.register_llm_module("skill.dynamic.generate_reply", llm_cfg)
 
     def ensure_llm(self) -> bool:
         """检查 LLM 模块是否可用。"""

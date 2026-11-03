@@ -184,7 +184,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
 
     monkeypatch.setattr(summary_skill, "summarize", observed_summary)
     if summary_mode != "generated":
-        model = llm.modules["luotianyi_call_summary"]
+        model = llm.modules["skill.call_summary.generate.luotianyi"]
 
         async def exhausted(**kwargs):
             model.calls.append(kwargs)
@@ -300,7 +300,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
             await manager.begin_user_data_reset("user")
 
-        summary_calls = llm.modules["luotianyi_call_summary"].calls
+        summary_calls = llm.modules["skill.call_summary.generate.luotianyi"].calls
         assert len(summary_calls) == 1
         rendered = repr(summary_calls[0]["completed_turns"])
         if summary_mode != "default":

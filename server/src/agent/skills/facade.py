@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
-
 from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
-    ReplyResources,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
     TopicExtractionSkill,
@@ -21,7 +17,6 @@ from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySk
 from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
 from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
-from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression._diary_operations import DiaryOperations
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
@@ -35,11 +30,8 @@ from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchReactionSkill
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
 from src.agent.skills.mutation import IntentionalMemoryCommit
-from src.infrastructure.media import MediaResolver
-
-if TYPE_CHECKING:
-    from src.infrastructure.models.service import LLMService
-    from src.infrastructure.persistence.database import DatabaseManager
+from src.agent.skills.resources import SkillResources
+from src.infrastructure.config.skills import SkillsConfig
 
 
 class SharedSkills:
@@ -50,75 +42,77 @@ class SharedSkills:
     运行时服务定位和不完整装配。
     """
 
-    def __init__(
-        self,
-        config: dict[str, Any],
-        llm_service: LLMService,
-        *,
-        memories: Mapping[str, AgentMemory],
-        reply_resources: Mapping[str, ReplyResources],
-        narratives: Mapping[str, CharacterNarrative],
-        touch_configs: Mapping[str, Mapping[str, object]],
-        prepared_speech: PreparedSpeechCatalog,
-        preprocessing_config: dict[str, Any] | None,
-        explicit_memory_config: dict[str, Any] | None,
-        reply_composition_config: dict[str, Any],
-        topic_extraction_config: dict[str, Any],
-        call_recall_model: object | None,
-        call_summary_models: Mapping[str, object],
-        call_maintenance_batches: object | None,
-        song_knowledge_config: dict[str, Any],
-        database_manager: DatabaseManager,
-        media_resolver: MediaResolver | None = None,
-    ) -> None:
-        if not isinstance(config, dict):
-            raise TypeError("skills 必须是字典")
-        if not memories or set(memories) != set(reply_resources) or set(memories) != set(narratives):
-            raise ValueError("共享技能要求每个启用角色具备完整的记忆、回复资源和叙事资料")
-
-        dynamics = DynamicOperations(config.get("dynamic", {}))
+    def __init__(self, config: SkillsConfig, *, resources: SkillResources) -> None:
+        llm_service = resources.llm_service
+        database_manager = resources.database
+        media_resolver = resources.media_resolver
+        characters = resources.characters
+        memory_config = {
+            **config.get("memory_retrieval"),
+            "memory_writer": config.get("memory_write"),
+            "user_profile": config.get("cognitive_maintenance").get("user_profile", {}),
+        }
+        memories = {
+            key: AgentMemory(
+                memory_config,
+                llm_service,
+                database_manager=database_manager,
+                vector_store=resources.vector_store,
+                owner_character_id=key,
+            )
+            for key in characters
+        }
+        self._memories = memories
+        self.reply = ReplySkill(config.get("reply"), llm_service=llm_service, characters=characters)
+        narratives = self.reply.narratives()
+        prepared_speech = PreparedSpeechCatalog(config.get("prepared_speech").get("characters", {}))
+        touch_configs = config.get("touch_reaction").get("characters", {})
+        # 先完成所有可能失败的配置与模型装配，最后创建拥有进程的语音技能。
+        dynamics = DynamicOperations(config.get("dynamic"))
         dynamics.create_llm_module(llm_service)
         dynamics.wire_dependencies(database_manager=database_manager)
-        diary = DiaryOperations(config.get("diary", {}))
+        diary = DiaryOperations(config.get("diary"))
         diary.create_llm_module(llm_service)
         diary.wire_dependencies(database_manager=database_manager, dynamic_operations=dynamics)
 
-        self.speaking = SpeakingSkill(config.get("speaking", {}))
-        self.singing = SingingSkill(config.get("singing", {}), llm_service)
+        self.singing = SingingSkill(config.get("singing"), llm_service)
         self.conversation_compaction = ConversationCompactionSkill(
-            config.get("conversation_compaction", {}),
+            config.get("cognitive_maintenance").get("conversation_compaction", {}),
             llm_service,
         )
         self.text_preprocessing = TextPreprocessingSkill(
-            preprocessing_config,
+            config.get("jargon_recognition"),
             song_names=self.singing.song_names(),
         )
-        self.explicit_memory_intent = ExplicitMemoryIntentSkill(explicit_memory_config)
+        self.explicit_memory_intent = ExplicitMemoryIntentSkill(config.get("explicit_memory_intent"))
         self.image_understanding = (
-            ImageUnderstandingSkill(config.get("image_understanding", {}), media_resolver, llm_service)
+            ImageUnderstandingSkill(config.get("image_understanding"), media_resolver, llm_service)
             if media_resolver is not None
             else None
         )
         self.audio_understanding = (
-            AudioUnderstandingSkill(config.get("audio_understanding", {}), media_resolver, llm_service)
+            AudioUnderstandingSkill(config.get("audio_understanding"), media_resolver, llm_service)
             if media_resolver is not None
             else None
         )
 
-        self.reply = ReplySkill(reply_resources)
         self.response_composition = ResponseCompositionSkill(
-            reply_composition_config,
+            config.get("response_composition"),
             memories=memories,
             singing=self.singing.backend,
             reply=self.reply,
             topic_extraction=TopicExtractionSkill(
-                topic_extraction_config, llm_service, understanding=self.text_preprocessing
+                config.get("topic_extraction"), llm_service, understanding=self.text_preprocessing
             ),
         )
-        self.call_recall = CallRecallDecisionSkill(memories=memories, model=call_recall_model)
+        self.call_recall = CallRecallDecisionSkill(
+            memories=memories, config=config.get("call_recall"), llm_service=llm_service
+        )
         self.call_reply = CallReplySkill(self.reply)
-        self.call_summary = CallSummarySkill(dict(call_summary_models))
-        self.call_maintenance = CallMaintenanceSkill(dict(memories), call_maintenance_batches)
+        self.call_summary = CallSummarySkill(config.get("call_summary"), llm_service=llm_service, characters=characters)
+        self.call_maintenance = CallMaintenanceSkill(
+            dict(memories), getattr(database_manager, "call_maintenance_batches", None)
+        )
         self.cognitive_maintenance = CognitiveMaintenanceSkill(
             memories=memories,
             compaction=self.conversation_compaction,
@@ -134,7 +128,12 @@ class SharedSkills:
         self.song_learning = SongLearningDispatchSkill(self.singing.backend)
         self.prepared_speech = prepared_speech
         self.touch_reaction = TouchReactionSkill(touch_configs, prepared_speech)
-        self.song_knowledge = SongKnowledgeAcceptanceSkill(song_knowledge_config)
+        self.song_knowledge = SongKnowledgeAcceptanceSkill(config.get("knowledge"))
+        self.speaking = SpeakingSkill(config.get("speaking"))
+
+    def ensure_dependencies(self) -> None:
+        for memory in self._memories.values():
+            memory.ensure_dependencies()
 
     async def stop(self) -> None:
         """关闭由共享 Skill 拥有的长生命周期资源。"""

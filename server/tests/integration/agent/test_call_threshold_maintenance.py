@@ -1,3 +1,4 @@
+from support.model_service import make_call_summary
 """Real Context/Ephemeral/compaction/action/SQL boundaries; model ports are fakes."""
 
 import asyncio
@@ -26,7 +27,7 @@ from src.agent.context import (
 from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
-from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
+from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.contracts import SkillInvocation
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
@@ -203,7 +204,7 @@ async def test_final_summary_keeps_accepted_input_missing_from_context_after_end
         interaction_context=context,
     )
     result = await FinalizeCallHandler(
-        "luotianyi", setup.call_skill, CallSummarySkill({"luotianyi": setup.model})
+        "luotianyi", setup.call_skill, make_call_summary({"luotianyi": setup.model})
     ).realize(d.FinalizeCall(action_id="ending", user_id="user", final_snapshot=snapshot), execution, None)
     assert result.call_ending.maintenance_succeeded
     assert context.conversation.read_call_maintenance_progress() == 2

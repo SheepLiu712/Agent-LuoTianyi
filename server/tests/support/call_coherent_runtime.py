@@ -18,7 +18,7 @@ class DeterministicLLMModule:
 
     async def generate_response(self, **kwargs) -> str:
         self.calls.append(kwargs)
-        if self.name == "call_recall":
+        if self.name == "skill.call_recall.decide":
             if "silence_ms" in kwargs:
                 return json.dumps({"decision": "end_call"})
             return json.dumps(
@@ -28,16 +28,16 @@ class DeterministicLLMModule:
                     "ack_style": "thinking",
                 }
             )
-        if self.name.endswith("call_summary"):
+        if self.name.startswith("skill.call_summary."):
             return "用户与角色讨论了音乐喜好，并约定之后继续交流。"
-        if self.name.endswith("main_chat"):
+        if self.name.startswith("skill.reply."):
             topic = str(kwargs.get("reply_topic") or "")
             if "刚刚接通" in topic:
                 return "[中性]你好，我在这里。"
             if "告别" in topic:
                 return "[中性]那我们下次再聊，再见。"
             return "[中性]我记得你喜欢音乐，我们继续聊吧。"
-        if self.name.endswith("user_profile_updater"):
+        if self.name.startswith("skill.cognitive_maintenance.profile."):
             return "NO_UPDATE"
         return "{}"
 
@@ -49,7 +49,7 @@ class DeterministicLLMService:
     def ensure_dependencies(self) -> None:
         return None
 
-    def register_llm_module(self, name, _config):
+    def register_llm_module(self, name, _config, *, stream=False):
         module = DeterministicLLMModule(name)
         self.modules[name] = module
         return module
@@ -169,10 +169,15 @@ def runtime_config(tmp_path) -> dict[str, object]:
     songs.mkdir()
     return {
         "skills": {
+            "prepared_speech": {"characters": {"luotianyi": {"manifest": str(manifest)}}},
+            "reply": {"llm_module": {"llm": {"name": "test"}}},
+            "memory_write": {"llm_module": {"llm": {"name": "test"}}},
+            "cognitive_maintenance": {"user_profile": {"llm_module": {"llm": {"name": "test"}}}},
+            "call_recall": {"llm_module": {"llm": {"name": "test"}}},
+            "call_summary": {"llm_module": {"llm": {"name": "test"}}},
             "speaking": {"characters": {"luotianyi": {}}},
             "singing": {"characters": {"luotianyi": {"resource_path": str(songs)}}},
         },
-        "prepared_speech": {"characters": {"luotianyi": {"manifest": str(manifest)}}},
         "character_registry": {
             "characters": {
                 "luotianyi": {
@@ -181,14 +186,5 @@ def runtime_config(tmp_path) -> dict[str, object]:
                     "llm_tone_mapping_file": str(tones),
                 }
             }
-        },
-        "agent": {
-            "memory": {
-                "memory_writer": {"llm_module": {}},
-                "user_profile": {"llm_module": {}},
-            },
-            "main_chat": {"llm_module": {}},
-            "call_recall": {"llm_module": {}},
-            "call_summary": {"llm_module": {}},
         },
     }

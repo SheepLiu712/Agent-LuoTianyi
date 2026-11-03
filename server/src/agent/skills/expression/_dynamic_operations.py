@@ -33,11 +33,7 @@ class DynamicOperations:
         """从 config 注册 world dynamic composer LLM 模块。"""
         composer_cfg = self._module_config(self.config.get("dynamic_composer"))
         if composer_cfg:
-            try:
-                self._dynamic_composer = llm_service.register_llm_module("dynamic_composer", composer_cfg)
-            except Exception as exc:
-                self._dynamic_composer = None
-                self.logger.warning(f"Dynamic composer module unavailable: {exc}")
+            self._dynamic_composer = llm_service.register_llm_module("skill.dynamic.generate", composer_cfg)
         # 同时注册动态回复 LLM 模块
         self.replier.create_llm_module(llm_service)
 

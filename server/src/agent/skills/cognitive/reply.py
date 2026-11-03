@@ -5,7 +5,8 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import asdict
 
 from src.agent.context.models import UserContextSnapshot
-from src.agent.skills.contracts import ReplyDraft
+from src.agent.skills.contracts import CharacterNarrative, ReplyDraft
+from src.infrastructure.config.skills import SkillsConfig
 from src.utils.logger import get_logger
 
 from ._reply_resources import ReplyResources
@@ -15,10 +16,28 @@ from ._streaming_reply_parser import StreamingReplyParser
 class ReplySkill:
     """按角色标识选择已绑定资源，不持有当前交互或写入聊天记录。"""
 
-    def __init__(self, resources: Mapping[str, ReplyResources]) -> None:
-        if not resources:
+    def __init__(self, config: dict, *, llm_service, characters: Mapping) -> None:
+        if not characters:
             raise ValueError("回复技能至少需要一个角色的生成资源")
-        self._resources = dict(resources)
+        self._resources = {}
+        for character_id, profile in characters.items():
+            character_config = {**config, **config.get("characters", {}).get(character_id, {})}
+            module_config = SkillsConfig.require_model(character_config, f"agent_runtime.skills.reply.{character_id}")
+            module = llm_service.register_llm_module(
+                f"skill.reply.generate.{character_id}",
+                module_config,
+                stream=True,
+            )
+            self._resources[character_id] = ReplyResources(character_config, module, profile)
+
+    def narratives(self) -> dict[str, CharacterNarrative]:
+        """提供已校验的人设资料，供其他内容生成能力共享。"""
+        return {
+            key: CharacterNarrative(
+                name=value.character_name, persona=value.character_persona, speaking_style=value.speaking_style
+            )
+            for key, value in self._resources.items()
+        }
 
     async def generate(
         self,

@@ -146,24 +146,6 @@
             "terminal_send_retry_delay_seconds": 0.05,
             "shutdown_timeout_seconds": 30
         },
-        "conversation_service": {
-            "raw_conversation_context_limit": 60,
-            "not_zip_conversation_count": 30,
-            "forget_conversation_days": 10,
-            "context_stale_after_days": 5,
-            "llm_module": {
-                "llm": {
-                    "name": "qwen3.5-plus",
-                    "enable_thinking": false,
-                    "use_json": false
-                },
-                "prompt_name": "summary_prompt"
-            },
-            "history_dir": "data/memory/conversation_history",
-            "max_file_lines": 1000,
-            "recent_history_limit": 100,
-            "context_file": "data/memory/context/context.json"
-        },
         "proactive_topic_maker": {
             "return_user_threshold_seconds": 432000,
             "silence_threshold_seconds": 180,
@@ -298,12 +280,116 @@
                         "prompt_name": "diary_prompt"
                     }
                 }
-            }
-        },
-        "prepared_speech": {
-            "characters": {
-                "luotianyi": {
-                    "manifest": "res/agent/prepared_speech/luotianyi/manifest.json"
+            },
+            "memory_write": {
+                "recent_update_path": "data/memory/context/recent_update.json",
+                "llm_module": {
+                    "label": "记忆写入",
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true,
+                        "params": {
+                            "max_tokens": 800
+                        }
+                    },
+                    "prompt_name": "memory_write_prompt"
+                }
+            },
+            "explicit_memory_intent": {},
+            "cognitive_maintenance": {
+                "user_profile": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "qwen3.5-plus",
+                            "enable_thinking": true
+                        },
+                        "prompt_name": "user_profile_update_prompt"
+                    }
+                },
+                "conversation_compaction": {
+                    "raw_conversation_context_limit": 60,
+                    "not_zip_conversation_count": 30,
+                    "forget_conversation_days": 10,
+                    "context_stale_after_days": 5,
+                    "llm_module": {
+                        "llm": {
+                            "name": "qwen3.5-plus",
+                            "enable_thinking": false,
+                            "use_json": false
+                        },
+                        "prompt_name": "summary_prompt"
+                    },
+                    "history_dir": "data/memory/conversation_history",
+                    "max_file_lines": 1000,
+                    "recent_history_limit": 100,
+                    "context_file": "data/memory/context/context.json"
+                }
+            },
+            "memory_retrieval": {
+                "graph_retriever": {
+                    "retriever_type": "memory"
+                }
+            },
+            "reply": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {},
+                        "client_model_type": "main_chat"
+                    },
+                    "prompt_name": "topic_reply_prompt"
+                }
+            },
+            "jargon_recognition": {
+                "song_entity_linker": {
+                    "songname_file": "res/knowledge/song_name_keywords.txt",
+                    "lyric_file": "res/knowledge/song_lyric_keywords.txt"
+                }
+            },
+            "topic_extraction": {
+                "llm_module": {
+                    "label": "话题抽取",
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true,
+                        "client_model_type": "topic_extraction"
+                    },
+                    "prompt_name": "topic_extraction_prompt"
+                }
+            },
+            "knowledge": {
+                "song_database": {
+                    "db_folder": "res/knowledge",
+                    "db_file": "knowledge_db.db"
+                }
+            },
+            "prepared_speech": {
+                "characters": {
+                    "luotianyi": {
+                        "manifest": "res/agent/prepared_speech/luotianyi/manifest.json"
+                    }
+                }
+            },
+            "response_composition": {},
+            "touch_reaction": {
+                "characters": {
+                    "luotianyi": {
+                        "resource_names": [
+                            "touch_voice1",
+                            "touch_voice2",
+                            "touch_voice3",
+                            "touch_voice4",
+                            "touch_voice5",
+                            "touch_voice6",
+                            "touch_voice7",
+                            "touch_voice8"
+                        ],
+                        "probability": 1.0
+                    }
                 }
             }
         },
@@ -318,106 +404,20 @@
                     "speaking_style_ref": "main_chat.static_variables.speaking_style",
                     "voice_profile": "luotianyi",
                     "live2d_profile": "luotianyi",
-                    "reflex": {
-                        "touch": {
-                            "fast_reply": {
-                                "resource_names": ["touch_voice1", "touch_voice2", "touch_voice3", "touch_voice4", "touch_voice5", "touch_voice6", "touch_voice7", "touch_voice8"],
-                                "probability": 1.0
-                            }
-                        }
-                    },
                     "default_target": true
                 }
             }
         },
-        "agent": {
-            "preprocessing": {
-                "song_entity_linker": {
-                    "songname_file": "res/knowledge/song_name_keywords.txt",
-                    "lyric_file": "res/knowledge/song_lyric_keywords.txt"
-                }
+        "vector_store": {
+            "store_type": "chroma",
+            "embedding_model": {
+                "api_type": "openai",
+                "model": "BAAI/bge-large-zh-v1.5",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1"
             },
-            "memory": {
-                "vector_store": {
-                    "store_type": "chroma",
-                    "embedding_model": {
-                        "api_type": "openai",
-                        "model": "BAAI/bge-large-zh-v1.5",
-                        "api_key": "$SILICONFLOW_API_KEY",
-                        "base_url": "https://api.siliconflow.cn/v1"
-                    },
-                    "vector_store_path": "data/database/vector_store",
-                    "collection_name": "luotianyi_memory"
-                },
-                "graph_retriever": {
-                    "retriever_type": "memory"
-                },
-                "user_profile": {
-                    "llm_module": {
-                        "llm": {
-                            "name": "qwen3.5-plus",
-                            "enable_thinking": true
-                        },
-                        "prompt_name": "user_profile_update_prompt"
-                    }
-                },
-                "memory_writer": {
-                    "recent_update_path": "data/memory/context/recent_update.json",
-                    "llm_module": {
-                        "label": "记忆写入",
-                        "llm": {
-                            "name": "qwen3.5-plus",
-                            "enable_thinking": false,
-                            "use_json": true,
-                            "params": {
-                                "max_tokens": 800
-                            }
-                        },
-                        "prompt_name": "memory_write_prompt"
-                    }
-                }
-            },
-            "date_detector": {
-                "llm_module": {
-                    "label": "日期检测",
-                    "llm": {
-                        "name": "qwen3.5-plus",
-                        "enable_thinking": false,
-                        "use_json": true
-                    },
-                    "prompt_name": "date_detection_prompt"
-                }
-            },
-            "topic_extractor": {
-                "llm_module": {
-                    "label": "话题抽取",
-                    "llm": {
-                        "name": "qwen3.5-plus",
-                        "enable_thinking": false,
-                        "use_json": true,
-                        "client_model_type": "topic_extraction"
-                    },
-                    "prompt_name": "topic_extraction_prompt"
-                }
-            },
-            "song_knowledge": {
-                "song_database": {
-                    "db_folder": "res/knowledge",
-                    "db_file": "knowledge_db.db"
-                }
-            },
-            "main_chat": {
-                "llm_module": {
-                    "llm": {
-                        "name": "qwen3.5-plus",
-                        "enable_thinking": false,
-                        "use_json": false,
-                        "params": {},
-                        "client_model_type": "main_chat"
-                    },
-                    "prompt_name": "topic_reply_prompt"
-                }
-            }
+            "vector_store_path": "data/database/vector_store",
+            "collection_name": "luotianyi_memory"
         }
     },
     "world": {

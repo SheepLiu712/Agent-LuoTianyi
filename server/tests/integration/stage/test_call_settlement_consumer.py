@@ -279,7 +279,7 @@ async def test_history_preserves_committed_winner_and_repairs_pending_cas(monkey
         persisted = database.call_sessions.find_by_id(call_id)
         assert persisted.summary_status is SettlementStatus.SUCCEEDED
         assert persisted.conversation_id == conversation_id
-        assert llm.modules["luotianyi_call_summary"].calls == []
+        assert llm.modules["skill.call_summary.generate.luotianyi"].calls == []
         with database.open_sql_session() as sql:
             assert sql.query(Conversation).filter_by(type="call").count() == 1
     finally:

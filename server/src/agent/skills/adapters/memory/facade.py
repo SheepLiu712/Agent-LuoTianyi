@@ -25,7 +25,7 @@ class AgentMemory:
     def __init__(
         self,
         config: Dict[str, Any],
-        llm_modules: Dict[str, Any],
+        llm_service,
         *,
         database_manager: "DatabaseManager",
         vector_store: VectorStore,
@@ -35,10 +35,17 @@ class AgentMemory:
         self.owner_character_id = owner_character_id
         self.database_manager = database_manager
         self.vector_store = vector_store
-        self.memory_writer = MemoryWriter(config["memory_writer"], llm_modules["memory_writer"])
+        self.memory_writer = MemoryWriter(
+            config["memory_writer"],
+            llm_service.register_llm_module(
+                f"skill.memory_write.extract.{owner_character_id}", config["memory_writer"]["llm_module"]
+            ),
+        )
         self.user_profile_updater = UserProfileUpdater(
             config["user_profile"],
-            llm_modules["user_profile_updater"],
+            llm_service.register_llm_module(
+                f"skill.cognitive_maintenance.profile.{owner_character_id}", config["user_profile"]["llm_module"]
+            ),
         )
 
     def ensure_dependencies(self) -> None:

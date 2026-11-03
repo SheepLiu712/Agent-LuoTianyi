@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 """音频理解结构校验、重试、降级及上下文不变量。"""
 
 import asyncio
@@ -39,7 +40,7 @@ class _Module:
 def _skill(responses, **kwargs):
     resolver = _Resolver()
     module = _Module(responses)
-    return AudioUnderstandingSkill({}, resolver, audio_module=module, retry_delay_seconds=0, **kwargs), resolver, module
+    return AudioUnderstandingSkill({}, resolver, llm_service=SimpleNamespace(register_audio_model_module=lambda *args: module), retry_delay_seconds=0, **kwargs), resolver, module
 
 
 @pytest.mark.asyncio

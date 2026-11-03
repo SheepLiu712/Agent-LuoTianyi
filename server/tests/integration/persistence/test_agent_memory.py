@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,12 @@ from src.infrastructure.persistence.database.database_service import DatabaseMan
 from src.infrastructure.persistence.database.vector_store import Document
 from src.utils.helpers import load_config
 from src.infrastructure.models.service import LLMService
+
+
+def service_for(models):
+    return SimpleNamespace(register_llm_module=lambda name, config: models[
+        "memory_writer" if ".memory_write." in name else "user_profile_updater"
+    ])
 
 
 USER_ID = "memory-test-user"
@@ -161,8 +168,9 @@ def memory_config():
     return {
         "memory_writer": {
             "user_memory_dedup_threshold": 0.72,
+            "llm_module": {"llm": {"name": "test"}},
         },
-        "user_profile": {},
+        "user_profile": {"llm_module": {"llm": {"name": "test"}}},
     }
 
 
@@ -188,7 +196,7 @@ def fake_vector_store():
 def fake_memory(memory_config, fake_llm_modules, fake_database_manager, fake_vector_store):
     return AgentMemory(
         memory_config,
-        fake_llm_modules,
+        service_for(fake_llm_modules),
         database_manager=fake_database_manager,
         vector_store=fake_vector_store,
         owner_character_id=CHARACTER_ID,
@@ -213,7 +221,8 @@ def real_llm_modules(request):
 
     config = load_config("config/config.json")
     llm_service = LLMService(config["llm_service"])
-    memory_cfg = config["agent_runtime"]["agent"]["memory"]
+    skills = config["agent_runtime"]["skills"]
+    memory_cfg = {"memory_writer": skills["memory_write"], "user_profile": skills["cognitive_maintenance"]["user_profile"]}
     return {
         "memory_writer": llm_service.register_llm_module(
             "test_memory_writer",
@@ -254,7 +263,7 @@ async def test_search_memory_context_reads_canonical_record_from_real_database(
     )
     memory = AgentMemory(
         memory_config,
-        fake_llm_modules,
+        service_for(fake_llm_modules),
         database_manager=real_database_manager,
         vector_store=vector_store,
         owner_character_id=CHARACTER_ID,
@@ -364,7 +373,7 @@ async def test_write_topic_memories_with_fake_llm_writes_when_context_has_memory
     }
     memory = AgentMemory(
         memory_config,
-        llm_modules,
+        service_for(llm_modules),
         database_manager=fake_database_manager,
         vector_store=fake_vector_store,
         owner_character_id=CHARACTER_ID,
@@ -402,7 +411,7 @@ async def test_write_topic_memories_with_fake_llm_does_not_write_without_memory(
     }
     memory = AgentMemory(
         memory_config,
-        llm_modules,
+        service_for(llm_modules),
         database_manager=fake_database_manager,
         vector_store=fake_vector_store,
         owner_character_id=CHARACTER_ID,
@@ -435,7 +444,7 @@ async def test_update_user_profile_with_fake_llm_updates_when_context_has_memory
     }
     memory = AgentMemory(
         memory_config,
-        llm_modules,
+        service_for(llm_modules),
         database_manager=fake_database_manager,
         vector_store=fake_vector_store,
         owner_character_id=CHARACTER_ID,
@@ -461,7 +470,7 @@ async def test_update_user_profile_with_fake_llm_keeps_profile_without_memory(me
     }
     memory = AgentMemory(
         memory_config,
-        llm_modules,
+        service_for(llm_modules),
         database_manager=fake_database_manager,
         vector_store=fake_vector_store,
         owner_character_id=CHARACTER_ID,
@@ -483,7 +492,7 @@ async def test_write_topic_memories_with_real_llm_optional(memory_config, real_l
     """真实 LLM：明显事实应能触发记忆写入；默认跳过。"""
     memory = AgentMemory(
         memory_config,
-        real_llm_modules,
+        service_for(real_llm_modules),
         database_manager=fake_database_manager,
         vector_store=fake_vector_store,
         owner_character_id=CHARACTER_ID,
@@ -512,7 +521,7 @@ async def test_update_user_profile_with_real_llm_optional(memory_config, real_ll
     """真实 LLM：明显长期上下文应能更新画像；默认跳过。"""
     memory = AgentMemory(
         memory_config,
-        real_llm_modules,
+        service_for(real_llm_modules),
         database_manager=fake_database_manager,
         vector_store=fake_vector_store,
         owner_character_id=CHARACTER_ID,

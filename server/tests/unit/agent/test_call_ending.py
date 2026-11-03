@@ -1,3 +1,4 @@
+from support.model_service import make_call_summary
 """One ending plan, sequential cognition, and current-call-only fallback."""
 
 from types import SimpleNamespace
@@ -10,7 +11,6 @@ from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.ledgers._execution_codec import ActionFact, decode_facts, encode_facts
 from src.agent.processing.plan_identity import decode_plan, encode_plan
-from src.agent.skills.cognitive.call_settlement import CallSummarySkill
 from src.domain.call import CallFinalTurn, CallReplyStatus, CallSummarySource
 
 from .test_call_settlement_skills import _snapshot
@@ -59,7 +59,7 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
                 raise response
             return response
 
-    skill = CallSummarySkill({"luotianyi": Model()} if response is not None else {})
+    skill = make_call_summary({"luotianyi": Model()} if response is not None else {})
     snapshot = _snapshot(turns=(CallFinalTurn(1, "fact", CallReplyStatus.NOT_STARTED, None),))
     action = d.FinalizeCall(action_id="finalize", user_id="user", final_snapshot=snapshot)
     execution = d.ExecutionContext(

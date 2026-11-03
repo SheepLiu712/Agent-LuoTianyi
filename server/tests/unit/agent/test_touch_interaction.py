@@ -290,10 +290,10 @@ async def test_production_runtime_registers_touch_and_restore_without_chat_dupli
         ),
         encoding="utf-8",
     )
-    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
-    kwargs["config"]["character_registry"]["characters"]["luotianyi"]["reflex"] = {
-        "touch": {
-            "fast_reply": {
+    kwargs["config"]["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    kwargs["config"]["skills"]["touch_reaction"] = {
+        "characters": {
+            "luotianyi": {
                 "resource_names": ["touch_voice"],
                 "probability": 1.0,
             }
@@ -316,9 +316,9 @@ async def test_production_runtime_registers_touch_and_restore_without_chat_dupli
 
 def test_production_runtime_rejects_directory_only_touch_resources(runtime_dependencies, tmp_path):
     kwargs, _ = runtime_dependencies
-    kwargs["config"]["character_registry"]["characters"]["luotianyi"]["reflex"] = {
-        "touch": {
-            "fast_reply": {
+    kwargs["config"]["skills"]["touch_reaction"] = {
+        "characters": {
+            "luotianyi": {
                 "touch_voice_dir": str(tmp_path),
                 "probability": 1.0,
             }
