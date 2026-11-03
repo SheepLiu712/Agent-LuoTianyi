@@ -1,4 +1,3 @@
-from support.retrieval import stub_retrieval
 import asyncio
 import hashlib
 from datetime import datetime, timedelta
@@ -10,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from support.call_output import output_sink
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval
 from support.stage_lifecycle import finish_call, observe_release, wait_call_finished
 from support.stage_manager import start_call_stage
 
@@ -1342,16 +1342,15 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
 
     from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
     from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
-    from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
     from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
     from src.agent.skills.contracts import ReplyDraft
-    from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 
     class Memory:
         inputs = []
 
         async def search_memory_context_for_topic(self, *args):
             from src.domain import MemoryContext
+
             return MemoryContext()
 
         async def extract_maintenance_candidates(self, **kwargs):
@@ -1375,12 +1374,10 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
     stage, provider, transport, _ = await _create(call_setup)
     repository, record, _, _ = call_setup
     memory = Memory()
-    call_skill = CallMaintenanceSkill({"luotianyi": memory})
-    compaction = ConversationCompactionSkill(
-        {"llm_module": {}}, SimpleNamespace(register_llm_module=lambda *args: Model())
-    )
     skill = CognitiveMaintenanceSkill(
-        memories={"luotianyi": memory}, compaction=compaction, call_maintenance=call_skill
+        {"conversation_compaction": {"llm_module": {}}},
+        llm_service=SimpleNamespace(register_llm_module=lambda *args: Model()),
+        memories={"luotianyi": memory},
     )
     recall = stub_retrieval({"luotianyi": memory})
     stage._agent = Agent(

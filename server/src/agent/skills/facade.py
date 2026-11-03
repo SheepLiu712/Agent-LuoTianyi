@@ -11,10 +11,9 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
     TopicExtractionSkill,
 )
-from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
+from src.agent.skills.cognitive.call_settlement import CallSummarySkill
 from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
-from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression.diary import DiarySkill
 from src.agent.skills.expression.dynamic import DynamicSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
@@ -64,10 +63,6 @@ class SharedSkills:
         touch_configs = config.get("touch_reaction").get("characters", {})
         # 先完成所有可能失败的配置与模型装配，最后创建拥有进程的语音技能。
         self.singing = SingingSkill(config.get("singing"), llm_service)
-        self.conversation_compaction = ConversationCompactionSkill(
-            config.get("cognitive_maintenance").get("conversation_compaction", {}),
-            llm_service,
-        )
         self.text_preprocessing = TextPreprocessingSkill(
             config.get("jargon_recognition"),
             song_names=self.singing.song_names(),
@@ -98,13 +93,11 @@ class SharedSkills:
             ),
         )
         self.call_summary = CallSummarySkill(config.get("call_summary"), llm_service=llm_service, characters=characters)
-        self.call_maintenance = CallMaintenanceSkill(
-            dict(memories), getattr(database_manager, "call_maintenance_batches", None)
-        )
         self.cognitive_maintenance = CognitiveMaintenanceSkill(
+            config.get("cognitive_maintenance"),
+            llm_service=llm_service,
             memories=memories,
-            compaction=self.conversation_compaction,
-            call_maintenance=self.call_maintenance,
+            batches=getattr(database_manager, "call_maintenance_batches", None),
         )
         self.memory_write = MemoryWriteSkill(
             config.get("memory_write"),

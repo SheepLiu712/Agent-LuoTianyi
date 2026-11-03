@@ -7,7 +7,7 @@ from support import context_support
 from support.context_support import entry, factory
 
 from src.agent.context import ConversationMode
-from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.cognitive_maintenance._compaction import _ConversationCompaction
 
 # Pytest registers this imported fixture; an assignment avoids shadowing an import in test arguments.
 database = context_support.database
@@ -28,7 +28,7 @@ class LLM:
 
 
 def skill(llm, keep=1):
-    return ConversationCompactionSkill(
+    return _ConversationCompaction(
         {"raw_conversation_context_limit": 2, "not_zip_conversation_count": keep, "llm_module": {"model": "test"}}, llm
     )
 
@@ -105,12 +105,15 @@ async def test_runtime_registers_compaction_once_for_all_characters(runtime_depe
         return original(name, config, **kwargs)
 
     kwargs["llm_service"].register_llm_module = register
-    kwargs["config"].setdefault("skills", {})["cognitive_maintenance"]["conversation_compaction"] = {"llm_module": {"model": "test"}}
+    kwargs["config"].setdefault("skills", {})["cognitive_maintenance"]["conversation_compaction"] = {
+        "llm_module": {"model": "test"}
+    }
     runtime = AgentRuntime(**kwargs)
     try:
         assert runtime.character_ids == ("luotianyi", "miku")
         assert calls.count("conversation_context_summary") == 1
-        assert isinstance(runtime.skills.conversation_compaction, ConversationCompactionSkill)
+        assert not hasattr(runtime.skills, "conversation_compaction")
+        assert not hasattr(runtime.skills, "call_maintenance")
     finally:
         await runtime.shutdown()
 
@@ -143,27 +146,27 @@ async def test_append_while_skill_generates_summary_survives_application(databas
 def test_compaction_validates_own_config_before_registering(field, value):
     llm = LLM()
     with pytest.raises((TypeError, ValueError), match=field):
-        ConversationCompactionSkill({field: value, "llm_module": {"model": "test"}}, llm)
+        _ConversationCompaction({field: value, "llm_module": {"model": "test"}}, llm)
     assert llm.registrations == []
 
 
 @pytest.mark.parametrize("config", [[], None, "config"])
 def test_compaction_rejects_non_dictionary_config(config):
     with pytest.raises(TypeError, match="conversation_compaction"):
-        ConversationCompactionSkill(config, LLM())
+        _ConversationCompaction(config, LLM())
 
 
 @pytest.mark.parametrize("module_config", [{}, {"custom_nested": {"provider": "value"}}, "invalid-child-config"])
 def test_compaction_passes_child_config_unchanged_to_owner(module_config):
     llm = LLM()
-    ConversationCompactionSkill({"llm_module": module_config, "future_submodule": {}}, llm)
+    _ConversationCompaction({"llm_module": module_config, "future_submodule": {}}, llm)
     assert llm.registrations[0][1] is module_config
 
 
 def test_compaction_rejects_keep_count_exceeding_threshold():
     llm = LLM()
     with pytest.raises(ValueError, match="not_zip_conversation_count"):
-        ConversationCompactionSkill({"raw_conversation_context_limit": 1}, llm)
+        _ConversationCompaction({"raw_conversation_context_limit": 1}, llm)
     assert llm.registrations == []
 
 
@@ -173,4 +176,4 @@ def test_compaction_propagates_child_configuration_error():
             raise ValueError("llm_module.prompt_name is required")
 
     with pytest.raises(ValueError, match="llm_module.prompt_name"):
-        ConversationCompactionSkill({"llm_module": {}}, Rejecting())
+        _ConversationCompaction({"llm_module": {}}, Rejecting())

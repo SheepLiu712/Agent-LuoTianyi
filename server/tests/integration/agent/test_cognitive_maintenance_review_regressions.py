@@ -4,10 +4,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.context_support import entry
+from support.maintenance import make_maintenance
 from support.skill_support import invocation
 
 from src.agent.context import ContextFactory, ConversationCompaction, ConversationMode, ConversationSummary
-from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
+from src.agent.skills.cognitive_maintenance import MaintenanceRequest
 from src.domain.agent.maintenance import (
     MaintenanceCandidate,
     MaintenanceMemoryType,
@@ -95,7 +96,7 @@ class AppendingPrefixCompaction(PrefixCompaction):
 
 
 def skill(memory):
-    return CognitiveMaintenanceSkill(memories={"luotianyi": memory}, compaction=PrefixCompaction())
+    return make_maintenance(memories={"luotianyi": memory}, compaction=PrefixCompaction())
 
 
 async def context_with(database, numbers):
@@ -110,12 +111,16 @@ async def context_with(database, numbers):
 async def test_second_short_interaction_covers_history_but_maintains_only_new_entries(database):
     memory = RecordingMemory()
     first = await context_with(database, (1, 2))
-    first_report = await skill(memory).maintain(invocation(), first, reason=MaintenanceReason.INTERACTION_ENDING)
+    first_report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=first)
+    )
     assert first_report.status is MaintenanceStatus.COMPLETED
     await first.close()
 
     second = await context_with(database, (3, 4))
-    second_report = await skill(memory).maintain(invocation(), second, reason=MaintenanceReason.INTERACTION_ENDING)
+    second_report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=second)
+    )
 
     assert second_report.status is MaintenanceStatus.COMPLETED
     assert second_report.previous_progress == "2"
@@ -131,12 +136,16 @@ async def test_second_short_interaction_covers_history_but_maintains_only_new_en
 async def test_threshold_compacts_prefix_after_marker_without_reextracting_history(database):
     memory = RecordingMemory()
     initial = await context_with(database, range(1, 61))
-    ended = await skill(memory).maintain(invocation(), initial, reason=MaintenanceReason.INTERACTION_ENDING)
+    ended = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=initial)
+    )
     assert ended.new_progress == "60"
     await initial.close()
 
     resumed = await context_with(database, (61,))
-    threshold = await skill(memory).maintain_if_compaction_needed(invocation(), resumed)
+    threshold = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.COMPACTION_THRESHOLD, context=resumed)
+    )
 
     assert threshold.status is MaintenanceStatus.COMPLETED
     assert threshold.compacted is True
@@ -148,7 +157,9 @@ async def test_threshold_compacts_prefix_after_marker_without_reextracting_histo
     assert snapshot.summary == ConversationSummary("压缩总结")
     assert tuple(item.entry_id for item in snapshot.entries) == tuple(str(index) for index in range(32, 62))
 
-    final = await skill(memory).maintain(invocation(), resumed, reason=MaintenanceReason.INTERACTION_ENDING)
+    final = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=resumed)
+    )
     assert final.status is MaintenanceStatus.COMPLETED
     assert final.new_progress == "61"
     assert final.maintained_entry_ids == ("61",)
@@ -170,7 +181,9 @@ async def test_threshold_locates_marker_in_full_snapshot_for_inside_and_after_pr
         "u", character_id="luotianyi", expected_entry_id=None, new_entry_id=progress
     )
 
-    report = await skill(memory).maintain_if_compaction_needed(invocation(), context)
+    report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.COMPACTION_THRESHOLD, context=context)
+    )
 
     assert report.status is MaintenanceStatus.COMPLETED
     assert report.maintained_entry_ids == expected_maintained
@@ -184,7 +197,9 @@ async def test_ending_maintains_long_snapshot_through_tail(database):
     memory = RecordingMemory()
     context = await context_with(database, range(1, 62))
 
-    report = await skill(memory).maintain(invocation(), context, reason=MaintenanceReason.INTERACTION_ENDING)
+    report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=context)
+    )
 
     assert report.status is MaintenanceStatus.COMPLETED
     assert report.new_progress == "61"
@@ -201,11 +216,15 @@ async def test_ending_resumes_frozen_batch_then_maintains_next_interaction_tail(
     memory = RecordingMemory(fail_first_write=True)
     first = await context_with(database, (1, 2))
     with pytest.raises(RuntimeError, match="projection failed"):
-        await skill(memory).maintain(invocation(), first, reason=MaintenanceReason.INTERACTION_ENDING)
+        await skill(memory).maintain(
+            invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=first)
+        )
     await first.close()
 
     second = await context_with(database, (3, 4))
-    report = await skill(memory).maintain(invocation(), second, reason=MaintenanceReason.INTERACTION_ENDING)
+    report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=second)
+    )
 
     assert report.status is MaintenanceStatus.COMPLETED
     assert report.new_progress == "4"
@@ -225,7 +244,9 @@ async def test_ending_uses_fixed_snapshot_boundary_when_new_entries_arrive(datab
         await context.conversation.append((entry(62),))
 
     memory = RecordingMemory(append_during_first_write=append_late_entry)
-    report = await skill(memory).maintain(invocation(), context, reason=MaintenanceReason.INTERACTION_ENDING)
+    report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=context)
+    )
 
     assert report.new_progress == "61"
     assert await context.conversation.read_maintenance_progress() == "61"
@@ -243,9 +264,11 @@ async def test_ending_compaction_freezes_model_input_and_defers_late_entries(dat
 
     compaction = AppendingPrefixCompaction(append_late_entries)
     memory = RecordingMemory()
-    maintenance = CognitiveMaintenanceSkill(memories={"luotianyi": memory}, compaction=compaction)
+    maintenance = make_maintenance(memories={"luotianyi": memory}, compaction=compaction)
 
-    initial = await maintenance.maintain(invocation(), context, reason=MaintenanceReason.INTERACTION_ENDING)
+    initial = await maintenance.maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=context)
+    )
 
     assert initial.status is MaintenanceStatus.COMPLETED
     assert initial.new_progress == "61"
@@ -257,7 +280,9 @@ async def test_ending_compaction_freezes_model_input_and_defers_late_entries(dat
     assert all("消息62" not in dialogue for dialogue in memory.extracts)
     assert all("消息62" not in "\n".join(lines) for lines in memory.profile_inputs)
 
-    resumed = await maintenance.maintain(invocation(), context, reason=MaintenanceReason.INTERACTION_ENDING)
+    resumed = await maintenance.maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=context)
+    )
 
     assert resumed.status is MaintenanceStatus.COMPLETED
     assert resumed.previous_progress == "61"
@@ -278,7 +303,9 @@ async def test_empty_ending_boundary_does_not_absorb_entries_appended_before_bat
         return await original_read_progress()
 
     context.conversation.read_maintenance_progress = append_before_batch_read
-    first = await skill(memory).maintain(invocation(), context, reason=MaintenanceReason.INTERACTION_ENDING)
+    first = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=context)
+    )
 
     assert first.status is MaintenanceStatus.SKIPPED
     assert first.new_progress is None
@@ -287,7 +314,9 @@ async def test_empty_ending_boundary_does_not_absorb_entries_appended_before_bat
     assert await context.conversation.read_maintenance_progress() is None
 
     context.conversation.read_maintenance_progress = original_read_progress
-    second = await skill(memory).maintain(invocation(), context, reason=MaintenanceReason.INTERACTION_ENDING)
+    second = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=context)
+    )
 
     assert second.status is MaintenanceStatus.COMPLETED
     assert second.new_progress == "2"
@@ -301,12 +330,14 @@ async def test_empty_ending_boundary_does_not_resume_an_existing_frozen_batch(da
     failed = await context_with(database, (1, 2))
     with pytest.raises(RuntimeError, match="projection failed"):
         await skill(RecordingMemory(fail_first_write=True)).maintain(
-            invocation(), failed, reason=MaintenanceReason.INTERACTION_ENDING
+            invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=failed)
         )
     await failed.close()
 
     memory = RecordingMemory()
-    report = await skill(memory).maintain(invocation(), empty, reason=MaintenanceReason.INTERACTION_ENDING)
+    report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=empty)
+    )
 
     assert report.status is MaintenanceStatus.SKIPPED
     assert report.new_progress is None
@@ -333,7 +364,9 @@ async def test_missing_ending_boundary_conflicts_without_processing_current_tail
     reads = iter((initial_snapshot, concurrent.conversation.read()))
     context.conversation.read = lambda: next(reads)
 
-    report = await skill(memory).maintain(invocation(), context, reason=MaintenanceReason.INTERACTION_ENDING)
+    report = await skill(memory).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=context)
+    )
 
     assert report.status is MaintenanceStatus.CONFLICT
     assert report.new_progress is None

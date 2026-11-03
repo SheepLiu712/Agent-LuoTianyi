@@ -1,4 +1,3 @@
-from support.retrieval import stub_retrieval, stub_singing
 """Isolated loopback server for AC-27. Only models and long-term memory are fakes."""
 
 import io
@@ -32,7 +31,6 @@ from src.agent.skills.cognitive import (
     TopicExtractionSkill,
 )
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
-from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.domain import CharacterProfile
@@ -43,6 +41,7 @@ from src.web.http.user_interface import UserInterface
 from src.web.websocket import endpoint
 from src.web.websocket.service import WebSocketService
 from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
 from support.stage_manager import make_stage_manager
 
 
@@ -105,7 +104,10 @@ def make_agent(root, resolver, models):
         topic_extraction=TopicExtractionSkill({}, None, understanding=text),
     )
     preprocessing = ChatPreprocessingHandler(
-        text, audio_understanding=AudioUnderstandingSkill({}, resolver, llm_service=SimpleNamespace(register_audio_model_module=lambda *args: models))
+        text,
+        audio_understanding=AudioUnderstandingSkill(
+            {}, resolver, llm_service=SimpleNamespace(register_audio_model_module=lambda *args: models)
+        ),
     )
     return Agent(
         character_id="luotianyi",
@@ -126,7 +128,7 @@ def make_agent(root, resolver, models):
                     d.ActionKind.COGNITIVE_MAINTENANCE,
                     CognitiveMaintenanceActionHandler(
                         "luotianyi",
-                        CognitiveMaintenanceSkill(memories=memory, compaction=ConversationCompactionSkill({}, None)),
+                        CognitiveMaintenanceSkill({}, llm_service=None, memories=memory),
                     ),
                 ),
             )

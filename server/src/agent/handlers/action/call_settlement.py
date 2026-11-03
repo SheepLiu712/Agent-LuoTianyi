@@ -3,6 +3,7 @@
 import src.domain.agent as d
 from src.agent.context import ConversationSummary
 from src.agent.skills.cognitive.call_settlement import CallSummaryMaterial, CallSummaryStatus
+from src.agent.skills.cognitive_maintenance import MaintenanceRequest
 from src.agent.skills.invocation import execution_invocation
 from src.domain.call import CallEndingResult, CallSummarySource, fallback_call_summary
 from src.utils.logger import get_logger
@@ -25,7 +26,16 @@ class FinalizeCallHandler:
         invocation = execution_invocation(self._character_id, context, user_id=action.user_id)
         succeeded = True
         try:
-            await self._maintenance.maintain_ending(invocation, interaction, action.final_snapshot)
+            maintained = await self._maintenance.maintain(
+                invocation,
+                request=MaintenanceRequest(
+                    reason=d.MaintenanceReason.INTERACTION_ENDING,
+                    context=interaction,
+                    call_snapshot=action.final_snapshot,
+                ),
+            )
+            if maintained.status is d.MaintenanceStatus.CONFLICT:
+                raise RuntimeError("COGNITIVE_MAINTENANCE_CONFLICT")
         except Exception as error:
             succeeded = False
             get_logger(__name__).warning("Call maintenance failed type=%s", type(error).__name__)

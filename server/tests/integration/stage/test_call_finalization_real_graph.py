@@ -157,22 +157,19 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
     write_release = threading.Event()
     close_count = 0
 
-    maintenance = runtime.skills.call_maintenance
-    original_maintenance = maintenance.maintain_ending
+    maintenance = runtime.skills.cognitive_maintenance
+    original_maintenance = maintenance.maintain
 
-    async def observed_maintenance(invocation, context, snapshot):
+    async def observed_maintenance(invocation, *, request):
+        context = request.context
         assert context is created[0]
-        assert invocation.interaction_id == str(snapshot.terminal.call_id)
+        assert invocation.interaction_id == str(request.call_snapshot.terminal.call_id)
         order.append("maintenance")
         if maintenance_failure:
             raise TimeoutError("maintenance model exhausted")
-        return await original_maintenance(
-            invocation,
-            context,
-            snapshot,
-        )
+        return await original_maintenance(invocation, request=request)
 
-    monkeypatch.setattr(maintenance, "maintain_ending", observed_maintenance)
+    monkeypatch.setattr(maintenance, "maintain", observed_maintenance)
     summary_skill = runtime.skills.call_summary
     original_summary = summary_skill.generate
 

@@ -44,12 +44,13 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
     calls = []
 
     class Maintenance:
-        async def maintain_ending(self, invocation, supplied, snapshot):
-            assert supplied is context
+        async def maintain(self, invocation, *, request):
+            assert request.context is context
             calls.append("maintenance")
             if maintenance_fails:
                 raise TimeoutError("attempts exhausted")
             conversation.advance_call_maintenance_progress(expected=0, new=1)
+            return SimpleNamespace(status=d.MaintenanceStatus.COMPLETED)
 
     class Model:
         async def generate_response(self, **kwargs):
@@ -99,8 +100,8 @@ async def test_finalize_does_not_report_generated_summary_when_context_commit_fa
     await conversation.update_call_working_summary(ConversationSummary("原工作摘要"))
 
     class Maintenance:
-        async def maintain_ending(self, *args):
-            return 0
+        async def maintain(self, *args, **kwargs):
+            return SimpleNamespace(status=d.MaintenanceStatus.COMPLETED)
 
     class Model:
         async def generate_response(self, **kwargs):

@@ -12,17 +12,18 @@ class Skill:
         self.threshold = []
         self.ending = []
 
-    async def maintain_if_compaction_needed(self, invocation, context):
-        self.threshold.append((invocation, context))
-
-    async def maintain(self, invocation, context, *, reason):
-        self.ending.append((invocation, context, reason))
+    async def maintain(self, invocation, *, request):
+        if request.reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
+            self.threshold.append((invocation, request.context))
+        else:
+            self.ending.append((invocation, request.context, request.reason))
+        return SimpleNamespace(status=d.MaintenanceStatus.COMPLETED)
 
 
 def context():
     return SimpleNamespace(
         identity=SimpleNamespace(user_id="u"),
-        conversation=SimpleNamespace(),
+        conversation=SimpleNamespace(read=lambda: SimpleNamespace(entries=())),
         user=SimpleNamespace(),
         recalled_memory=RecalledMemoryContext(),
     )
@@ -77,3 +78,15 @@ async def test_missing_context_returns_dependency_failure_without_output():
     )
     assert result.status is d.ActionExecutionStatus.FAILED
     assert result.error_code is d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_conflicted_batch_is_not_reported_as_completed_action():
+    class Conflicted:
+        async def maintain(self, invocation, *, request):
+            return SimpleNamespace(status=d.MaintenanceStatus.CONFLICT)
+
+    with pytest.raises(RuntimeError, match="COGNITIVE_MAINTENANCE_CONFLICT"):
+        await CognitiveMaintenanceActionHandler("luotianyi", Conflicted()).realize(
+            action(d.MaintenanceReason.INTERACTION_ENDING), execution_context(context()), None
+        )

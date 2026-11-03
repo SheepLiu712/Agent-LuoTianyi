@@ -317,7 +317,7 @@ class AgentRuntime:
                 (ActionKind.END_CALL, EndCallHandler()),
                 (
                     ActionKind.FINALIZE_CALL,
-                    FinalizeCallHandler(character_id, self.skills.call_maintenance, self.skills.call_summary),
+                    FinalizeCallHandler(character_id, self.skills.cognitive_maintenance, self.skills.call_summary),
                 ),
             )
         )

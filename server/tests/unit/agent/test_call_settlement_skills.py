@@ -16,12 +16,11 @@ from src.agent.context import (
 )
 from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.skills.cognitive.call_settlement import (
-    CallMaintenanceSkill,
     CallSummaryMaterial,
     CallSummaryStatus,
-    _maintenance_digest,
     render_call_turns,
 )
+from src.agent.skills.cognitive_maintenance._call import _CallMaintenance, _maintenance_digest
 from src.agent.skills.contracts import SkillInvocation
 from src.domain.call import (
     CallEndReason,
@@ -180,7 +179,7 @@ async def test_call_maintenance_without_repository_has_no_cross_call_retry_cache
                 raise RuntimeError("partial write")
 
     memory = Memory()
-    skill = CallMaintenanceSkill({"luotianyi": memory})
+    skill = _CallMaintenance({"luotianyi": memory})
     snapshot = _snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),))
 
     with pytest.raises(RuntimeError, match="partial write"):
