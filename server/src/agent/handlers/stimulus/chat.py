@@ -27,7 +27,7 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
 )
 from src.agent.skills.invocation import handling_invocation
-from src.agent.skills.mutation import IntentionalMemoryCommit
+from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill
 from src.utils.enum_type import ConversationSource
 
 _MEMORY_ACK_REPLY_TOPIC_PREFIX: Final = "刚刚已经把这条用户长期记忆提交完成，请用角色口吻简短确认"
@@ -194,7 +194,7 @@ class ChatReplyHandler:
         self,
         composition: ResponseCompositionSkill,
         memory_intent: ExplicitMemoryIntentSkill | None = None,
-        memory_commit: IntentionalMemoryCommit | None = None,
+        memory_commit: MemoryWriteSkill | None = None,
         reply: ReplyDelivery | None = None,
     ) -> None:
         """注入统一回复编排以及可选的明确记忆识别与提交技能。"""
@@ -270,12 +270,22 @@ class ChatReplyHandler:
         if identity.user_id is None or self._memory_commit is None:
             return _failed_memory_report(request)
         committed_contents: list[str] = []
-        for _, memory_content in memory_items:
-            revision = await self._memory_commit.commit(
-                handling_invocation(request, plans.context),
-                content=memory_content,
+        for item, memory_content in memory_items:
+            source = next(
+                value for value in request.interaction.pending_stimuli if value.stimulus_id == item.stimulus_id
             )
-            if not revision.identifier.strip():
+            revision = await self._memory_commit.commit_fact(
+                handling_invocation(request, plans.context),
+                fact=MemoryFact(
+                    source="explicit_memory",
+                    source_id=item.stimulus_id,
+                    occurred_at=source.occurred_at,
+                    content=memory_content,
+                    scope=MemoryScope.USER,
+                    basis=MemoryBasis.USER_REQUEST,
+                ),
+            )
+            if not revision.memory_ids or any(not value.strip() for value in revision.memory_ids):
                 return _failed_memory_report(request)
             committed_contents.append(memory_content)
         reply_topic = f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{'；'.join(committed_contents)}"

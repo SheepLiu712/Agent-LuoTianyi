@@ -381,7 +381,8 @@
             "memory_retrieval": {
                 "graph_retriever": {
                     "retriever_type": "memory"
-                }
+                },
+                "legacy_character_memory_ids": {}
             },
             "reply": {
                 "llm_module": {

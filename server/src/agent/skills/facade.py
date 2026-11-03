@@ -13,8 +13,6 @@ from src.agent.skills.cognitive import (
 )
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
 from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
-from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
-from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
 from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
@@ -29,7 +27,7 @@ from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchReactionSkill
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
-from src.agent.skills.mutation import IntentionalMemoryCommit
+from src.agent.skills.memory_write import MemoryWriteSkill
 from src.agent.skills.resources import SkillResources
 from src.infrastructure.config.skills import SkillsConfig
 
@@ -118,9 +116,13 @@ class SharedSkills:
             compaction=self.conversation_compaction,
             call_maintenance=self.call_maintenance,
         )
-        self.intentional_memory = IntentionalMemoryCommit(lambda character_id: memories[character_id])
-        self.dynamic_topic_memory = DynamicTopicMemorySkill(memories)
-        self.learned_song_experience = LearnedSongExperienceSkill(memories)
+        self.memory_write = MemoryWriteSkill(
+            config.get("memory_write"),
+            llm_service=llm_service,
+            memory_store=database_manager.memory_store,
+            vector_store=resources.vector_store,
+            characters=characters,
+        )
 
         self.dynamic_publishing = DynamicPublishingSkill(dynamics, narratives)
         self.dynamic_reply = DynamicReplySkill(dynamics, narratives)

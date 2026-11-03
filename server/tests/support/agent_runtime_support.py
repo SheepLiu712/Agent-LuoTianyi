@@ -94,7 +94,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
             resolve=lambda media_ref, **kwargs: None,
             ensure_dependencies=lambda: None,
         ),
-        "database_manager": SimpleNamespace(open_sql_session=sessions, conversation_service=object()),
+        "database_manager": SimpleNamespace(open_sql_session=sessions, conversation_service=object(), memory_store=SimpleNamespace(sql_session_factory=sessions)),
     }, store
     runtime_module.set_agent_runtime(previous)
     engine.dispose()

@@ -22,7 +22,7 @@ from src.infrastructure.models.service import LLMService
 
 def service_for(models):
     return SimpleNamespace(register_llm_module=lambda name, config: models[
-        "memory_writer" if ".memory_write." in name else "user_profile_updater"
+        "memory_writer" if ".extract." in name else "user_profile_updater"
     ])
 
 

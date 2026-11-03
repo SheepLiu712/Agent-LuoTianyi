@@ -14,6 +14,7 @@ from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
 from src.infrastructure.persistence.database.sql_database import (
     AgentMemoryRecord,
     MemoryChunkRecord,
+    MemoryEventBatch,
     MemoryUpdateRecord,
 )
 from src.infrastructure.persistence.database.sql_writer import run_sql_write
@@ -359,6 +360,9 @@ class MemoryStore:
                 count = len(rows)
                 for row in rows:
                     db.delete(row)
+                db.query(MemoryEventBatch).filter(MemoryEventBatch.subject_user_id == user_id).delete(
+                    synchronize_session=False
+                )
                 db.query(MemoryUpdateRecord).filter(MemoryUpdateRecord.user_id == user_id).delete(
                     synchronize_session=False
                 )

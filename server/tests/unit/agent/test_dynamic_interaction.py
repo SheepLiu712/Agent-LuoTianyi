@@ -10,7 +10,6 @@ import src.domain.agent as d
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
-from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
 
@@ -70,7 +69,8 @@ class FakeMemory:
         self.fail = fail
         self.calls = []
 
-    async def write_topic_memories(self, *, user_id, history, current_dialogue, related_memories, commit=True):
+    async def remember_event(self, invocation, *, event):
+        user_id, history, current_dialogue, commit = invocation.user_id, event.background, event.body, True
         self.calls.append(
             {
                 "user_id": user_id,
@@ -168,7 +168,7 @@ def _handler(replier: FakeReplier, *, memory: FakeMemory | None = None, publish_
         DynamicObservedHandler(
             CHARACTER_ID,
             reply,
-            DynamicTopicMemorySkill({CHARACTER_ID: memory}),
+            memory,
         ),
         dynamics,
         memory,
@@ -242,7 +242,7 @@ def test_comment_observation_can_be_ignored_explicitly():
     assert handling.emitted_plan_ids == ()
     assert fact.stimulus_id in handling.consumed_pending_stimulus_ids
     assert sink.plans == []
-    assert memory.calls[0]["current_dialogue"] == "user: 加油，慢慢来。"
+    assert memory.calls[0]["current_dialogue"] == "加油，慢慢来。"
 
 
 def test_comment_observation_replies_to_comment_parent():

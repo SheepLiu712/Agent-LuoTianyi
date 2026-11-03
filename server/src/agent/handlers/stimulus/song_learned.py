@@ -6,12 +6,10 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.cognitive.learned_song_experience import (
-    LearnedSongExperienceSkill,
-)
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.invocation import handling_invocation
+from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill, MemoryWriteStatus
 from src.utils.logger import get_logger
 
 SONG_LEARNED_SOURCE_TYPE = "song_learned"
@@ -27,7 +25,7 @@ class SongLearnedHandler:
     def __init__(
         self,
         character_id: str,
-        experience: LearnedSongExperienceSkill,
+        experience: MemoryWriteSkill,
         publishing: DynamicPublishingSkill,
         dispatch: SongLearningDispatchSkill,
     ) -> None:
@@ -82,15 +80,21 @@ class SongLearnedHandler:
     async def _record_experience(self, invocation, stimulus: d.SongLearned) -> None:
         """写入角色经验；失败只记录，不撤销已经成立的新学会事实。"""
         try:
-            committed = await self._experience.commit(
+            result = await self._experience.commit_fact(
                 invocation,
-                song_id=stimulus.song_id,
-                learning_job_id=stimulus.learning_job_id,
+                fact=MemoryFact(
+                    source="song_learned",
+                    source_id=stimulus.learning_job_id,
+                    occurred_at=stimulus.completed_at,
+                    content=f"学会了新歌《{stimulus.song_id}》（学习任务 {stimulus.learning_job_id}）",
+                    scope=MemoryScope.CHARACTER,
+                    basis=MemoryBasis.CONFIRMED_FACT,
+                ),
             )
         except Exception:
             self._logger.exception("学会经验写入失败 song=%s", stimulus.song_id)
             return
-        if not committed:
+        if result.status is MemoryWriteStatus.DUPLICATE:
             self._logger.info("学会经验已存在，跳过重复写入 song=%s", stimulus.song_id)
 
     @staticmethod

@@ -7,9 +7,9 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
 from src.agent.skills.invocation import handling_invocation
+from src.agent.skills.memory_write import MemoryEvent, MemoryScope, MemoryWriteSkill
 from src.utils.logger import get_logger
 
 
@@ -24,7 +24,7 @@ class DynamicObservedHandler:
         self,
         character_id: str,
         reply: DynamicReplySkill,
-        memory: DynamicTopicMemorySkill,
+        memory: MemoryWriteSkill,
     ) -> None:
         self._character_id = character_id
         self._reply = reply
@@ -96,10 +96,16 @@ class DynamicObservedHandler:
         post = stimulus.messages[0]
         history = "" if post.message_id == target.message_id else f"动态正文：{post.text}"
         try:
-            await self._memory.write(
+            await self._memory.remember_event(
                 replace(invocation, user_id=target.author_ref.actor_id),
-                current_dialogue=f"user: {target.text}",
-                conversation_history=history,
+                event=MemoryEvent(
+                    source="dynamic",
+                    source_id=f"{stimulus.dynamic_id}:{target.message_id}",
+                    occurred_at=stimulus.occurred_at,
+                    body=target.text,
+                    background=history,
+                    scope=MemoryScope.USER,
+                ),
             )
         except Exception:
             self._logger.exception("动态记忆写入失败 target=%s", target.message_id)

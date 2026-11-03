@@ -11,9 +11,7 @@ from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.stimulus.citywalk import CitywalkObservationHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.cognitive.learned_song_experience import (
-    LearnedSongExperienceSkill,
-)
+from src.agent.skills.memory_write import MemoryWriteResult, MemoryWriteStatus
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
@@ -66,9 +64,10 @@ class FakeMemory:
     def __init__(self):
         self.calls = []
 
-    async def write_event_memory(self, *, user_id, content, commit=True):
+    async def commit_fact(self, invocation, *, fact):
+        user_id, content = None, fact.content
         self.calls.append((user_id, content))
-        return True
+        return MemoryWriteResult(MemoryWriteStatus.CREATED, ("memory-1",), fact.source_id)
 
 
 @pytest.fixture(scope="function")
@@ -313,7 +312,7 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     handling = asyncio.run(
         SongLearnedHandler(
             "luotianyi",
-            LearnedSongExperienceSkill({"luotianyi": FakeMemory()}),
+            FakeMemory(),
             publishing,
             SongLearningDispatchSkill(SimpleNamespace(singing_manager={"luotianyi": FakeSinging()})),
         ).handle(request, _emitter(request, plan_sink))

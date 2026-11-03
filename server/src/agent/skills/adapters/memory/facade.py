@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.domain import MemoryContext, MemoryHit
 from src.domain.agent.maintenance import MaintenanceCandidate
+from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.infrastructure.persistence.database.vector_store import VectorStore
 
 from .profile_updater import UserProfileUpdater
@@ -38,7 +39,7 @@ class AgentMemory:
         self.memory_writer = MemoryWriter(
             config["memory_writer"],
             llm_service.register_llm_module(
-                f"skill.memory_write.extract.{owner_character_id}", config["memory_writer"]["llm_module"]
+                f"skill.cognitive_maintenance.extract.{owner_character_id}", config["memory_writer"]["llm_module"]
             ),
         )
         self.user_profile_updater = UserProfileUpdater(
@@ -91,7 +92,7 @@ class AgentMemory:
             self.memory_store.get_agent_memory_records_by_embedding_ids,
             vector_ids,
         )
-        scored_hits = self._materialize_hits(candidate_hits, records_by_vector_id)
+        scored_hits = self._materialize_hits(candidate_hits, records_by_vector_id, user_id)
         return MemoryContext(self._top_distinct_hits(scored_hits, k))
 
     async def _search_candidates(
@@ -107,6 +108,14 @@ class AgentMemory:
             if not q:
                 continue
             results = await self.vector_store.search(user_id, q, k=max(1, k))
+            results += await self.vector_store.search(
+                "",
+                q,
+                k=max(1, k),
+                where={"$and": [{"owner_character_id": self.owner_character_id}, {"memory_scope": "character"}]},
+            )
+            if self._legacy_character_ids():
+                results += await self.vector_store.search(self.owner_character_id, q, k=max(1, k))
             for doc, score in results:
                 if score < similarity_threshold:
                     continue
@@ -121,10 +130,14 @@ class AgentMemory:
         self,
         candidates: List[Tuple[float, str, str, Any, str]],
         records_by_vector_id: dict[str, Any],
+        user_id: str,
     ) -> List[Tuple[float, str, MemoryHit]]:
         scored_hits: List[Tuple[float, str, MemoryHit]] = []
         for score, query, vector_id, doc, content in candidates:
             record = records_by_vector_id.get(vector_id) if vector_id else None
+            metadata = doc.get_metadata()
+            if not self._can_read(record, metadata, user_id):
+                continue
             rendered = self._render_memory_hit(record, content, doc)
             dedup_key = record.id if record else vector_id or rendered
             scored_hits.append(
@@ -142,6 +155,25 @@ class AgentMemory:
                 )
             )
         return scored_hits
+
+    def _legacy_character_ids(self) -> set[str]:
+        """受控旧格式适配：仅信任部署者明确列出的旧角色事件正本 ID。"""
+        return set(self.config.get("legacy_character_memory_ids", {}).get(self.owner_character_id, ()))
+
+    def _can_read(self, record, metadata, user_id) -> bool:
+        if record is None:
+            return (
+                "memory_scope" not in metadata
+                and metadata.get("user_id") == user_id
+                and metadata.get("owner_character_id", "luotianyi") == self.owner_character_id
+            )
+        if record.owner_character_id != self.owner_character_id:
+            return False
+        if record.subject_user_id is None:
+            return record.visibility is MemoryVisibility.CHARACTER_PRIVATE
+        if record.id in self._legacy_character_ids() and record.memory_type is MemoryType.INTERACTION_EVENT:
+            return record.subject_user_id == self.owner_character_id
+        return record.subject_user_id == user_id
 
     @staticmethod
     def _top_distinct_hits(scored_hits: List[Tuple[float, str, MemoryHit]], k: int) -> tuple[MemoryHit, ...]:

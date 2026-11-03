@@ -24,6 +24,15 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 Base = declarative_base()
 
 
+class MemoryEventBatch(Base):
+    __tablename__ = "memory_event_batches"
+
+    identity = Column(String, primary_key=True)
+    subject_user_id = Column(String, nullable=True, index=True)
+    envelope = Column(Text, nullable=False)
+    candidates = Column(Text, nullable=False)
+
+
 # ————————————
 # 基本表：用户、注册码和对话记录
 # ————————————

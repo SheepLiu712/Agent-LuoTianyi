@@ -233,7 +233,7 @@ class AgentRuntime:
                 ChatReplyHandler(
                     self.skills.response_composition,
                     self.skills.explicit_memory_intent,
-                    self.skills.intentional_memory,
+                    self.skills.memory_write,
                     reply=self.reply_delivery,
                 ),
             ),
@@ -247,7 +247,7 @@ class AgentRuntime:
                 DynamicObservedHandler(
                     character_id,
                     self.skills.dynamic_reply,
-                    self.skills.dynamic_topic_memory,
+                    self.skills.memory_write,
                 ),
             ),
             (
@@ -258,7 +258,7 @@ class AgentRuntime:
                 StimulusKind.SONG_LEARNED,
                 SongLearnedHandler(
                     character_id,
-                    self.skills.learned_song_experience,
+                    self.skills.memory_write,
                     self.skills.dynamic_publishing,
                     self.skills.song_learning,
                 ),

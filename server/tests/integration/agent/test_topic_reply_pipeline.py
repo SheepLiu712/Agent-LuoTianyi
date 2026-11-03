@@ -119,7 +119,7 @@ async def run_handler(composition, mode="chat"):
         handler = ChatReplyHandler(
             composition,
             memory_intent=SimpleNamespace(detect=lambda text: text if text.startswith("请记住") else None),
-            memory_commit=SimpleNamespace(commit=AsyncMock(return_value=SimpleNamespace(identifier="revision"))),
+            memory_commit=SimpleNamespace(commit_fact=AsyncMock(return_value=SimpleNamespace(memory_ids=("revision",)))),
         )
     if mode == "proactive":
         stimulus = d.ProactivePromptDue(

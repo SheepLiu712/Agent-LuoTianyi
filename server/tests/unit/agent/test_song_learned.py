@@ -8,9 +8,7 @@ import src.domain.agent as d
 from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
-from src.agent.skills.cognitive.learned_song_experience import (
-    LearnedSongExperienceSkill,
-)
+from src.agent.skills.memory_write import MemoryWriteResult, MemoryWriteStatus
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
@@ -25,11 +23,12 @@ class FakeMemory:
         self.committed = committed
         self.fail = fail
 
-    async def write_event_memory(self, *, user_id, content, commit=True):
+    async def commit_fact(self, invocation, *, fact):
+        user_id, content = None, fact.content
         if self.fail:
             raise RuntimeError("memory unavailable")
         self.calls.append((user_id, content))
-        return self.committed
+        return MemoryWriteResult(MemoryWriteStatus.CREATED if self.committed else MemoryWriteStatus.DUPLICATE, ("memory-1",), fact.source_id)
 
 
 class FakeDynamics:
@@ -123,7 +122,7 @@ def request_for(fact):
 def handler(memory, dynamics, singing=None):
     return SongLearnedHandler(
         "luotianyi",
-        LearnedSongExperienceSkill({"luotianyi": memory}),
+        memory,
         DynamicPublishingSkill(
             dynamics,
             {"luotianyi": CharacterNarrative(name="洛天依", persona="", speaking_style="")},
@@ -134,35 +133,6 @@ def handler(memory, dynamics, singing=None):
 
 def _singing(manager):
     return SimpleNamespace(singing_manager={"luotianyi": manager})
-
-
-async def test_experience_is_written_once_per_learning_job():
-    memory = FakeMemory()
-    skill = LearnedSongExperienceSkill({"luotianyi": memory})
-
-    first = await skill.commit(
-        invocation(user_id=None),
-        song_id="Song A",
-        learning_job_id="luotianyi:20260915120000",
-    )
-    assert first is True
-    assert memory.calls[0][0] == "luotianyi"
-    assert "Song A" in memory.calls[0][1]
-    assert "luotianyi:20260915120000" in memory.calls[0][1]
-
-
-async def test_experience_skill_rejects_invalid_arguments():
-    skill = LearnedSongExperienceSkill({"luotianyi": FakeMemory()})
-
-    for skill_invocation, kwargs in (
-        (invocation(user_id=None), {"song_id": "", "learning_job_id": "job"}),
-        (invocation(user_id=None), {"song_id": "Song A", "learning_job_id": " "}),
-    ):
-        try:
-            await skill.commit(skill_invocation, **kwargs)
-        except ValueError:
-            continue
-        raise AssertionError(f"非法参数未被拒绝：{kwargs}")
 
 
 async def test_song_learned_handler_records_experience_and_emits_publish_plan():
