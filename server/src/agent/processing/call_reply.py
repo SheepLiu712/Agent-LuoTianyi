@@ -2,6 +2,8 @@
 
 from contextlib import aclosing
 
+from src.infrastructure.observability.call_reply_timing import mark_reply_phase
+
 
 async def generate_call_reply(
     reply, invocation, *, reply_topic, user_context, conversation_history, memory_pool, on_drafts=None
@@ -21,6 +23,7 @@ async def generate_call_reply(
     ) as stream:
         async for draft in stream:
             if draft.sing is None and draft.content.strip() and draft.sound_content.strip():
+                mark_reply_phase("reply_generated")
                 drafts.append(draft)
                 if on_drafts is not None:
                     await on_drafts((draft,))

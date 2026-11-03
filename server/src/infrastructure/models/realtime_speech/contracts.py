@@ -49,6 +49,8 @@ class SpeechStopped:
 class TurnCompleted:
     semantic: CallAudioSemantic
     item_id: str | None = None
+    speech_ended_at: float | None = None
+    recognized_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

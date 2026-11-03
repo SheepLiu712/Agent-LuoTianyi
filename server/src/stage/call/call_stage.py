@@ -62,6 +62,7 @@ from src.infrastructure.observability.call_metrics import (
     CallMetricStatus,
     CallProvider,
 )
+from src.infrastructure.observability.call_reply_timing import CallReplyTiming, reply_timing_scope
 from src.infrastructure.persistence.call_sessions.repository import CallSessionRecord, CallSessionRepository
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
@@ -238,6 +239,8 @@ class _Turn:
     formal_text: str | None = None
     started_at: float = 0.0
     started_at_timestamp: str = ""
+    speech_ended_at: float | None = None
+    recognized_at: float | None = None
     first_audio_recorded: bool = False
     first_audio_disqualified: bool = False
     reply_turn_seq: int | None = None
@@ -310,6 +313,7 @@ class CallStage:
         self._provider_audio_sequence = 0
         self._plans: deque[_QueuedPlan] = deque()
         self._request_tokens: set[d.CancellationToken] = set()
+        self._reply_timings: dict[str, CallReplyTiming] = {}
         self._handle_tasks: set[asyncio.Task[Any]] = set()
         self._execution_tokens: set[d.CancellationToken] = set()
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -873,6 +877,8 @@ class CallStage:
             event.semantic.render(),
             started_at=started_at,
             started_at_timestamp=started_at_timestamp,
+            speech_ended_at=event.speech_ended_at,
+            recognized_at=event.recognized_at,
             first_audio_disqualified=first_audio_disqualified,
         )
         self._unfinished_turns.add(sequence)
@@ -1019,8 +1025,10 @@ class CallStage:
             cancellation=token,
         )
         sink = _PlanSink(self, request_id, token, turn_seq)
+        timing = self._new_reply_timing(request_id, turn_seq, stimulus)
         try:
-            report = await self._agent.handle_stimulus(request, sink, context=self._context)
+            with reply_timing_scope(timing):
+                report = await self._agent.handle_stimulus(request, sink, context=self._context)
             if request_id == self._warning.request_id:
                 self._warning.report = report
             if attempt is not None:
@@ -1035,6 +1043,7 @@ class CallStage:
                     self._turns[turn_seq].status = CallReplyStatus.FAILED
                 self._record_reply_failure(request_id)
         except Exception:
+            self._finish_reply_timing(request_id, "failed")
             if request_id == self._warning.request_id:
                 self._warning.finish(success=False)
             if attempt is not None and self._inputs.attempt is attempt:
@@ -1046,6 +1055,34 @@ class CallStage:
             self._schedule_output()
             if turn_seq is not None and not sink.ids:
                 self._finish_user_turn(turn_seq)
+
+    def _new_reply_timing(self, request_id, turn_seq, stimulus):
+        if not isinstance(stimulus, d.CallReplyRequested):
+            return None
+        turn = self._turns.get(turn_seq)
+        if turn is None:
+            return None
+        timing = CallReplyTiming(
+            call_id=self._record.call_id,
+            request_id=request_id,
+            turn_seq=turn_seq,
+            recognized_at=turn.recognized_at if turn.recognized_at is not None else turn.started_at,
+            speech_ended_at=turn.speech_ended_at,
+            sink=getattr(self._call_metrics, "record_reply_span", None),
+            clock=self._monotonic,
+            wall_clock=self._now,
+        )
+        self._reply_timings[request_id] = timing
+        return timing
+
+    def _finish_reply_timing(self, request_id, outcome):
+        timing = self._reply_timings.get(request_id)
+        if timing is not None:
+            timing.finish(outcome)
+
+    def _interrupt_reply_timings(self):
+        for timing in self._reply_timings.values():
+            timing.finish("interrupted")
 
     def _enqueue_plan(self, plan: d.ActionPlan, token: d.CancellationToken, turn_seq: int | None) -> None:
         barriers = tuple(
@@ -1130,7 +1167,8 @@ class CallStage:
         ):
             self._turns[turn_seq].status = CallReplyStatus.NOT_STARTED
         try:
-            report = await self._agent.realize_action_plan(plan, context, _OutputSink(self, context, turn_seq))
+            with reply_timing_scope(self._reply_timings.get(plan.origin_request_id)):
+                report = await self._agent.realize_action_plan(plan, context, _OutputSink(self, context, turn_seq))
             await self._handle_plan_result(plan, report, turn_seq, execution_token, retried, response_ids)
         except asyncio.CancelledError:
             if turn_seq is not None:
@@ -1164,6 +1202,8 @@ class CallStage:
                 self._turns[turn_seq].status = CallReplyStatus.FAILED
 
     def _record_reply_failure(self, request_id: str) -> None:
+        if request_id in self._reply_timings:
+            self._reply_timings[request_id].finish("failed")
         if request_id in self._failed_reply_requests:
             return
         self._failed_reply_requests.add(request_id)
@@ -1576,6 +1616,7 @@ class CallStage:
             raise
 
     def _interrupt(self) -> None:
+        self._interrupt_reply_timings()
         self._record_metric(
             CallMetricName.INTERRUPT,
             duration_ms=0,
@@ -2052,6 +2093,11 @@ class _PlanSink:
             raise d.SinkRejectedError("stale or invalid call plan", code=d.SinkRejectionCode.IDENTITY_MISMATCH)
         self._ids.append(plan.plan_id)
         self._stage._enqueue_plan(plan, self._token, self._turn_seq)
+        timing = self._stage._reply_timings.get(self._request_id)
+        if timing is not None and any(
+            isinstance(action, d.Say) and not action.call_delivery.provisional for action in plan.actions
+        ):
+            timing.mark("reply_submitted")
         return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections import deque
 from collections.abc import AsyncIterator
 from traceback import extract_stack
@@ -63,6 +64,8 @@ class FunAsrRealtimeSpeechSession:
         self._active_sentence: int | None = None
         self._speech_started = False
         self._last_completed = 0
+        self._audio_samples = 0
+        self._audio_arrivals: deque[tuple[int, int, float]] = deque(maxlen=4096)
 
     async def start(self, config: RealtimeSpeechConfig) -> None:
         if self._ready is not None or self._closed:
@@ -122,6 +125,9 @@ class FunAsrRealtimeSpeechSession:
             raise ValueError("Fun-ASR requires 16 kHz mono PCM16")
         if len(frame.payload) % 2 or len(frame.payload) > self._config.max_audio_frame_bytes:
             raise ValueError("invalid PCM16 frame size")
+        samples = len(frame.payload) // 2
+        self._audio_arrivals.append((self._audio_samples, self._audio_samples + samples, time.monotonic()))
+        self._audio_samples += samples
         await self._enqueue(frame.payload)
 
     async def _enqueue(self, message: str | bytes) -> None:
@@ -201,15 +207,31 @@ class FunAsrRealtimeSpeechSession:
             return
         self._last_completed = identity
         self._active_sentence = None
-        await self._complete_sentence(item_id, text)
+        await self._complete_sentence(item_id, text, sentence.get("end_time"))
 
-    async def _complete_sentence(self, item_id: str, text: str) -> None:
+    def _speech_end_time(self, end_ms: object) -> float | None:
+        if type(end_ms) not in (int, float) or end_ms < 0:
+            return None
+        sample = end_ms * 16
+        for start, end, arrived in reversed(self._audio_arrivals):
+            if start <= sample <= end:
+                return arrived - (end - sample) / 16000
+        return None
+
+    async def _complete_sentence(self, item_id: str, text: str, end_ms: object) -> None:
         if not self._speech_started:
             return
         self._speech_started = False
         await self._emit(SpeechStopped(item_id))
         if text:
-            await self._emit(TurnCompleted(CallAudioSemantic(transcript=text), item_id))
+            await self._emit(
+                TurnCompleted(
+                    CallAudioSemantic(transcript=text),
+                    item_id,
+                    speech_ended_at=self._speech_end_time(end_ms),
+                    recognized_at=time.monotonic(),
+                )
+            )
         else:
             await self._emit(TurnInvalid("empty_transcript", item_id))
 

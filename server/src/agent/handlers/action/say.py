@@ -9,6 +9,7 @@ from src.agent.skills.expression.prepared_speech import EmptyPreparedAudioError,
 from src.agent.skills.expression.speaking import EmptySpeechError, SpeakingSkill, UnsupportedCallAudioError
 from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from src.agent.skills.invocation import execution_invocation
+from src.infrastructure.observability.call_reply_timing import mark_reply_phase
 from src.utils.logger import get_logger
 
 
@@ -135,6 +136,8 @@ class SayHandler:
                 if execution_context.cancellation.is_cancelled:
                     return self._result(action, d.ExecutionErrorCode.CANCELLED)
                 if is_call:
+                    if chunk.data and not action.call_delivery.provisional:
+                        mark_reply_phase("tts_first_packet")
                     await self._emit_pending_call_chunk(action, outputs, pending)
                     pending = chunk
                 else:
