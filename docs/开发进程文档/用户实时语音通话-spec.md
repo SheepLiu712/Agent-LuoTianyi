@@ -480,7 +480,7 @@ async def maintain(
 **输入**：维护批次。  
 **输出**：不推进持久化维护进度；ChatStage 在后续生命周期重试。Call 的阈值维护保留同进程重试和冻结批次；结束维护不再由 Stage 整体重试，失败标记 `maintenance_status=failed` 且不推进账本进度，仍继续生成/回退概要和保存通话记录，全部写入停止后关闭 Context 并释放占用。
 
-向量候选使用 `(maintenance_id, candidate_index)` 幂等；画像使用完整值幂等写入。只有数据库成功后，才通过 InteractionContext 的正式接口更新当前用户画像。正常通话复用原 InteractionContext，先完成最终认知维护，再以维护后本次会话的工作摘要和未压缩内容生成最终概要；该概要作为 CallContent.summary 持久化，并在全部 owned 写入停止后关闭原 Context。维护失败沿用既有降级策略，不阻止通话记录清理；本次通话概要不参与本次维护，但作为 Conversation 条目参与以后全局聊天上下文的维护。`CallEndingHandler` 只发出一个 `FinalizeCall` 行动，行动内部按“维护 → 概要”执行，维护异常不触发通用执行器短路后续概要。Agent 通过类型化 `CallEndingResult` 返回概要、来源、维护成功与实际进度；CallStage 调用内部 `CallHistory` 保存 Conversation 和账本，不回调 Manager 执行业务。
+向量候选使用 `(maintenance_id, candidate_index)` 幂等；画像使用完整值幂等写入。只有数据库成功后，才通过 InteractionContext 的正式接口更新当前用户画像。正常通话复用原 InteractionContext，先完成最终认知维护，再以维护后本次会话的工作摘要和未压缩内容生成最终概要；`CallSummarySkill`（`server/src/agent/skills/cognitive/call_settlement.py`，通话概要生成能力）的 `generate` 只消费 `CallSummaryMaterial` 只读快照，在技能内部按压缩边界与来源标识合并材料，不修改 Context。返回结果区分成功、无材料和生成失败。`FinalizeCallHandler`（`server/src/agent/handlers/action/call_settlement.py`，通话结束行动处理器）收到成功结果后提交工作摘要；提交异常直接上报，不将其标记为已保存。该概要作为 CallContent.summary 持久化，并在全部 owned 写入停止后关闭原 Context。维护失败沿用既有降级策略，不阻止通话记录清理；本次通话概要不参与本次维护，但作为 Conversation 条目参与以后全局聊天上下文的维护。`CallEndingHandler` 只发出一个 `FinalizeCall` 行动，行动内部按“维护 → 概要”执行，维护异常不触发通用执行器短路后续概要。Agent 通过类型化 `CallEndingResult` 返回概要、来源、维护成功与实际进度；CallStage 调用内部 `CallHistory` 保存 Conversation 和账本，不回调 Manager 执行业务。
 
 现有显式“请记住这些事”能力保持原行为；本功能不新增一句话级别的“请记住”识别，本轮不扩展其通话内识别范围。
 

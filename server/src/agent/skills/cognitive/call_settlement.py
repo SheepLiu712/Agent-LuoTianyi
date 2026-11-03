@@ -6,14 +6,15 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from enum import Enum
 from hashlib import sha256
 from typing import Protocol
 
-from src.agent.context import ConversationSummary, UserProfile
+from src.agent.context import ConversationSnapshot, UserProfile
 from src.agent.skills.contracts import SkillInvocation
 from src.domain.agent import MaintenanceCandidate
-from src.domain.call import CallFinalSnapshot, CallReplyStatus
+from src.domain.call import CallFinalSnapshot, CallFinalTurn, CallReplyStatus
 from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
 from src.utils.owned_operation import complete_owned
@@ -35,8 +36,56 @@ def render_call_turns(snapshot: CallFinalSnapshot, *, after_turn_seq: int = 0) -
     return tuple(rendered)
 
 
-class CallSummaryModel(Protocol):
-    async def generate_response(self, **kwargs) -> str: ...
+@dataclass(frozen=True)
+class CallSummaryMaterial:
+    """本次通话的只读材料；范围边界取结束维护前的压缩进度。"""
+
+    working: ConversationSnapshot
+    accepted_turns: tuple[CallFinalTurn, ...]
+    summarized_turn_seq: int
+
+
+class CallSummaryStatus(str, Enum):
+    GENERATED = "generated"
+    EMPTY = "empty"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class CallSummaryResult:
+    status: CallSummaryStatus
+    summary: str | None = None
+
+
+def _summary_inputs(material: CallSummaryMaterial) -> tuple[str, ...]:
+    lines = []
+    if material.working.summary.text.strip():
+        lines.append(f"本次通话已有摘要：{material.working.summary.text.strip()}")
+    present = set()
+    reply_anchors = set()
+    for entry in material.working.entries:
+        if entry.entry_id in present:
+            continue
+        present.add(entry.entry_id)
+        lines.append(f"{entry.source}：{entry.content.text}")
+        match = re.fullmatch(r"call-turn-(\d+)-agent-[\w-]+", entry.entry_id)
+        if match:
+            reply_anchors.add(int(match.group(1)))
+    for turn in material.accepted_turns:
+        if turn.turn_seq <= material.summarized_turn_seq:
+            continue
+        entry_id = f"call-turn-{turn.turn_seq}-user"
+        if entry_id not in present:
+            lines.append(f"用户：{turn.user_semantic}")
+            present.add(entry_id)
+        anchor = turn.reply_turn_seq or turn.turn_seq
+        confirmed = turn.confirmed_agent_text
+        if confirmed is None and turn.reply_turn_seq is None and turn.reply_status is CallReplyStatus.COMPLETED:
+            confirmed = turn.formal_agent_text
+        if confirmed is not None and anchor not in reply_anchors:
+            lines.append(f"角色：{confirmed}")
+            reply_anchors.add(anchor)
+    return tuple(lines)
 
 
 class CallSummarySkill:
@@ -55,43 +104,22 @@ class CallSummarySkill:
         model = self._models.get(character_id)
         return model is not None and callable(getattr(model, "generate_response", None))
 
-    async def summarize(self, invocation: SkillInvocation, snapshot: CallFinalSnapshot, *, context=None) -> str | None:
-        turns = render_call_turns(snapshot)
-        if context is not None:
-            working = context.conversation.read_working()
-            working_inputs = []
-            if working.summary.text.strip():
-                working_inputs.append(f"本次通话已有摘要：{working.summary.text.strip()}")
-            working_inputs.extend(f"{entry.source}：{entry.content.text}" for entry in working.entries)
-            # An accepted input can survive a failed context append at shutdown.
-            # Compacted inputs are already represented by the working summary.
-            present = {entry.entry_id for entry in working.entries}
-            # Ending maintenance advances progress without compacting working
-            # entries. Only the boundary frozen before ending covers old inputs.
-            progress = snapshot.maintenance_turn_seq
-            working_inputs.extend(
-                f"用户：{turn.user_semantic}"
-                for turn in snapshot.completed_turns
-                if turn.turn_seq > progress and f"call-turn-{turn.turn_seq}-user" not in present
-            )
-            if working_inputs:
-                turns = tuple(working_inputs)
+    async def generate(self, invocation: SkillInvocation, *, material: CallSummaryMaterial) -> CallSummaryResult:
+        turns = _summary_inputs(material)
         if not turns:
-            return None
+            return CallSummaryResult(CallSummaryStatus.EMPTY)
         model = self._models.get(invocation.character_id)
         if model is None:
-            return None
+            return CallSummaryResult(CallSummaryStatus.FAILED)
         try:
-            # The model adapter owns bounded attempts and exponential backoff.
+            # 模型适配器拥有既有的有限重试和指数退避。
             response = await model.generate_response(completed_turns=turns)
             summary = response.strip() if isinstance(response, str) else ""
             if summary and len(summary) <= 200:
-                if context is not None:
-                    await context.conversation.update_call_working_summary(ConversationSummary(summary))
-                return summary
+                return CallSummaryResult(CallSummaryStatus.GENERATED, summary)
         except Exception:
             logging.getLogger(__name__).warning("Call summary generation failed")
-        return None
+        return CallSummaryResult(CallSummaryStatus.FAILED)
 
 
 class CallMaintenanceMemory(Protocol):

@@ -1,9 +1,9 @@
-from support.model_service import make_call_summary
 """One ending plan, sequential cognition, and current-call-only fallback."""
 
 from types import SimpleNamespace
 
 import pytest
+from support.model_service import make_call_summary
 
 import src.domain.agent as d
 from src.agent.context import ContextIdentity, ConversationContext, ConversationSnapshot, ConversationSummary
@@ -88,3 +88,43 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
     assert decode_plan(encode_plan(plan)) == plan
     facts = [ActionFact(started=True, result=result)]
     assert decode_facts(encode_facts(facts), plan) == facts
+
+
+@pytest.mark.asyncio
+async def test_finalize_does_not_report_generated_summary_when_context_commit_fails(monkeypatch):
+    conversation = ConversationContext(
+        identity=ContextIdentity("luotianyi", "call", "user"),
+        _store=EphemeralCallConversationStore(ConversationSnapshot()),
+    )
+    await conversation.update_call_working_summary(ConversationSummary("原工作摘要"))
+
+    class Maintenance:
+        async def maintain_ending(self, *args):
+            return 0
+
+    class Model:
+        async def generate_response(self, **kwargs):
+            return "新生成概要"
+
+    async def failed_commit(summary):
+        assert summary.text == "新生成概要"
+        raise RuntimeError("摘要提交失败")
+
+    monkeypatch.setattr(conversation, "update_call_working_summary", failed_commit)
+    execution = d.ExecutionContext(
+        execution_id="execution",
+        interaction_id="call",
+        current_interaction_revision=0,
+        cancellation=d.CancellationToken(),
+        interaction_context=SimpleNamespace(conversation=conversation),
+    )
+    action = d.FinalizeCall(
+        action_id="ending",
+        user_id="user",
+        final_snapshot=_snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.NOT_STARTED, None),)),
+    )
+    with pytest.raises(RuntimeError, match="摘要提交失败"):
+        await FinalizeCallHandler("luotianyi", Maintenance(), make_call_summary({"luotianyi": Model()})).realize(
+            action, execution, None
+        )
+    assert conversation.read_working().summary.text == "原工作摘要"

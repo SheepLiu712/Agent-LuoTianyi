@@ -174,15 +174,15 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
 
     monkeypatch.setattr(maintenance, "maintain_ending", observed_maintenance)
     summary_skill = runtime.skills.call_summary
-    original_summary = summary_skill.summarize
+    original_summary = summary_skill.generate
 
-    async def observed_summary(invocation, snapshot, *, context=None):
-        assert context is created[0]
-        assert invocation.interaction_id == str(snapshot.terminal.call_id)
+    async def observed_summary(invocation, *, material):
+        assert material.working == created[0].conversation.read_working()
+        assert invocation.interaction_id == created[0].identity.interaction_id
         order.append("summary")
-        return await original_summary(invocation, snapshot, context=context)
+        return await original_summary(invocation, material=material)
 
-    monkeypatch.setattr(summary_skill, "summarize", observed_summary)
+    monkeypatch.setattr(summary_skill, "generate", observed_summary)
     if summary_mode != "generated":
         model = llm.modules["skill.call_summary.generate.luotianyi"]
 
