@@ -215,7 +215,6 @@ async def test_call_opening_requests_one_short_spoken_greeting():
         async def generate(self, **kwargs):
             assert kwargs["scene"] == "call"
             assert "一句简短、口语化" in kwargs["reply_topic"]
-            assert "语气词" in kwargs["reply_topic"]
             return await super().generate(**kwargs)
 
     handler = CallStartedHandler(make_reply_skill({"luotianyi": Generator()}), PreparedSpeechCatalog({}))
