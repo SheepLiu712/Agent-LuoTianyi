@@ -583,12 +583,19 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         </TouchableOpacity>
 
-         {Platform.OS === 'android' ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={call.canStart ? '给天依打电话' : '语音通话，暂不可用'} accessibilityState={{ disabled: !call.canStart }} disabled={!call.canStart} style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt, opacity: call.canStart ? 1 : 0.58 }]} onPress={call.canStart ? openCall : undefined} activeOpacity={0.78}>
-          <View style={styles.drawerItemRow}>
-            <Text style={[styles.drawerItemText, { color: theme.text }]}>语音通话</Text>
-             {!call.canStart ? <Text style={[styles.callUnavailable, { color: theme.textMuted }]}>暂不可用</Text> : null}
-          </View>
-         </TouchableOpacity> : null}
+        {Platform.OS === 'android' ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="给天依打电话"
+            accessibilityState={{ disabled: !call.canStart }}
+            disabled={!call.canStart}
+            style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]}
+            onPress={call.canStart ? openCall : undefined}
+            activeOpacity={0.78}
+          >
+            <Text style={[styles.drawerItemText, { color: call.canStart ? theme.text : theme.textMuted }]}>语音通话</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.drawerSectionLabel, { color: theme.textMuted }]}>颜色模式</Text>
@@ -795,9 +802,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#243447',
-  },
-  callUnavailable: {
-    fontSize: 12,
   },
   drawerItemRow: {
     flexDirection: 'row',
