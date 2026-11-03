@@ -78,7 +78,7 @@ class AgentRuntime:
     @property
     def singing_backend(self) -> SingingBackend:
         """Expose the shared singing port only to the application composition root."""
-        return self.skills.singing.backend
+        return self.skills.song_learning_tasks.world_resources
 
     @property
     def call_tts_character_ids(self) -> tuple[str, ...]:
@@ -185,7 +185,7 @@ class AgentRuntime:
     ) -> StimulusRouter:
         """登记一个角色可处理的刺激，并复用无状态的输入预处理器。"""
         preprocessing = ChatPreprocessingHandler(
-            self.skills.text_preprocessing,
+            self.skills.jargon_recognition,
             self.skills.image_understanding,
             self.skills.audio_understanding,
         )

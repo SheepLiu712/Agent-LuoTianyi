@@ -26,7 +26,7 @@ async def until(predicate):
 
 
 class _Understanding:
-    def extract_terms(self, text):
+    def recognize(self, text):
         return ()
 
 

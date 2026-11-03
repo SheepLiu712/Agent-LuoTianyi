@@ -1,4 +1,3 @@
-from support.retrieval import stub_retrieval, stub_singing
 """慢召回只在完成后交付一轮正式回复。"""
 
 import asyncio
@@ -8,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
 from support.routing_support import Sink, request
 from support.skill_support import invocation
 
@@ -52,7 +52,7 @@ def deadline_request():
 
 
 class _Understanding:
-    def extract_terms(self, text):
+    def recognize(self, text):
         return ()
 
 

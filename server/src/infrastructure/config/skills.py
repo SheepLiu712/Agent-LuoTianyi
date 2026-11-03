@@ -25,10 +25,7 @@ class SkillsConfig:
         values = runtime.get("skills")
         if not isinstance(values, dict):
             raise TypeError("agent_runtime.skills 必须是字典")
-        if "call_recall" in values:
-            raise ValueError("agent_runtime.skills.call_recall 已删除，通话每轮使用通用记忆检索")
-        if "conversation_compaction" in values:
-            raise ValueError("agent_runtime.skills.conversation_compaction 请迁移到 skills.cognitive_maintenance")
+        cls._reject_skill_legacy(values)
         for key, value in values.items():
             if not isinstance(value, dict):
                 raise TypeError(f"agent_runtime.skills.{key} 必须是字典")
@@ -48,6 +45,15 @@ class SkillsConfig:
         if "diary_llm" in values.get("diary", {}):
             raise ValueError("agent_runtime.skills.diary.diary_llm 请迁移到 skills.dynamic.diary_composer")
         return cls(deepcopy(values))
+
+    @staticmethod
+    def _reject_skill_legacy(values):
+        if "text_preprocessing" in values:
+            raise ValueError("agent_runtime.skills.text_preprocessing 请迁移到 skills.jargon_recognition")
+        if "call_recall" in values:
+            raise ValueError("agent_runtime.skills.call_recall 已删除，通话每轮使用通用记忆检索")
+        if "conversation_compaction" in values:
+            raise ValueError("agent_runtime.skills.conversation_compaction 请迁移到 skills.cognitive_maintenance")
 
     @staticmethod
     def _reject_runtime_legacy(runtime):

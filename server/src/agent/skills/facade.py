@@ -7,8 +7,8 @@ from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
+    JargonRecognitionSkill,
     ResponseCompositionSkill,
-    TextPreprocessingSkill,
     TopicExtractionSkill,
 )
 from src.agent.skills.cognitive.call_settlement import CallSummarySkill
@@ -18,7 +18,6 @@ from src.agent.skills.expression.diary import DiarySkill
 from src.agent.skills.expression.dynamic import DynamicSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.singing import SingingSkill
-from src.agent.skills.expression.song_learning import SongLearningTasks
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchReactionSkill
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeStore
@@ -63,7 +62,7 @@ class SharedSkills:
         touch_configs = config.get("touch_reaction").get("characters", {})
         # 先完成所有可能失败的配置与模型装配，最后创建拥有进程的语音技能。
         self.singing = SingingSkill(config.get("singing"), llm_service)
-        self.text_preprocessing = TextPreprocessingSkill(
+        self.jargon_recognition = JargonRecognitionSkill(
             config.get("jargon_recognition"),
             song_names=self.singing.song_names(),
         )
@@ -89,7 +88,7 @@ class SharedSkills:
             singing=self.singing,
             reply=self.reply,
             topic_extraction=TopicExtractionSkill(
-                config.get("topic_extraction"), llm_service, understanding=self.text_preprocessing
+                config.get("topic_extraction"), llm_service, understanding=self.jargon_recognition
             ),
         )
         self.call_summary = CallSummarySkill(config.get("call_summary"), llm_service=llm_service, characters=characters)
@@ -111,7 +110,7 @@ class SharedSkills:
             config.get("dynamic"), llm_service=llm_service, database=database_manager, narratives=narratives
         )
         self.diary = DiarySkill(config.get("diary"), dynamic=self.dynamic, database=database_manager)
-        self.song_learning_tasks = SongLearningTasks(self.singing.backend)
+        self.song_learning_tasks = self.singing.learning_tasks()
         self.prepared_speech = prepared_speech
         self.touch_reaction = TouchReactionSkill(touch_configs, prepared_speech)
         self.speaking = SpeakingSkill(config.get("speaking"))

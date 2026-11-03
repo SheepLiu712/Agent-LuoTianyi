@@ -28,6 +28,11 @@ class SongLearningTasks:
             self._validate_manager(character_id, manager)
         self._singing = singing
 
+    @property
+    def world_resources(self):
+        """仅供组合根连接世界学歌工作流，非 Handler 的认知技能接口。"""
+        return self._singing
+
     def request(self, invocation: SkillInvocation, *, song_id: str) -> bool:
         """把歌曲加入愿望清单；已在清单中（无论状态）返回 False，重复请求不产生第二个任务。"""
         if not isinstance(song_id, str):

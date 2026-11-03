@@ -11,7 +11,7 @@ from src.agent import Agent
 from src.agent.context import AudioUnderstandingStatus
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import ImageUnderstandingSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive import ImageUnderstandingSkill, JargonRecognitionSkill
 from src.agent.skills.cognitive.audio_understanding import AudioUnderstandingResult
 from src.agent.skills.cognitive.song_entity_linker import SongEntityLinker
 from src.infrastructure.media import MediaResolutionError, ResolvedMedia
@@ -23,7 +23,7 @@ class _Understanding:
     def __init__(self, terms=()):
         self.terms = tuple(terms)
 
-    def extract_terms(self, text):
+    def recognize(self, text):
         return self.terms
 
 
@@ -181,7 +181,9 @@ async def test_image_is_one_user_conversation_with_agent_only_description_text()
     understanding = _ImageUnderstanding()
     handler = ChatPreprocessingHandler(
         _Understanding(("白猫",)),
-        ImageUnderstandingSkill({}, resolver, llm_service=SimpleNamespace(register_vlm_module=lambda *args: understanding)),
+        ImageUnderstandingSkill(
+            {}, resolver, llm_service=SimpleNamespace(register_vlm_module=lambda *args: understanding)
+        ),
     )
     runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.IMAGE_MESSAGE, handler)]))
     ctx = context()
@@ -223,7 +225,9 @@ async def test_illegal_media_stops_before_image_understanding(error):
     understanding = _ImageUnderstanding()
     handler = ChatPreprocessingHandler(
         _Understanding(),
-        ImageUnderstandingSkill({}, resolver, llm_service=SimpleNamespace(register_vlm_module=lambda *args: understanding)),
+        ImageUnderstandingSkill(
+            {}, resolver, llm_service=SimpleNamespace(register_vlm_module=lambda *args: understanding)
+        ),
     )
     runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.IMAGE_MESSAGE, handler)]))
     ctx = context()
@@ -260,7 +264,7 @@ async def test_voice_builds_audio_entry_and_nonempty_preprocessed_text():
     assert report.preprocessed_input.conversation_entry_ids == (entry.entry_id,)
 
 
-def test_text_preprocessing_skill_returns_terms(monkeypatch):
+def test_jargon_recognition_skill_returns_terms(monkeypatch):
     class _Linker:
         def __init__(self, config, *, song_names=()):
             self.config = config
@@ -269,12 +273,12 @@ def test_text_preprocessing_skill_returns_terms(monkeypatch):
         def extract_and_verify(self, text):
             return ["《歌》是一首歌"] if "歌" in text else []
 
-    monkeypatch.setattr("src.agent.skills.cognitive.text_preprocessing.SongEntityLinker", _Linker)
-    skill = TextPreprocessingSkill({"song_entity_linker": {"songname_file": "unused"}})
-    assert skill.extract_terms("唱《歌》") == ("《歌》是一首歌",)
-    assert skill.extract_terms("随便聊聊") == ()
+    monkeypatch.setattr("src.agent.skills.cognitive.jargon_recognition.SongEntityLinker", _Linker)
+    skill = JargonRecognitionSkill({"song_entity_linker": {"songname_file": "unused"}})
+    assert skill.recognize("唱《歌》") == ("《歌》是一首歌",)
+    assert skill.recognize("随便聊聊") == ()
     with pytest.raises(TypeError):
-        skill.extract_terms(None)
+        skill.recognize(None)
 
 
 def test_song_entity_linker_prefers_complete_quoted_title_over_keyword_substring(tmp_path):
@@ -295,3 +299,20 @@ def test_song_entity_linker_uses_singing_catalog_for_unquoted_song_title(tmp_pat
     linker = SongEntityLinker({}, str(song_names), str(lyrics), song_names=("死别",))
 
     assert linker.extract_and_verify("请唱死别") == ["《死别》是一首歌"]
+
+
+def test_jargon_recognition_preserves_song_lyric_and_unrelated_text_behavior(tmp_path):
+    names, lyrics = tmp_path / "names.txt", tmp_path / "lyrics.txt"
+    names.write_text("权御天下\n", encoding="utf-8")
+    lyrics.write_text("蒹葭苍苍\n", encoding="utf-8")
+    skill = JargonRecognitionSkill(
+        {
+            "song_entity_linker": {
+                "songname_file": str(names),
+                "lyric_file": str(lyrics),
+            }
+        }
+    )
+    assert skill.recognize("请唱《权御天下》") == ("《权御天下》是一首歌",)
+    assert skill.recognize("蒹葭苍苍") == ("蒹葭苍苍",)
+    assert skill.recognize("今天天气很好") == ()

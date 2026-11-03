@@ -44,12 +44,16 @@ async def test_two_characters_use_their_own_model_and_persona(tmp_path):
             encoding="utf-8",
         )
         characters[key] = CharacterProfile(
-            character_id=key, display_name=key, memory_namespace=key,
-            static_variables_file=str(persona), llm_tone_mapping_file=str(tones),
+            character_id=key,
+            display_name=key,
+            memory_namespace=key,
+            static_variables_file=str(persona),
+            llm_tone_mapping_file=str(tones),
         )
     skill = ReplySkill(
         {"llm_module": {"llm": {"name": "模型甲"}}, "characters": {"乙": {"llm_module": {"llm": {"name": "模型乙"}}}}},
-        llm_service=ModelService(), characters=characters,
+        llm_service=ModelService(),
+        characters=characters,
     )
 
     async def collect(key):
@@ -90,10 +94,14 @@ def test_removed_call_decision_configuration_is_not_silently_ignored(runtime_dep
 
 
 def test_admin_model_edit_preserves_other_skill_configuration():
-    config = {"agent_runtime": {"skills": {
-        "reply": {"llm_module": {"llm": {"name": "旧模型"}}},
-        "memory_write": {"llm_module": {"llm": {"name": "记忆模型"}}, "dedup_threshold": 0.8},
-    }}}
+    config = {
+        "agent_runtime": {
+            "skills": {
+                "reply": {"llm_module": {"llm": {"name": "旧模型"}}},
+                "memory_write": {"llm_module": {"llm": {"name": "记忆模型"}}, "dedup_threshold": 0.8},
+            }
+        }
+    }
     view = build_llm_config_view(config)
     for binding in view["module_bindings"]:
         if binding["path"] == "agent_runtime.skills.reply.llm_module":
@@ -103,3 +111,10 @@ def test_admin_model_edit_preserves_other_skill_configuration():
     assert skills["reply"]["llm_module"]["llm"]["name"] == "新模型"
     assert skills["memory_write"]["llm_module"]["llm"]["name"] == "记忆模型"
     assert skills["memory_write"]["dedup_threshold"] == 0.8
+
+
+def test_old_terminology_configuration_reports_migration(runtime_dependencies):
+    kwargs, _ = runtime_dependencies
+    kwargs["config"]["skills"]["text_preprocessing"] = {}
+    with pytest.raises(ValueError, match=r"skills.text_preprocessing.*jargon_recognition"):
+        AgentRuntime(**kwargs)

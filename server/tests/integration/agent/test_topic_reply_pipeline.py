@@ -1,4 +1,3 @@
-from support.retrieval import stub_retrieval, stub_singing
 """从统一 topic_extract 到真实回复解析和 Say/Sing ActionPlan 的离线链路。"""
 
 import json
@@ -8,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
 from support.routing_support import Sink, request
 from support.skill_support import invocation
 
@@ -17,7 +17,7 @@ from src.agent.context import UserContextSnapshot
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import ReplyResources, ResponseCompositionSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive import JargonRecognitionSkill, ReplyResources, ResponseCompositionSkill
 from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembler
 from src.agent.skills.cognitive._response_parser import StructuredResponseParser
 from src.agent.skills.cognitive.topic_extraction import TopicExtractionSkill
@@ -52,7 +52,7 @@ def pipeline(*, attempts=("权御天下",), queries=("用户喜欢的歌",), ava
     extractor = TopicExtractionSkill(
         {"llm_module": {}},
         SimpleNamespace(register_llm_module=lambda *args: SimpleNamespace(generate_response=extract)),
-        understanding=TextPreprocessingSkill(song_names=("权御天下",)),
+        understanding=JargonRecognitionSkill(song_names=("权御天下",)),
     )
     generator = ReplyResources.__new__(ReplyResources)
     generator.character_name = "洛天依"
@@ -68,11 +68,13 @@ def pipeline(*, attempts=("权御天下",), queries=("用户喜欢的歌",), ava
     composition = ResponseCompositionSkill(
         {},
         topic_extraction=extractor,
-        retrieval=stub_retrieval({
-            "luotianyi": SimpleNamespace(
-                search_memory_context_for_topic=recall,
-            )
-        }),
+        retrieval=stub_retrieval(
+            {
+                "luotianyi": SimpleNamespace(
+                    search_memory_context_for_topic=recall,
+                )
+            }
+        ),
         singing=stub_singing(singing),
         reply=make_reply_skill({"luotianyi": generator}),
     )
@@ -120,7 +122,9 @@ async def run_handler(composition, mode="chat"):
         handler = ChatReplyHandler(
             composition,
             memory_intent=SimpleNamespace(detect=lambda text: text if text.startswith("请记住") else None),
-            memory_commit=SimpleNamespace(commit_fact=AsyncMock(return_value=SimpleNamespace(memory_ids=("revision",)))),
+            memory_commit=SimpleNamespace(
+                commit_fact=AsyncMock(return_value=SimpleNamespace(memory_ids=("revision",)))
+            ),
         )
     if mode == "proactive":
         stimulus = d.ProactivePromptDue(

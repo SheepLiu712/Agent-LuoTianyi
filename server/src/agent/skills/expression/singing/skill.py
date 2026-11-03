@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Protocol
 
 from src.agent.skills.contracts import SkillInvocation
+from src.agent.skills.expression.song_learning import SongLearningTasks
 from src.infrastructure.media.song_asset_validation import playable_segments
 
 from .backend import SingingBackend
@@ -39,10 +40,9 @@ class SingingSkill:
             raise TypeError("singing 必须是字典")
         self._singing = backend or SingingBackend(config, llm_service=llm_service)
 
-    @property
-    def backend(self) -> _SingingPort:
-        """Expose the owned backend to adjacent Agent skills and world jobs."""
-        return self._singing
+    def learning_tasks(self) -> SongLearningTasks:
+        """提供独立学歌任务资源，Handler 无需接触演唱后端。"""
+        return SongLearningTasks(self._singing)
 
     def song_names(self) -> tuple[str, ...]:
         """返回所有角色曲库中的歌曲名称，供输入实体链接复用。"""

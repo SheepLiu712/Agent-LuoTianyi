@@ -1,28 +1,37 @@
 """授权范围内的排序去重与当前歌曲资源查询。"""
 
-import wave
 import logging
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
 from support.skill_support import invocation
-from tests.integration.persistence.test_memory_write_skill import fact, setup
 
-from src.agent.skills.memory_retrieval import MemoryQuery, MemoryRetrievalSkill, RetrievalScope
 from src.agent.skills.expression.singing import SingingSkill
-from src.agent.skills.expression.song_learning import SongLearningTasks
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeStore
+from src.agent.skills.memory_retrieval import MemoryQuery, MemoryRetrievalSkill, RetrievalScope
 from src.domain.music_type import OneLyricLine, SongMetadata, SongSegment
 from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
 from src.infrastructure.persistence.song_knowledge import Song, get_song_session
+from tests.integration.persistence import test_memory_write_skill as memory_write_tests
+from tests.integration.persistence.test_memory_write_skill import fact
+
+setup = memory_write_tests.setup
 
 
 def skill(setup, tmp_path):
     singing = SingingSkill({"characters": {"luotianyi": {"resource_path": str(tmp_path / "songs")}}})
     knowledge = SongKnowledgeStore({"song_database": {"db_folder": str(tmp_path), "db_file": "knowledge.sqlite"}})
-    return MemoryRetrievalSkill({}, memories={"luotianyi": setup.reader(), "miku": setup.reader("miku")},
-                                singing=singing, knowledge=knowledge), singing
+    return (
+        MemoryRetrievalSkill(
+            {},
+            memories={"luotianyi": setup.reader(), "miku": setup.reader("miku")},
+            singing=singing,
+            knowledge=knowledge,
+        ),
+        singing,
+    )
 
 
 async def test_current_character_is_not_crowded_out_and_multiple_queries_deduplicate(setup, tmp_path):
@@ -33,6 +42,7 @@ async def test_current_character_is_not_crowded_out_and_multiple_queries_dedupli
         else:
             values = [(key, doc) for key, doc in values if doc.get_metadata()["user_id"] == user_id]
         return [(doc, 0.99) for key, doc in values[:k]]
+
     setup.vectors.search = search
     for index in range(3):
         await setup.skill.commit_fact(invocation(), fact=fact(str(index), content=f"天依事实{index}"))
@@ -48,8 +58,10 @@ async def test_current_character_is_not_crowded_out_and_multiple_queries_dedupli
 async def test_empty_memory_and_backend_failure_are_distinct(setup, tmp_path):
     retrieval, _ = skill(setup, tmp_path)
     assert (await retrieval.search(invocation(), query=MemoryQuery(("没有事实",)))).hits == ()
+
     async def unavailable(*args, **kwargs):
         raise RuntimeError("记忆后端不可用")
+
     setup.vectors.search = unavailable
     with pytest.raises(RuntimeError, match="记忆后端不可用"):
         await retrieval.search(invocation(), query=MemoryQuery(("事实",)))
@@ -64,8 +76,9 @@ async def test_song_catalog_and_segments_reflect_actual_resources_without_submit
     with wave.open(str(audio), "wb") as output:
         output.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
         output.writeframes(b"\0\0" * 16000)
-    metadata = SongMetadata("歌甲", "歌甲", "介绍", str(audio), "", 0,
-                            [SongSegment("副歌", 0, 1, [OneLyricLine(1, "正确歌词")])])
+    metadata = SongMetadata(
+        "歌甲", "歌甲", "介绍", str(audio), "", 0, [SongSegment("副歌", 0, 1, [OneLyricLine(1, "正确歌词")])]
+    )
     manager.all_songs[manager.get_unified_song_name("歌甲")] = metadata
     manager.song_aliases[manager.get_unified_song_name("歌甲别名")] = manager.get_unified_song_name("歌甲")
     await retrieval.get_song(invocation(), song_id="歌甲")
@@ -79,7 +92,7 @@ async def test_song_catalog_and_segments_reflect_actual_resources_without_submit
     assert not (await retrieval.get_song(invocation(), song_id="歌甲", segment_id="缺失唱段")).found
     assert not (await retrieval.get_song(invocation(), song_id="完全不同的歌")).found
     assert manager.wishlist.get_all() == {}
-    tasks = SongLearningTasks(singing.backend)
+    tasks = singing.learning_tasks()
     assert tasks.request(invocation(), song_id="想学的歌")
     assert not tasks.request(invocation(), song_id="想学的歌")
     assert len(manager.wishlist.get_all()) == 1
@@ -93,9 +106,10 @@ async def test_public_knowledge_has_a_stable_source_and_needs_no_private_user_sc
     with get_song_session() as session:
         session.add(Song(uuid="knowledge-1", name="歌乙", safe_name="歌乙", introduction="旅行主题", lyrics="歌词"))
         session.commit()
-    result = await retrieval.search(invocation(user_id=None), query=MemoryQuery(
-        ("旅行", "歌乙"), scopes=frozenset((RetrievalScope.PUBLIC_KNOWLEDGE,))
-    ))
+    result = await retrieval.search(
+        invocation(user_id=None),
+        query=MemoryQuery(("旅行", "歌乙"), scopes=frozenset((RetrievalScope.PUBLIC_KNOWLEDGE,))),
+    )
     assert [(hit.memory_record_id, hit.source) for hit in result.hits] == [("knowledge-1", "song_knowledge")]
 
 
@@ -107,8 +121,10 @@ async def test_production_vector_adapter_does_not_turn_backend_failure_into_empt
         store._executor = executor
         store.collection = SimpleNamespace(query=lambda **kwargs: {"ids": []})
         assert await store.search("u", "空库") == []
+
         def fail(**kwargs):
             raise RuntimeError("向量服务不可用")
+
         store.collection = SimpleNamespace(query=fail)
         with pytest.raises(RuntimeError, match="向量服务不可用"):
             await store.search("u", "查询")

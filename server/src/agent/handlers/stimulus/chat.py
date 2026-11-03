@@ -23,8 +23,8 @@ from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
+    JargonRecognitionSkill,
     ResponseCompositionSkill,
-    TextPreprocessingSkill,
 )
 from src.agent.skills.invocation import handling_invocation
 from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill
@@ -57,7 +57,7 @@ class ChatPreprocessingHandler:
 
     def __init__(
         self,
-        text_understanding: TextPreprocessingSkill,
+        text_understanding: JargonRecognitionSkill,
         image_understanding: ImageUnderstandingSkill | None = None,
         audio_understanding: AudioUnderstandingSkill | None = None,
     ) -> None:
@@ -76,7 +76,7 @@ class ChatPreprocessingHandler:
         )
         match stimulus:
             case d.TextMessage():
-                terms = self._text_understanding.extract_terms(stimulus.text)
+                terms = self._text_understanding.recognize(stimulus.text)
                 entry = ConversationEntry(
                     entry_id=str(uuid4()),
                     timestamp=fact_time,
@@ -100,7 +100,7 @@ class ChatPreprocessingHandler:
                     owner_user_id=owner_user_id,
                 )
                 machine_text = f"[图片理解]: {description}"
-                terms = self._text_understanding.extract_terms(machine_text)
+                terms = self._text_understanding.recognize(machine_text)
                 media_entry = ConversationEntry(
                     entry_id=str(uuid4()),
                     timestamp=fact_time,

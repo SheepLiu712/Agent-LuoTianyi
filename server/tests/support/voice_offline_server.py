@@ -25,9 +25,9 @@ from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
+    JargonRecognitionSkill,
     ReplyResources,
     ResponseCompositionSkill,
-    TextPreprocessingSkill,
     TopicExtractionSkill,
 )
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
@@ -90,7 +90,7 @@ def make_agent(root, resolver, models):
     profile = CharacterProfile(
         "luotianyi", "天依", "offline", static_variables_file=str(persona), llm_tone_mapping_file=str(tones)
     )
-    text = TextPreprocessingSkill()
+    text = JargonRecognitionSkill()
     memory = {"luotianyi": OfflineMemory()}
     # TTS 的 stream 方法与文本模型的 stream 布尔配置属于不同接口。
     reply_model = SimpleNamespace(
