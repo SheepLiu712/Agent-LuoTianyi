@@ -1,5 +1,9 @@
 {
     "is_debug": true,
+    "server": {
+        "debug_port": 24523,
+        "production_port": 15673
+    },
     "call_transport": {
         "enabled": false
     },
