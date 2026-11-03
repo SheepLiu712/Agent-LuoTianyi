@@ -584,7 +584,7 @@ def load_lora_weights(model: torch.nn.Module, lora_path: str, device: str = 'cpu
     None
         The model is updated in place.
     """
-    lora_state_dict = torch.load(lora_path, map_location=device)
+    lora_state_dict = torch.load(lora_path, map_location=device, weights_only=True)
     model.load_state_dict(lora_state_dict, strict=False)
 
 
