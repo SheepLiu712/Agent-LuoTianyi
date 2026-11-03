@@ -54,6 +54,27 @@ class FakeNativeCallAudio implements CallAudioNativeModule {
 }
 
 describe('AndroidCallAudio adapter', () => {
+  it.each(['noise_suppressor_unavailable', 'noise_suppressor_create_failed', 'noise_suppressor_enable_failed'])('continues capture and recovery without optional suppression: %s', async (error) => {
+    clearDebugTrace();
+    const native = new FakeNativeCallAudio();
+    native.capability.noiseSuppressor = { available: error !== 'noise_suppressor_unavailable', enabled: false, error };
+    const audio = new AndroidCallAudio({}, native, 'android');
+    await expect(audio.initialize()).resolves.toBe('available');
+    await expect(audio.getCapability()).resolves.toBe('available');
+    await expect(audio.startCapture(CAPTURE_FORMAT, jest.fn())).resolves.toBeUndefined();
+    await audio.pauseCapture();
+    await expect(audio.resumeCapture()).resolves.toBeUndefined();
+    const trace = getDebugTraceSnapshot().find((entry) => entry.message === 'initialization without noise suppression');
+    expect(JSON.parse(trace!.detail!)).toMatchObject({ noiseSuppressor: { enabled: false, error } });
+    await audio.close();
+  });
+
+  it('preserves permission failure for the user-facing notice', async () => {
+    const native = new FakeNativeCallAudio();
+    native.capability = { ...native.capability, available: false, reason: 'permission_denied' };
+    await expect(new AndroidCallAudio({}, native, 'android').initialize()).rejects.toThrow('MICROPHONE_PERMISSION_DENIED');
+  });
+
   it('exposes the native initialization failure reason in the device debug panel', async () => {
     clearDebugTrace();
     const native = new FakeNativeCallAudio();
@@ -148,9 +169,6 @@ describe('AndroidCallAudio adapter', () => {
 
   it.each([
     ['aec', { aec: { available: false, enabled: false, error: 'aec_unavailable' } }],
-    ['noise suppression', {
-      noiseSuppressor: { available: false, enabled: false, error: 'noise_suppressor_unavailable' },
-    }],
     ['audio focus', { audioFocus: { granted: false, error: 'audio_focus_denied' } }],
   ])('fails closed when %s is not initialized', async (_name, override) => {
     const native = new FakeNativeCallAudio();

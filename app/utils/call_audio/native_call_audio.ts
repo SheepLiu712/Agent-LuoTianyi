@@ -58,8 +58,6 @@ function capabilityOf(native: NativeCapability): CallAudioCapability {
     matchesFormat(native.playbackFormat, PLAYBACK_FORMAT) &&
     native.aec.available &&
     native.aec.enabled &&
-    native.noiseSuppressor.available &&
-    native.noiseSuppressor.enabled &&
     native.audioFocus.granted
     ? 'available'
     : 'unavailable';
@@ -119,7 +117,13 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
           audioFocus: nativeCapability.audioFocus,
         });
       }
+      if (nativeCapability.reason === 'permission_denied') throw new Error('MICROPHONE_PERMISSION_DENIED');
       if (capability === 'available') {
+        if (!nativeCapability.noiseSuppressor.enabled) {
+          addDebugTrace('call-audio', 'initialization without noise suppression', {
+            noiseSuppressor: nativeCapability.noiseSuppressor,
+          });
+        }
         this.resetSessionState(nativeCapability.sessionGeneration);
         this.subscribe();
       }
@@ -128,6 +132,7 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
       addDebugTrace('call-audio', 'initialization rejected', {
         error: error instanceof Error ? error.message : String(error),
       });
+      if (error instanceof Error && error.message === 'MICROPHONE_PERMISSION_DENIED') throw error;
       return 'unavailable';
     }
   }

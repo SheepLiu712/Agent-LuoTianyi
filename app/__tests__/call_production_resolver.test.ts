@@ -297,9 +297,9 @@ describe('production call resolver', () => {
     expect(mouthBridge.reset).not.toHaveBeenCalled();
   });
 
-  it('cleans the visual subscription exactly once when native initialization rejects', async () => {
+  it.each(['initialize_failed', 'MICROPHONE_PERMISSION_DENIED'])('cleans native initialization rejection and preserves permission errors: %s', async (code) => {
     const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
-    audio.initialize.mockRejectedValue(new Error('initialize_failed'));
+    audio.initialize.mockRejectedValue(new Error(code));
     const mouthBridge = { update: jest.fn(), reset: jest.fn() };
     const resolver = new ProductionCallResolver({
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
@@ -313,7 +313,11 @@ describe('production call resolver', () => {
     const attempt = resolver.createAttempt();
     const listener = (audio.subscribePlaybackProgress as jest.Mock).mock.calls[0][0];
 
-    await expect(attempt.initializeNative()).resolves.toBe(false);
+    if (code === 'MICROPHONE_PERMISSION_DENIED') {
+      await expect(attempt.initializeNative()).rejects.toThrow(code);
+    } else {
+      await expect(attempt.initializeNative()).resolves.toBe(false);
+    }
     expect(audio.progressListener).toBeUndefined();
     expect(mouthBridge.reset).not.toHaveBeenCalled();
     expect(audio.close).toHaveBeenCalledTimes(1);

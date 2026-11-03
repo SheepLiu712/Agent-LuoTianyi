@@ -268,7 +268,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     noiseSuppressorStatus = enableNoiseSuppressor(record.audioSessionId)
     return when {
       !aecStatus.first -> aecStatus.second ?: "aec_initialization_failed"
-      !noiseSuppressorStatus.first -> noiseSuppressorStatus.second ?: "noise_suppressor_initialization_failed"
       else -> null
     }
   }

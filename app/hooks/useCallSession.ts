@@ -275,6 +275,7 @@ export function useCallSession(options: CallSessionOptions = {}) {
       permissionPendingRef.current = false;
       if (result === 'permanently_denied') onPermissionSettings?.();
       if (result !== 'granted') {
+        reportAttemptFailure(ownerRef.current, generation, 'MICROPHONE_PERMISSION_DENIED');
         dispatchEvent({ type: result === 'permanently_denied' ? 'permission_permanently_denied' : 'permission_denied' });
         return;
       }
