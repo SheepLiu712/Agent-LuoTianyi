@@ -35,7 +35,15 @@ class FirstLoginHandler:
         self._logger = get_logger(__name__)
 
     async def _generate_reply(
-        self, invocation, *, user_context, reply_topic, conversation_history, excluded_segments=None, on_drafts=None
+        self,
+        invocation,
+        *,
+        user_context,
+        reply_topic,
+        conversation_history,
+        fact_hits,
+        excluded_segments=None,
+        on_drafts=None,
     ) -> ReplyGenerationResult:
         invocation.require_user_id()
         if invocation.cancellation.is_cancelled:
@@ -80,7 +88,7 @@ class FirstLoginHandler:
                 reply_topic=reply_topic,
                 conversation_history=conversation_history,
                 memory_hits=recalled.render_for_prompt() if recalled is not None else [],
-                fact_hits=[],
+                fact_hits=fact_hits,
                 sing_plan=sing_plan,
             )
         ) as stream:
@@ -116,6 +124,7 @@ class FirstLoginHandler:
                     handling_invocation(request, context),
                     user_context=context.user.read(),
                     reply_topic=self._reminder_topic(stimulus),
+                    fact_hits=[f"{event.title}：{event.description}" for event in stimulus.events],
                     conversation_history=render_conversation_history(context.conversation.read()),
                     excluded_segments=set(),
                     on_drafts=on_drafts,
@@ -181,16 +190,29 @@ class FirstLoginHandler:
     @staticmethod
     def _reminder_topic(stimulus: d.ProactivePromptDue) -> str:
         """从 Stage 提供的提醒事实生成只供角色回复生成器使用的内部话题。"""
-        reasons = stimulus.reason.value.split("+")
-        labels = {
-            "holiday": "节日",
-            "travel": "旅行见闻",
-            "new_song": "新歌",
-            "birthday": "生日",
-            "anniversary": "纪念日",
-        }
-        subjects = "、".join(labels.get(reason, reason) for reason in reasons)
-        return f"有一项到期提醒（{subjects}），请自然地告诉用户并关心用户的安排。"
+        if not stimulus.events:
+            raise ValueError("主动提醒缺少事件正文")
+        return "\n".join(FirstLoginHandler._event_topic(event) for event in stimulus.events)
+
+    @staticmethod
+    def _event_topic(event: d.EventReminder) -> str:
+        when = {
+            "1_day_after": "昨天",
+            "day_of_event": "今天",
+            "1_day_before": "明天",
+            "3_days_before": "3天后",
+            "7_days_before": "7天后",
+            "1_hour_before": "稍后",
+        }[event.trigger_key]
+        if event.event_type == "travel":
+            return f"你{when}去了{event.title}，请结合具体见闻，自然地向用户分享经历和感受。"
+        if event.event_type == "new_song":
+            if not event.description.strip():
+                raise ValueError(f"新歌提醒缺少歌曲内容：{event.event_id}")
+            return f"你{when}学了{event.description}，请自然地向用户分享学会这些歌曲的消息。"
+        if event.event_type in {"holiday", "birthday", "anniversary"}:
+            return f"{when}是{event.title}，请结合这一天的具体意义送上祝福，并关心用户的安排。"
+        raise ValueError(f"不支持的主动提醒类型：{event.event_type}")
 
     @staticmethod
     def _report(

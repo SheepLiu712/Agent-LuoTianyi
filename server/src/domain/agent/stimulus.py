@@ -27,6 +27,7 @@ from .stimulus_values import (
     ActivityFact,
     BodyRegion,
     DynamicMessage,
+    EventReminder,
     EvidenceRef,
     MediaRef,
     ProactiveReason,
@@ -305,6 +306,7 @@ class ProactivePromptDue(Stimulus):
     due_at: datetime
     dedup_key: str
     fact_refs: tuple[EvidenceRef, ...]
+    events: tuple[EventReminder, ...] = ()
 
     def __post_init__(self) -> None:
         Stimulus.__post_init__(self)
@@ -312,6 +314,7 @@ class ProactivePromptDue(Stimulus):
         _require_aware_datetime(self.due_at)
         _require_nonblank_string(self.dedup_key)
         _require_tuple_of(self.fact_refs, EvidenceRef)
+        _require_tuple_of(self.events, EventReminder)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

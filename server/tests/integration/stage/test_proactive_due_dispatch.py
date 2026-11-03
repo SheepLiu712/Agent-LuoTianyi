@@ -91,6 +91,8 @@ def event(
         is_personal=is_personal,
         target_user_id=target_user_id,
         is_notified=is_notified,
+        title=event_id,
+        description=f"{event_id}的具体内容",
     )
 
 

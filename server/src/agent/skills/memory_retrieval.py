@@ -1,7 +1,9 @@
 """授权记忆检索与权威歌曲资料查询。"""
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
+from zoneinfo import ZoneInfo
 
 from src.agent.skills.contracts import SkillInvocation
 from src.domain import MemoryHit
@@ -66,7 +68,12 @@ class MemoryRetrievalSkill:
         memory = self._memories[invocation.character_id]
         clues = tuple(dict.fromkeys(clue.strip() for clue in query.clues if clue.strip()))
         hits = []
-        if include_user or include_character:
+        if "/YesterdayCityWalk" in clues:
+            if include_character:
+                day = datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1)
+                hits.extend((await memory.citywalk_memory_on(day)).hits)
+            clues = tuple(clue for clue in clues if clue != "/YesterdayCityWalk")
+        if clues and (include_user or include_character):
             context = await memory.search_memory_context_for_topic(
                 user_id,
                 list(clues),

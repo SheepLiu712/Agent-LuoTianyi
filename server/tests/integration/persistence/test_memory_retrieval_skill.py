@@ -128,3 +128,99 @@ async def test_production_vector_adapter_does_not_turn_backend_failure_into_empt
         store.collection = SimpleNamespace(query=fail)
         with pytest.raises(RuntimeError, match="向量服务不可用"):
             await store.search("u", "查询")
+
+
+async def test_yesterday_citywalk_reads_exact_character_and_day_without_vector_search(setup, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from src.agent.skills import memory_retrieval as retrieval_module
+    from src.infrastructure.persistence.database.sql_database import Event
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # UTC 尚为 11 月 2 日，北京已经是 11 月 3 日。
+            return cls(2026, 11, 2, 16, 30, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(retrieval_module, "datetime", Clock)
+    day = datetime(2026, 11, 2)
+    with setup.database.open_sql_session() as session:
+        for key, character, when, personal in (
+            ("walk", "luotianyi", day + timedelta(hours=12), False),
+            ("today", "luotianyi", day + timedelta(days=1), False),
+            ("older", "luotianyi", day - timedelta(seconds=1), False),
+            ("other-character", "miku", day, False),
+            ("private", "luotianyi", day, True),
+            ("removed", "luotianyi", day, False),
+        ):
+            session.add(
+                Event(
+                    id=key,
+                    character=character,
+                    event_type="travel",
+                    source="world_citywalk",
+                    title=key,
+                    description=f"{key}：在武康路买了桂花糕。",
+                    start_datetime=when,
+                    is_personal=personal,
+                    target_user_id="other" if personal else None,
+                    is_active=key != "removed",
+                )
+            )
+        session.commit()
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("昨天漫步指令不应进入向量搜索")
+
+    setup.vectors.search = forbidden
+    retrieval, _ = skill(setup, tmp_path)
+    result = await retrieval.search(invocation(), query=MemoryQuery(("/YesterdayCityWalk",)))
+    assert [hit.memory_record_id for hit in result.hits] == ["walk"]
+    assert result.hits[0].source == "citywalk_event"
+    assert "桂花糕" in result.render_for_prompt()[0]
+    assert "2026-11-02" in result.render_for_prompt()[0]
+    # 只有用户记忆权限时不能通过指令读取角色经历。
+    result = await retrieval.search(
+        invocation(), query=MemoryQuery(("/YesterdayCityWalk",), scopes=frozenset((RetrievalScope.USER,)))
+    )
+    assert result.hits == ()
+
+
+async def test_yesterday_citywalk_empty_and_mixed_queries(setup, tmp_path):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from src.infrastructure.persistence.database.sql_database import Event
+
+    retrieval, _ = skill(setup, tmp_path)
+    assert (await retrieval.search(invocation(), query=MemoryQuery(("/YesterdayCityWalk",)))).hits == ()
+    with setup.database.open_sql_session() as session:
+        session.add(
+            Event(
+                id="walk",
+                character="luotianyi",
+                event_type="travel",
+                source="world_citywalk",
+                title="武康路",
+                description="看到了梧桐落叶。",
+                is_personal=False,
+                start_datetime=(datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(days=1)).replace(tzinfo=None),
+            )
+        )
+        session.commit()
+    await setup.skill.commit_fact(invocation(), fact=fact(content="喜欢桂花糕"))
+    calls = []
+    original = setup.vectors.search
+
+    async def search(user_id, query, **kwargs):
+        calls.append(query)
+        return await original(user_id, query, **kwargs)
+
+    setup.vectors.search = search
+    result = await retrieval.search(
+        invocation(), query=MemoryQuery(("/YesterdayCityWalk", "桂花糕", "/YesterdayCityWalk"))
+    )
+    assert len(result.hits) == 2
+    assert all(query == "桂花糕" for query in calls)
+    assert any("梧桐落叶" in text for text in result.render_for_prompt())
+    assert any("桂花糕" in text for text in result.render_for_prompt())

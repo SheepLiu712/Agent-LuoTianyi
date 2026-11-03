@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.domain import MemoryContext, MemoryHit
@@ -70,6 +71,24 @@ class AgentMemory:
         if memory_store is None:
             raise RuntimeError("MemoryStore has not been initialized.")
         return memory_store
+
+    async def citywalk_memory_on(self, day: date) -> MemoryContext:
+        """从角色的漫步事件正本读取完整经历，不依赖向量相似度或虚拟用户身份。"""
+        events = await asyncio.to_thread(
+            self.database_manager.event_store.get_citywalk_events, self.owner_character_id, day
+        )
+        return MemoryContext(
+            tuple(
+                MemoryHit(
+                    rendered_text=f"{day:%Y-%m-%d} {event['title']}：{event['description']}",
+                    score=1.0,
+                    query="/YesterdayCityWalk",
+                    source="citywalk_event",
+                    source_record_id=event["id"],
+                )
+                for event in events
+            )
+        )
 
     async def search_memory_context_for_topic(
         self,

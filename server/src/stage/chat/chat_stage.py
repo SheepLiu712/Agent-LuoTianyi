@@ -311,6 +311,16 @@ class ChatStage:
             if self._supports_due_event(event)
         )
         selected = candidates if merge_all else ((random.choice(candidates),) if candidates else ())
+        reminders = {
+            event.event_id: d.EventReminder(
+                event_id=event.event_id,
+                event_type=event.reason,
+                title=event.title,
+                description=event.description,
+                trigger_key=event.trigger_key,
+            )
+            for event in selected
+        }
         claimed = []
         for event in selected:
             if self._due_event_provider.claim(
@@ -330,6 +340,7 @@ class ChatStage:
                 f"{event.event_id}:{self.user_id}:{self.character_id}:{event.trigger_key}" for event in claimed
             ),
             fact_refs=tuple(d.EvidenceRef(evidence_id=event.event_id) for event in claimed),
+            events=tuple(reminders[event.event_id] for event in claimed),
         )
         request = self._make_request(stimulus)
         self._proactive_claims[request.request_id] = tuple(claimed)

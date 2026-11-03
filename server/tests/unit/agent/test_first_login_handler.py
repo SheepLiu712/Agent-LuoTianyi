@@ -71,6 +71,19 @@ def first_login_request(reason: str = "first_login") -> d.HandleStimulusRequest:
         due_at=datetime.now(timezone.utc),
         dedup_key="first-login:user:luotianyi",
         fact_refs=(),
+        events=(
+            ()
+            if reason == "first_login"
+            else (
+                d.EventReminder(
+                    event_id="event",
+                    event_type=reason,
+                    title="中秋节",
+                    description="赏月团圆",
+                    trigger_key="day_of_event",
+                ),
+            )
+        ),
     )
     return d.HandleStimulusRequest(
         request_id="request",
@@ -200,7 +213,7 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
 
     # Then: the prompt stays internal; only the generated reply is persisted and realized.
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
-    assert composer.calls[0]["reply_topic"] == "有一项到期提醒（节日），请自然地告诉用户并关心用户的安排。"
+    assert composer.calls[0]["reply_topic"] == "今天是中秋节，请结合这一天的具体意义送上祝福，并关心用户的安排。"
     assert composer.calls[0]["conversation_history"] == "已有总结"
     assert composer.calls[0]["invocation"].user_id == "user"
     assert [entry.content.text for entry in conversation.entries] == ["今天好像有个特别的日子，你有什么安排吗？"]

@@ -142,6 +142,15 @@ async def run_handler(composition, mode="chat"):
             due_at=req.interaction.now,
             dedup_key="birthday:u",
             fact_refs=(),
+            events=(
+                d.EventReminder(
+                    event_id="birthday",
+                    event_type="birthday",
+                    title="用户的生日",
+                    description="一起庆祝生日",
+                    trigger_key="day_of_event",
+                ),
+            ),
         )
         req = replace(req, stimulus=stimulus)
         handler = FirstLoginHandler(prepared_names=(), prepared_speech=None, skills=composition)
