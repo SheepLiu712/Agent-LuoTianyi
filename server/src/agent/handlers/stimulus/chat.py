@@ -224,7 +224,10 @@ class ChatReplyHandler:
             return ReplyGenerationResult()
         candidate = (
             await self._skills.singing.select(
-                invocation, attempts=decision.sing_attempts, excluded_segments=excluded_segments
+                invocation,
+                attempts=decision.sing_attempts,
+                excluded_segments=excluded_segments,
+                emotion_context="\n".join(part for part in (conversation_history, f"当前话题：{reply_topic}") if part),
             )
             if decision.sing_attempts
             else None

@@ -71,9 +71,20 @@ class SingingSkill:
         )
         return metadata.song_name, segments, lyrics
 
-    async def select(self, invocation: SkillInvocation, *, attempts: tuple[str, ...], excluded_segments=None):
+    async def select(
+        self,
+        invocation: SkillInvocation,
+        *,
+        attempts: tuple[str, ...],
+        excluded_segments=None,
+        emotion_context: str = "",
+    ):
         return await self._singing.build_sing_plan(
-            invocation.character_id, list(attempts), excluded_segments=excluded_segments, confirmed_intent=True
+            invocation.character_id,
+            list(attempts),
+            excluded_segments=excluded_segments,
+            emotion_context=emotion_context,
+            confirmed_intent=True,
         )
 
     async def render(self, invocation: SkillInvocation, *, song_id: str, segment_id: str) -> bytes:

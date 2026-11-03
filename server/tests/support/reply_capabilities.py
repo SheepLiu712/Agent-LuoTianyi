@@ -18,7 +18,7 @@ def scripted_reply_skills(producer):
         state["invocation"] = invocation
         return MemorySearchResult(tuple(getattr(producer, "hits", ())))
 
-    async def select(invocation, *, attempts, excluded_segments=None):
+    async def select(invocation, *, attempts, excluded_segments=None, emotion_context=""):
         state["excluded_segments"] = excluded_segments
         drafts = getattr(producer, "drafts", getattr(producer, "formal_drafts", ()))
         return next((draft.sing for draft in drafts if draft.sing and draft.sing[1]), None)
