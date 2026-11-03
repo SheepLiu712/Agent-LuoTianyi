@@ -8,7 +8,6 @@ from src.agent.skills.cognitive import (
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
     JargonRecognitionSkill,
-    ResponseCompositionSkill,
     TopicExtractionSkill,
 )
 from src.agent.skills.cognitive.call_settlement import CallSummarySkill
@@ -82,14 +81,8 @@ class SharedSkills:
         self.memory_retrieval = MemoryRetrievalSkill(
             config.get("memory_retrieval"), memories=memories, singing=self.singing, knowledge=self.song_knowledge
         )
-        self.response_composition = ResponseCompositionSkill(
-            config.get("response_composition"),
-            retrieval=self.memory_retrieval,
-            singing=self.singing,
-            reply=self.reply,
-            topic_extraction=TopicExtractionSkill(
-                config.get("topic_extraction"), llm_service, understanding=self.jargon_recognition
-            ),
+        self.topic_extraction = TopicExtractionSkill(
+            config.get("topic_extraction"), llm_service, understanding=self.jargon_recognition
         )
         self.call_summary = CallSummarySkill(config.get("call_summary"), llm_service=llm_service, characters=characters)
         self.cognitive_maintenance = CognitiveMaintenanceSkill(

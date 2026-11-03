@@ -1,4 +1,3 @@
-from support.retrieval import stub_retrieval, stub_singing
 """逐字模型输出经真实回复处理器、行动计划和 SayHandler 提前进入 TTS。"""
 
 import asyncio
@@ -10,6 +9,7 @@ from uuid import uuid4
 import pytest
 from support.call_apology import _Plans, _request, _stimulus
 from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
 from support.routing_support import Sink, request
 
 import src.domain.agent as d
@@ -17,13 +17,13 @@ from src.agent import Agent
 from src.agent.context import UserContextSnapshot
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembler
 from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.cognitive._response_parser import StructuredResponseParser
-from src.agent.skills.cognitive.response_composition import ResponseCompositionSkill
 from src.agent.skills.contracts import ReplyDraft, TopicExtraction
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking.skill import SpeakingAudioChunk
@@ -159,8 +159,7 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
     else:
         value = replace(request(), prepared_inputs=(d.PreprocessedInput(stimulus_id="m2", text="今天做什么"),))
         handler = ChatReplyHandler(
-            ResponseCompositionSkill(
-                {},
+            ReplySkills(
                 retrieval=stub_retrieval({"luotianyi": Memory()}),
                 singing=stub_singing(SimpleNamespace()),
                 reply=make_reply_skill(generators),

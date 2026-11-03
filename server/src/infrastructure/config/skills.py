@@ -4,6 +4,28 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+_SKILL_NODES = frozenset(
+    {
+        "reply",
+        "memory_write",
+        "memory_retrieval",
+        "cognitive_maintenance",
+        "call_summary",
+        "dynamic",
+        "diary",
+        "jargon_recognition",
+        "topic_extraction",
+        "explicit_memory_intent",
+        "speaking",
+        "singing",
+        "image_understanding",
+        "audio_understanding",
+        "touch_reaction",
+        "prepared_speech",
+        "knowledge",
+    }
+)
+
 
 @dataclass(frozen=True)
 class SkillsConfig:
@@ -26,9 +48,7 @@ class SkillsConfig:
         if not isinstance(values, dict):
             raise TypeError("agent_runtime.skills 必须是字典")
         cls._reject_skill_legacy(values)
-        for key, value in values.items():
-            if not isinstance(value, dict):
-                raise TypeError(f"agent_runtime.skills.{key} 必须是字典")
+        cls._validate_skill_nodes(values)
         for key in ("reply", "memory_write"):
             cls.require_model(values.get(key, {}), f"agent_runtime.skills.{key}")
         maintenance = values.get("cognitive_maintenance", {})
@@ -47,7 +67,17 @@ class SkillsConfig:
         return cls(deepcopy(values))
 
     @staticmethod
+    def _validate_skill_nodes(values):
+        for key, value in values.items():
+            if key not in _SKILL_NODES:
+                raise ValueError(f"agent_runtime.skills.{key} 未定义，请检查名称或迁移旧技能配置")
+            if not isinstance(value, dict):
+                raise TypeError(f"agent_runtime.skills.{key} 必须是字典")
+
+    @staticmethod
     def _reject_skill_legacy(values):
+        if "response_composition" in values:
+            raise ValueError("agent_runtime.skills.response_composition 已删除，回复编排由 Handler 显式执行")
         if "text_preprocessing" in values:
             raise ValueError("agent_runtime.skills.text_preprocessing 请迁移到 skills.jargon_recognition")
         if "call_recall" in values:

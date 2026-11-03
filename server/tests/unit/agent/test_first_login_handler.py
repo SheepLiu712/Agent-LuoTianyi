@@ -1,4 +1,3 @@
-from src.agent.skills.contracts import ComposedReply
 """首次登录主动欢迎 handler 的失败结算。"""
 
 from datetime import datetime, timezone
@@ -6,12 +5,14 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from support.reply_capabilities import scripted_reply_skills
 
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.handlers.stimulus import proactive as proactive_module
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.processing.reply_materials import ReplyGenerationResult
 from src.agent.skills.cognitive import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent_runtime import agent_runtime as runtime_module
@@ -34,14 +35,14 @@ class Composer:
         self.drafts = tuple(drafts)
         self.calls = []
 
-    async def compose(self, invocation, **kwargs):
+    async def generate_drafts(self, invocation, **kwargs):
         self.calls.append({"invocation": invocation, **kwargs})
-        return ComposedReply(drafts=self.drafts)
+        return ReplyGenerationResult(drafts=self.drafts)
 
 
 class CancellingComposer(Composer):
-    async def compose(self, invocation, **kwargs):
-        result = await super().compose(invocation, **kwargs)
+    async def generate_drafts(self, invocation, **kwargs):
+        result = await super().generate_drafts(invocation, **kwargs)
         invocation.cancellation.cancel(d.CancellationReason.SUPERSEDED)
         return result
 
@@ -107,7 +108,7 @@ async def test_missing_prepared_name_fails_without_silent_skip(monkeypatch):
     handler = FirstLoginHandler(
         prepared_names=("missing",),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=Composer(),
+        skills=scripted_reply_skills(Composer()),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -151,7 +152,7 @@ async def test_runtime_injects_configured_names_into_real_handler(runtime_depend
         # Then: the placeholder is replaced and configured order is retained.
         assert isinstance(handler, FirstLoginHandler)
         assert handler._prepared_names == ("welcome_1", "welcome_2")
-        assert handler._composition is runtime.skills.response_composition
+        assert handler._skills.reply is runtime.skills.reply
     finally:
         await runtime.shutdown()
 
@@ -172,7 +173,7 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
     handler = FirstLoginHandler(
         prepared_names=(),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=composer,
+        skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -220,7 +221,7 @@ async def test_due_reminder_with_no_deliverable_generation_does_not_persist_prom
     handler = FirstLoginHandler(
         prepared_names=(),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=composer,
+        skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -250,7 +251,7 @@ async def test_cancelled_due_reminder_does_not_persist_or_emit_late_generation()
     handler = FirstLoginHandler(
         prepared_names=(),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=composer,
+        skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",

@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+from support.reply_capabilities import scripted_reply_skills
 from support.routing_support import Sink, request
 
 import src.domain.agent as d
@@ -13,8 +14,8 @@ from src.agent.handlers.stimulus.chat import (
     ChatReplyHandler,
 )
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.processing.reply_materials import ReplyGenerationResult
 from src.agent.skills.cognitive import ExplicitMemoryIntentSkill, ReplyDraft
-from src.agent.skills.contracts import ComposedReply
 from src.agent.skills.memory_write import MemoryWriteResult, MemoryWriteStatus
 
 
@@ -43,12 +44,12 @@ class _Composer:
         self.events = events
         self.calls = []
 
-    async def compose(self, skill_invocation, **kwargs):
+    async def generate_drafts(self, skill_invocation, **kwargs):
         kwargs["invocation"] = skill_invocation
         self.calls.append(kwargs)
         if self.events is not None:
             self.events.append("compose")
-            return ComposedReply(
+            return ReplyGenerationResult(
                 drafts=(
                     ReplyDraft(
                         content="compose-memory-ack",
@@ -110,7 +111,7 @@ def _batch_deadline(texts, *, user_id="u"):
 
 
 def _agent(commit, *, composer=None):
-    handler = ChatReplyHandler(composer or _Composer(), _Intent(), commit)
+    handler = ChatReplyHandler(scripted_reply_skills(composer or _Composer()), _Intent(), commit)
     return Agent(character_id="luotianyi", stimulus_router=StimulusRouter(((d.StimulusKind.TEXT_MESSAGE, handler),)))
 
 

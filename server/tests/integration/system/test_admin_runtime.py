@@ -7,18 +7,18 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from src.infrastructure.observability import ObservabilityService
 from src.application.admin import qq_music_credential_refresh as qq_refresh_module
-from src.web.admin.admin_interface import _collect_llm_api_key_names
 from src.application.admin.admin_shell import init_admin_shell, shutdown_admin_shell
 from src.application.admin.auth import AdminAuthError, AdminAuthService
-from src.infrastructure.config.store import ConfigStore
-from src.infrastructure.config.validation import RuntimeConfigValidator
-from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
 from src.application.admin.qq_music_credential_refresh import QQMusicCredentialRefreshService
 from src.application.admin.runtime_supervisor import RuntimeSupervisor
+from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.store import ConfigStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
+from src.infrastructure.observability import ObservabilityService
 from src.utils.helpers import apply_env_variables
+from src.web.admin.admin_interface import _collect_llm_api_key_names
 
 
 def minimal_config(tmp_path: Path) -> dict:
@@ -89,7 +89,6 @@ def minimal_config(tmp_path: Path) -> dict:
                 },
                 "topic_extraction": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
                 "reply": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                "date_detector": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
                 "knowledge": {
                     "song_database": {
                         "db_folder": str(tmp_path),
@@ -124,7 +123,6 @@ def minimal_config(tmp_path: Path) -> dict:
                     }
                 }
             },
-
         },
         "world": {
             "citywalk": {"amap": {"api_key": "$AMAP_KEY"}},
@@ -483,9 +481,7 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
             {
                 **binding,
                 "interface_name": (
-                    "main2"
-                    if binding["path"] == "agent_runtime.skills.reply.llm_module"
-                    else binding["interface_name"]
+                    "main2" if binding["path"] == "agent_runtime.skills.reply.llm_module" else binding["interface_name"]
                 ),
                 "enable_thinking": binding["path"]
                 in {

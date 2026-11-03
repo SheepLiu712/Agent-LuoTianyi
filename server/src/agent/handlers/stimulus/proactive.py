@@ -1,16 +1,19 @@
 """主动刺激处理器。"""
 
+from contextlib import aclosing
 from datetime import datetime
 from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.context import ConversationEntry, TextContent
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
 from src.agent.processing.reply_dispatch import ReplyDelivery
-from src.agent.skills.cognitive import ResponseCompositionSkill
+from src.agent.processing.reply_materials import ReplyGenerationResult, enrich_reply_drafts, resolve_song_selection
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
+from src.agent.skills.memory_retrieval import MemoryQuery
 from src.utils.logger import get_logger
 
 
@@ -22,14 +25,73 @@ class FirstLoginHandler:
         *,
         prepared_names: tuple[str, ...],
         prepared_speech: PreparedSpeechCatalog,
-        composition: ResponseCompositionSkill,
+        skills: ReplySkills,
         reply: ReplyDelivery | None = None,
     ) -> None:
         self._prepared_names = prepared_names
         self._prepared_speech = prepared_speech
-        self._composition = composition
+        self._skills = skills
         self._reply = reply or ReplyDelivery()
         self._logger = get_logger(__name__)
+
+    async def _generate_reply(
+        self, invocation, *, user_context, reply_topic, conversation_history, excluded_segments=None, on_drafts=None
+    ) -> ReplyGenerationResult:
+        invocation.require_user_id()
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        decision = await self._skills.topic_extraction.extract(reply_topic, conversation_history=conversation_history)
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        recalled = (
+            await self._skills.retrieval.search(invocation, query=MemoryQuery(decision.memory_queries))
+            if decision.memory_queries
+            else None
+        )
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        candidate = (
+            await self._skills.singing.select(
+                invocation, attempts=decision.sing_attempts, excluded_segments=excluded_segments
+            )
+            if decision.sing_attempts
+            else None
+        )
+        sing_plan, learning_requests = resolve_song_selection(candidate)
+        lyrics = ""
+        if sing_plan is not None:
+            information = self._skills.singing.song_information(
+                invocation, song_id=sing_plan[0], segment_id=sing_plan[1]
+            )
+            if information is None:
+                sing_plan = None
+            else:
+                lyrics = information[2] or ""
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        drafts = []
+        async with aclosing(
+            self._skills.reply.generate(
+                invocation.character_id,
+                user_context=user_context,
+                reply_topic=reply_topic,
+                conversation_history=conversation_history,
+                memory_hits=recalled.render_for_prompt() if recalled is not None else [],
+                fact_hits=[],
+                sing_plan=sing_plan,
+            )
+        ) as stream:
+            async for draft in stream:
+                if invocation.cancellation.is_cancelled:
+                    return ReplyGenerationResult()
+                drafts.append(draft)
+                if on_drafts is not None and sing_plan is None and draft.sing is None:
+                    await on_drafts((draft,))
+        return ReplyGenerationResult(
+            drafts=enrich_reply_drafts(drafts, sing_plan=sing_plan, lyrics=lyrics),
+            memory_hits=tuple(recalled.hits) if recalled is not None else (),
+            learning_requests=learning_requests,
+        )
 
     async def handle(
         self,
@@ -47,7 +109,7 @@ class FirstLoginHandler:
 
             async def generate(on_drafts):
                 nonlocal learning_requests
-                result = await self._composition.compose(
+                result = await self._generate_reply(
                     handling_invocation(request, context),
                     user_context=context.user.read(),
                     reply_topic=self._reminder_topic(stimulus),

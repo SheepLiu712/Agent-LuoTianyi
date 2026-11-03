@@ -1,5 +1,6 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 
+from contextlib import aclosing
 from dataclasses import replace
 from datetime import timedelta
 from typing import Final
@@ -16,17 +17,19 @@ from src.agent.context.models import (
     SongContent,
     TextContent,
 )
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
 from src.agent.processing.reply_dispatch import ReplyDelivery
+from src.agent.processing.reply_materials import ReplyGenerationResult, enrich_reply_drafts, resolve_song_selection
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
     JargonRecognitionSkill,
-    ResponseCompositionSkill,
 )
 from src.agent.skills.invocation import handling_invocation
+from src.agent.skills.memory_retrieval import MemoryQuery
 from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill
 from src.utils.enum_type import ConversationSource
 
@@ -192,16 +195,75 @@ class ChatReplyHandler:
 
     def __init__(
         self,
-        composition: ResponseCompositionSkill,
+        skills: ReplySkills,
         memory_intent: ExplicitMemoryIntentSkill | None = None,
         memory_commit: MemoryWriteSkill | None = None,
         reply: ReplyDelivery | None = None,
     ) -> None:
-        """注入统一回复编排以及可选的明确记忆识别与提交技能。"""
-        self._composition = composition
+        """注入具名回复能力以及可选的明确记忆识别与提交能力。"""
+        self._skills = skills
         self._reply = reply or ReplyDelivery()
         self._memory_intent = memory_intent
         self._memory_commit = memory_commit
+
+    async def _generate_reply(
+        self, invocation, *, user_context, reply_topic, conversation_history, excluded_segments=None, on_drafts=None
+    ) -> ReplyGenerationResult:
+        invocation.require_user_id()
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        decision = await self._skills.topic_extraction.extract(reply_topic, conversation_history=conversation_history)
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        recalled = (
+            await self._skills.retrieval.search(invocation, query=MemoryQuery(decision.memory_queries))
+            if decision.memory_queries
+            else None
+        )
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        candidate = (
+            await self._skills.singing.select(
+                invocation, attempts=decision.sing_attempts, excluded_segments=excluded_segments
+            )
+            if decision.sing_attempts
+            else None
+        )
+        sing_plan, learning_requests = resolve_song_selection(candidate)
+        lyrics = ""
+        if sing_plan is not None:
+            information = self._skills.singing.song_information(
+                invocation, song_id=sing_plan[0], segment_id=sing_plan[1]
+            )
+            if information is None:
+                sing_plan = None
+            else:
+                lyrics = information[2] or ""
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        drafts = []
+        async with aclosing(
+            self._skills.reply.generate(
+                invocation.character_id,
+                user_context=user_context,
+                reply_topic=reply_topic,
+                conversation_history=conversation_history,
+                memory_hits=recalled.render_for_prompt() if recalled is not None else [],
+                fact_hits=[],
+                sing_plan=sing_plan,
+            )
+        ) as stream:
+            async for draft in stream:
+                if invocation.cancellation.is_cancelled:
+                    return ReplyGenerationResult()
+                drafts.append(draft)
+                if on_drafts is not None and sing_plan is None and draft.sing is None:
+                    await on_drafts((draft,))
+        return ReplyGenerationResult(
+            drafts=enrich_reply_drafts(drafts, sing_plan=sing_plan, lyrics=lyrics),
+            memory_hits=tuple(recalled.hits) if recalled is not None else (),
+            learning_requests=learning_requests,
+        )
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """按接收顺序把整批输入作为一次回复：召回→生成→落库→交付计划，并按 ID 消费。"""
@@ -297,7 +359,7 @@ class ChatReplyHandler:
 
         async def generate(on_drafts):
             nonlocal learning_requests
-            result = await self._composition.compose(
+            result = await self._generate_reply(
                 handling_invocation(request, plans.context),
                 user_context=plans.context.user.read(),
                 reply_topic=reply_topic,
@@ -334,7 +396,7 @@ class ChatReplyHandler:
 
         async def generate(on_drafts):
             nonlocal learning_requests
-            staged = await self._composition.compose_staged(
+            formal = await self._generate_reply(
                 handling_invocation(request, plans.context),
                 user_context=plans.context.user.read(),
                 reply_topic=reply_topic,
@@ -342,7 +404,6 @@ class ChatReplyHandler:
                 excluded_segments=_recent_sung_segments(snapshot),
                 on_drafts=on_drafts,
             )
-            formal = await staged.formal()
             learning_requests = formal.learning_requests
             _attach_recall(plans, request, formal.memory_hits)
             return formal.drafts

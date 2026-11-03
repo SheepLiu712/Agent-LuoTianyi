@@ -20,16 +20,12 @@ from src.agent.context import ContextFactory
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import (
-    AudioUnderstandingSkill,
-    JargonRecognitionSkill,
-    ReplyResources,
-    ResponseCompositionSkill,
-    TopicExtractionSkill,
-)
+from src.agent.skills.cognitive import AudioUnderstandingSkill, JargonRecognitionSkill, TopicExtractionSkill
+from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking import SpeakingSkill
@@ -96,8 +92,7 @@ def make_agent(root, resolver, models):
     reply_model = SimpleNamespace(
         stream=False, prompt_template=models.prompt_template, generate_response=models.generate_response
     )
-    composition = ResponseCompositionSkill(
-        {},
+    composition = ReplySkills(
         retrieval=stub_retrieval(memory),
         singing=stub_singing(None),
         reply=make_reply_skill({"luotianyi": ReplyResources({}, reply_model, profile)}),

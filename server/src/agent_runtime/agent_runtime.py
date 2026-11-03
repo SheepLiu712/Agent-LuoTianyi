@@ -16,6 +16,7 @@ from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.action.write_diary import WriteDiaryHandler
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.call import (
     CallAnswerRequestedHandler,
     CallEndingHandler,
@@ -189,6 +190,12 @@ class AgentRuntime:
             self.skills.image_understanding,
             self.skills.audio_understanding,
         )
+        reply_skills = ReplySkills(
+            topic_extraction=self.skills.topic_extraction,
+            retrieval=self.skills.memory_retrieval,
+            singing=self.skills.singing,
+            reply=self.skills.reply,
+        )
         registrations = [
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
             (
@@ -224,14 +231,14 @@ class AgentRuntime:
                 FirstLoginHandler(
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
-                    composition=self.skills.response_composition,
+                    skills=reply_skills,
                     reply=self.reply_delivery,
                 ),
             ),
             (
                 StimulusKind.INTERACTION_DEADLINE,
                 ChatReplyHandler(
-                    self.skills.response_composition,
+                    reply_skills,
                     self.skills.explicit_memory_intent,
                     self.skills.memory_write,
                     reply=self.reply_delivery,

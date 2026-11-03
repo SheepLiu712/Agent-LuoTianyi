@@ -1,4 +1,3 @@
-from support.retrieval import stub_retrieval
 """交互上下文的数据库边界、并发释放与刺激归属。"""
 
 import asyncio
@@ -8,6 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from support.retrieval import stub_retrieval
 
 from src.agent.context import (
     ContextFactory,
@@ -511,10 +511,14 @@ async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
             return SimpleNamespace(hits=(SimpleNamespace(rendered_text="late", memory_record_id="late"),))
 
     skill = stub_retrieval({"luotianyi": Memory()})
+
     async def retrieve():
-        result = await skill.search(SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),
-                                    query=SimpleNamespace(clues=("query",)))
+        result = await skill.search(
+            SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),
+            query=SimpleNamespace(clues=("query",)),
+        )
         pool.remember_hits(result.hits)
+
     recall = asyncio.create_task(retrieve())
     await entered.wait()
     await first.close()
@@ -686,7 +690,7 @@ def _reminder_agent():
             [
                 (
                     d.StimulusKind.PROACTIVE_PROMPT_DUE,
-                    FirstLoginHandler(prepared_names=(), prepared_speech=None, composition=composition),
+                    FirstLoginHandler(prepared_names=(), prepared_speech=None, skills=composition),
                 ),
                 (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             ]

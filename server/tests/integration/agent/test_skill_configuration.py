@@ -118,3 +118,13 @@ def test_old_terminology_configuration_reports_migration(runtime_dependencies):
     kwargs["config"]["skills"]["text_preprocessing"] = {}
     with pytest.raises(ValueError, match=r"skills.text_preprocessing.*jargon_recognition"):
         AgentRuntime(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "obsolete", ["response_composition", "memory", "main_chat", "preprocessing", "diary_writing", "date_detector"]
+)
+def test_removed_skill_nodes_cannot_silently_start(runtime_dependencies, obsolete):
+    kwargs, _ = runtime_dependencies
+    kwargs["config"]["skills"][obsolete] = {}
+    with pytest.raises(ValueError, match=rf"agent_runtime.skills.{obsolete}.*(删除|迁移)"):
+        AgentRuntime(**kwargs)

@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from support.reply_capabilities import scripted_reply_skills
 from support.stage_support import cleanup, setup, stimulus
 
 import src.domain.agent as d
@@ -14,7 +15,7 @@ from src.agent.handlers.stimulus.chat import (
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import ComposedReply, ComposedResponse, ReplyDraft
+from src.agent.skills.cognitive import ReplyDraft
 
 
 async def until(predicate):
@@ -35,17 +36,9 @@ class _Composer:
         self.drafts = drafts
         self.calls = 0
 
-    async def compose(self, invocation, **kwargs):
+    async def generate_drafts(self, invocation, **kwargs):
         self.calls += 1
         return self.drafts
-
-    async def compose_staged(self, invocation, **kwargs):
-        self.calls += 1
-
-        async def formal():
-            return ComposedReply(drafts=self.drafts)
-
-        return ComposedResponse(provisional=None, pending=formal)
 
 
 class _Execute:
@@ -72,7 +65,7 @@ def build_agent(composer, execute):
         stimulus_router=StimulusRouter(
             [
                 (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
-                (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(composer)),
+                (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(scripted_reply_skills(composer))),
                 (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             ]
         ),

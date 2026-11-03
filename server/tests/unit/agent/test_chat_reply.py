@@ -1,4 +1,3 @@
-from support.retrieval import stub_retrieval, stub_singing
 """到期批次回复：生成、落库与 Say/Sing 计划交付。"""
 
 from dataclasses import replace
@@ -7,20 +6,21 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from support.reply_capabilities import scripted_reply_skills
 from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
 from support.routing_support import Sink, request
 from support.skill_support import invocation
 
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.context import ConversationEntry, SongContent, TextContent, UserContextSnapshot
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.processing.reply_materials import ReplyGenerationResult
 from src.agent.skills.cognitive import (
-    ComposedReply,
-    ComposedResponse,
     ReplyDraft,
-    ResponseCompositionSkill,
 )
 from src.agent.skills.contracts import TopicExtraction
 
@@ -56,19 +56,10 @@ class Composer:
         self.provisional = provisional
         self.calls = []
 
-    async def compose(self, skill_invocation, **kwargs):
+    async def generate_drafts(self, skill_invocation, **kwargs):
         kwargs["invocation"] = skill_invocation
         self.calls.append(kwargs)
-        return ComposedReply(drafts=self.drafts)
-
-    async def compose_staged(self, skill_invocation, **kwargs):
-        kwargs["invocation"] = skill_invocation
-        self.calls.append(kwargs)
-
-        async def formal():
-            return ComposedReply(drafts=self.drafts)
-
-        return ComposedResponse(provisional=self.provisional, pending=formal)
+        return ReplyGenerationResult(drafts=self.drafts)
 
 
 def agent(composer):
@@ -78,7 +69,7 @@ def agent(composer):
             [
                 (
                     d.StimulusKind.TEXT_MESSAGE,
-                    ChatReplyHandler(composer),
+                    ChatReplyHandler(scripted_reply_skills(composer)),
                 )
             ]
         ),
@@ -202,12 +193,11 @@ class _Singing:
 
 
 @pytest.mark.asyncio
-async def test_response_composition_skill_recalls_and_maps_drafts():
+async def test_chat_handler_retrieves_selects_and_generates_drafts():
     memory = _Memory()
     singing = _Singing()
     generator = _Generator()
-    skill = ResponseCompositionSkill(
-        {},
+    skill = ReplySkills(
         topic_extraction=SimpleNamespace(
             extract=AsyncMock(return_value=TopicExtraction(memory_queries=("你好",), sing_attempts=("《歌》",)))
         ),
@@ -215,7 +205,7 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
         singing=stub_singing(singing),
         reply=make_reply_skill({"luotianyi": generator}),
     )
-    drafts = await skill.compose(
+    drafts = await ChatReplyHandler(skill)._generate_reply(
         invocation(),
         user_context=UserContextSnapshot(),
         reply_topic="你好",
