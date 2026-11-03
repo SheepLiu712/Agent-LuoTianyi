@@ -13,6 +13,7 @@ from src.domain.call import CallAudioSemantic
 @dataclass(frozen=True, slots=True)
 class RealtimeSpeechConfig:
     language: str | None = None
+    instructions: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

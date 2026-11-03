@@ -84,6 +84,7 @@ class FirstLoginHandler:
         async with aclosing(
             self._skills.reply.generate(
                 invocation.character_id,
+                scene="chat",
                 user_context=user_context,
                 reply_topic=reply_topic,
                 conversation_history=conversation_history,

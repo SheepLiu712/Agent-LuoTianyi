@@ -10,6 +10,7 @@ async def generate_call_reply(
     async with aclosing(
         reply.generate(
             invocation.character_id,
+            scene="call",
             reply_topic=reply_topic,
             user_context=user_context,
             conversation_history=conversation_history,

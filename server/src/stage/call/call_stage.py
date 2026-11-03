@@ -15,6 +15,7 @@ from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -72,6 +73,8 @@ from ._call_playback import CallPlaybackCoordinator, PlaybackCompletion, Playbac
 from ._call_records import PreparedCall
 from ._call_warning import CallWarning, WarningState
 from .call_lifecycle import CallLifecycle
+
+_ASR_INSTRUCTIONS_PATH = Path(__file__).resolve().parents[3] / "res/agent/prompts/call_asr_instructions.txt"
 
 
 def bind_call_stage_creator(
@@ -453,10 +456,13 @@ class CallStage:
     async def _start(self) -> None:
         try:
             self._require_setup_time()
+            instructions = _ASR_INSTRUCTIONS_PATH.read_text(encoding="utf-8").strip()
+            if not instructions:
+                raise ValueError(f"通话语音识别提示词不能为空: {_ASR_INSTRUCTIONS_PATH}")
             self._provider = await self._await_setup(
                 self._speech_factory.create(self._record.call_id), cleanup=lambda provider: provider.close()
             )
-            await self._await_setup(self._provider.start(RealtimeSpeechConfig()))
+            await self._await_setup(self._provider.start(RealtimeSpeechConfig(instructions=instructions)))
             if self._finish_source_interaction is not None:
                 await self._await_setup(self._finish_source_interaction(self))
             self._require_setup_time()

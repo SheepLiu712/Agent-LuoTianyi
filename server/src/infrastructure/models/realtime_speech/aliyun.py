@@ -249,6 +249,8 @@ class AliyunRealtimeSpeechSession:
             "output_audio_format": "pcm",
             "turn_detection": {"type": "smart_turn"},
         }
+        if config.instructions:
+            session["instructions"] = config.instructions
         if config.language:
             session["input_audio_transcription"] = {"language": config.language}
         return {"type": "session.update", "session": session}

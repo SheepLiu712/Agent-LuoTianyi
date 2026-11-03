@@ -10,6 +10,7 @@ import src.domain.agent as d
 from src.agent.context.memory_pool import CallMemory
 from src.agent.handlers.stimulus.call import (
     CallEndingHandler,
+    CallStartedHandler,
     CallReplyRequestedHandler,
     CallSilenceElapsedHandler,
     CallTimeLimitWarningHandler,
@@ -102,6 +103,7 @@ async def test_time_limit_warning_uses_fixed_agent_plan_without_generation():
 async def test_each_formal_request_recalls_without_ack_and_reuses_memory_pool():
     class CapturingGenerator(_Generator):
         async def generate(self, **kwargs):
+            assert kwargs["scene"] == "call"
             self.memory_hits = kwargs["memory_hits"]
             return await super().generate(**kwargs)
 
@@ -138,6 +140,8 @@ async def test_each_formal_request_recalls_without_ack_and_reuses_memory_pool():
 async def test_valid_silence_opens_new_topic_without_waiting_or_ending_the_call():
     class Generator(_Generator):
         async def generate(self, **kwargs):
+            assert kwargs["scene"] == "call"
+            assert "一句简短、口语化" in kwargs["reply_topic"]
             assert "主动开启" in kwargs["reply_topic"]
             return await super().generate(**kwargs)
     handler = CallSilenceElapsedHandler(stub_retrieval({"luotianyi": _Memory()}),
@@ -204,3 +208,18 @@ async def test_call_ending_emits_one_finalize_action_and_keeps_context_alive():
     assert isinstance(plans.drafts[0].actions[0], d.FinalizeCall)
     assert plans.drafts[0].actions[0].final_snapshot is ending.final_snapshot
     assert tuple(item.content for item in plans.context.call_memory.snapshot()) == ("旧记忆", "新记忆")
+
+
+async def test_call_opening_requests_one_short_spoken_greeting():
+    class Generator(_Generator):
+        async def generate(self, **kwargs):
+            assert kwargs["scene"] == "call"
+            assert "一句简短、口语化" in kwargs["reply_topic"]
+            assert "语气词" in kwargs["reply_topic"]
+            return await super().generate(**kwargs)
+
+    handler = CallStartedHandler(make_reply_skill({"luotianyi": Generator()}), PreparedSpeechCatalog({}))
+    plans = _Plans()
+    report = await handler.handle(_request(_stimulus(d.CallStarted, call_id=uuid4(), connected_at=datetime.now(timezone.utc))), plans)
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert plans.drafts[0].actions[0].content == "正式回答"

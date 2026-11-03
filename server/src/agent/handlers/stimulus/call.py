@@ -78,9 +78,7 @@ class CallAnswerRequestedHandler:
 
 
 class CallStartedHandler:
-    def __init__(
-        self, replies: ReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplyDelivery | None = None
-    ) -> None:
+    def __init__(self, replies: ReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplyDelivery | None = None) -> None:
         self._replies = replies
         self._prepared_speech = prepared_speech
         self._reply = reply or ReplyDelivery()
@@ -97,7 +95,7 @@ class CallStartedHandler:
             plans,
             request,
             handling_invocation(request, plans.context),
-            reply_topic="实时语音通话刚刚接通，请用一句简短自然的话向用户打招呼",
+            reply_topic="实时语音通话刚刚接通，请只用一句简短、口语化的话向用户打招呼",
             user_context=plans.context.user.read(),
             conversation_history=render_conversation_history(plans.context.conversation.read()),
             memory_pool=(),
@@ -183,9 +181,7 @@ class CallReplyRequestedHandler:
         if drafts is None:
             return _failed_report(request, plans)
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
-        return replace(
-            _with_emitted(request, plans), consumed_pending_stimulus_ids=pending, retained_pending_stimulus_ids=()
-        )
+        return replace(_with_emitted(request, plans), consumed_pending_stimulus_ids=pending, retained_pending_stimulus_ids=())
 
 
 class CallSilenceElapsedHandler:
@@ -207,7 +203,10 @@ class CallSilenceElapsedHandler:
             raise TypeError("CallSilenceElapsedHandler requires CallSilenceElapsed")
         invocation = handling_invocation(request, plans.context)
         history = render_conversation_history(plans.context.conversation.read())
-        topic = "通话中短暂安静了，请主动开启一个自然的新话题或关心用户，不要提及计时器"
+        topic = (
+            "通话中短暂安静了，请只用一句简短、口语化的话主动开启一个自然的新话题或关心用户，"
+            "可自然带上语气词，给用户接话的空间，不要提及计时器"
+        )
         memory_pool = await _retrieve_call_memories(self._retrieval, invocation, plans, (history or topic,))
         drafts = await _generate_reply(
             self._replies,

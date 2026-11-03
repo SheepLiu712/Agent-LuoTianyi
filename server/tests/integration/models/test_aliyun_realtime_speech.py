@@ -66,9 +66,10 @@ async def test_default_connector_authenticates_and_completes_session_handshake(m
         )
         session = await AliyunRealtimeSpeechSessionFactory(provider_config(session_timeout_seconds=2)).create(uuid4())
         try:
-            await session.start(RealtimeSpeechConfig(language="zh"))
+            await session.start(RealtimeSpeechConfig(language="zh", instructions="术语：洛天依、乐正绫、言和、天钿"))
             assert received[0] == "Bearer test-only-key"
             assert received[1]["type"] == "session.update"
+            assert received[1]["session"]["instructions"] == "术语：洛天依、乐正绫、言和、天钿"
             assert received[1]["session"]["turn_detection"] == {"type": "smart_turn"}
         finally:
             await session.close()

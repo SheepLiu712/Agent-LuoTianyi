@@ -601,6 +601,8 @@ async def test_real_stage_agent_context_and_sqlite_connect_then_cleanup(call_set
 
     await _eventually(lambda: stage.state is CallState.ACTIVE)
     assert provider.started_with is not None
+    for name in ("洛天依", "乐正绫", "言和", "天钿", "天依", "阿绫", "阿和"):
+        assert name in provider.started_with.instructions
     assert repository.find_by_id(record.call_id).state is CallState.ACTIVE
     assert [item.state for item in transport.items if isinstance(item, CallStateChanged)][:2] == [
         CallState.RINGING,

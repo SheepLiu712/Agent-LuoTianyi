@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import asdict
+from typing import Literal
 
 from src.agent.context.models import UserContextSnapshot
 from src.agent.skills.contracts import CharacterNarrative, ReplyDraft
@@ -44,6 +45,7 @@ class ReplySkill:
         character_id: str,
         *,
         reply_topic: str,
+        scene: Literal["chat", "call"] = "chat",
         user_context: UserContextSnapshot,
         conversation_history: str = "",
         fact_hits: list[str] | None = None,
@@ -51,8 +53,11 @@ class ReplySkill:
         sing_plan: tuple[str, str] | None = None,
     ) -> AsyncIterator[ReplyDraft]:
         """输出已完成解析的草稿；调用方提前结束消费时必须关闭此异步流。"""
+        if scene not in ("chat", "call"):
+            raise ValueError(f"未知回复场景: {scene}")
         resource = self._resources[character_id]
         prompt = resource.prompt_assembler.build(
+            scene=scene,
             character_name=resource.character_name,
             character_persona=resource.character_persona,
             speaking_style=resource.speaking_style,

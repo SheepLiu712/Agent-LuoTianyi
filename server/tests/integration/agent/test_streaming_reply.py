@@ -340,3 +340,37 @@ async def test_complete_and_streaming_models_use_same_draft_rules():
         )
     assert results[0] == results[1]
     assert len(results[0]) == 3
+
+
+@pytest.mark.parametrize("scene", ["chat", "call"])
+async def test_reply_scene_reaches_rendered_model_prompt(scene):
+    import json
+    from pathlib import Path
+
+    from src.infrastructure.models.llm.prompts import PromptTemplate
+
+    prompts = []
+    provider = CharacterStream("[中性]嗯，我在呢。")
+    original = provider.stream_response
+
+    async def capture(prompt, **kwargs):
+        prompts.append(prompt)
+        async for chunk in original(prompt, **kwargs):
+            yield chunk
+
+    provider.stream_response = capture
+    resource = generator(provider)
+    path = Path(__file__).resolve().parents[3] / "res/agent/prompts/topic_reply_prompt.json"
+    template = PromptTemplate("\n".join(json.loads(path.read_text(encoding="utf-8"))["template"]))
+    resource.llm = LLMModule("reply", {}, template, provider, stream=True)
+    skill = make_reply_skill({"luotianyi": resource})
+    drafts = [draft async for draft in skill.generate(
+        "luotianyi", scene=scene, reply_topic="你好", user_context=UserContextSnapshot()
+    )]
+    assert drafts[0].sound_content == "嗯，我在呢。"
+    assert len(prompts) == 1
+    assert ("实时电话通话" in prompts[0]) == (scene == "call")
+    assert ("聊天消息场景" in prompts[0]) == (scene == "chat")
+    if scene == "call":
+        assert "一到两句短句" in prompts[0]
+        assert "语气词" in prompts[0]
