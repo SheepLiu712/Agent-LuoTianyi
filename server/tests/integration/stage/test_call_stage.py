@@ -8,6 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.call_output import output_sink
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval
+from support.stage_lifecycle import finish_call, observe_release, wait_call_finished
 from support.stage_manager import start_call_stage
 
 import src.domain.agent as d
@@ -28,6 +31,7 @@ from src.domain.call import (
     CallSpeechDelivery,
     CallState,
 )
+from src.domain.stage.lifecycle import StageEndReason, StageInitializationFailed, StageLifecycleState
 from src.infrastructure.models.realtime_speech import (
     ProviderFailed,
     SpeechStarted,
@@ -42,7 +46,7 @@ from src.infrastructure.persistence.call_sessions import (
     SqlCallSessionRepository,
 )
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage.call_stage import CallIngressReceipt, CallStage, CallStageOwnership, CallStateChanged
+from src.stage.call.call_stage import CallIngressReceipt, CallStage, CallStageOwnership, CallStateChanged
 
 
 class _ContextDatabase:
@@ -306,7 +310,7 @@ async def test_time_limit_warning_and_hard_deadline_are_stage_owned_and_monotoni
 
     clock.advance(1.0)
     stage._time_limit_changed.set()
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
 
     assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
     assert len(warning_handler.requests) == 1
@@ -334,7 +338,7 @@ async def test_time_limit_resume_does_not_reset_warning_or_deadline(call_setup):
 
     clock.advance(1.0)
     stage._time_limit_changed.set()
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
 
     assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
     assert len(warning_handler.requests) == 1
@@ -358,7 +362,7 @@ async def test_time_limit_during_unrecovered_disconnect_yields_recovery_timeout(
     clock.advance(2.5)
     stage._time_limit_changed.set()
     assert await stage.resume() is False
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
 
     assert snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
     assert snapshot.terminal.active_duration_ms == 1500
@@ -381,7 +385,7 @@ async def test_resume_after_deadline_counts_reconnect_and_immediately_time_limit
     await asyncio.sleep(0)
 
     assert await stage.resume() is True
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
 
     assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
     assert snapshot.terminal.active_duration_ms == 2250
@@ -409,7 +413,7 @@ async def test_warning_waits_for_resume_and_is_sent_once_before_deadline(call_se
     await _eventually(lambda: len(warning_handler.requests) == 1)
     clock.advance(0.9)
     stage._time_limit_changed.set()
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
 
     assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
     assert len(warning_handler.requests) == 1
@@ -425,7 +429,7 @@ async def test_early_hangup_cancels_time_limit_task_without_warning(call_setup):
     )
     await _eventually(lambda: stage.state is CallState.ACTIVE)
 
-    snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+    snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
 
     assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
     assert warning_handler.requests == []
@@ -456,7 +460,7 @@ async def test_blocked_warning_does_not_delay_hard_time_limit(call_setup):
 
     clock.advance(1.0)
     stage._time_limit_changed.set()
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
 
     assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
     assert not stage.tasks
@@ -475,7 +479,7 @@ async def test_provider_failure_wins_when_requested_at_time_limit_boundary(call_
     await _eventually(lambda: stage.termination_requested)
     stage._time_limit_changed.set()
 
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
 
     assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
     assert not stage.tasks
@@ -580,7 +584,7 @@ async def _create(
         call_sessions=repository,
         speech_factory=speech,
         output_sink=output_sink(transport),
-        release_ownership=release,
+        own_termination=observe_release(release, ownership),
         monotonic=clock.tick,
         wall_clock=clock.now,
         config=config,
@@ -603,7 +607,7 @@ async def test_real_stage_agent_context_and_sqlite_connect_then_cleanup(call_set
         CallState.ACTIVE,
     ]
 
-    snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+    snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
 
     assert snapshot.terminal.outcome is CallOutcome.CONNECTED
     assert stage.context is None
@@ -616,8 +620,8 @@ async def test_real_stage_agent_context_and_sqlite_connect_then_cleanup(call_set
 @pytest.mark.asyncio
 async def test_decline_and_setup_deadline_are_terminal_without_active_duration(call_setup):
     stage, _, _, _ = await _create(call_setup, decision=CallAnswerDecision.DECLINE)
-    snapshot = await stage.wait_closed()
-    repeated = await stage.terminate(CallEndReason.USER_HANGUP)
+    snapshot = await wait_call_finished(stage)
+    repeated = await finish_call(stage, StageEndReason.USER_REQUESTED)
     repository, record, ownership, clock = call_setup
     persisted = repository.find_by_id(record.call_id)
 
@@ -640,7 +644,7 @@ async def test_decline_and_setup_deadline_are_terminal_without_active_duration(c
     expired = CallStageOwnership(
         str(second.call_id), "user", "luotianyi", "request-2", clock.monotonic, ownership.generation + 1
     )
-    with pytest.raises(TimeoutError):
+    with pytest.raises(StageInitializationFailed):
         await start_call_stage(
             ownership=expired,
             record=second,
@@ -674,7 +678,7 @@ async def test_pcm_receipts_are_bounded_idempotent_and_turns_require_completed_e
     response_id, stream_id = stage._playback.pending_streams[0]
     stage.playback_completed(response_id, stream_id)
     await _eventually(lambda: stage._turns[1].status is CallReplyStatus.COMPLETED)
-    await stage.terminate()
+    await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -738,7 +742,7 @@ async def test_reconnect_preserves_accepted_pcm_and_completed_turn_exactly_once(
         assert [metric.name for metric in captured_metrics].count(CallMetricName.FIRST_AUDIO) == 1
     finally:
         provider.release_push.set()
-        await stage.terminate(CallEndReason.USER_HANGUP)
+        await finish_call(stage, StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -771,7 +775,7 @@ async def test_reconnect_timeout_discards_paused_pcm_and_provider_events(call_se
         clock.advance(3.0)
 
         assert await stage.resume() is False
-        await stage.wait_closed()
+        await wait_call_finished(stage)
 
         assert stage.context is None
         assert stage._pcm.empty()
@@ -780,7 +784,7 @@ async def test_reconnect_timeout_discards_paused_pcm_and_provider_events(call_se
         assert not stage.tasks
     finally:
         provider.release_push.set()
-        await stage.terminate(CallEndReason.USER_HANGUP)
+        await finish_call(stage, StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -794,7 +798,7 @@ async def test_provider_failure_bypasses_paused_reconnect_events_and_cleans_owne
     )
 
     await provider.emit(ProviderFailed("provider_connection_closed", True))
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 0.2)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 0.2)
 
     assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
     assert turn_handler.requests == []
@@ -819,7 +823,7 @@ async def test_provider_failure_requested_before_resume_rejects_resume_and_clean
         call_sessions=repository,
         speech_factory=speech,
         output_sink=output_sink(_Transport()),
-        release_ownership=lambda value: not released.append(value),
+        own_termination=observe_release(lambda value: not released.append(value), ownership),
         monotonic=clock.tick,
         wall_clock=clock.now,
     )
@@ -839,10 +843,10 @@ async def test_provider_failure_requested_before_resume_rejects_resume_and_clean
     release_termination = asyncio.Event()
     original_terminate_owned = stage._terminate_owned
 
-    async def delayed_terminate_owned(reason):
+    async def delayed_terminate_owned():
         termination_entered.set()
         await release_termination.wait()
-        return await original_terminate_owned(reason)
+        return await original_terminate_owned()
 
     stage._terminate_owned = delayed_terminate_owned
     await provider.emit(ProviderFailed("provider_connection_closed", True))
@@ -856,7 +860,7 @@ async def test_provider_failure_requested_before_resume_rejects_resume_and_clean
 
     release_termination.set()
     provider.release_push.set()
-    snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
     assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
     assert turn_handler.requests == []
     assert stage.context is None
@@ -901,7 +905,7 @@ async def test_invalid_turn_releases_matching_speech_and_preserves_newer_speech(
     assert stage._turns == {}
     assert stage._unfinished_turns == set()
     assert repository.find_by_id(record.call_id).maintenance_turn_seq == maintenance_turn_seq
-    await stage.terminate()
+    await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -946,7 +950,7 @@ async def test_invalid_speech_after_completed_playback_restarts_silence_without_
         assert not turn_handler.requests and not stage._plans
         assert repository.find_by_id(record.call_id).maintenance_turn_seq == progress
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -971,7 +975,7 @@ async def test_stale_speech_end_cannot_release_new_speech_or_restore_silence(cal
         assert stage._playback.silence_started_at is None
         assert stage._active_speech_item_id == "new"
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -994,7 +998,7 @@ async def test_invalid_turn_without_identity_releases_speaking_without_formal_tu
     assert turn_handler.requests == []
     assert not stage._plans
     assert repository.find_by_id(record.call_id).maintenance_turn_seq == maintenance_turn_seq
-    await stage.terminate()
+    await finish_call(stage)
     assert not stage.tasks
 
 
@@ -1008,7 +1012,7 @@ async def test_speech_started_interrupts_handle_and_terminal_snapshot_keeps_user
     await provider.emit(SpeechStarted())
     await _eventually(lambda: not stage._handle_tasks)
     turn_handler.gate.set()
-    snapshot = await stage.terminate()
+    snapshot = await finish_call(stage)
 
     assert len(snapshot.completed_turns) == 1
     assert snapshot.completed_turns[0].user_semantic == "敲桌声"
@@ -1032,7 +1036,7 @@ async def test_playback_completion_is_idempotent_and_resume_restarts_full_silenc
     assert await stage.resume() is True
     assert stage.state is CallState.ACTIVE
     assert stage._playback.silence_started_at == call_setup[3].monotonic
-    await stage.terminate()
+    await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -1051,9 +1055,9 @@ async def test_resume_uses_fixed_disconnect_deadline_even_when_timer_is_delayed(
     if expected:
         assert stage.state is CallState.ACTIVE
         assert provider.closed is False
-        await stage.terminate()
+        await finish_call(stage)
     else:
-        snapshot = await stage.wait_closed()
+        snapshot = await wait_call_finished(stage)
         assert snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
         assert repository.find_by_id(record.call_id).state is CallState.ENDED
         assert provider.closed is True
@@ -1071,7 +1075,7 @@ async def test_resume_keeps_context_and_does_not_emit_another_call_started(call_
 
     assert stage.context is original_context
     assert stage._revision == original_revision
-    await stage.terminate()
+    await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -1082,15 +1086,15 @@ async def test_user_hangup_reason_wins_recovery_deadline_race(call_setup):
     original = stage._terminate_owned
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def delayed(reason):
+    async def delayed():
         entered.set()
         await release.wait()
-        return await original(reason)
+        return await original()
 
     stage._terminate_owned = delayed
-    hangup = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    hangup = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
     await asyncio.wait_for(entered.wait(), 1)
-    deadline = asyncio.create_task(stage.expire_retention(stage._recovery_deadline))
+    deadline = asyncio.create_task(stage.expire_retention(stage._recovery_deadline, stage._connection_generation))
     await asyncio.sleep(0)
     release.set()
     snapshot = await hangup
@@ -1106,6 +1110,7 @@ async def test_expired_resume_uses_owned_termination_without_recovery_self_wait(
     stage._recovery_deadline = stage._monotonic()
 
     assert await asyncio.wait_for(stage.resume(), 1) is False
+    await wait_call_finished(stage)
     assert stage.snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
     assert not stage.tasks
 
@@ -1130,7 +1135,7 @@ async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_s
         call_sessions=repository,
         speech_factory=speech,
         output_sink=output_sink(transport),
-        release_ownership=lambda value: not released.append(value),
+        own_termination=observe_release(lambda value: not released.append(value), ownership),
         save_history=Settlement().emit,
         monotonic=clock.tick,
         wall_clock=clock.now,
@@ -1139,9 +1144,9 @@ async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_s
         d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
     )
 
-    await stage.terminate()
+    await finish_call(stage)
 
-    assert stage._closed.is_set()
+    assert stage.lifecycle_state is StageLifecycleState.TERMINATED
     assert stage.context is None
     assert speech.sessions[record.call_id].closed is True
     assert released == [ownership]
@@ -1170,7 +1175,7 @@ async def test_blocked_terminal_delivery_is_bounded_before_history_write(call_se
         call_sessions=repository,
         speech_factory=speech,
         output_sink=output_sink(transport),
-        release_ownership=lambda value: not released.append(value),
+        own_termination=observe_release(lambda value: not released.append(value), ownership),
         save_history=Settlement().emit,
         monotonic=clock.tick,
         wall_clock=clock.now,
@@ -1180,12 +1185,12 @@ async def test_blocked_terminal_delivery_is_bounded_before_history_write(call_se
         d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
     )
 
-    snapshot = await asyncio.wait_for(stage.terminate(), 1)
+    snapshot = await asyncio.wait_for(finish_call(stage), 1)
 
     assert transport.started.is_set()
     assert transport.cancelled.is_set()
     assert settled == [snapshot]
-    assert stage._closed.is_set()
+    assert stage.lifecycle_state is StageLifecycleState.TERMINATED
     assert stage.context is None
     assert speech.sessions[record.call_id].closed is True
     assert released == [ownership]
@@ -1201,8 +1206,8 @@ async def test_terminal_ledger_uses_monotonic_duration_and_first_disconnect_cuto
     clock.monotonic += 2.0
     await stage.disconnect()
     clock.monotonic += 10.0
-    await stage.terminate(CallEndReason.RECOVERY_TIMEOUT)
-    snapshot = await stage.wait_closed()
+    await finish_call(stage, StageEndReason.IDLE_TIMEOUT)
+    snapshot = await wait_call_finished(stage)
 
     persisted = repository.find_by_id(record.call_id)
     assert snapshot.terminal.active_duration_ms == 2000
@@ -1222,7 +1227,7 @@ async def test_setup_await_is_bounded_by_original_deadline(call_setup):
         clock.monotonic + 0.01,
         ownership.generation,
     )
-    with pytest.raises(TimeoutError):
+    with pytest.raises(StageInitializationFailed):
         await start_call_stage(
             ownership=ownership,
             record=record,
@@ -1247,7 +1252,7 @@ async def test_pcm_rejects_sequence_duplicates_conflicts_and_gaps(call_setup):
     assert stage.accept_pcm(_receipt(call_id, 4, b"\x01\x00"), b"\x01\x00")
     assert not stage.accept_pcm(_receipt(call_id, 2, b"\x01\x00"), b"\x01\x00")
     await _eventually(lambda: [frame.sequence for frame in provider.pushed_frames] == [1, 2])
-    await stage.terminate()
+    await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -1256,7 +1261,7 @@ async def test_pcm_does_not_require_audio_wire_sequence_to_start_at_one(call_set
     await _eventually(lambda: stage.state is CallState.ACTIVE)
 
     assert stage.accept_pcm(_receipt(stage._record.call_id, 42, b"\x00\x00"), b"\x00\x00")
-    await stage.terminate()
+    await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -1272,11 +1277,11 @@ async def test_pcm_receipts_roll_over_without_retaining_payload_or_refusing_long
     assert len(stage._receipts) == 4
     assert all(len(fingerprint) == 32 for fingerprint in stage._receipts.values())
     assert [frame.sequence for frame in provider.pushed_frames] == list(range(1, 7))
-    await stage.terminate()
+    await finish_call(stage)
 
 
 @pytest.mark.asyncio
-async def test_cleanup_releases_ownership_even_when_provider_close_fails(call_setup):
+async def test_cleanup_keeps_ownership_when_provider_close_fails(call_setup):
     released = []
     stage, provider, _, _ = await _create(call_setup, release=lambda ownership: not released.append(ownership))
     await _eventually(lambda: stage.state is CallState.ACTIVE)
@@ -1286,13 +1291,12 @@ async def test_cleanup_releases_ownership_even_when_provider_close_fails(call_se
         raise RuntimeError("close failed")
 
     provider.close = fail_close
-    with pytest.raises(RuntimeError, match="close failed"):
-        await stage.terminate()
-
-    assert released
+    result = await stage.terminate(StageEndReason.USER_REQUESTED)
+    assert result.cleanup_error == "RuntimeError" and not result.resources_released
+    assert stage.lifecycle_state is StageLifecycleState.TERMINATING
+    assert not released
     assert stage.context is None
     assert not stage.tasks
-    assert stage._closed.is_set()
 
 
 @pytest.mark.asyncio
@@ -1329,7 +1333,7 @@ async def test_next_turn_runs_after_cancelled_owned_maintenance_drains(call_setu
         )
     finally:
         release.set()
-        await stage.terminate(CallEndReason.USER_HANGUP)
+        await finish_call(stage, StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -1338,15 +1342,16 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
 
     from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
     from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
-    from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
-    from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
     from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
     from src.agent.skills.contracts import ReplyDraft
-    from src.agent.skills.conversation.compaction import ConversationCompactionSkill
-    from src.domain.call import AckStyle, CallRecallDecision, RecallMode
 
     class Memory:
         inputs = []
+
+        async def search_memory_context_for_topic(self, *args):
+            from src.domain import MemoryContext
+
+            return MemoryContext()
 
         async def extract_maintenance_candidates(self, **kwargs):
             self.inputs.append(kwargs)
@@ -1366,21 +1371,15 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
         async def generate(self, **kwargs):
             return (ReplyDraft("正式回答", "正式回答", "normal", None),)
 
-    async def decide(*args, **kwargs):
-        return CallRecallDecision(RecallMode.DIRECT, (), AckStyle.NONE)
-
     stage, provider, transport, _ = await _create(call_setup)
     repository, record, _, _ = call_setup
     memory = Memory()
-    call_skill = CallMaintenanceSkill({"luotianyi": memory})
-    compaction = ConversationCompactionSkill(
-        {"llm_module": {}}, SimpleNamespace(register_llm_module=lambda *args: Model())
-    )
     skill = CognitiveMaintenanceSkill(
-        memories={"luotianyi": memory}, compaction=compaction, call_maintenance=call_skill
+        {"conversation_compaction": {"llm_module": {}}},
+        llm_service=SimpleNamespace(register_llm_module=lambda *args: Model()),
+        memories={"luotianyi": memory},
     )
-    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
-    recall.decide = decide
+    recall = stub_retrieval({"luotianyi": memory})
     stage._agent = Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
@@ -1390,7 +1389,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
                 (
                     d.StimulusKind.CALL_REPLY_REQUESTED,
                     CallReplyRequestedHandler(
-                        recall, CallReplySkill({"luotianyi": Generator()}), PreparedSpeechCatalog({})
+                        recall, make_reply_skill({"luotianyi": Generator()}), PreparedSpeechCatalog({})
                     ),
                 ),
                 (d.StimulusKind.CALL_ENDING, _NoPlanHandler()),
@@ -1418,12 +1417,12 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
         assert len(stage.context.conversation.read().entries) == 32
         assert stage.context.conversation.read_call_maintenance_progress() == 16
         assert len(memory.inputs) == 1
-        snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+        snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
         assert snapshot.maintenance_turn_seq == 16
         assert all(turn.reply_status is CallReplyStatus.COMPLETED for turn in snapshot.completed_turns)
     finally:
         if stage.snapshot is None:
-            await stage.terminate(CallEndReason.USER_HANGUP)
+            await finish_call(stage, StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -1441,4 +1440,4 @@ async def test_interrupted_unanswered_input_is_protected_from_maintenance(call_s
         assert snapshot.completed_turns == ()
         assert 1 in stage._inputs.pending
     finally:
-        await stage.terminate(CallEndReason.USER_HANGUP)
+        await finish_call(stage, StageEndReason.USER_REQUESTED)

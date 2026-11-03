@@ -8,17 +8,21 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from support.call_output import output_sink
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.chat_connection import StubChatConnection
 from support.stage_manager import create_call_stage, make_stage_manager
 
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
+from src.agent.context import ContextFactory, ConversationMode
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallEndReason, CallState
+from src.domain.stage.lifecycle import StageEndReason, StageStartAborted
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
 from src.stage.interaction_lease import InteractionLeaseRegistry, InteractionSource
+from tests.integration.stage.test_call_stage import _ContextDatabase, _eventually, _Transport
 
 from .test_chat_stage import RecordingAgent, Socket, StageContextFactory, stimulus
 
@@ -34,12 +38,28 @@ def manager(
 ):
     adapter = WebSocketAdapter()
     repository = repository or InMemoryCallSessionRepository()
-    factory = StageContextFactory()
+
+    class Factory(StageContextFactory):
+        async def create(self, interaction_id, *, mode, user_id, **kwargs):
+            if mode is ConversationMode.CALL:
+                return await ContextFactory(character_id=self.character_id, database=_ContextDatabase()).create(
+                    interaction_id, mode=mode, user_id=user_id, **kwargs
+                )
+            context = await super().create(interaction_id, mode=mode, user_id=user_id)
+
+            async def refresh():
+                pass
+
+            context.conversation.refresh = refresh
+            return context
+
+    factory = Factory()
     manager = make_stage_manager(
         get_agent=lambda _character: agent or RecordingAgent(),
         adapter=adapter,
         get_context_factory=lambda _character: factory,
         call_sessions=repository,
+        call_output_sink=output_sink(_Transport()),
         lease_registry=lease_registry,
         user_reset_fence=user_reset_fence,
         wall_clock=clock or (lambda: datetime.now(timezone.utc)),
@@ -135,6 +155,10 @@ async def test_adapter_routes_switch_prepare_and_keeps_binding_until_commit():
             client_request_id="request-1",
         )
         assert claim.prepared._record.call_id
+        assert stage.interaction_id in adapter._routes
+        await stage_manager._create_call_stage(
+            claim, user_id="user", character_id="luotianyi", client_request_id="request-1"
+        )
         assert stage.interaction_id not in adapter._routes
     finally:
         await stage_manager.close()
@@ -164,7 +188,8 @@ async def test_call_start_closes_chat_context_before_returning_call_claim():
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
-    claim = await stage_manager._claim_call(
+    claim = await start_claim(
+        stage_manager,
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
@@ -174,8 +199,8 @@ async def test_call_start_closes_chat_context_before_returning_call_claim():
     assert stage.context.closed is True
     assert stage.state.value == "terminated"
     assert claim.prepared._record.state is CallState.PREPARING
-    assert claim.lease.source is InteractionSource.CALL
-    assert repository.find_by_request("request-1") == claim.prepared._record
+    assert stage_manager._lease_registry.current("user", "luotianyi").source is InteractionSource.CALL
+    assert repository.find_by_request("request-1").call_id == claim.prepared._record.call_id
 
 
 @pytest.mark.asyncio
@@ -270,6 +295,7 @@ async def test_release_call_rejects_stale_or_wrong_ownership_and_cleans_deadline
     )
 
     assert not stage_manager._release_call(wrong)
+    stage_manager._finish_transition(stage_manager._handoffs[ownership.call_id].ownership, call_id=ownership.call_id)
     assert stage_manager._release_call(ownership)
     assert not stage_manager._release_call(ownership)
     assert stage_manager._current_call_ownership(ownership.call_id) is None
@@ -322,7 +348,7 @@ async def test_concurrent_duplicate_start_shares_one_handoff_and_one_winner():
     assert first.prepared._record.call_id == second.prepared._record.call_id
     assert first.setup_deadline == second.setup_deadline
     assert repository.find_by_request("request-1").call_id == first.prepared._record.call_id
-    assert stage.context.closed is True
+    assert stage.context.closed is False
 
 
 @pytest.mark.asyncio
@@ -356,8 +382,9 @@ async def test_termination_maintenance_failure_marks_ledger_failed_and_releases_
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
-    with pytest.raises(RuntimeError, match="maintenance failed"):
-        await stage_manager._claim_call(
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        await start_claim(
+            stage_manager,
             user_id="user",
             character_id="luotianyi",
             source_interaction_id=stage.interaction_id,
@@ -433,33 +460,27 @@ async def test_same_request_other_operation_is_rejected_without_leaking_claim():
 
 
 @pytest.mark.asyncio
-async def test_cancelled_start_completes_owned_handoff_before_propagating_cancel():
-    gate = asyncio.Event()
+async def test_cancelled_start_waiter_does_not_cancel_committed_chat_finalization():
+    entered, gate = asyncio.Event(), asyncio.Event()
 
     async def blocking_realize(_plan, _context, _sink):
+        entered.set()
         await gate.wait()
         return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
 
-    stage_manager, repository, _ = manager(agent=RecordingAgent(realize=blocking_realize))
-    connection, stage = await connected(stage_manager)
-    await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    task = asyncio.create_task(
-        stage_manager._claim_call(
-            user_id="user",
-            character_id="luotianyi",
-            source_interaction_id=stage.interaction_id,
-            client_request_id="request-1",
-        )
-    )
-    await asyncio.sleep(0)
-    task.cancel()
-    gate.set()
+    stages, _, _ = manager(agent=RecordingAgent(realize=blocking_realize), config={"stage": {"termination_timeout": 5}})
+    connection, chat = await connected(stages)
+    call = await preparing_call(stages, chat, connection)
+    waiter = asyncio.create_task(call.start())
+    await asyncio.wait_for(entered.wait(), 1)
+    waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await task
-
-    record = repository.find_by_request("request-1")
-    assert stage.context.closed is True
-    assert record.state is CallState.PREPARING
+        await waiter
+    assert not chat.context.closed
+    gate.set()
+    await call.start()
+    assert chat.context.closed
+    await stages.close()
 
 
 @pytest.mark.asyncio
@@ -486,7 +507,7 @@ async def test_direct_start_without_chat_claims_empty_slot_and_persists_ledger()
         client_request_id="request-direct",
     )
 
-    assert claim.lease.source is InteractionSource.CALL
+    assert claim.lease.source is InteractionSource.CALL_TRANSITION
     assert repository.find_by_request("request-direct") == claim.prepared._record
 
 
@@ -658,15 +679,17 @@ async def test_handoff_persists_preparing_claim_in_real_sqlite(tmp_path):
     connection, stage = await connected(stage_manager)
     await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
 
-    claim = await stage_manager._claim_call(
+    claim = await start_claim(
+        stage_manager,
         user_id="user",
         character_id="luotianyi",
         source_interaction_id=stage.interaction_id,
         client_request_id="request-1",
     )
 
-    assert repository.find_by_request("request-1") == claim.prepared._record
+    assert repository.find_by_request("request-1").call_id == claim.prepared._record.call_id
     assert stage.context.closed is True
+    await stage_manager.close()
     engine.dispose()
 
 
@@ -685,140 +708,88 @@ async def test_manager_shutdown_releases_call_lease():
     await stage_manager.close()
 
     assert stage_manager._lease_registry.current("user", "luotianyi") is None
-    assert claim.lease.source is InteractionSource.CALL
+    assert claim.lease.source is InteractionSource.CALL_TRANSITION
 
 
 @pytest.mark.asyncio
-async def test_shutdown_waits_blocked_handoff_and_never_grants_call_lease():
-    gate = asyncio.Event()
+async def test_shutdown_waits_committed_chat_cleanup_and_prevents_call_context_creation():
+    entered, gate = asyncio.Event(), asyncio.Event()
 
     async def blocking_realize(_plan, _context, _sink):
+        entered.set()
         await gate.wait()
         return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
 
-    stage_manager, repository, _ = manager(agent=RecordingAgent(realize=blocking_realize))
-    connection, stage = await connected(stage_manager)
-    await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    start = asyncio.create_task(
-        stage_manager._claim_call(
-            user_id="user",
-            character_id="luotianyi",
-            source_interaction_id=stage.interaction_id,
-            client_request_id="request-1",
-        )
+    stages, repository, _ = manager(
+        agent=RecordingAgent(realize=blocking_realize), config={"stage": {"termination_timeout": 5}}
     )
-    for _ in range(1000):
-        if repository.find_by_request("request-1") is not None:
-            break
-        await asyncio.sleep(0.001)
-    assert repository.find_by_request("request-1") is not None
-    closing = asyncio.create_task(stage_manager.close())
-    await asyncio.sleep(0)
-    assert not closing.done()
+    connection, chat = await connected(stages)
+    call = await preparing_call(stages, chat, connection)
+    await asyncio.wait_for(entered.wait(), 1)
+    closing = asyncio.create_task(stages.close())
+    await _eventually(lambda: call.interaction_ended)
+    assert not closing.done() and call.context is None
     gate.set()
     await closing
-    with pytest.raises((RuntimeError, ValueError), match="closed"):
-        await start
-
-    assert stage.context.closed is True
+    assert chat.context.closed
     assert repository.find_by_request("request-1").state is CallState.FAILED
-    assert stage_manager._lease_registry.current("user", "luotianyi") is None
+    assert stages._lease_registry.current("user", "luotianyi") is None
 
 
 @pytest.mark.asyncio
-async def test_setup_timeout_waits_for_owned_termination_before_releasing_transition():
-    entered = asyncio.Event()
-    release = asyncio.Event()
+async def test_setup_timeout_emits_terminal_without_waiting_for_committed_chat_cleanup():
+    entered, gate = asyncio.Event(), asyncio.Event()
 
     async def blocking_realize(_plan, _context, _sink):
         entered.set()
-        await release.wait()
+        await gate.wait()
         return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
 
-    stage_manager, repository, _ = manager(
+    stages, repository, _ = manager(
         agent=RecordingAgent(realize=blocking_realize),
-        config={"offline_timeout": 60.0, "call_setup_timeout": 0.2},
+        config={"call_setup_timeout": 0.1, "stage": {"termination_timeout": 5}},
     )
-    connection, stage = await connected(stage_manager)
-    await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    start = asyncio.create_task(
-        stage_manager._claim_call(
-            user_id="user",
-            character_id="luotianyi",
-            source_interaction_id=stage.interaction_id,
-            client_request_id="request-1",
-        )
-    )
-    await entered.wait()
-
-    lease = stage_manager._lease_registry.current("user", "luotianyi")
-    assert lease.source is InteractionSource.CALL_TRANSITION
-    assert not start.done()
-    assert stage.context.closed is False
-    with pytest.raises(RuntimeError, match="INTERACTION_FINALIZING"):
-        await stage_manager._claim_call(
-            user_id="user",
-            character_id="luotianyi",
-            source_interaction_id=None,
-            client_request_id="request-direct",
-        )
-    with pytest.raises(RuntimeError) as error:
-        await stage_manager._test_chat_adapter._open(StubChatConnection(Socket(), "user", "replacement"), "luotianyi")
-    assert str(error.value) == "INTERACTION_FINALIZING"
-
-    await asyncio.sleep(0.25)
-    release.set()
-    with pytest.raises(TimeoutError, match="timed out"):
-        await start
-
-    record = repository.find_by_request("request-1")
-    assert stage.context.closed is True
-    assert stage.state.value == "terminated"
-    assert record.state is CallState.FAILED
-    assert record.end_reason is CallEndReason.SETUP_TIMEOUT
-    assert stage_manager._lease_registry.current("user", "luotianyi") is None
-    assert stage_manager._call_starts == {}
+    connection, chat = await connected(stages)
+    call = await preparing_call(stages, chat, connection)
+    await asyncio.wait_for(entered.wait(), 1)
+    await _eventually(lambda: call.interaction_ended)
+    result = await asyncio.wait_for(call.terminate(StageEndReason.USER_REQUESTED), 1)
+    assert result.reason is StageEndReason.INITIALIZATION_FAILED and result.resources_released
+    assert not chat.context.closed and call.context is None
+    assert stages._lease_registry.current("user", "luotianyi").source is InteractionSource.CALL_TRANSITION
+    with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
+        await stages.begin_user_data_reset("user")
+    gate.set()
+    await stages.close()
+    assert repository.find_by_request("request-1").end_reason is CallEndReason.SETUP_TIMEOUT
 
 
 @pytest.mark.asyncio
-async def test_caller_cancel_after_setup_deadline_still_completes_timeout_cleanup():
-    entered = asyncio.Event()
-    release = asyncio.Event()
+async def test_hangup_after_commit_finishes_call_before_chat_and_never_restores_old_chat():
+    entered, gate = asyncio.Event(), asyncio.Event()
 
     async def blocking_realize(_plan, _context, _sink):
         entered.set()
-        await release.wait()
+        await gate.wait()
         return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
 
-    stage_manager, repository, _ = manager(
-        agent=RecordingAgent(realize=blocking_realize),
-        config={"offline_timeout": 60.0, "call_setup_timeout": 0.01},
+    stages, repository, _ = manager(
+        agent=RecordingAgent(realize=blocking_realize), config={"stage": {"termination_timeout": 5}}
     )
-    connection, stage = await connected(stage_manager)
-    await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
-    start = asyncio.create_task(
-        stage_manager._claim_call(
-            user_id="user",
-            character_id="luotianyi",
-            source_interaction_id=stage.interaction_id,
-            client_request_id="request-1",
-        )
-    )
-    await entered.wait()
-    await asyncio.sleep(0.02)
-    start.cancel()
-    await asyncio.sleep(0)
-    assert not start.done()
-    release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await start
-
-    record = repository.find_by_request("request-1")
-    assert stage.context.closed is True
-    assert record.state is CallState.FAILED
-    assert record.end_reason is CallEndReason.SETUP_TIMEOUT
-    assert stage_manager._lease_registry.current("user", "luotianyi") is None
-    assert stage_manager._call_starts == {}
+    connection, chat = await connected(stages)
+    call = await preparing_call(stages, chat, connection)
+    await asyncio.wait_for(entered.wait(), 1)
+    result = await asyncio.wait_for(call.terminate(StageEndReason.USER_REQUESTED), 1)
+    assert result.resources_released and not chat.context.closed
+    assert call.context is None
+    with pytest.raises(StageStartAborted):
+        await call.start()
+    assert repository.find_by_request("request-1").end_reason is CallEndReason.USER_HANGUP
+    gate.set()
+    await _eventually(lambda: not stages._scope_releases)
+    _, replacement = await connected(stages)
+    assert replacement is not chat
+    await stages.close()
 
 
 @pytest.mark.asyncio
@@ -895,7 +866,7 @@ async def test_user_reset_invalidates_blocking_sql_start_and_leaves_no_live_clai
 async def test_user_reset_waits_creation_after_claim_take_and_fence_is_registry_backstop(
     monkeypatch,
 ):
-    from src.stage.call_stage import CallStage
+    from src.stage.call.call_stage import CallStage
 
     fence = UserResetFence()
     stage_manager, _, _ = manager(user_reset_fence=fence)
@@ -945,7 +916,7 @@ async def test_user_reset_waits_creation_after_claim_take_and_fence_is_registry_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_seam", ["constructor", "publication"])
 async def test_postclaim_setup_failure_only_existing_stage_emits_and_releases_ownership(monkeypatch, failure_seam):
-    from src.stage import call_stage as call_stage_module
+    from src.stage.call import call_stage as call_stage_module
 
     stage_manager, repository, _ = manager()
     claim = await stage_manager._claim_call(
@@ -1012,7 +983,7 @@ async def test_postclaim_setup_failure_only_existing_stage_emits_and_releases_ow
 
 @pytest.mark.asyncio
 async def test_postclaim_setup_failure_marks_real_sqlite_failed_and_duplicate_keeps_identity(tmp_path, monkeypatch):
-    from src.stage import call_stage as call_stage_module
+    from src.stage.call import call_stage as call_stage_module
 
     engine = create_engine(f"sqlite:///{tmp_path / 'postclaim.sqlite'}")
     Base.metadata.create_all(engine)
@@ -1103,60 +1074,159 @@ async def test_old_claim_generation_and_reset_owner_are_rejected_while_other_use
 
 
 @pytest.mark.asyncio
-async def test_post_start_generation_wait_does_not_hold_manager_registry_lock(
-    monkeypatch,
-):
-    from src.stage.call_stage import CallStage
+async def test_blocked_provider_initialization_does_not_hold_manager_lock():
+    entered, gate = asyncio.Event(), asyncio.Event()
 
-    class BlockingFence(UserResetFence):
-        def __init__(self):
-            super().__init__()
-            self.calls = 0
-            self.entered = asyncio.Event()
-            self.release = asyncio.Event()
+    class Speech:
+        async def create(self, call_id):
+            entered.set()
+            await gate.wait()
+            raise RuntimeError("provider unavailable")
 
-        async def require_generation(self, user_id, generation):
-            self.calls += 1
-            if self.calls == 3:
-                self.entered.set()
-                await self.release.wait()
-            await super().require_generation(user_id, generation)
+    stages, _, _ = manager(user_reset_fence=UserResetFence())
+    from src.stage.call.call_stage import bind_call_stage_creator
 
-    async def start_without_resources(self):
-        self._started = True
-
-    async def abort_without_resources(self):
-        self._closed.set()
-
-    fence = BlockingFence()
-    stage_manager, _, _ = manager(user_reset_fence=fence)
-    claim = await stage_manager._claim_call(
-        user_id="owner",
-        character_id="luotianyi",
-        source_interaction_id=None,
-        client_request_id="lock-race",
+    resources = dict(stages._test_call_resources, speech_factory=Speech())
+    stages._call_stage_creator = bind_call_stage_creator(**resources)
+    call = await stages.try_to_get_stage(
+        stage_type="call", user_id="owner", character_id="luotianyi", client_request_id="blocked"
     )
-    monkeypatch.setattr(CallStage, "start", start_without_resources)
-    monkeypatch.setattr(CallStage, "abort_failed_start", abort_without_resources)
-    creation = asyncio.create_task(
-        create_call_stage(
-            stage_manager,
-            claim,
-            user_id="owner",
-            character_id="luotianyi",
-            client_request_id="lock-race",
-            speech_factory=SimpleNamespace(),
-            transport=None,
-        )
+    await asyncio.wait_for(entered.wait(), 1)
+    token = await asyncio.wait_for(stages.begin_user_data_reset("other"), 1)
+    await stages.end_user_data_reset("other", token)
+    await asyncio.wait_for(stages.close(), 1)
+    assert call.context is None and not stages._call_stages
+
+
+async def start_claim(manager, **kwargs):
+    claim = await manager._claim_call(**kwargs)
+    await manager._create_call_stage(
+        claim,
+        user_id=kwargs["user_id"],
+        character_id=kwargs["character_id"],
+        client_request_id=kwargs["client_request_id"],
     )
-    await asyncio.wait_for(fence.entered.wait(), 1)
-    closing = asyncio.create_task(stage_manager.close())
-    for _ in range(100):
-        if stage_manager._closed:
-            break
-        await asyncio.sleep(0)
-    assert stage_manager._closed
-    fence.release.set()
-    await asyncio.gather(creation, return_exceptions=True)
-    await closing
-    assert stage_manager._call_stages == {}
+    return claim
+
+
+async def preparing_call(manager, chat, connection, request="request-1"):
+    await manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id=request)
+    return await manager.try_to_get_stage(
+        stage_type="call", user_id="user", character_id="luotianyi", client_request_id=request
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expired", [False, True])
+async def test_precommit_hangup_preserves_original_chat_offline_deadline(expired):
+    entered = asyncio.Event()
+
+    class Speech:
+        async def create(self, call_id):
+            entered.set()
+            await asyncio.Event().wait()
+
+    stages, _, _ = manager(config={"offline_timeout": 0.02 if expired else 60})
+    from src.stage.call.call_stage import bind_call_stage_creator
+
+    stages._call_stage_creator = bind_call_stage_creator(**dict(stages._test_call_resources, speech_factory=Speech()))
+    connection, chat = await connected(stages)
+    call = await preparing_call(stages, chat, connection)
+    await asyncio.wait_for(entered.wait(), 1)
+    await stages._test_chat_adapter._close_connection(connection)
+    deadline = chat.offline_deadline
+    if expired:
+        await asyncio.sleep(0.04)
+    assert not chat.context.closed
+    await call.terminate(StageEndReason.USER_REQUESTED)
+    if expired:
+        await _eventually(lambda: chat.context.closed)
+        _, replacement = await connected(stages)
+        assert replacement is not chat
+    else:
+        assert chat.offline_deadline == deadline
+        _, resumed = await connected(stages)
+        assert resumed is chat
+    await stages.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_at", ["ledger", "constructor"])
+async def test_failed_call_creation_restores_original_offline_expiry(monkeypatch, failure_at):
+    stages, _, _ = manager(config={"offline_timeout": 0.1})
+    connection, chat = await connected(stages)
+    await stages.prepare_call_transition(connection, character_id="luotianyi", client_request_id="failed-start")
+    await stages._test_chat_adapter._close_connection(connection)
+    deadline = chat.offline_deadline
+
+    async def unavailable(*args, **kwargs):
+        raise OSError("call creation unavailable")
+
+    if failure_at == "ledger":
+        monkeypatch.setattr(stages._call_records, "prepare_start", unavailable)
+    else:
+        monkeypatch.setattr(stages, "_call_stage_creator", unavailable)
+    try:
+        with pytest.raises(OSError, match="call creation unavailable"):
+            await stages.try_to_get_stage(
+                stage_type="call", user_id="user", character_id="luotianyi", client_request_id="failed-start"
+            )
+        assert chat.offline_deadline == deadline
+        await _eventually(lambda: chat.context.closed)
+        assert time.monotonic() >= deadline
+        await chat.terminate(StageEndReason.IDLE_TIMEOUT)
+        assert stages._lease_registry.current("user", "luotianyi") is None
+    finally:
+        await stages.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during_refresh", ["resume", "expire", "shutdown"])
+async def test_chat_restore_rechecks_admission_after_history_sync(monkeypatch, during_refresh):
+    from src.stage.call.call_stage import bind_call_stage_creator
+
+    class Speech:
+        async def create(self, call_id):
+            await asyncio.Event().wait()
+
+    stages, _, _ = manager()
+    clock = [time.monotonic()]
+    stages._monotonic = lambda: clock[0]
+    stages._call_stage_creator = bind_call_stage_creator(**dict(stages._test_call_resources, speech_factory=Speech()))
+    connection, chat = await connected(stages)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def refresh():
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(chat.context.conversation, "refresh", refresh)
+    call = await preparing_call(stages, chat, connection)
+    ending = asyncio.create_task(call.terminate(StageEndReason.USER_REQUESTED))
+    shutdown = None
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert chat.input_suspended and not chat.stimulus_input_sink.can_accept(stimulus())
+        # 一个用户的历史同步不占住 Manager 全局锁。
+        await asyncio.wait_for(connected(stages, user="other"), 1)
+        if during_refresh == "expire":
+            await stages._test_chat_adapter._close_connection(connection)
+            clock[0] = chat.offline_deadline + 1
+        elif during_refresh == "shutdown":
+            shutdown = asyncio.create_task(stages.close())
+            await _eventually(lambda: stages.is_closed)
+        release.set()
+        await asyncio.wait_for(ending, 1)
+        if during_refresh == "resume":
+            assert not chat.input_suspended and chat.stimulus_input_sink.can_accept(stimulus())
+            _, resumed = await connected(stages)
+            assert resumed is chat
+        else:
+            await _eventually(lambda: chat.context.closed)
+            assert not chat.stimulus_input_sink.can_accept(stimulus())
+    finally:
+        release.set()
+        await ending
+        if shutdown is not None:
+            await shutdown
+        await stages.close()

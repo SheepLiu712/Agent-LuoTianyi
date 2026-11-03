@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import src.domain.agent as d
-from src.domain.call import CallEndReason, CallFinalSnapshot
+from src.domain.call import CallEndReason
+from src.domain.call.terminal import CallTerminated
 from src.infrastructure.observability.call_metrics import CallMetric, CallMetricName, CallMetricResult, CallMetricStatus
 
 from ._audio_codec import CALL_ROUTE, FINAL_FLAG, HEADER_SIZE, VERSION, WireAudioFrame
@@ -423,7 +424,7 @@ class Delivery:
         if message is not None:
             await self._deliver(self._send_control(message))
 
-    async def send_ended(self, snapshot: CallFinalSnapshot) -> None:
+    async def send_ended(self, snapshot: CallTerminated) -> None:
         """幂等排入通话终止消息，标记终态输出已接纳。"""
         if self._terminal_sent:
             return

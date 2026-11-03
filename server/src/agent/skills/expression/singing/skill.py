@@ -6,6 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Protocol
 
 from src.agent.skills.contracts import SkillInvocation
+from src.agent.skills.expression.song_learning import SongLearningTasks
+from src.infrastructure.media.song_asset_validation import playable_segments
 
 from .backend import SingingBackend
 
@@ -38,14 +40,52 @@ class SingingSkill:
             raise TypeError("singing 必须是字典")
         self._singing = backend or SingingBackend(config, llm_service=llm_service)
 
-    @property
-    def backend(self) -> _SingingPort:
-        """Expose the owned backend to adjacent Agent skills and world jobs."""
-        return self._singing
+    def learning_tasks(self) -> SongLearningTasks:
+        """提供独立学歌任务资源，Handler 无需接触演唱后端。"""
+        return SongLearningTasks(self._singing)
 
     def song_names(self) -> tuple[str, ...]:
         """返回所有角色曲库中的歌曲名称，供输入实体链接复用。"""
         return self._singing.get_song_names()
+
+    def catalog(self, invocation: SkillInvocation) -> tuple[str, ...]:
+        manager = self._singing._get_manager(invocation.character_id)
+        return tuple(metadata.song_name for metadata in manager.all_songs.values())
+
+    def canonical_song_id(self, invocation: SkillInvocation, song_id: str) -> str:
+        metadata = self._singing._get_manager(invocation.character_id).get_song_metadata(song_id)
+        return metadata.song_name if metadata is not None else song_id
+
+    def song_information(self, invocation: SkillInvocation, *, song_id: str, segment_id: str | None = None):
+        manager = self._singing._get_manager(invocation.character_id)
+        metadata = manager.get_song_metadata(song_id)
+        if metadata is None:
+            return None
+        segments = tuple(segment.description for segment in playable_segments(metadata.segments, metadata.song_path))
+        if segment_id is not None and segment_id not in segments:
+            return None
+        lyrics = (
+            manager.get_segment_lyrics(metadata.song_name, segment_id)
+            if segment_id is not None
+            else manager.get_full_lyrics(metadata.song_name)
+        )
+        return metadata.song_name, segments, lyrics
+
+    async def select(
+        self,
+        invocation: SkillInvocation,
+        *,
+        attempts: tuple[str, ...],
+        excluded_segments=None,
+        emotion_context: str = "",
+    ):
+        return await self._singing.build_sing_plan(
+            invocation.character_id,
+            list(attempts),
+            excluded_segments=excluded_segments,
+            emotion_context=emotion_context,
+            confirmed_intent=True,
+        )
 
     async def render(self, invocation: SkillInvocation, *, song_id: str, segment_id: str) -> bytes:
         """在 executor 中渲染指定片段；身份为空抛 ValueError，不可用或无音频抛 EmptySongAudioError。"""

@@ -3,19 +3,19 @@ from types import SimpleNamespace
 
 import pytest
 from support.call_apology import Recall, Replies, catalog
+from support.stage_lifecycle import finish_call
 
 import src.domain.agent as d
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.call import (
-    CallReplyConfirmedHandler,
     CallReplyRequestedHandler,
-    CallTurnCompletedHandler,
 )
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
-from src.domain.call import CallAudioSemantic, CallEndReason, CallReplyStatus, CallState, RecallMode
+from src.domain.call import CallAudioSemantic, CallEndReason, CallReplyStatus, CallState
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.models.realtime_speech import SpeechStarted, TurnCompleted
-from src.stage.call_stage import CallReplyFailed
+from src.stage.call.call_stage import CallReplyFailed
 from tests.integration.stage import test_call_stage as base
 from tests.integration.stage.test_call_stage import _agent, _create, _eventually
 
@@ -91,7 +91,8 @@ async def test_partial_formal_reply_is_preserved_but_batch_waits_for_next_reply(
 
         async def observed(*args, **kwargs):
             requests.append(kwargs)
-            return await generate(*args, **kwargs)
+            async for draft in generate(*args, **kwargs):
+                yield draft
 
         replies.generate = observed
         await stage._on_turn(TurnCompleted(CallAudioSemantic(transcript="question B"), "next"))
@@ -102,12 +103,12 @@ async def test_partial_formal_reply_is_preserved_but_batch_waits_for_next_reply(
         await _eventually(lambda: not stage._handle_tasks and stage._realize_task.done())
         await acknowledge(stage)
         assert not stage._inputs.pending
-        final = await stage.terminate(CallEndReason.USER_HANGUP)
+        final = await finish_call(stage, StageEndReason.USER_REQUESTED)
         text = "\n".join(render_call_turns(final))
         assert text.count("confirmed first") == text.count("combined answer") == 1
         assert "unheard second" not in text
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.parametrize("rate,width,channels", [(16000, 2, 1), (24000, 1, 1), (24000, 2, 2)])
@@ -146,7 +147,7 @@ async def test_each_utterance_retries_partial_tts_with_new_response(call_setup, 
     assert len(stops) == 2
     assert not any(isinstance(item, CallReplyFailed) for item in transport.items)
     await acknowledge(stage)
-    final = await stage.terminate(CallEndReason.USER_HANGUP)
+    final = await finish_call(stage, StageEndReason.USER_REQUESTED)
     assert final.completed_turns[0].formal_agent_text == "first\nsecond"
     assert final.completed_turns[0].reply_status is CallReplyStatus.COMPLETED
 
@@ -168,7 +169,7 @@ async def test_tts_exhausted_is_one_failure_and_success_resets(call_setup, tmp_p
     await turn(stage)
     assert stage.state is CallState.ACTIVE
     assert stage._reply_failures == 1
-    await stage.terminate(CallEndReason.USER_HANGUP)
+    await finish_call(stage, StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -197,41 +198,4 @@ async def test_playback_receipt_before_message_end_still_settles(call_setup, tmp
     await turn(stage)
     assert stage._reply_failures == 0
     assert stage._turns[1].status is CallReplyStatus.COMPLETED
-    await stage.terminate(CallEndReason.USER_HANGUP)
-
-
-@pytest.mark.asyncio
-async def test_retry_provisional_remains_formal_reply_barrier(call_setup, tmp_path):
-    from src.domain.call import AckStyle
-
-    class Recalling(Recall):
-        async def decide(self, *args, **kwargs):
-            return SimpleNamespace(mode=RecallMode.RECALL, ack_style=AckStyle.THINKING, memory_queries=("query",))
-
-        async def recall_once(self, *args, **kwargs):
-            return ()
-
-    stage, _, replies, speech = await setup(call_setup, tmp_path, failures=1)
-    stage._agent._stimulus_router = base.StimulusRouter(
-        (
-            (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
-            (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
-            (d.StimulusKind.CALL_REPLY_REQUESTED, CallReplyRequestedHandler(Recalling(), replies, catalog(tmp_path))),
-            (d.StimulusKind.CALL_ENDING, base._NoPlanHandler()),
-        )
-    )
-    await stage._on_turn(TurnCompleted(CallAudioSemantic(transcript="user")))
-    await _eventually(
-        lambda: any(response.message_completed and response.provisional for response in stage._responses.values())
-    )
-    for response_id, stream_id in tuple(stage._playback.pending_streams):
-        if stage._responses[response_id].failed:
-            stage.playback_stopped(response_id, stream_id)
-    assert "answer" not in speech.calls
-    for response_id, stream_id in tuple(stage._playback.pending_streams):
-        if stage._responses[response_id].provisional:
-            stage.playback_completed(response_id, stream_id)
-    await _eventually(lambda: stage._realize_task.done())
-    assert speech.calls["answer"] == 2
-    await acknowledge(stage)
-    await stage.terminate(CallEndReason.USER_HANGUP)
+    await finish_call(stage, StageEndReason.USER_REQUESTED)

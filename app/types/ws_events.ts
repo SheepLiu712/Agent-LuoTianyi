@@ -14,6 +14,7 @@ export const WSEventType = {
   AGENT_MESSAGE: "agent_message",
   LLM_REQUEST: "llm_request",
   LLM_RESPONSE: "llm_response",
+  LLM_CANCEL: "llm_cancel",
 
   // 用户事件（客户端发送）
   USER_MESSAGE: "user_message",

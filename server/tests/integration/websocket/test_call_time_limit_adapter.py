@@ -12,6 +12,7 @@ from support.call_coherent_runtime import (
     runtime_config,
 )
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import wait_call_finished
 from support.stage_manager import make_call_adapter, make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
@@ -24,7 +25,7 @@ from src.domain.call import CallEndReason, CallState
 from src.infrastructure.persistence.call_sessions import SettlementStatus
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
-from src.stage._call_warning import WarningState
+from src.stage.call._call_warning import WarningState
 from tests.integration.stage.test_call_stage import _Clock, _eventually
 from tests.integration.websocket.test_call_websocket_adapter import start_message
 
@@ -130,7 +131,7 @@ async def test_public_config_warning_audio_playback_ack_and_complete_deadline_se
         )
         clock.advance(8)
         stage._time_limit_changed.set()
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 5)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 5)
         await asyncio.wait_for(pumping, 3)
         await manager._finalizations.close()
         assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT

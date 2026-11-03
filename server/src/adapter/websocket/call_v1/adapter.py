@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from functools import partial
 
-from src.domain.call import CallEndReason
+from src.domain.stage.lifecycle import StageEndReason
 from src.stage import CallStartFailed, InteractionFinalizing, StageManager
-from src.stage.call_stage import CallStageOutput
+from src.stage.call.call_stage import CallStageOutput
 from src.utils.owned_operation import complete_owned
 
 from ..connection import AdapterConnection, OutboundDelivery
@@ -73,6 +74,8 @@ class CallWebSocketAdapter:
         self._call_summary_character_ids = call_summary_character_ids
         self._supports_character = supports_character
         self._sessions = {}
+        self._pending_outputs = {}
+        self._opening_requests = set()
         self._bindings = {}
         self._start_locks = {}
         self._open_tasks = set()
@@ -175,6 +178,7 @@ class CallWebSocketAdapter:
             raise self._start_error("CALL_CHARACTER_UNAVAILABLE", request_id, frame.seq, close_code=1008)
         stage = session = binding = None
         created = False
+        self._opening_requests.add(request_id)
         try:
             stage = await self._manager.try_to_get_stage(
                 stage_type="call",
@@ -185,24 +189,20 @@ class CallWebSocketAdapter:
             session = self._sessions.get(stage.call_id)
             if session is None:
                 created = True
-                session = Session(stage, call_metrics=self._call_metrics)
+                session = Session(stage, call_metrics=self._call_metrics, on_terminal=self._own_release)
                 self._sessions[stage.call_id] = session
             binding = Binding(session, connection_id=connection_id)
-            await session.attach(binding)
-            await self._validate_open(user_id, generation, cancelled)
-            await binding.receive(frame)
-            await self._validate_open(user_id, generation, cancelled)
-            handle = self._register_binding(binding)
-            if created:
-                self._own_release(stage, session)
-            stage.begin_initialization()
-            return handle
+            return await session.bind(
+                binding,
+                frame,
+                validate_admission=partial(self._validate_open, user_id, generation, cancelled),
+                publish=self._register_binding,
+                initial_outputs=self._pending_outputs.pop(stage.call_id, ()),
+            )
         except BaseException as error:
-            if binding is not None:
-                await complete_owned(session.detach(binding))
             if created:
                 try:
-                    await complete_owned(stage.abort_failed_start())
+                    stage.begin_termination(StageEndReason.INITIALIZATION_FAILED)
                 finally:
                     await self._remove_session(session)
             if isinstance(error, asyncio.CancelledError):
@@ -210,6 +210,10 @@ class CallWebSocketAdapter:
             if isinstance(error, CallTransportError):
                 raise self._start_error(error.code, request_id, frame.seq, close_code=error.close_code) from error
             raise self._normalize_start_error(error, request_id, frame.seq) from error
+        finally:
+            self._opening_requests.discard(request_id)
+            if stage is not None:
+                self._pending_outputs.pop(stage.call_id, None)
 
     async def _open_resume(self, frame, user_id, connection_id, cancelled, generation):
         message = frame.control
@@ -219,26 +223,18 @@ class CallWebSocketAdapter:
         if session.user_id != user_id or session.character_id != message["character_id"]:
             raise CallTransportError("RESUME_OWNERSHIP_MISMATCH", close_code=1008)
         try:
-            stage = await self._manager.try_to_get_stage(
+            await self._manager.try_to_get_stage(
                 stage_type="call", user_id=user_id, character_id=session.character_id, call_id=session.call_id
             )
         except RuntimeError as error:
             raise CallTransportError(str(error), close_code=1008) from error
         binding = Binding(session, connection_id=connection_id)
-        committed = False
-        try:
-            await self._validate_open(user_id, generation, cancelled)
-            await session.attach(binding, resume_cursor=int(message["last_contiguous_server_seq"]))
-            committed = True
-            await self._validate_open(user_id, generation, cancelled)
-            return self._register_binding(binding)
-        except BaseException:
-            await complete_owned(session.detach(binding))
-            if committed:
-                stage.begin_termination(CallEndReason.SYSTEM_FAILURE)
-                await complete_owned(stage.wait_realtime_stopped())
-                await self._remove_session(session)
-            raise
+        return await session.bind(
+            binding,
+            frame,
+            validate_admission=partial(self._validate_open, user_id, generation, cancelled),
+            publish=self._register_binding,
+        )
 
     async def _validate_open(self, user_id, generation, cancelled):
         if cancelled.is_set() or self._closed:
@@ -281,6 +277,12 @@ class CallWebSocketAdapter:
         """按稳定呼叫身份路由输出，Stage 无需持有或替换连接 Binding。"""
         session = self._sessions.get(call_id)
         if session is None:
+            if getattr(output, "client_request_id", None) in self._opening_requests or call_id in self._pending_outputs:
+                pending = self._pending_outputs.setdefault(call_id, [])
+                if len(pending) >= 256:
+                    raise CallTransportError("CALL_INITIAL_OUTPUT_BUFFER_FULL", close_code=1013)
+                pending.append(output)
+                return
             raise CallTransportError("CALL_SESSION_UNAVAILABLE", close_code=1013)
         await session.submit_output(output)
 
@@ -290,15 +292,14 @@ class CallWebSocketAdapter:
             raise CallTransportError("STALE_CALL_CONNECTION", close_code=1008)
         return binding
 
-    def _own_release(self, stage, session):
-        task = asyncio.create_task(self._release_terminal(stage, session), name="call-adapter-release")
+    def _own_release(self, session):
+        task = asyncio.create_task(self._release_terminal(session), name="call-adapter-release")
         self._release_tasks.add(task)
         task.add_done_callback(self._release_tasks.discard)
         task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
 
-    async def _release_terminal(self, stage, session):
+    async def _release_terminal(self, session):
         try:
-            await stage.wait_realtime_stopped()
             await session.drain_terminal()
         finally:
             await self._remove_session(session)
@@ -306,10 +307,12 @@ class CallWebSocketAdapter:
     async def _remove_session(self, session):
         if self._sessions.get(session.call_id) is session:
             self._sessions.pop(session.call_id)
-        await session.close()
-        for handle, binding in tuple(self._bindings.items()):
-            if binding.session is session:
-                self._bindings.pop(handle)
+        try:
+            await session.close()
+        finally:
+            for handle, binding in tuple(self._bindings.items()):
+                if binding.session is session:
+                    self._bindings.pop(handle)
 
     async def close(self) -> None:
         """关闭接入并释放所有协议资源，不接管 Stage 的认知收尾。"""

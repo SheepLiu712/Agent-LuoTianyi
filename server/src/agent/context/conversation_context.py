@@ -89,6 +89,14 @@ class ConversationContext:
             self._require_store()
             await _complete(self._append(entries))
 
+    async def refresh(self) -> None:
+        """只读同步外部已提交的正式历史，不重建交互或重复追加条目。"""
+        async with self._state.lock:
+            self._require_store()
+            snapshot, _ = await _complete(asyncio.to_thread(self._store.load))
+            self._state.check()
+            self._snapshot = snapshot
+
     async def compact(self, compaction: ConversationCompaction) -> None:
         """验证并保存外部压缩结果，保留未覆盖的记录及完整历史。
 

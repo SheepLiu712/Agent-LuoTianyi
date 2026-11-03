@@ -11,7 +11,7 @@ from src.agent.context import ConversationSnapshot, UserContextSnapshot
 from src.agent.context.memory_pool import CallMemoryPool
 from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
-from src.domain.call import CallState, RecallMode
+from src.domain.call import CallState
 
 
 class _Conversation:
@@ -91,8 +91,8 @@ def catalog(tmp_path, *, rate=24000, width=2, channels=1):
 
 
 class Recall:
-    async def decide(self, *args, **kwargs):
-        return SimpleNamespace(mode=RecallMode.DIRECT)
+    async def search(self, *args, **kwargs):
+        return SimpleNamespace(hits=())
 
 
 class Replies:
@@ -102,4 +102,5 @@ class Replies:
     async def generate(self, *args, **kwargs):
         if self.failing:
             raise RuntimeError("private reply should not be logged")
-        return tuple(ReplyDraft(text, text, "normal", None) for text in self.texts)
+        for text in self.texts:
+            yield ReplyDraft(text, text, "normal", None)

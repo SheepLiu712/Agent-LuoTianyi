@@ -147,6 +147,6 @@ def test_manager_coordinates_call_operations_without_ledger_context_or_transport
         "create_if_absent",
     ):
         assert forbidden not in source
-    call_stage = (SERVER_ROOT / "src/stage/call_stage.py").read_text(encoding="utf-8")
+    call_stage = (SERVER_ROOT / "src/stage/call/call_stage.py").read_text(encoding="utf-8")
     assert "from .stage_manager" not in call_stage
     assert "CallTransportSink" not in call_stage

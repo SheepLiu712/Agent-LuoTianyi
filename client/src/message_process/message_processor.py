@@ -371,7 +371,7 @@ class MessageProcessor:
         if text and self.system_message_signal:
             self.system_message_signal(text)
 
-    async def process_llm_request(self, payload: dict) -> dict | None:
+    async def process_llm_request(self, payload: dict, on_delta=None) -> dict | None:
         request_id = payload.get("request_id")
         if not request_id:
             return None
@@ -415,11 +415,18 @@ class MessageProcessor:
             use_json=use_json,
             image_base64=payload.get("image_base64"),
         )
+        streaming = {}
+        if payload.get("stream") is True:
+            if on_delta is None:
+                raise ValueError("流式委托缺少增量接收器")
+            body.update(stream=True, stream_options={"include_usage": True})
+            streaming["on_delta"] = on_delta
         try:
             result = await call_llm_api_async(
                 url=f"{base_url.rstrip('/')}/chat/completions",
                 api_key=api_key,
                 payload=body,
+                **streaming,
             )
             if use_json:
                 try:
@@ -430,9 +437,10 @@ class MessageProcessor:
         except Exception as exc:
             return {"request_id": request_id, "error": str(exc)}
 
-    def get_llm_mode(self) -> dict[str, list[str]]:
+    def get_llm_mode(self) -> dict[str, object]:
         modules = llm_key_storage.get_llm_modules_config()
         return {
+            "stream": True,
             "types": [
                 str(type_id)
                 for type_id, entry in modules.items()

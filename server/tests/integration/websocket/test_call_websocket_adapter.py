@@ -1,13 +1,16 @@
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from support.call_protocol import bind_protocol_connection
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import finish_call, wait_call_finished
 from support.stage_manager import make_call_adapter, make_stage_manager
 
 import src.domain.agent as d
@@ -18,9 +21,10 @@ from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage.call_stage import CallStateChanged
+from src.stage.call.call_stage import CallStateChanged
 from tests.integration.stage.test_call_stage import _ContextDatabase
 from tests.integration.stage.test_chat_stage import RecordingAgent
 
@@ -204,7 +208,7 @@ async def test_initialization_hangup_cancels_stage_preparation_without_waiting_f
     receiving = asyncio.create_task(adapter.receive(connection, hangup))
     await asyncio.wait_for(receiving, 1)
     assert not speech.release.is_set()
-    await asyncio.wait_for(stage.terminate(), 1)
+    await asyncio.wait_for(finish_call(stage), 1)
     assert not stages._call_stages
     assert not stages._call_ownerships
     assert speech.calls == 1
@@ -233,7 +237,7 @@ async def test_cancelled_open_after_prepare_has_no_session_lease_or_request_task
     speech = BlockingSpeechFactory()
     stages, repository = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    original = Session.attach
+    original = Session._reserve_binding
     registered = asyncio.Event()
     release = asyncio.Event()
 
@@ -242,7 +246,7 @@ async def test_cancelled_open_after_prepare_has_no_session_lease_or_request_task
         registered.set()
         await release.wait()
 
-    monkeypatch.setattr(Session, "attach", blocked_register)
+    monkeypatch.setattr(Session, "_reserve_binding", blocked_register)
     opening = asyncio.create_task(adapter.open(initial_message=start_message(), user_id="user", connection_id=object()))
     await asyncio.wait_for(registered.wait(), 1)
     opening.cancel()
@@ -254,6 +258,7 @@ async def test_cancelled_open_after_prepare_has_no_session_lease_or_request_task
     assert adapter._sessions == {}
     assert stages._call_open_tasks == {}
     assert stages._call_claims == {}
+    await _eventually(lambda: not stages._call_ownerships)
     assert stages._call_ownerships == {}
     assert stages._lease_registry.current("user", "luotianyi") is None
     record = repository.find_by_request("request-1")
@@ -313,7 +318,7 @@ async def test_adapter_close_waits_for_cancelled_open_compensation_before_closin
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
-    original = Session.attach
+    original = Session._reserve_binding
     registered = asyncio.Event()
     release = asyncio.Event()
 
@@ -322,7 +327,7 @@ async def test_adapter_close_waits_for_cancelled_open_compensation_before_closin
         registered.set()
         await release.wait()
 
-    monkeypatch.setattr(Session, "attach", blocked_register)
+    monkeypatch.setattr(Session, "_reserve_binding", blocked_register)
     opening = asyncio.create_task(adapter.open(initial_message=start_message(), user_id="user", connection_id=object()))
     await asyncio.wait_for(registered.wait(), 1)
     closing = asyncio.create_task(adapter.close())
@@ -334,17 +339,18 @@ async def test_adapter_close_waits_for_cancelled_open_compensation_before_closin
         await opening
     assert adapter._sessions == {}
     assert stages._call_claims == {}
+    await _eventually(lambda: not stages._call_ownerships)
     assert stages._call_ownerships == {}
     assert stages._lease_registry.current("user", "luotianyi") is None
     await stages.close()
 
 
-async def _eventually(predicate):
+async def _eventually(predicate, timeout=2):
     async def wait():
         while not predicate():
             await asyncio.sleep(0.001)
 
-    await asyncio.wait_for(wait(), 2)
+    await asyncio.wait_for(wait(), timeout)
 
 
 async def _opened(adapter):
@@ -562,14 +568,15 @@ async def test_failed_resume_after_business_commit_terminates_real_sqlite_stage(
         monkeypatch.setattr(stage, "reconnect", overflowing)
     else:
         entered, release = asyncio.Event(), asyncio.Event()
-        original = Session.attach
+        original = stage.connection_changed
 
-        async def blocking_attach(*args, **kwargs):
-            await original(*args, **kwargs)
+        async def blocking_connect(*args, **kwargs):
+            result = await original(*args, **kwargs)
             entered.set()
             await release.wait()
+            return result
 
-        monkeypatch.setattr(Session, "attach", blocking_attach)
+        monkeypatch.setattr(stage, "connection_changed", blocking_connect)
     opening = asyncio.create_task(
         adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
     )
@@ -580,7 +587,7 @@ async def test_failed_resume_after_business_commit_terminates_real_sqlite_stage(
     expected = asyncio.CancelledError if fault == "cancel" else RuntimeError
     with pytest.raises(expected):
         await asyncio.wait_for(opening, 2)
-    await asyncio.wait_for(stage.wait_closed(), 2)
+    await asyncio.wait_for(wait_call_finished(stage), 2)
     await _eventually(lambda: not adapter._sessions)
     await stages._finalizations.close()
     record = repository.find_by_id(call_id)
@@ -608,7 +615,7 @@ async def test_async_initialization_failure_releases_session_and_rejects_same_re
     assert json.loads(failed.message)["type"] == "error"
     assert json.loads(failed.message)["code"] == "CALL_SETUP_FAILED"
     adapter.complete_output(connection, failed.delivery_id)
-    await stage.wait_closed()
+    await wait_call_finished(stage)
     await _eventually(lambda: not adapter._sessions)
     assert not stages._call_ownerships
     assert repository.find_by_request("request-1").state is CallState.FAILED
@@ -627,14 +634,14 @@ async def test_protocol_ack_bypasses_blocked_business_input_and_hangup_ack_prece
     session = adapter._sessions[call_id]
     stage = stages._call_stages[call_id]
     entered, release = asyncio.Event(), asyncio.Event()
-    original = stage._terminate_locked
+    original = stage._terminate_owned
 
     async def delayed_terminate(*args, **kwargs):
         entered.set()
         await release.wait()
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(stage, "_terminate_locked", delayed_terminate)
+    monkeypatch.setattr(stage, "_terminate_owned", delayed_terminate)
     receiving = asyncio.create_task(
         adapter.receive(
             connection,
@@ -684,9 +691,9 @@ async def test_late_protocol_release_drains_terminal_after_history_failure(monke
     release_protocol = asyncio.Event()
     original_release = adapter._release_terminal
 
-    async def delayed_release(stage, session):
+    async def delayed_release(session):
         await release_protocol.wait()
-        await original_release(stage, session)
+        await original_release(session)
 
     monkeypatch.setattr(adapter, "_release_terminal", delayed_release)
     connection, call_id = await _opened(adapter)
@@ -704,9 +711,9 @@ async def test_late_protocol_release_drains_terminal_after_history_failure(monke
                 {"protocol": "call.v1", "type": "call.hangup", "seq": 2, "call_id": call_id, "reason": "user_hangup"}
             ),
         )
-        with pytest.raises(RuntimeError, match="history write failed"):
-            await stage.terminate()
-        assert stage.context is None and stage._termination.done()
+        result = await stage.terminate(StageEndReason.USER_REQUESTED)
+        assert result.finalization_error == "RuntimeError" and result.resources_released
+        assert stage.context is None and stage._lifetime.termination.done()
         # Release only after the complete termination task has failed. Queued
         # terminal frames must still be drained to the actual protocol binding.
         release_protocol.set()
@@ -772,20 +779,20 @@ async def test_hangup_ack_and_protocol_release_do_not_wait_for_full_termination(
         assert any(item["type"] == "ack" and item["ack_seq"] == 2 for item in received)
         assert any(item["type"] == "call.ended" for item in received)
         assert not adapter._sessions and not adapter._bindings
-        assert not stage._termination.done()
-        waiter = asyncio.create_task(stage.terminate())
+        assert not stage._lifetime.termination.done()
+        waiter = asyncio.create_task(finish_call(stage))
         await asyncio.sleep(0)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
-        assert not stage._termination.done()
+        assert not stage._lifetime.termination.done()
         with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
             await stages.begin_user_data_reset("user")
         # 当前通话收尾不阻塞其他用户的管理操作。
         token = await asyncio.wait_for(stages.begin_user_data_reset("other"), 1)
         await stages.end_user_data_reset("other", token)
         release.set()
-        await asyncio.wait_for(stage.terminate(), 1)
+        await asyncio.wait_for(finish_call(stage), 1)
     finally:
         release.set()
         await adapter.close()
@@ -802,7 +809,7 @@ async def test_call_lifecycle_versions_advance_when_wall_clock_does_not():
     stage = await _activate(stages, call_id)
     await adapter.disconnect(connection)
     await adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
-    await stage.terminate()
+    await finish_call(stage)
     record = repository.find_by_request("request-1")
     assert record.state is CallState.ENDED
     assert record.updated_at > record.created_at
@@ -831,13 +838,123 @@ async def test_resume_rollback_preserves_original_failure_even_if_cleanup_and_lo
         def error(self, *_args):
             raise RuntimeError("logger fault")
 
-    monkeypatch.setattr(stage, "terminate", cleanup_failure)
     monkeypatch.setattr(session._delivery, "acknowledge_server", cursor_failure)
     monkeypatch.setattr("src.adapter.websocket.call_v1._session.get_logger", lambda *_args: Logger())
     with pytest.raises(RuntimeError, match="original cursor fault"):
         await adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
     await _eventually(lambda: not adapter._sessions)
+    await wait_call_finished(stage)
     assert stage.state is CallState.ENDED
     assert not adapter._bindings
     await adapter.close()
     await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_terminal_queue_overflow_still_releases_protocol_session():
+    stages, _ = manager(speech_factory=BlockingSpeechFactory())
+    adapter = call_adapter(stages)
+    connection, call_id = await _opened(adapter)
+    stage = stages._call_stages[call_id]
+    binding = adapter._bindings[connection]
+    session = adapter._sessions[call_id]
+    try:
+        for _ in range(512):
+            binding.enqueue('{"protocol":"call.v1","type":"ack"}')
+        stage.begin_termination(StageEndReason.USER_REQUESTED)
+        await asyncio.wait_for(stage.terminate(StageEndReason.USER_REQUESTED), 1)
+        assert session.terminal_received
+        await _eventually(lambda: not adapter._sessions, timeout=3)
+        assert not adapter._bindings and binding.is_closed
+        assert session._delivery._closed
+    finally:
+        await adapter.close()
+        await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_terminal_before_handshake_is_delivered_once_after_start_ack(monkeypatch):
+    stages, _ = manager(speech_factory=BlockingSpeechFactory())
+    adapter = call_adapter(stages)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = Session._receive_start
+
+    async def delayed_start(session, binding, frame):
+        entered.set()
+        await release.wait()
+        await original(session, binding, frame)
+
+    monkeypatch.setattr(Session, "_receive_start", delayed_start)
+    opening = asyncio.create_task(adapter.open(initial_message=start_message(), user_id="user", connection_id=object()))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        stage = next(iter(stages._call_stages.values()))
+        session = adapter._sessions[stage.call_id]
+        await asyncio.wait_for(stage.terminate(StageEndReason.USER_REQUESTED), 1)
+        await adapter.submit_output(stage.call_id, stage._terminal)
+        with pytest.raises(ValueError, match="conflicting call terminal"):
+            await adapter.submit_output(stage.call_id, replace(stage._terminal, active_duration_ms=1))
+        with pytest.raises(CallTransportError, match="CALL_RESUME_UNAVAILABLE"):
+            await bind_protocol_connection(
+                session, Binding(session, connection_id=object()), resume_message(stage.call_id)
+            )
+        release.set()
+        connection = await asyncio.wait_for(opening, 1)
+        received = []
+        for _ in range(3):
+            delivery = await asyncio.wait_for(adapter.next_output(connection), 1)
+            received.append(json.loads(delivery.message))
+            adapter.complete_output(connection, delivery.delivery_id)
+        assert [item["type"] for item in received] == ["call.state", "ack", "call.ended"]
+        assert received[0]["state"] == "preparing" and received[1]["ack_seq"] == 1
+        await _eventually(lambda: not adapter._sessions)
+        assert not adapter._bindings
+    finally:
+        release.set()
+        await asyncio.gather(opening, return_exceptions=True)
+        await adapter.close()
+        await stages.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repeated_start", [False, True])
+@pytest.mark.parametrize("failure", ["admission", "publication", "terminal"])
+async def test_resuming_binding_owns_failures_after_business_admission(monkeypatch, repeated_start, failure):
+    stages, repository = manager(speech_factory=FakeRealtimeSpeechSessionFactory())
+    adapter = call_adapter(stages)
+    old, call_id = await _opened(adapter)
+    stage = await _activate(stages, call_id)
+    await adapter.disconnect(old)
+    original = adapter._validate_open
+    checks = 0
+
+    async def validate(*args):
+        nonlocal checks
+        checks += 1
+        await original(*args)
+        if checks == 2:
+            if failure == "admission":
+                raise RuntimeError("admission revoked")
+            if failure == "terminal":
+                await stage.terminate(StageEndReason.USER_REQUESTED)
+
+    def publish(binding):
+        raise RuntimeError("publication failed")
+
+    monkeypatch.setattr(adapter, "_validate_open", validate)
+    if failure == "publication":
+        monkeypatch.setattr(adapter, "_register_binding", publish)
+    try:
+        raw = start_message() if repeated_start else resume_message(call_id)
+        with pytest.raises((RuntimeError, CallTransportError)):
+            await asyncio.wait_for(adapter.open(initial_message=raw, user_id="user", connection_id=object()), 2)
+        await _eventually(lambda: not adapter._sessions)
+        await wait_call_finished(stage)
+        assert not adapter._bindings
+        record = repository.find_by_request("request-1")
+        expected = CallEndReason.USER_HANGUP if failure == "terminal" else CallEndReason.SYSTEM_FAILURE
+        assert record.end_reason is expected
+        assert stages._lease_registry.current("user", "luotianyi") is None
+    finally:
+        await adapter.close()
+        await stages.close()

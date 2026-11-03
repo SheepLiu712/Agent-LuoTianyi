@@ -20,9 +20,10 @@ from src.agent.processing.plan_emitter import ActionPlanDraft
 from src.domain.call import CallAnswerDecision, CallSpeechDelivery, CallState
 from src.infrastructure.persistence.call_sessions import BEIJING_TIMEZONE, CallSessionRecord, SqlCallSessionRepository
 from src.infrastructure.persistence.database.sql_database import Base
-from src.stage.call_stage import CallStage, CallStageOwnership
+from src.stage.call.call_stage import CallStage, CallStageOwnership
 from support.call_output import output_sink
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import observe_release
 from support.stage_manager import start_call_stage
 
 
@@ -226,7 +227,7 @@ async def create_active_stage(tmp_path, *, response_count: int = 1):
         call_sessions=repository,
         speech_factory=provider_factory,
         output_sink=output_sink(transport),
-        release_ownership=lambda value: not released.append(value),
+        own_termination=observe_release(lambda value: not released.append(value), ownership),
         save_history=settlement.emit,
         monotonic=clock.tick,
         wall_clock=clock.now,

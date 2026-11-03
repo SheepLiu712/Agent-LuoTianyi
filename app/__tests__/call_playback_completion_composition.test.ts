@@ -229,6 +229,26 @@ test.each(['tombstone', 'stopPlayback'] as const)('a native %s failure still fai
   expect(transport.state).toMatchObject({ status: 'failed', errorCode: 'native_stop_failed' });
 });
 
+test.each(['provider_failed', 'time_limit'] as const)('原生音频接纳阻塞时，%s 终态仍能停止播放并结束通话', async (reason) => {
+  const { socket, bridge, transport } = await establish();
+  const stopPlayback = jest.spyOn(bridge, 'stopPlayback');
+  stopCurrent(socket);
+  socket.message(control({
+    protocol: 'call.v1', type: 'call.ended', seq: 6, call_id: CALL_ID,
+    outcome: 'connected', end_reason: reason, active_duration_ms: 1_000,
+  }));
+  await flush();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(stopPlayback).toHaveBeenCalled();
+  expect(transport.state).toMatchObject({ status: 'closed', endReason: reason });
+  expect(wireCompletions(socket)).toHaveLength(0);
+  bridge.acceptEnqueue();
+  bridge.complete();
+  await flush();
+  expect(transport.state.status).toBe('closed');
+  expect(wireCompletions(socket)).toHaveLength(0);
+});
+
 test.each([
   ['resolve', false], ['resolve', true], ['reject', false], ['reject', true],
 ] as const)('close during pending final stays closed after %s (early completion: %s)', async (outcome, early) => {

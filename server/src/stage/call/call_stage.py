@@ -34,6 +34,14 @@ from src.domain.call import (
     fallback_call_summary,
 )
 from src.domain.call.contracts import CallMaintenanceSnapshot
+from src.domain.call.terminal import CallTerminated
+from src.domain.stage.lifecycle import (
+    StageEndReason,
+    StageInitializationOwner,
+    StageRetentionChanged,
+    StageTerminationOwner,
+    StageTerminationResult,
+)
 from src.infrastructure.models.realtime_speech import (
     AmbientAudio,
     AudioFrame,
@@ -57,6 +65,7 @@ from src.infrastructure.persistence.call_sessions.repository import CallSessionR
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
+from .._lifecycle import StageLifetime
 from ._call_history import CallHistory
 from ._call_inputs import CallInputs, ReplyAttempt
 from ._call_playback import CallPlaybackCoordinator, PlaybackCompletion, PlaybackSettlementError
@@ -165,22 +174,8 @@ class CallPCM:
     final: bool
 
 
-@dataclass(frozen=True, slots=True)
-class CallSetupFailed:
-    """建立失败的稳定业务原因。"""
-
-    reason: CallEndReason
-
-
 CallStageOutput = (
-    CallStateChanged
-    | CallReplyFailed
-    | CallOutput
-    | CallFinalSnapshot
-    | CallStreamStarted
-    | CallPCM
-    | CallPlaybackStop
-    | CallSetupFailed
+    CallStateChanged | CallReplyFailed | CallOutput | CallTerminated | CallStreamStarted | CallPCM | CallPlaybackStop
 )
 
 
@@ -228,6 +223,7 @@ class _CallOutputPermit:
             response_id in self._response_ids
             and self._generation == self._stage._generation
             and response_id not in self._stage._tombstones
+            and not self._stage.termination_requested
             and self._stage.state not in {CallState.ENDING, CallState.ENDED, CallState.FAILED, CallState.DECLINED}
         )
 
@@ -258,10 +254,11 @@ class CallStage:
         call_sessions: CallSessionRepository,
         speech_factory: RealtimeSpeechSessionFactory,
         output_sink: Callable[[str, CallStageOutput], Awaitable[None]],
-        release_ownership: Callable[[CallStageOwnership], bool] | None = None,
         save_history: Callable[..., Awaitable[object]] | None = None,
-        own_termination: Callable[..., asyncio.Task] | None = None,
-        retention_changed: Callable[[float | None], None] | None = None,
+        own_termination: StageTerminationOwner | None = None,
+        own_initialization: StageInitializationOwner | None = None,
+        finish_source_interaction=None,
+        retention_changed: StageRetentionChanged | None = None,
         call_metrics: Any | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] | None = None,
@@ -275,11 +272,9 @@ class CallStage:
         self._ownership, self._record = ownership, record
         self._agent, self._context_factory, self._repository = agent, context_factory, call_sessions
         self._speech_factory, self._output_sink = speech_factory, output_sink
-        self._release_ownership = release_ownership
+        self._finish_source_interaction = finish_source_interaction
         self._save_history = save_history
-        self._own_termination = own_termination
         self._retention_changed = retention_changed
-        self._realtime_ended = asyncio.Event()
         self._call_metrics = call_metrics
         self._monotonic = monotonic
         self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
@@ -337,10 +332,7 @@ class CallStage:
         self._user_speaking = False
         self._request_turn: dict[str, int | None] = {}
         self._started = False
-        self._initialization: asyncio.Task[None] | None = None
-        self._termination: asyncio.Task[CallFinalSnapshot | None] | None = None
         self._termination_reason: CallEndReason | None = None
-        self._closed = asyncio.Event()
         self._final: CallFinalSnapshot | None = None
         self._active_response_id: str | None = None
         self._responses: dict[str, _Response] = {}
@@ -353,7 +345,6 @@ class CallStage:
         self._first_disconnect_monotonic: float | None = None
         self._recovery_deadline: float | None = None
         self._pending_end_reason: CallEndReason | None = None
-        self._ownership_released = False
         self._transition_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._transport_abort_task: asyncio.Task[Any] | None = None
@@ -361,10 +352,17 @@ class CallStage:
         self._reconnect_count = 0
         self._connection_available = connection_available
         self._pending_answer: d.AnswerCall | None = None
+        self._connection_generation = 0
+        self._terminal = None
+        self._resource_error = None
+        self._finalization_error = None
+        self._lifetime = StageLifetime(self, own_initialization=own_initialization, own_termination=own_termination)
+        self._lifetime.initialize(self._start)
+        self._setup_timer = self._track(asyncio.create_task(self._watch_setup()))
 
     @classmethod
     async def create(cls, *, conversation_service, call_maintenance_batches, **kwargs: object) -> "CallStage":
-        """装配本次结算并返回 PREPARING Stage；握手排队后才启动耗时初始化。"""
+        """装配本次结算并返回 PREPARING Stage；同时启动唯一耗时初始化任务。"""
         stage = cls(**kwargs)
         history = CallHistory(
             call_sessions=stage._repository,
@@ -414,21 +412,30 @@ class CallStage:
         """返回原始建立请求身份，重连不产生新请求。"""
         return self._ownership.client_request_id
 
-    def begin_initialization(self) -> None:
-        """握手排队后启动自有初始化任务；不阻塞挂断或断线处理。"""
-        if self._initialization is None and not self.termination_requested and not self._closed.is_set():
-            self._initialization = asyncio.create_task(self._start(), name=f"call-initialize-{self.call_id}")
-            self._initialization.add_done_callback(self._observe_task)
+    @property
+    def interaction_id(self) -> str:
+        return self.call_id
+
+    @property
+    def lifecycle_state(self):
+        return self._lifetime.state
+
+    @property
+    def interaction_ended(self):
+        return self._lifetime.interaction_ended
 
     async def start(self) -> None:
-        """启动并等待资源准备；生产接入使用异步初始化入口。"""
-        self.begin_initialization()
-        if self._initialization is not None:
-            await asyncio.shield(self._initialization)
+        await self._lifetime.start()
+
+    async def _watch_setup(self):
+        while self._monotonic() < self._ownership.setup_deadline:
+            await asyncio.sleep(self._ownership.setup_deadline - self._monotonic())
+        if self.state in {CallState.PREPARING, CallState.RINGING}:
+            self._request_call_end(CallEndReason.SETUP_TIMEOUT)
 
     def can_reconnect(self) -> bool:
         """检查准备期原期限或接通后恢复期限，不改变交互状态。"""
-        if self.termination_requested or self._closed.is_set():
+        if self.termination_requested or self.interaction_ended:
             return False
         if self.state in {CallState.PREPARING, CallState.RINGING}:
             return not self._setup_expired()
@@ -446,6 +453,15 @@ class CallStage:
     async def _start(self) -> None:
         try:
             self._require_setup_time()
+            self._provider = await self._await_setup(
+                self._speech_factory.create(self._record.call_id), cleanup=lambda provider: provider.close()
+            )
+            await self._await_setup(self._provider.start(RealtimeSpeechConfig()))
+            if self._finish_source_interaction is not None:
+                await self._await_setup(self._finish_source_interaction(self))
+            self._require_setup_time()
+            if self.termination_requested:
+                raise asyncio.CancelledError
             requested_at = self._record.requested_at.replace(tzinfo=None)
             self._context = await self._await_setup(
                 self._context_factory.create(
@@ -456,24 +472,23 @@ class CallStage:
                 ),
                 cleanup=lambda context: context.close(),
             )
-            self._provider = await self._await_setup(
-                self._speech_factory.create(self._record.call_id), cleanup=lambda provider: provider.close()
-            )
-            await self._await_setup(self._provider.start(RealtimeSpeechConfig()))
             await self._transition(CallState.RINGING)
+            self._require_setup_time()
             self._started = True
             self._pcm_task = self._track(asyncio.create_task(self._drain_pcm(), name="call-pcm"))
             self._events_task = self._track(asyncio.create_task(self._consume_events(), name="call-speech-events"))
             self._provider_failure_task = self._track(
                 asyncio.create_task(self._await_provider_failure(), name="call-provider-failure")
             )
-            await self._submit_stimulus(self._answer_requested())
+            self._spawn_handle(self._submit_stimulus(self._answer_requested()), name="call-answer-request")
         except asyncio.CancelledError:
             raise
-        except BaseException:
-            if self.state not in {CallState.ENDED, CallState.FAILED}:
-                await self._fail_setup(
-                    CallEndReason.SETUP_TIMEOUT if self._setup_expired() else CallEndReason.SYSTEM_FAILURE
+        except BaseException as error:
+            if self._termination_reason is None:
+                self._termination_reason = (
+                    CallEndReason.SETUP_TIMEOUT
+                    if isinstance(error, TimeoutError) or self._setup_expired()
+                    else CallEndReason.SYSTEM_FAILURE
                 )
             raise
 
@@ -486,7 +501,7 @@ class CallStage:
         if prior is not None:
             self._receipts.move_to_end(key)
             return prior == receipt.fingerprint
-        if self.state is not CallState.ACTIVE:
+        if self.termination_requested or self.state is not CallState.ACTIVE:
             return False
         self._provider_audio_sequence += 1
         try:
@@ -510,7 +525,7 @@ class CallStage:
         """Consume the Stage-owned answer action once it has been produced by Agent integration."""
         if not isinstance(action, d.AnswerCall) or action.call_id != self._record.call_id:
             return False
-        if self.state is not CallState.RINGING:
+        if self.termination_requested or self.state is not CallState.RINGING:
             return False
         await self._apply_answer(action)
         return True
@@ -591,7 +606,7 @@ class CallStage:
             self._recovery_deadline = disconnected_monotonic + 3.0
             self._cancel_task(self._silence_task)
             if self._retention_changed is not None:
-                self._retention_changed(self._recovery_deadline)
+                self._report_retention(self._recovery_deadline)
 
     async def set_connection_available(self, available: bool) -> None:
         self._connection_available = available
@@ -621,13 +636,13 @@ class CallStage:
                 timed_out = True
             else:
                 if self._retention_changed is not None:
-                    self._retention_changed(None)
+                    self._report_retention(None)
+                self._first_disconnect_monotonic = None
+                self._recovery_deadline = None
                 await self._transition_or_close(CallState.ACTIVE)
                 self._time_limit_changed.set()
                 self._inputs.blocked = False
                 self._schedule_output()
-                self._first_disconnect_monotonic = None
-                self._recovery_deadline = None
                 # Product policy: a successful resume always starts a fresh full silence period.
                 if self._playback.silence_started_at is None:
                     try:
@@ -643,8 +658,7 @@ class CallStage:
                 )
                 return True
         if timed_out:
-            self.begin_termination(CallEndReason.RECOVERY_TIMEOUT)
-            await self.wait_realtime_stopped()
+            self._request_call_end(CallEndReason.RECOVERY_TIMEOUT)
         return False
 
     def can_resume(self) -> bool:
@@ -655,89 +669,109 @@ class CallStage:
             and self._monotonic() < self._recovery_deadline
         )
 
-    def begin_termination(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> asyncio.Task:
-        """登记唯一完整终止任务；调用者可继续处理其他交互。"""
+    def _request_call_end(self, reason: CallEndReason) -> None:
         if self._termination_reason is None:
             self._termination_reason = reason
-            self._time_limit_changed.set()
-        if self._termination is None:
-            if self._own_termination is not None:
-                self._termination = self._own_termination(lambda: self._terminate_owned(self._termination_reason))
-            else:
-                self._termination = asyncio.create_task(
-                    self._terminate_owned(self._termination_reason), name=f"call-terminate-{self.call_id}"
-                )
-                self._termination.add_done_callback(self._observe_task)
-        return self._termination
+        generic = {
+            CallEndReason.USER_HANGUP: StageEndReason.USER_REQUESTED,
+            CallEndReason.DECLINED: StageEndReason.AGENT_REQUESTED,
+            CallEndReason.AGENT_HANGUP: StageEndReason.AGENT_REQUESTED,
+            CallEndReason.RECOVERY_TIMEOUT: StageEndReason.IDLE_TIMEOUT,
+            CallEndReason.TIME_LIMIT: StageEndReason.TIME_LIMIT,
+            CallEndReason.SETUP_TIMEOUT: StageEndReason.INITIALIZATION_FAILED,
+        }.get(reason, StageEndReason.SYSTEM_FAILURE)
+        if reason is CallEndReason.PROVIDER_FAILED and not self._lifecycle.snapshot.has_connected:
+            generic = StageEndReason.INITIALIZATION_FAILED
+        self.begin_termination(generic)
 
-    async def terminate(self, reason: CallEndReason = CallEndReason.USER_HANGUP) -> CallFinalSnapshot | None:
-        """等待实时停止、全部收尾和 Context 关闭；取消等待者不取消实际操作。"""
-        return await asyncio.shield(self.begin_termination(reason))
+    async def _terminate_call(self, reason):
+        self._request_call_end(reason)
+        return await asyncio.shield(self._lifetime.termination)
 
-    async def wait_realtime_stopped(self) -> CallFinalSnapshot | None:
-        """等待终态输出处理和实时资源释放，不等待认知结算。"""
-        await self._realtime_ended.wait()
-        return self._final
-
-    async def _terminate_owned(self, reason: CallEndReason) -> CallFinalSnapshot | None:
-        try:
-            initialization = self._initialization
-            if (
-                initialization is not None
-                and initialization is not asyncio.current_task()
-                and not initialization.done()
-            ):
-                initialization.cancel()
-                await asyncio.gather(initialization, return_exceptions=True)
-            async with self._lifecycle_lock:
-                return await self._terminate_locked(reason)
-        except BaseException:
-            # A ledger transition can fail before _finish takes ownership of
-            # cleanup. Never report completion with live resources or a lease.
-            if not self._closed.is_set():
-                await complete_owned(self._cleanup())
-            raise
-        finally:
-            self._realtime_ended.set()
-            self._closed.set()
-
-    async def _terminate_locked(self, reason: CallEndReason) -> CallFinalSnapshot | None:
-        if self._final is not None:
-            return self._final
-        if self.state in {CallState.ENDED, CallState.FAILED}:
-            return self._final
-        self._interrupt()
-        if self.state is CallState.RINGING and reason is CallEndReason.DECLINED:
-            await self._transition_or_close(
-                CallState.DECLINED,
-                outcome=CallOutcome.DECLINED,
-                end_reason=reason,
-            )
-            return await self._finish(CallOutcome.DECLINED, reason)
-        if self.state is not CallState.ENDING and self.state is not CallState.DECLINED:
-            await self._transition_or_close(CallState.ENDING)
-        outcome = (
-            CallOutcome.CONNECTED if self._lifecycle.snapshot.has_connected else CallOutcome.CANCELLED_BEFORE_ANSWER
-        )
-        return await self._finish(outcome, reason)
-
-    async def wait_closed(self) -> CallFinalSnapshot | None:
-        await self._closed.wait()
-        return self._final
-
-    async def close(self) -> CallFinalSnapshot | None:
-        """Idempotently release a call whose owner is going away."""
-        return await self.terminate(CallEndReason.SYSTEM_FAILURE)
-
-    async def abort_failed_start(self) -> None:
-        """终止未交付的建立操作，持久化失败并释放初始化资源。"""
-        initialization = self._initialization
-        if initialization is not None and initialization is not asyncio.current_task() and not initialization.done():
-            initialization.cancel()
-            await asyncio.gather(initialization, return_exceptions=True)
-        if self._closed.is_set():
+    def begin_termination(self, reason: StageEndReason) -> None:
+        if not isinstance(reason, StageEndReason):
+            raise TypeError("reason must be StageEndReason")
+        if self._lifetime.termination is not None:
             return
-        await self._fail_setup(CallEndReason.SETUP_TIMEOUT if self._setup_expired() else CallEndReason.SYSTEM_FAILURE)
+        if self._termination_reason is None:
+            self._termination_reason = {
+                StageEndReason.USER_REQUESTED: CallEndReason.USER_HANGUP,
+                StageEndReason.AGENT_REQUESTED: CallEndReason.DECLINED,
+                StageEndReason.IDLE_TIMEOUT: CallEndReason.RECOVERY_TIMEOUT,
+                StageEndReason.TIME_LIMIT: CallEndReason.TIME_LIMIT,
+            }.get(reason, CallEndReason.SYSTEM_FAILURE)
+        self._time_limit_changed.set()
+        # 同步关闭输入与输出许可；终态和持久化不依赖挂断输入锁。
+        self._interrupt()
+        failed = not self._lifecycle.snapshot.has_connected and self._termination_reason in {
+            CallEndReason.SYSTEM_FAILURE,
+            CallEndReason.SETUP_TIMEOUT,
+            CallEndReason.PROVIDER_FAILED,
+        }
+        outcome = (
+            None
+            if failed
+            else (
+                CallOutcome.CONNECTED
+                if self._lifecycle.snapshot.has_connected
+                else (
+                    CallOutcome.DECLINED
+                    if self._termination_reason is CallEndReason.DECLINED
+                    else CallOutcome.CANCELLED_BEFORE_ANSWER
+                )
+            )
+        )
+        self._terminal = CallTerminated(
+            self.call_id,
+            self.client_request_id,
+            "FAILED" if failed else "ENDED",
+            outcome,
+            self._termination_reason,
+            self._active_duration_ms(self._now()),
+            self._now(),
+        )
+        self._lifetime.begin(reason, self._terminate_owned)
+
+    async def terminate(self, reason: StageEndReason) -> StageTerminationResult:
+        self.begin_termination(reason)
+        return await asyncio.shield(self._lifetime.termination)
+
+    async def _terminate_owned(self) -> StageTerminationResult:
+        error = None
+        # _interrupt 已阻断旧输出；先交付 playback.stop，再发布唯一业务终态。
+        stops = [t for t in self._tasks if t.get_name() == "call-playback-stop" and not t.done()]
+        if stops:
+            await asyncio.gather(*stops, return_exceptions=True)
+        self._lifetime.interaction_ended = True
+        await self._send_terminal_best_effort(self._terminal)
+        try:
+            await self._lifetime.stop_initialization()
+            async with self._lifecycle_lock:
+                if self._terminal.kind == "FAILED":
+                    await self._transition(CallState.FAILED, end_reason=self._terminal.end_reason, publish=False)
+                else:
+                    if self._terminal.outcome is CallOutcome.DECLINED:
+                        await self._transition(
+                            CallState.DECLINED,
+                            outcome=CallOutcome.DECLINED,
+                            end_reason=self._terminal.end_reason,
+                            publish=False,
+                        )
+                    else:
+                        await self._transition(CallState.ENDING, publish=False)
+                    await self._finish(self._terminal.outcome, self._terminal.end_reason)
+        except Exception as failure:
+            get_logger(__name__).exception("Call finalization failed call=%s", self.call_id)
+            error = type(failure).__name__
+        finally:
+            await complete_owned(self._cleanup())
+        return StageTerminationResult(
+            interaction_id=self.interaction_id,
+            reason=self._lifetime.reason,
+            finalization_error=error or self._finalization_error,
+            cleanup_error=type(self._resource_error).__name__ if self._resource_error else None,
+            resources_released=self._resource_error is None,
+        )
 
     async def _consume_events(self) -> None:
         assert self._provider is not None
@@ -746,7 +780,7 @@ class CallStage:
                 return
             observed_at = self._monotonic()
             observed_at_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
-            if self._termination is not None:
+            if self._lifetime.termination is not None:
                 continue
             observed_disconnected = self.state is CallState.RECONNECTING
             if isinstance(event, SpeechStarted):
@@ -788,7 +822,7 @@ class CallStage:
                 "error_code": "PROVIDER_EVENT_FAILED",
             },
         )
-        await self.terminate(CallEndReason.PROVIDER_FAILED)
+        await self._terminate_call(CallEndReason.PROVIDER_FAILED)
 
     def _release_user_speaking(self, item_id: str | None, *, invalid: bool = False) -> None:
         """Release only the provider turn that currently owns speaking state."""
@@ -816,7 +850,7 @@ class CallStage:
         started_at_timestamp: str | None = None,
         first_audio_disqualified: bool = False,
     ) -> None:
-        if self._termination is not None or self.state not in {CallState.ACTIVE, CallState.RECONNECTING}:
+        if self._lifetime.termination is not None or self.state not in {CallState.ACTIVE, CallState.RECONNECTING}:
             return
         if event.item_id is not None:
             if event.item_id in self._inputs.completed_items:
@@ -853,7 +887,7 @@ class CallStage:
                 await operation
             except Exception as error:
                 self._fact_error = self._fact_error or error
-                self.begin_termination(CallEndReason.SYSTEM_FAILURE)
+                self._request_call_end(CallEndReason.SYSTEM_FAILURE)
                 raise
             finally:
                 self._schedule_output()
@@ -874,7 +908,7 @@ class CallStage:
         sink = _EndingPlanSink()
         report = await self._agent.handle_stimulus(request, sink, context=self._context)
         if report.request_status is not d.HandlingRequestStatus.COMPLETED:
-            self.begin_termination(CallEndReason.SYSTEM_FAILURE)
+            self._request_call_end(CallEndReason.SYSTEM_FAILURE)
             raise RuntimeError("call fact could not be accepted")
         return tuple(sink.plans)
 
@@ -883,7 +917,7 @@ class CallStage:
         self._inputs.ready.add(stimulus.turn_seq)
 
     def _schedule_output(self) -> None:
-        if self._termination is not None:
+        if self._lifetime.termination is not None:
             return
         if self._output_schedule is None or self._output_schedule.done():
             self._output_schedule = self._track(asyncio.create_task(self._try_output(), name="call-output-schedule"))
@@ -897,7 +931,7 @@ class CallStage:
 
     def _output_available(self) -> bool:
         return not (
-            self._termination is not None
+            self._lifetime.termination is not None
             or self.state is not CallState.ACTIVE
             or self._pending_end_reason is not None
             or self._user_speaking
@@ -917,7 +951,7 @@ class CallStage:
         # One no-await selection step reserves warning/reply before spawning work.
         await asyncio.sleep(0)
         if self.state is CallState.ACTIVE and self._deadline_reached():
-            self.begin_termination(CallEndReason.TIME_LIMIT)
+            self._request_call_end(CallEndReason.TIME_LIMIT)
             return
         if not self._output_available() or self._inputs.attempt is not None:
             return
@@ -961,7 +995,7 @@ class CallStage:
         attempt: ReplyAttempt | None = None,
         request_id: str | None = None,
     ) -> None:
-        if self.state in {
+        if self.termination_requested or self.state in {
             CallState.ENDING,
             CallState.ENDED,
             CallState.FAILED,
@@ -1125,7 +1159,7 @@ class CallStage:
         self._reply_failures += 1
         if self._reply_failures >= 2:
             task = self._track(
-                asyncio.create_task(self.terminate(CallEndReason.SYSTEM_FAILURE), name="call-reply-failed")
+                asyncio.create_task(self._terminate_call(CallEndReason.SYSTEM_FAILURE), name="call-reply-failed")
             )
             task.add_done_callback(self._observe_task)
 
@@ -1202,16 +1236,18 @@ class CallStage:
         return CallMaintenanceSnapshot(self._record.call_id, tuple(turns))
 
     async def _apply_answer(self, action: d.AnswerCall) -> None:
-        if action.call_id != self._record.call_id or self.state is not CallState.RINGING:
+        if self.termination_requested or action.call_id != self._record.call_id or self.state is not CallState.RINGING:
             return
         if action.decision.value == "decline":
-            await self.terminate(CallEndReason.DECLINED)
+            await self._terminate_call(CallEndReason.DECLINED)
             return
         if not self._connection_available:
             self._pending_answer = action
             return
         connected_at = self._now()
         await self._transition_or_close(CallState.ACTIVE, ledger_facts={"connected_at": connected_at})
+        if self.termination_requested:
+            return
         self._connected_monotonic = self._monotonic()
         self._time_limit_task = self._track(asyncio.create_task(self._run_time_limit(), name="call-time-limit"))
         if not self._started:
@@ -1231,17 +1267,34 @@ class CallStage:
                 self._pcm.task_done()
                 self._schedule_output()
 
-    async def expire_retention(self, deadline: float) -> None:
-        """应用 Manager 的离线到期通知，重新校验期限避免旧计时终止新连接。"""
-        should_terminate = False
-        async with self._lifecycle_lock:
-            should_terminate = (
-                self.state is CallState.RECONNECTING
-                and self._recovery_deadline == deadline
-                and self._monotonic() >= deadline
-            )
-        if should_terminate:
-            await self.terminate(CallEndReason.RECOVERY_TIMEOUT)
+    def _report_retention(self, deadline):
+        if self._retention_changed is not None:
+            self._retention_changed(self, deadline, self._connection_generation)
+
+    async def connection_changed(self, available: bool, generation: int) -> bool:
+        if self.termination_requested or generation < self._connection_generation:
+            return False
+        if not available and generation != self._connection_generation:
+            return False
+        if available and not self.can_attach():
+            return False
+        self._connection_generation = generation
+        if available:
+            self._connection_available = True
+            if self.state is CallState.ACTIVE:
+                return True
+            return await self.reconnect()
+        await self.set_connection_available(False)
+        return True
+
+    async def expire_retention(self, deadline: float, generation: int) -> None:
+        if (
+            generation == self._connection_generation
+            and self.state is CallState.RECONNECTING
+            and self._recovery_deadline == deadline
+            and self._monotonic() >= deadline
+        ):
+            self._request_call_end(CallEndReason.RECOVERY_TIMEOUT)
 
     def _refresh_silence_task(self) -> None:
         self._cancel_task(self._silence_task)
@@ -1270,7 +1323,7 @@ class CallStage:
             self._schedule_output()
         await self._wait_until_monotonic(deadline)
         if await self._await_time_limit_active():
-            self.begin_termination(CallEndReason.TIME_LIMIT)
+            self._request_call_end(CallEndReason.TIME_LIMIT)
 
     async def _await_time_limit_active(self) -> bool:
         # Preserve the original three-second recovery opportunity. Successful
@@ -1303,6 +1356,8 @@ class CallStage:
         publish: bool = True,
     ) -> None:
         async with self._transition_lock:
+            if self.termination_requested and state in {CallState.RINGING, CallState.ACTIVE, CallState.RECONNECTING}:
+                return
             lifecycle = CallLifecycle()
             lifecycle._snapshot = self._lifecycle.snapshot
             snapshot = lifecycle.transition(state, outcome=outcome, end_reason=end_reason)
@@ -1319,11 +1374,16 @@ class CallStage:
             if state is CallState.ENDED:
                 changes["ended_at"] = wall_now
             updated = self._record.with_update(**changes)
+            expected_state = self._record.state
+            # 本进程先提交交互事实，持久化失败单独报告；挂断不会与在途 ACTIVE 得出矛盾终态。
+            self._lifecycle._snapshot = snapshot
+            self._playback.set_call_state(snapshot.state)
+            self._record = updated
             changed = await complete_owned(
                 asyncio.to_thread(
                     self._repository.update_if_state,
                     self._record.call_id,
-                    expected_state=self._record.state,
+                    expected_state=expected_state,
                     record=updated,
                 )
             )
@@ -1332,9 +1392,6 @@ class CallStage:
             if persisted is None or self._record_identity(persisted) != self._record_identity(self._record):
                 raise RuntimeError("call ledger identity changed during CAS failure")
             raise RuntimeError("call ledger CAS failed")
-        self._record = updated
-        self._lifecycle._snapshot = snapshot
-        self._playback.set_call_state(snapshot.state)
         self._record_metric(
             CallMetricName.STATE,
             duration_ms=0,
@@ -1375,18 +1432,22 @@ class CallStage:
             except Exception:
                 # The accepted input ledger still supplies ending facts. Report
                 # the write failure after settlement instead of skipping it.
-                get_logger(__name__).warning("Call fact write failed before ending call={}", self.call_id)
+                get_logger(__name__).warning("Call fact write failed before ending call=%s", self.call_id)
             # Admission is already closed (ENDING/DECLINED). Drain any owned
             # maintenance write before freezing the final progress boundary.
             if self._realize_task is not None and self._realize_task is not asyncio.current_task():
                 await asyncio.gather(self._realize_task, return_exceptions=True)
-            ended = self._now()
-            duration = self._active_duration_ms(ended)
+            ended = self._terminal.ended_at
+            duration = self._terminal.active_duration_ms
             terminal_facts = {"ended_at": ended, "active_duration_ms": duration}
             if self.state is CallState.DECLINED:
-                await self._transition(CallState.ENDED, outcome=outcome, end_reason=reason, ledger_facts=terminal_facts)
+                await self._transition(
+                    CallState.ENDED, outcome=outcome, end_reason=reason, ledger_facts=terminal_facts, publish=False
+                )
             elif self.state is CallState.ENDING:
-                await self._transition(CallState.ENDED, outcome=outcome, end_reason=reason, ledger_facts=terminal_facts)
+                await self._transition(
+                    CallState.ENDED, outcome=outcome, end_reason=reason, ledger_facts=terminal_facts, publish=False
+                )
             terminal = CallTerminalFacts(self._record.call_id, outcome, reason, duration, ended)
             completed = tuple(self._final_turn(seq, turn) for seq, turn in sorted(self._turns.items()))
             persisted = await complete_owned(asyncio.to_thread(self._repository.find_by_id, self._record.call_id))
@@ -1397,23 +1458,16 @@ class CallStage:
         except BaseException:
             await complete_owned(self._cleanup())
             raise
-        cleanup_error = await complete_owned(self._cleanup(release_ownership=False, close_context=False))
+        cleanup_error = await complete_owned(self._cleanup(close_context=False))
         try:
-            await self._send_terminal_best_effort(self._final)
-            self._realtime_ended.set()
-            result = await self._complete_ending(self._final)
+            result = await self._complete_ending(self._final) if self._context is not None else None
             if self._save_history is not None:
                 await complete_owned(self._save_history(self._final, result=result))
             if cleanup_error is not None:
                 raise cleanup_error
         finally:
-            try:
-                if self._context is not None:
-                    await complete_owned(self._context.close())
-            finally:
-                self._context = None
-                self._release_call_ownership()
-                self._closed.set()
+            resource_error = await self._close_resources()
+            self._resource_error = self._resource_error or resource_error
         return self._final
 
     async def _complete_ending(self, snapshot) -> CallEndingResult | None:
@@ -1460,6 +1514,7 @@ class CallStage:
                 raise RuntimeError("FinalizeCall returned no result")
             return result
         except Exception:
+            self._finalization_error = "call ending maintenance failed"
             get_logger(__name__).exception("CallEnding failed call=%s", self.call_id)
             if snapshot.terminal.outcome is not CallOutcome.CONNECTED:
                 return None
@@ -1473,18 +1528,20 @@ class CallStage:
             return CallEndingResult(summary, source, False, progress)
 
     async def _emit(self, output: CallStageOutput) -> None:
+        if self.termination_requested and not isinstance(output, (CallTerminated, CallPlaybackStop)):
+            return
         await self._output_sink(self.call_id, output)
 
     @property
     def is_finalizing(self) -> bool:
         """实时退出已开始，不能接受新的交互接入。"""
-        return self.state in {CallState.ENDING, CallState.ENDED, CallState.DECLINED}
+        return self.termination_requested
 
     def can_attach(self) -> bool:
         """检查能否申请连接；实际接入仍须重验恢复期限和连接状态。"""
         return not self.termination_requested and (self.state is CallState.ACTIVE or self.can_reconnect())
 
-    async def _send_terminal_best_effort(self, snapshot: CallFinalSnapshot) -> None:
+    async def _send_terminal_best_effort(self, snapshot: CallTerminated) -> None:
         """Bound terminal delivery after realtime cleanup, before cognition.
 
         Cancellation cannot retract bytes already written by a transport, so the
@@ -1497,26 +1554,15 @@ class CallStage:
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        except Exception:
+        except Exception as error:
+            get_logger(__name__).warning(
+                "Call terminal delivery failed call=%s type=%s", self.call_id, type(error).__name__
+            )
             await asyncio.gather(task, return_exceptions=True)
         except asyncio.CancelledError:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             raise
-
-    async def _fail_setup(self, reason: CallEndReason) -> None:
-        """Persist a non-recordable setup failure and release all runtime resources."""
-        self._interrupt()
-        await self._transition(CallState.FAILED, end_reason=reason, publish=False)
-        cleanup_error = await self._cleanup()
-        try:
-            await self._emit(CallSetupFailed(reason))
-        except BaseException:
-            pass
-        finally:
-            self._realtime_ended.set()
-        if cleanup_error is not None:
-            raise cleanup_error
 
     def _interrupt(self) -> None:
         self._record_metric(
@@ -1591,9 +1637,9 @@ class CallStage:
         if self._fact_error is not None:
             raise self._fact_error
 
-    async def _cleanup(self, *, release_ownership: bool = True, close_context: bool = True) -> BaseException | None:
+    async def _cleanup(self, *, close_context: bool = True) -> BaseException | None:
         if self._retention_changed is not None:
-            self._retention_changed(None)
+            self._report_retention(None)
         self._plans.clear()
         current = asyncio.current_task()
         pending = tuple(task for task in self._tasks if task is not current and not task.done())
@@ -1607,6 +1653,7 @@ class CallStage:
         except BaseException as error:
             cleanup_error = error
         resource_error = await self._close_resources(close_context=close_context)
+        self._resource_error = self._resource_error or resource_error
         cleanup_error = cleanup_error or resource_error
         while not self._pcm.empty():
             try:
@@ -1624,18 +1671,7 @@ class CallStage:
         self._fact_tasks.clear()
         self._fact_tail = None
         self._fact_error = None
-        if release_ownership:
-            try:
-                self._release_call_ownership()
-            except BaseException as error:
-                cleanup_error = cleanup_error or error
-        if close_context:
-            self._closed.set()
         return cleanup_error
-
-    def _release_call_ownership(self) -> None:
-        if self._release_ownership is not None and not self._ownership_released:
-            self._ownership_released = self._release_ownership(self._ownership)
 
     async def _close_resources(self, *, close_context: bool = True) -> BaseException | None:
         cleanup_error: BaseException | None = None
@@ -1688,6 +1724,8 @@ class CallStage:
         }
 
     def _require_setup_time(self) -> None:
+        if self.termination_requested:
+            raise asyncio.CancelledError
         if self._setup_expired():
             raise TimeoutError("call setup deadline elapsed")
 
@@ -1707,13 +1745,19 @@ class CallStage:
             return await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
         except (asyncio.CancelledError, asyncio.TimeoutError) as error:
             task.cancel()
-            result = await asyncio.gather(task, return_exceptions=True)
-            value = result[0]
-            if cleanup is not None and not isinstance(value, BaseException):
-                await cleanup(value)
+            await complete_owned(self._dispose_late_setup(task, cleanup))
             if isinstance(error, asyncio.TimeoutError):
                 raise TimeoutError("call setup deadline elapsed") from None
             raise
+
+    async def _dispose_late_setup(self, task, cleanup):
+        value = (await asyncio.gather(task, return_exceptions=True))[0]
+        if cleanup is not None and not isinstance(value, BaseException):
+            try:
+                await cleanup(value)
+            except Exception as failure:
+                self._resource_error = self._resource_error or failure
+                get_logger(__name__).exception("Call late resource cleanup failed call=%s", self.call_id)
 
     def _setup_expired(self) -> bool:
         return self._monotonic() >= self._ownership.setup_deadline
@@ -1800,7 +1844,7 @@ class CallStage:
 
     async def _abort_transport(self) -> None:
         try:
-            await self.terminate(CallEndReason.SYSTEM_FAILURE)
+            await self._terminate_call(CallEndReason.SYSTEM_FAILURE)
         finally:
             self._aborting_transport = False
 
@@ -1831,7 +1875,7 @@ class CallStage:
             return
         reason = self._pending_end_reason
         self._pending_end_reason = None
-        task = self._track(asyncio.create_task(self.terminate(reason), name="call-agent-end"))
+        task = self._track(asyncio.create_task(self._terminate_call(reason), name="call-agent-end"))
         task.add_done_callback(self._observe_task)
 
     def _settle_response_if_complete(self, response_id: str) -> None:
@@ -1880,7 +1924,7 @@ class CallStage:
             self._reset_failures_after_playback(response)
         self._settle_warning()
         self._settle_attempt()
-        if self._termination is None:
+        if self._lifetime.termination is None:
             for plan in plans:
                 self._enqueue_plan(plan, d.CancellationToken(), None)
         self._refresh_silence_task()

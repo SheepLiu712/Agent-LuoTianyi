@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 import src.world.get_new_songs.daily_new_song_fetcher as fetcher_module
-from src.agent.skills.knowledge.song_acceptance import SongAcceptanceStatus, SongKnowledgeAcceptanceSkill
+from src.agent.skills.knowledge.song_acceptance import SongAcceptanceStatus, SongKnowledgeStore
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.persistence import Song, get_song_session
 from src.utils.helpers import load_config
@@ -121,7 +121,7 @@ async def test_vcpedia_run_once_fetches_live_songs_and_writes_result(monkeypatch
 
     # World dispatches a fact; the Agent-owned acceptance skill persists it.
     fact = submitted_facts[0]
-    skill = SongKnowledgeAcceptanceSkill({**task_config, "knowledge_dir": str(knowledge_dir)})
+    skill = SongKnowledgeStore({**task_config, "knowledge_dir": str(knowledge_dir)})
     accepted = await skill.accept(
         source_ref=fact.source_ref,
         external_song_id=fact.external_song_id,

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from support.model_service import make_call_summary
 
 import src.domain.agent as d
 from src.agent.context import (
@@ -15,11 +16,11 @@ from src.agent.context import (
 )
 from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.skills.cognitive.call_settlement import (
-    CallMaintenanceSkill,
-    CallSummarySkill,
-    _maintenance_digest,
+    CallSummaryMaterial,
+    CallSummaryStatus,
     render_call_turns,
 )
+from src.agent.skills.cognitive_maintenance._call import _CallMaintenance, _maintenance_digest
 from src.agent.skills.contracts import SkillInvocation
 from src.domain.call import (
     CallEndReason,
@@ -46,8 +47,10 @@ def _invocation():
 
 @pytest.mark.asyncio
 async def test_call_summary_empty_retry_fallback_and_length_limit():
-    empty = await CallSummarySkill({"luotianyi": SimpleNamespace()}).summarize(_invocation(), _snapshot())
-    assert empty is None
+    empty = await make_call_summary({"luotianyi": SimpleNamespace()}).generate(
+        _invocation(), material=CallSummaryMaterial(ConversationSnapshot(), (), 0)
+    )
+    assert empty.status is CallSummaryStatus.EMPTY
 
     class Model:
         def __init__(self):
@@ -59,13 +62,16 @@ async def test_call_summary_empty_retry_fallback_and_length_limit():
 
     model = Model()
     snapshot = _snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),))
-    assert await CallSummarySkill({"luotianyi": model}).summarize(_invocation(), snapshot) is None
+    material = CallSummaryMaterial(ConversationSnapshot(), snapshot.completed_turns, 0)
+    result = await make_call_summary({"luotianyi": model}).generate(_invocation(), material=material)
+    assert result.status is CallSummaryStatus.FAILED
     assert model.calls == 1
-    assert await CallSummarySkill({}).summarize(_invocation(), snapshot) is None
+    result = await make_call_summary({}).generate(_invocation(), material=material)
+    assert result.status is CallSummaryStatus.FAILED
 
 
 @pytest.mark.asyncio
-async def test_call_summary_combines_working_prefix_and_tail_updates_same_context_without_seed():
+async def test_call_summary_combines_working_prefix_and_tail_without_mutating_context_or_seed():
     def entry(entry_id, text):
         return ConversationEntry(entry_id, datetime(2026, 1, 1), "user", TextContent(text))
 
@@ -76,7 +82,6 @@ async def test_call_summary_combines_working_prefix_and_tail_updates_same_contex
     )
     await conversation.append((entry("call-turn-2-user", "uncompressed call tail"),))
     conversation._store.update_working_summary(ConversationSummary("maintained call prefix"))
-    context = SimpleNamespace(conversation=conversation)
 
     class Model:
         def __init__(self):
@@ -87,24 +92,34 @@ async def test_call_summary_combines_working_prefix_and_tail_updates_same_contex
             return "updated complete call summary"
 
     model = Model()
-    result = await CallSummarySkill({"luotianyi": model}).summarize(
+    result = await make_call_summary({"luotianyi": model}).generate(
         _invocation(),
-        _snapshot(turns=(CallFinalTurn(2, "uncompressed call tail", CallReplyStatus.NOT_STARTED, None),)),
-        context=context,
+        material=CallSummaryMaterial(
+            conversation.read_working(),
+            (
+                CallFinalTurn(1, "already compressed fact", CallReplyStatus.COMPLETED, "compressed reply"),
+                CallFinalTurn(2, "uncompressed call tail", CallReplyStatus.NOT_STARTED, None),
+                CallFinalTurn(3, "missing accepted fact", CallReplyStatus.INTERRUPTED, "unplayed draft"),
+            ),
+            1,
+        ),
     )
 
-    assert result == "updated complete call summary"
+    assert result.status is CallSummaryStatus.GENERATED
+    assert result.summary == "updated complete call summary"
     assert model.inputs == [
         {
             "completed_turns": (
                 "本次通话已有摘要：maintained call prefix",
                 "user：uncompressed call tail",
+                "用户：missing accepted fact",
             )
         }
     ]
     assert "old seed" not in repr(model.inputs)
     working = conversation.read_working()
-    assert working.summary.text == result
+    assert working.summary.text == "maintained call prefix"
+    assert conversation.read().summary.text == "old seed summary"
     assert tuple(item.entry_id for item in working.entries) == ("call-turn-2-user",)
 
 
@@ -164,7 +179,7 @@ async def test_call_maintenance_without_repository_has_no_cross_call_retry_cache
                 raise RuntimeError("partial write")
 
     memory = Memory()
-    skill = CallMaintenanceSkill({"luotianyi": memory})
+    skill = _CallMaintenance({"luotianyi": memory})
     snapshot = _snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),))
 
     with pytest.raises(RuntimeError, match="partial write"):
@@ -176,3 +191,31 @@ async def test_call_maintenance_without_repository_has_no_cross_call_retry_cache
     assert (turn_seq, profile) == (1, "喜欢音乐的用户")
     assert memory.extracts == 2
     assert memory.writes == 2
+
+
+@pytest.mark.asyncio
+async def test_summary_deduplicates_merged_confirmed_replies_and_formal_entries():
+    class Model:
+        async def generate_response(self, **kwargs):
+            self.lines = kwargs["completed_turns"]
+            return "概要"
+
+    model = Model()
+    entries = (
+        ConversationEntry("call-turn-1-user", datetime(2026, 1, 1), "user", TextContent("问题一")),
+        ConversationEntry("call-turn-2-agent-response", datetime(2026, 1, 1), "agent", TextContent("已确认合并回复")),
+    )
+    turns = (
+        CallFinalTurn(1, "问题一", CallReplyStatus.COMPLETED, "草稿", 2, "已确认合并回复"),
+        CallFinalTurn(2, "问题二", CallReplyStatus.COMPLETED, "草稿", 2, "已确认合并回复"),
+        CallFinalTurn(3, "问题三", CallReplyStatus.INTERRUPTED, "未播放回复"),
+    )
+    await make_call_summary({"luotianyi": model}).generate(
+        _invocation(), material=CallSummaryMaterial(ConversationSnapshot(entries=entries), turns, 0)
+    )
+    combined = "\n".join(model.lines)
+    assert combined.count("问题一") == 1
+    assert combined.count("问题二") == 1
+    assert combined.count("已确认合并回复") == 1
+    assert "草稿" not in combined
+    assert "未播放回复" not in combined

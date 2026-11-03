@@ -88,12 +88,12 @@ async def test_chat_ready_precedes_output_produced_while_binding():
     adapter.initialize(stages)
     completions = []
 
-    async def changed(state):
-        from src.domain.agent import ConnectionState
-
-        if state is ConnectionState.CONNECTED:
+    async def changed(available, generation):
+        stages.stage.connection_generation = generation
+        if available:
             completions.extend((adapter.output_sink.submit_output(output()), adapter.output_sink.submit_output(end())))
             await asyncio.sleep(0)
+        return True
 
     stages.stage.connection_changed = changed
     connection = await adapter.open(user_id="user", connection_id=object())
@@ -257,7 +257,7 @@ async def test_disconnected_call_reader_cannot_consume_new_attachment_replay():
 @pytest.mark.asyncio
 async def test_resume_includes_output_produced_during_business_admission(monkeypatch):
     from src.domain.call import CallState
-    from src.stage.call_stage import CallStateChanged
+    from src.stage.call.call_stage import CallStateChanged
 
     speech = BlockingSpeechFactory()
     stages, _ = manager(speech_factory=speech)
@@ -271,7 +271,6 @@ async def test_resume_includes_output_produced_during_business_admission(monkeyp
         adapter.complete_output(old, ack.delivery_id)
         await adapter.disconnect(old)
         original = stages.try_to_get_stage
-        session = adapter._sessions[call_id]
 
         async def admit_with_concurrent_output(**kwargs):
             result = await original(**kwargs)
@@ -372,3 +371,73 @@ async def test_chat_binding_has_one_stage_and_detach_preserves_control_responses
     finally:
         await adapter.close()
     assert binding.is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["reject", "exception"])
+async def test_failed_chat_binding_settles_outputs_without_ready_or_route(failure):
+    adapter = WebSocketAdapter()
+    stages = _Manager()
+    adapter.initialize(stages)
+    completions = []
+    candidates = []
+
+    async def changed(available, generation):
+        if not available:
+            return True
+        stages.stage.connection_generation = generation
+        candidates.append(adapter._routes[stages.stage.interaction_id])
+        completions.extend((adapter.output_sink.submit_output(output()), adapter.output_sink.submit_output(end())))
+        await asyncio.sleep(0)
+        if failure == "exception":
+            raise RuntimeError("connection admission failed")
+        return False
+
+    stages.stage.connection_changed = changed
+    try:
+        with pytest.raises((RuntimeError, ValueError)):
+            await asyncio.wait_for(adapter.open(user_id="user", connection_id=object()), 1)
+        results = await asyncio.wait_for(asyncio.gather(*completions, return_exceptions=True), 1)
+        assert all(isinstance(result, BaseException) for result in results)
+        assert candidates[0].is_closed and not candidates[0].accepting
+        assert not adapter._routes and not adapter._bindings
+        assert candidates[0] in stages.disconnected
+    finally:
+        await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_slow_chat_replacement_does_not_block_another_interaction():
+    adapter, old, stages = await _chat()
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = stages.stage.connection_changed
+
+    async def changed(available, generation):
+        if not available:
+            entered.set()
+            await release.wait()
+        return await original(available, generation)
+
+    async def get_stage(**kwargs):
+        if kwargs["user_id"] == "other":
+            return Endpoint("other-interaction", "other")
+        return stages.stage
+
+    stages.stage.connection_changed = changed
+    stages.try_to_get_stage = get_stage
+    replacing = asyncio.create_task(adapter.open(user_id="user", connection_id=object()))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        other = await asyncio.wait_for(adapter.open(user_id="other", connection_id=object()), 1)
+        ready = await adapter.next_output(other)
+        assert json.loads(ready.message)["type"] == "chat.ready"
+        adapter.complete_output(other, ready.delivery_id)
+        assert not replacing.done()
+        release.set()
+        new = await asyncio.wait_for(replacing, 1)
+        await adapter.disconnect(old)
+        assert adapter._bindings[new].accepting
+    finally:
+        release.set()
+        await asyncio.gather(replacing, return_exceptions=True)
+        await adapter.close()

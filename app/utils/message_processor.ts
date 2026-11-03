@@ -488,7 +488,9 @@ export class MessageProcessor {
       });
   }
 
-  async processLlmRequest(payload: Record<string, unknown>) {
+  async processLlmRequest(
+    payload: Record<string, unknown>, onDelta?: (text: string) => void | Promise<void>, signal?: AbortSignal,
+  ) {
     const requestId = String(payload.request_id || '');
     if (!requestId) {
       return null;
@@ -544,10 +546,15 @@ export class MessageProcessor {
         useJson,
         imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
       });
+      if (payload.stream === true) {
+        body.stream = true;
+        body.stream_options = { include_usage: true };
+      }
       const result = await callLlmProvider({
         url: `${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`,
         apiKey: cfg.apiKey,
         body,
+        onDelta, signal,
       });
       const jsonError = validateJsonResponse(result.content, useJson);
       if (jsonError) {
@@ -562,6 +569,7 @@ export class MessageProcessor {
   async getLlmMode() {
     const cfg = await getLlmModulesConfig();
     return {
+      stream: true,
       types: Object.entries(cfg)
         .filter(([, entry]) => entry.enabled)
         .map(([key]) => key),

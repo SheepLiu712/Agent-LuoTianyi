@@ -1,5 +1,5 @@
-"""统一认知维护技能。"""
+"""统一认知维护技能及其请求、结果。"""
 
-from .skill import CognitiveMaintenanceSkill
+from .skill import CognitiveMaintenanceSkill, MaintenanceRequest, MaintenanceResult
 
-__all__ = ["CognitiveMaintenanceSkill"]
+__all__ = ["CognitiveMaintenanceSkill", "MaintenanceRequest", "MaintenanceResult"]

@@ -47,8 +47,8 @@ def test_recall_decision_enforces_mode_contract():
         CallRecallDecision(RecallMode.DIRECT, ("query",), AckStyle.NONE)
     with pytest.raises(ValueError):
         CallRecallDecision(RecallMode.RECALL, (), AckStyle.THINKING)
-    with pytest.raises(ValueError):
-        CallRecallDecision(RecallMode.RECALL, ("query",), AckStyle.NONE)
+    silent_recall = CallRecallDecision(RecallMode.RECALL, ("query",), AckStyle.NONE)
+    assert silent_recall.memory_queries == ("query",)
 
 
 def test_call_content_has_only_privacy_allowlisted_fields_and_separate_renderings():

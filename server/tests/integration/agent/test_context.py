@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from support.retrieval import stub_retrieval
 
 from src.agent.context import (
     ContextFactory,
@@ -24,6 +25,7 @@ from src.agent.context import (
     UserPreferences,
     UserProfile,
 )
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
 from src.infrastructure.persistence.database.services.conversation_service import ConversationService
 from src.infrastructure.persistence.database.services.user_store import UserStore
@@ -440,11 +442,12 @@ async def test_real_stage_owns_and_closes_loaded_context(database):
         output_sink=WebSocketAdapter(),
         context_factory=factory(database),
     )
+    await stage.start()
     context = stage.context
     assert context.identity.interaction_id == stage.interaction_id
     assert context.user.read().profile == UserProfile("画像")
-    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
-    assert result.error is None
+    result = await stage.terminate(StageEndReason.IDLE_TIMEOUT)
+    assert result.finalization_error is None and result.cleanup_error is None
     with pytest.raises(RuntimeError):
         context.user.read()
     assert database.get_user_description("u") == "画像"
@@ -465,10 +468,18 @@ async def test_same_user_call_windows_are_independent_and_close_preserves_chat(d
     a, b = calls
     local = ConversationEntry("c1", datetime(2026, 10, 10, 12, 1), "user", TextContent("private call"))
     await a.conversation.append((local,))
+    # 聊天种子只用于理解上下文，不能作为本次通话的压缩前缀。
+    with pytest.raises(ValueError, match="压缩依据与当前对话上下文不匹配"):
+        await a.conversation.compact(
+            ConversationCompaction(ConversationSummary(), ("e1",), ConversationSummary("invalid summary"))
+        )
+    assert a.conversation.read() == ConversationSnapshot(entries=(seed, local))
+    assert a.conversation.read_working() == ConversationSnapshot(entries=(local,))
     await a.conversation.compact(
-        ConversationCompaction(ConversationSummary(), ("e1",), ConversationSummary("local summary"))
+        ConversationCompaction(ConversationSummary(), ("c1",), ConversationSummary("local summary"))
     )
-    assert a.conversation.read().entries == (local,)
+    assert a.conversation.read() == ConversationSnapshot(ConversationSummary("local summary"), (seed,))
+    assert a.conversation.read_working() == ConversationSnapshot(ConversationSummary("local summary"), ())
     assert b.conversation.read() == ConversationSnapshot(entries=(seed,))
     await a.close()
     assert b.conversation.read() == ConversationSnapshot(entries=(seed,))
@@ -484,7 +495,6 @@ async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
     from types import SimpleNamespace
 
     from src.agent.context.memory_pool import CallMemory
-    from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill
 
     contexts = factory(database)
     first = await contexts.create("a", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
@@ -500,14 +510,16 @@ async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
             await release.wait()
             return SimpleNamespace(hits=(SimpleNamespace(rendered_text="late", memory_record_id="late"),))
 
-    skill = CallRecallDecisionSkill(memories={"luotianyi": Memory()})
-    recall = asyncio.create_task(
-        skill.recall_once(
+    skill = stub_retrieval({"luotianyi": Memory()})
+
+    async def retrieve():
+        result = await skill.search(
             SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),
-            memory_pool=pool,
-            queries=("query",),
+            query=SimpleNamespace(clues=("query",)),
         )
-    )
+        pool.remember_hits(result.hits)
+
+    recall = asyncio.create_task(retrieve())
     await entered.wait()
     await first.close()
     await first.close()
@@ -519,3 +531,175 @@ async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
     assert not pool._items
     assert second.call_memory.snapshot() == ()
     await second.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh_fails", [False, True])
+async def test_cancelled_call_restores_same_chat_with_committed_history(database, monkeypatch, caplog, refresh_fails):
+    """初始化挂断：先回复协议，迟到资源关闭后恢复原聊天及其最新历史。"""
+    import json
+
+    from support.call_session_repository import InMemoryCallSessionRepository
+    from support.chat_connection import StubChatConnection
+    from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+    from support.stage_manager import make_call_adapter, make_stage_manager
+
+    from src.adapter.websocket.chat import WebSocketAdapter
+    from src.domain.call import CallContent, CallOutcome
+    from src.domain.stage.lifecycle import StageEndReason, StageLifecycleState, StageStartAborted
+    from src.utils.logger import get_logger
+    from tests.integration.stage.test_call_stage import _eventually
+    from tests.integration.stage.test_chat_stage import Socket
+    from tests.integration.stage.test_proactive_due_dispatch import DueEvents, event
+    from tests.integration.websocket.test_call_websocket_adapter import start_message
+
+    class LateSpeech(FakeRealtimeSpeechSessionFactory):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.release = asyncio.Event(), asyncio.Event()
+            self.cancelled = asyncio.Event()
+
+        async def create(self, call_id):
+            self.entered.set()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                await self.release.wait()
+            return await super().create(call_id)
+
+    speech = LateSpeech()
+    chat_adapter = WebSocketAdapter()
+    contexts = factory(database)
+    agent, generation_calls = _reminder_agent()
+    due_events = DueEvents((event("after-cancel"),))
+    stages = make_stage_manager(
+        adapter=chat_adapter,
+        get_agent=lambda _: agent,
+        get_context_factory=lambda _: contexts,
+        call_sessions=InMemoryCallSessionRepository(),
+        conversation_service=database,
+        realtime_speech_factory=speech,
+        due_event_provider=due_events,
+    )
+    calls = make_call_adapter(manager=stages, enabled=True, supports_character=lambda _: True)
+    connection = StubChatConnection(Socket(), "u", "device")
+    chat = await chat_adapter._open(connection, "luotianyi")
+    original_context = chat.context
+    if refresh_fails:
+
+        async def fail_refresh():
+            raise OSError("conversation refresh unavailable")
+
+        monkeypatch.setattr(original_context.conversation, "refresh", fail_refresh)
+        monkeypatch.setattr(get_logger("src.stage.chat.chat_stage"), "propagate", True)
+    await stages.prepare_call_transition(connection, character_id="luotianyi", client_request_id="cancel")
+    handle = await calls.open(initial_message=start_message("cancel"), user_id="u", connection_id=object())
+    first = await calls.next_output(handle)
+    preparing = json.loads(first.message)
+    calls.complete_output(handle, first.delivery_id)
+    second = await calls.next_output(handle)
+    assert preparing["state"] == "preparing" and json.loads(second.message)["ack_seq"] == 1
+    calls.complete_output(handle, second.delivery_id)
+    call = stages._call_stages[preparing["call_id"]]
+    await asyncio.wait_for(speech.entered.wait(), 1)
+    original_context.conversation.read()
+    assert chat.input_suspended
+    try:
+        await asyncio.wait_for(
+            calls.receive(
+                handle,
+                json.dumps(
+                    {
+                        "protocol": "call.v1",
+                        "type": "call.hangup",
+                        "call_id": call.call_id,
+                        "seq": 2,
+                        "reason": "user_hangup",
+                    }
+                ),
+            ),
+            1,
+        )
+        received = []
+        while len(received) < 2:
+            delivery = await asyncio.wait_for(calls.next_output(handle), 1)
+            received.append(json.loads(delivery.message))
+            calls.complete_output(handle, delivery.delivery_id)
+        assert {item["type"] for item in received} == {"ack", "call.ended"}
+        await _eventually(lambda: not calls._sessions)
+        await asyncio.wait_for(speech.cancelled.wait(), 1)
+        assert chat.input_suspended and call.context is None
+        assert not await chat.dispatch_due_events(merge_all=True)
+        assert not generation_calls
+        speech.release.set()
+        result = await asyncio.wait_for(call.terminate(StageEndReason.USER_REQUESTED), 2)
+        assert result.resources_released
+        with pytest.raises(StageStartAborted):
+            await call.start()
+        if refresh_fails:
+            assert chat.lifecycle_state is StageLifecycleState.TERMINATED
+            assert not await chat.dispatch_due_events(merge_all=True)
+            assert not generation_calls
+            assert "Chat rollback refresh failed" in caplog.text
+            connection = StubChatConnection(Socket(), "u", "replacement")
+            resumed = await chat_adapter._open(connection, "luotianyi")
+            assert resumed is not chat
+        else:
+            resumed = chat
+            assert resumed.context is original_context and not resumed.input_suspended
+        contents = [entry.content for entry in resumed.context.conversation.read().entries]
+        records = [content for content in contents if isinstance(content, CallContent)]
+        assert len(records) == 1 and records[0].outcome is CallOutcome.CANCELLED_BEFORE_ANSWER
+        assert await resumed.dispatch_due_events(merge_all=True)
+        await _eventually(lambda: any(item["type"] == "agent_message" for item in connection.websocket.events))
+        assert generation_calls["extract"]["conversation_history"].count(records[0].text) == 1
+        assert generation_calls["replier"]["conversation_history"].count(records[0].text) == 1
+        assert all(provider.closed for provider in speech.sessions.values())
+        assert len(speech.sessions) == 1
+    finally:
+        speech.release.set()
+        await calls.close()
+        await stages.close()
+
+
+def _reminder_agent():
+    """真实提醒生成与交付链路，仅替换模型响应和语音输出。"""
+    import src.domain.agent as d
+    from src.agent import Agent
+    from src.agent.handlers.action.router import ActionRouter
+    from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+    from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+    from src.agent.handlers.stimulus.router import StimulusRouter
+    from src.agent.processing.output_drafts import MessageEndDraft, TextFinalDraft
+    from tests.integration.agent.test_topic_reply_pipeline import pipeline
+    from tests.support.call_stage_failure_harness import NoOutputActionHandler, action_result
+
+    class TextOutput:
+        async def realize(self, action, context, outputs):
+            await outputs.emit(TextFinalDraft(delivery=action.delivery, text=action.content))
+            await outputs.emit(
+                MessageEndDraft(delivery=action.delivery, status=d.MessageEndStatus.COMPLETED, error_code=None)
+            )
+            return action_result(action)
+
+    composition, _, calls = pipeline(attempts=(), queries=())
+    agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            [
+                (
+                    d.StimulusKind.PROACTIVE_PROMPT_DUE,
+                    FirstLoginHandler(prepared_names=(), prepared_speech=None, skills=composition),
+                ),
+                (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            ]
+        ),
+        action_router=ActionRouter(
+            [
+                (d.ActionKind.SAY, TextOutput()),
+                (d.ActionKind.COGNITIVE_MAINTENANCE, NoOutputActionHandler()),
+            ]
+        ),
+    )
+    return agent, calls

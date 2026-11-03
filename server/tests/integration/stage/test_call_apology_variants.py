@@ -7,7 +7,6 @@ from support.call_apology import Recall, Replies, _Plans, _request, _stimulus, c
 
 import src.domain.agent as d
 from src.agent.handlers.stimulus.call import CallReplyRequestedHandler, CallSilenceElapsedHandler, CallStartedHandler
-from src.agent.skills.cognitive.call_recall import SilenceDecision
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import CallAudioSemantic
 
@@ -35,10 +34,6 @@ async def test_failed_handler_randomly_selects_only_its_scene(tmp_path, monkeypa
     resources = variants(tmp_path)
     replies, recall = Replies(failing=True), Recall()
 
-    async def speak(*args, **kwargs):
-        return SilenceDecision.SPEAK
-
-    recall.decide_silence = speak
     now, call_id = datetime.now(timezone.utc), uuid4()
     handlers = {
         "opening": (

@@ -5,6 +5,7 @@ import time
 
 import pytest
 from support.call_apology import catalog
+from support.stage_lifecycle import finish_call, wait_call_finished
 
 import src.domain.agent as d
 from src.agent.handlers.action.router import ActionRouter
@@ -12,7 +13,7 @@ from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.call import CallTimeLimitWarningHandler
 from src.domain.call import CallEndReason, CallState
 from src.infrastructure.models.realtime_speech import SpeechStarted, SpeechStopped, TurnInvalid
-from src.stage._call_warning import WarningState
+from src.stage.call._call_warning import WarningState
 from tests.integration.stage import test_call_stage as base
 from tests.integration.stage.test_call_failure_policy import Speech
 from tests.integration.stage.test_call_pending_inputs import completed, finish_reply
@@ -74,13 +75,13 @@ async def test_real_timer_timeout_triggers_warning_and_deadline_without_external
         call_setup, tmp_path, config={"time_limit_seconds": 0.2, "time_limit_warning_seconds": warning_seconds}
     )
     try:
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 2)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 2)
         assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
         assert snapshot.terminal.active_duration_ms >= 200
         assert speech.calls[WARNING] == (1 if warning_seconds else 0)
         assert not stage.tasks
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -123,13 +124,13 @@ async def test_default_warning_waits_for_final_and_fact_then_precedes_batch_repl
         assert speech.calls[WARNING] == 1
         clock.advance(30)
         stage._time_limit_changed.set()
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
         assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
         assert snapshot.terminal.active_duration_ms == 1_800_000
         assert not stage.tasks
     finally:
         release.set()
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -164,7 +165,7 @@ async def test_each_interruption_requeues_warning_and_old_receipts_cannot_settle
         stage.playback_completed(*first)
         assert texts(stage).count(WARNING) == 1
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -197,7 +198,7 @@ async def test_accepted_completion_pending_fact_is_not_replayed_after_speech_sta
         assert texts(stage) == [WARNING]
     finally:
         release.set()
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -219,7 +220,7 @@ async def test_warning_does_not_interrupt_existing_reply_or_consume_its_pending_
         assert texts(stage) == ["用户说：“question”", "正式回答", WARNING]
         assert len(reply.requests) == 1
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -239,7 +240,7 @@ async def test_warning_keeps_same_attempt_during_reconnect(call_setup, tmp_path)
         await _eventually(lambda: stage._warning.state is WarningState.DELIVERED)
         assert texts(stage) == [WARNING]
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -262,11 +263,11 @@ async def test_deadline_cancels_blocked_tts_without_waiting_for_playback(call_se
         assert stage._warning.state is WarningState.IN_FLIGHT
         call_setup[-1].advance(30)
         stage._time_limit_changed.set()
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
         assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
         assert cancelled.is_set() and not stage.tasks
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -277,13 +278,13 @@ async def test_warning_can_be_disabled_without_disabling_deadline(call_setup, tm
     try:
         call_setup[-1].advance(10)
         stage._time_limit_changed.set()
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
         assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
         assert speech.calls == {}
         assert stage._warning.state is WarningState.NOT_DUE
         assert not stage.tasks
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -308,7 +309,7 @@ async def test_warning_due_offline_waits_for_resumed_speech_and_invalid_final(ca
         await _eventually(lambda: stage._warning.state is WarningState.DELIVERED)
         assert texts(stage) == [WARNING] and not stage._inputs.pending
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -335,11 +336,11 @@ async def test_warning_tts_retries_once_and_exhaustion_does_not_loop_or_count_as
         assert speech.calls[WARNING] == 2
         call_setup[-1].advance(30)
         stage._time_limit_changed.set()
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
         assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
         assert not stage.tasks
     finally:
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -366,22 +367,22 @@ async def test_deadline_drops_waiting_warning_and_owned_termination_drains_input
         call_setup[-1].advance(30)
         stage._time_limit_changed.set()
         await _eventually(lambda: stage.termination_requested)
-        waiter = asyncio.create_task(stage.terminate())
+        waiter = asyncio.create_task(finish_call(stage))
         await asyncio.sleep(0)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
-        assert not stage._termination.done()
+        assert not stage._lifetime.termination.done()
         assert speech.calls == {} and reply.requests == []
         release.set()
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
         assert captured == ["用户说：“accepted at deadline”"]
         assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
         assert snapshot.completed_turns[0].user_semantic == captured[0]
         assert not stage.tasks and stage.context is None
     finally:
         release.set()
-        await stage.terminate()
+        await finish_call(stage)
 
 
 @pytest.mark.asyncio
@@ -403,10 +404,10 @@ async def test_recovery_window_survives_deadline_without_late_warning(call_setup
             assert await stage.resume()
         else:
             clock.advance(1.5)
-            await stage.expire_retention(stage._recovery_deadline)
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 1)
+            await stage.expire_retention(stage._recovery_deadline, stage._connection_generation)
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
         assert snapshot.terminal.end_reason is (CallEndReason.TIME_LIMIT if resume else CallEndReason.RECOVERY_TIMEOUT)
         assert snapshot.terminal.active_duration_ms == (1_800_500 if resume else 1_799_000)
         assert speech.calls == {} and not stage.tasks
     finally:
-        await stage.terminate()
+        await finish_call(stage)

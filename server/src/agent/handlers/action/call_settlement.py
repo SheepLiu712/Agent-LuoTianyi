@@ -1,6 +1,9 @@
 """通过一次结束行动完成维护、概要生成和降级选择。"""
 
 import src.domain.agent as d
+from src.agent.context import ConversationSummary
+from src.agent.skills.cognitive.call_settlement import CallSummaryMaterial, CallSummaryStatus
+from src.agent.skills.cognitive_maintenance import MaintenanceRequest
 from src.agent.skills.invocation import execution_invocation
 from src.domain.call import CallEndingResult, CallSummarySource, fallback_call_summary
 from src.utils.logger import get_logger
@@ -23,12 +26,30 @@ class FinalizeCallHandler:
         invocation = execution_invocation(self._character_id, context, user_id=action.user_id)
         succeeded = True
         try:
-            await self._maintenance.maintain_ending(invocation, interaction, action.final_snapshot)
+            maintained = await self._maintenance.maintain(
+                invocation,
+                request=MaintenanceRequest(
+                    reason=d.MaintenanceReason.INTERACTION_ENDING,
+                    context=interaction,
+                    call_snapshot=action.final_snapshot,
+                ),
+            )
+            if maintained.status is d.MaintenanceStatus.CONFLICT:
+                raise RuntimeError("COGNITIVE_MAINTENANCE_CONFLICT")
         except Exception as error:
             succeeded = False
             get_logger(__name__).warning("Call maintenance failed type=%s", type(error).__name__)
-        summary = await self._summary.summarize(invocation, action.final_snapshot, context=interaction)
-        if summary is not None:
+        generated = await self._summary.generate(
+            invocation,
+            material=CallSummaryMaterial(
+                working=interaction.conversation.read_working(),
+                accepted_turns=action.final_snapshot.completed_turns,
+                summarized_turn_seq=action.final_snapshot.maintenance_turn_seq,
+            ),
+        )
+        if generated.status is CallSummaryStatus.GENERATED:
+            summary = generated.summary
+            await interaction.conversation.update_call_working_summary(ConversationSummary(summary))
             source = CallSummarySource.GENERATED
         else:
             summary, source = fallback_call_summary(interaction.conversation.read_working().summary.text)

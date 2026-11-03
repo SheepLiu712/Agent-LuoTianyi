@@ -7,18 +7,18 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from src.infrastructure.observability import ObservabilityService
 from src.application.admin import qq_music_credential_refresh as qq_refresh_module
-from src.web.admin.admin_interface import _collect_llm_api_key_names
 from src.application.admin.admin_shell import init_admin_shell, shutdown_admin_shell
 from src.application.admin.auth import AdminAuthError, AdminAuthService
-from src.infrastructure.config.store import ConfigStore
-from src.infrastructure.config.validation import RuntimeConfigValidator
-from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
 from src.application.admin.qq_music_credential_refresh import QQMusicCredentialRefreshService
 from src.application.admin.runtime_supervisor import RuntimeSupervisor
+from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.store import ConfigStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
+from src.infrastructure.observability import ObservabilityService
 from src.utils.helpers import apply_env_variables
+from src.web.admin.admin_interface import _collect_llm_api_key_names
 
 
 def minimal_config(tmp_path: Path) -> dict:
@@ -73,10 +73,28 @@ def minimal_config(tmp_path: Path) -> dict:
             "event_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
             "memory_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
         },
-        "chat_session_manager": {"conversation_service": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
         "infrastructure": {},
         "agent_runtime": {
             "skills": {
+                "jargon_recognition": {
+                    "song_entity_linker": {
+                        "songname_file": str(tmp_path / "song_name_keywords.txt"),
+                        "lyric_file": str(tmp_path / "song_lyric_keywords.txt"),
+                    }
+                },
+                "memory_write": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                "cognitive_maintenance": {
+                    "user_profile": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                    "conversation_compaction": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                },
+                "topic_extraction": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                "reply": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                "knowledge": {
+                    "song_database": {
+                        "db_folder": str(tmp_path),
+                        "db_file": "knowledge_db.db",
+                    }
+                },
                 "singing": {
                     "song_emotion_tagger": {
                         "llm": {"name": "main"},
@@ -95,7 +113,7 @@ def minimal_config(tmp_path: Path) -> dict:
                     }
                 },
                 "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
-                "diary": {"diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
+                "dynamic": {"diary_composer": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
             },
             "character_registry": {
                 "characters": {
@@ -104,27 +122,6 @@ def minimal_config(tmp_path: Path) -> dict:
                         "llm_tone_mapping_file": str(tmp_path / "tone.json"),
                     }
                 }
-            },
-            "agent": {
-                "preprocessing": {
-                    "song_entity_linker": {
-                        "songname_file": str(tmp_path / "song_name_keywords.txt"),
-                        "lyric_file": str(tmp_path / "song_lyric_keywords.txt"),
-                    }
-                },
-                "memory": {
-                    "memory_writer": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                    "user_profile": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                },
-                "topic_extractor": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                "main_chat": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                "date_detector": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                "song_knowledge": {
-                    "song_database": {
-                        "db_folder": str(tmp_path),
-                        "db_file": "knowledge_db.db",
-                    }
-                },
             },
         },
         "world": {
@@ -466,7 +463,7 @@ def test_access_log_filter_redacts_fallback_message():
 def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
     config = minimal_config(tmp_path)
     view = build_llm_config_view(config)
-    assert any(binding["path"] == "agent_runtime.agent.main_chat.llm_module" for binding in view["module_bindings"])
+    assert any(binding["path"] == "agent_runtime.skills.reply.llm_module" for binding in view["module_bindings"])
 
     payload = {
         "available_llms": {
@@ -484,23 +481,21 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
             {
                 **binding,
                 "interface_name": (
-                    "main2"
-                    if binding["path"] == "agent_runtime.agent.main_chat.llm_module"
-                    else binding["interface_name"]
+                    "main2" if binding["path"] == "agent_runtime.skills.reply.llm_module" else binding["interface_name"]
                 ),
                 "enable_thinking": binding["path"]
                 in {
-                    "agent_runtime.agent.main_chat.llm_module",
+                    "agent_runtime.skills.reply.llm_module",
                     "agent_runtime.skills.image_understanding.vlm_module",
                 },
                 "use_json": binding["path"]
                 in {
-                    "agent_runtime.agent.main_chat.llm_module",
+                    "agent_runtime.skills.reply.llm_module",
                     "agent_runtime.skills.image_understanding.vlm_module",
                 },
                 "params": (
                     {"temperature": 0.1}
-                    if binding["path"] == "agent_runtime.agent.main_chat.llm_module"
+                    if binding["path"] == "agent_runtime.skills.reply.llm_module"
                     else (
                         {"max_tokens": 512}
                         if binding["path"] == "agent_runtime.skills.image_understanding.vlm_module"
@@ -516,7 +511,7 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
 
     assert "main2" in next_config["llm_service"]["available_llms"]
     assert "default_params_text" not in next_config["llm_service"]["available_llms"]["main2"]
-    main_chat_llm = next_config["agent_runtime"]["agent"]["main_chat"]["llm_module"]["llm"]
+    main_chat_llm = next_config["agent_runtime"]["skills"]["reply"]["llm_module"]["llm"]
     assert main_chat_llm["name"] == "main2"
     assert main_chat_llm["enable_thinking"] is True
     assert main_chat_llm["use_json"] is True

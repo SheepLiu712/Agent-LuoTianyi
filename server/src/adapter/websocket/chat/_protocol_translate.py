@@ -108,7 +108,11 @@ def update_model_types(binding, raw_payload):
     if isinstance(types, str):
         types = [types]
     if isinstance(types, list):
-        binding.client_mode = {"types": [item.strip() for item in types if isinstance(item, str) and item.strip()]}
+        binding.client_mode = {
+            "types": [item.strip() for item in types if isinstance(item, str) and item.strip()],
+        }
+        if mode.get("stream") is True:
+            binding.client_mode["stream"] = True
 
 
 def payloads(output: d.AgentOutput) -> Iterator[dict[str, object]]:

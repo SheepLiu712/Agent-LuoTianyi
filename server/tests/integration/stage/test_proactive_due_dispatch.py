@@ -230,7 +230,7 @@ async def test_periodic_scan_waits_for_idle_and_selects_one_candidate_per_stream
     provider = DueEvents((event("first"), event("second")))
     agent = RecordingAgent()
     manager, stage = await connected_manager(provider, agent, proactive_idle_seconds=0.03)
-    monkeypatch.setattr("src.stage.chat_stage.random.choice", lambda values: values[-1])
+    monkeypatch.setattr("src.stage.chat.chat_stage.random.choice", lambda values: values[-1])
 
     # When: scans run before and after the Stage reaches the effective idle threshold.
     assert await manager.scan_due_events() == 0

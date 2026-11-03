@@ -1,6 +1,6 @@
 """将按序接纳的协议帧转换为 Stage 输入，不调用 Stage。"""
 
-from src.stage.call_stage import CallIngressReceipt
+from src.stage.call.call_stage import CallIngressReceipt
 
 
 def process_input(frame, *, call_id: str, fingerprint: bytes, stopped_stream_id: int | None = None):

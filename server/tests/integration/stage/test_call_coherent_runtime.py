@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from functools import partial
 
 import pytest
 from support.call_coherent_runtime import (
@@ -16,6 +17,7 @@ from support.call_coherent_runtime import (
 from support.call_output import output_sink
 from support.call_protocol import ProtocolDriver, StageOutputDriver
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import wait_call_finished
 from support.stage_manager import make_stage_manager
 
 import src.agent.skills.expression.speaking.backend as speaking_backend
@@ -32,7 +34,7 @@ from src.infrastructure.models.realtime_speech import (
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage import CallStage
-from src.stage._call_history import CallHistory
+from src.stage.call._call_history import CallHistory
 
 
 async def _eventually(predicate, timeout=2.0):
@@ -143,9 +145,10 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         call_sessions=database.call_sessions,
         speech_factory=provider_factory,
         output_sink=output_sink(binding),
-        release_ownership=manager._release_call,
         save_history=save,
-        own_termination=lambda operation: manager._own_call_operation(ownership, operation),
+        own_initialization=partial(manager._own_initialization, user_id="user", release=manager._release_call_stage),
+        own_termination=manager._own_termination,
+        finish_source_interaction=manager._finish_source_interaction,
     )
     binding.bind(stage=stage, session=session)
 
@@ -167,27 +170,9 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         await session.receive_text(_completed(binding.call_id, 1, opening))
 
         await provider.emit(TurnCompleted(CallAudioSemantic(transcript="你还记得我喜欢什么吗")))
-        await _eventually(
-            lambda: any(
-                item["type"] == "audio.stream_started" and "recall-ack" in item["response_id"]
-                for item in _controls(delivered)
-            )
-        )
-        provisional = _latest_stream(delivered, response_marker="recall-ack")
-        await _eventually(
-            lambda: any(
-                item.binary is not None
-                and BinaryAudioFrameCodec().decode(item.binary).stream_id == provisional["stream_id"]
-                and BinaryAudioFrameCodec().decode(item.binary).flags == 1
-                for item in delivered
-            )
-        )
-        assert not tts.formal_started.is_set()
         call_memory = stage.context.call_memory
         await _eventually(lambda: bool(call_memory.snapshot()))
         assert tuple(item.content for item in call_memory.snapshot()) == ("用户喜欢音乐",)
-
-        await session.receive_text(_completed(binding.call_id, 2, provisional))
         await _eventually(lambda: tts.formal_started.is_set())
         await _eventually(
             lambda: any(
@@ -227,7 +212,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
                 {
                     "protocol": "call.v1",
                     "type": "playback.stopped",
-                    "seq": 3,
+                    "seq": 2,
                     "call_id": binding.call_id,
                     "response_id": formal["response_id"],
                     "stop_seq": stop["seq"],
@@ -271,11 +256,14 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
             )
         )
         assert stage.state is CallState.ACTIVE
-        await session.receive_text(_completed(binding.call_id, 4, farewell))
-        snapshot = await asyncio.wait_for(stage.wait_closed(), 2)
+        await session.receive_text(_completed(binding.call_id, 3, farewell))
+        assert stage.state is CallState.ACTIVE
+        await session.receive_text(json.dumps({"protocol": "call.v1", "type": "call.hangup", "seq": 4,
+                                              "call_id": binding.call_id, "reason": "user_hangup"}))
+        snapshot = await asyncio.wait_for(wait_call_finished(stage), 2)
         await manager._finalizations.close()
 
-        assert snapshot.terminal.end_reason is CallEndReason.AGENT_HANGUP
+        assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
         assert stage.state is CallState.ENDED
         assert provider.closed is True
         assert stage.context is None
@@ -284,7 +272,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         with pytest.raises(RuntimeError):
             call_memory.snapshot()
         assert not call_memory._items
-        assert vector.searches == [("user", "用户喜欢的音乐", 3)]
+        assert vector.searches and all(user == "user" and "喜欢什么" in query for user, query, _ in vector.searches)
         with database.open_sql_session() as sql:
             assert sql.query(Conversation).filter_by(user_id="user").count() == 1
     finally:

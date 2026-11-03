@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.persistence.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
@@ -40,14 +41,13 @@ class RuntimeConfigValidator:
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
         "database.memory_store": "database.memory_store.llm_module",
-        "conversation.summary": "chat_session_manager.conversation_service.llm_module",
-        "agent.topic_extractor": "agent_runtime.agent.topic_extractor.llm_module",
-        "agent.main_chat": "agent_runtime.agent.main_chat.llm_module",
-        "agent.memory_writer": "agent_runtime.agent.memory.memory_writer.llm_module",
-        "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
-        "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
+        "conversation.summary": "agent_runtime.skills.cognitive_maintenance.conversation_compaction.llm_module",
+        "agent.topic_extractor": "agent_runtime.skills.topic_extraction.llm_module",
+        "agent.main_chat": "agent_runtime.skills.reply.llm_module",
+        "agent.memory_writer": "agent_runtime.skills.memory_write.llm_module",
+        "agent.user_profile": "agent_runtime.skills.cognitive_maintenance.user_profile.llm_module",
         "skill.singing.song_emotion_tagger": "agent_runtime.skills.singing.song_emotion_tagger",
-        "skill.diary": "agent_runtime.skills.diary.diary_llm.llm_module",
+        "skill.diary": "agent_runtime.skills.dynamic.diary_composer.llm_module",
     }
 
     CORE_VLM_MODULE_PATHS = {
@@ -73,6 +73,12 @@ class RuntimeConfigValidator:
 
     def validate(self, config: dict[str, Any]) -> dict[str, Any]:
         items: list[ValidationItem] = []
+        if "agent_runtime" in config:
+            try:
+                SkillsConfig.reject_legacy_summary(config)
+                SkillsConfig.from_runtime(config["agent_runtime"])
+            except (ValueError, TypeError) as error:
+                items.append(ValidationItem("core", "agent_runtime.skills", "error", str(error)))
         items.extend(self._validate_secrets())
         items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
@@ -394,13 +400,13 @@ class RuntimeConfigValidator:
         return result
 
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
-        linker_cfg = self._get(config, "agent_runtime.agent.preprocessing.song_entity_linker") or {}
+        linker_cfg = self._get(config, "agent_runtime.skills.jargon_recognition.song_entity_linker") or {}
         songname_file = linker_cfg.get("songname_file") or "res/knowledge/song_name_keywords.txt"
         lyric_file = (
             linker_cfg.get("lyric_file") or linker_cfg.get("lyrics_file") or "res/knowledge/song_lyric_keywords.txt"
         )
 
-        song_db_cfg = self._get(config, "agent_runtime.agent.song_knowledge.song_database") or {}
+        song_db_cfg = self._get(config, "agent_runtime.skills.knowledge.song_database") or {}
         db_folder = song_db_cfg.get("db_folder") or "res/knowledge"
         db_file = song_db_cfg.get("db_file") or "knowledge_db.db"
         raw_db_file = Path(str(db_file))

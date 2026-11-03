@@ -45,8 +45,8 @@ class _CompactionConfig:
         return result
 
 
-class ConversationCompactionSkill:
-    """角色共享的对话压缩技能；每次调用只使用输入上下文的快照。"""
+class _ConversationCompaction:
+    """维护能力内部的对话压缩实现；每次调用只使用输入上下文的快照。"""
 
     def __init__(self, config: dict[str, Any], llm_service: LLMService) -> None:
         """从 config 读取压缩阈值与保留条数，通过 llm_service 注册总结模型。"""

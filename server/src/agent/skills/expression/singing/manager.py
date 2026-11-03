@@ -202,7 +202,6 @@ class SingingManager:
             return "", []
         segments = playable_segments(song_metadata.segments, song_metadata.song_path)
         if not segments:
-            self.add_wished_song(safe_song_name)
             return "", []
         return song_metadata.song_name, [segment.description for segment in segments]
 

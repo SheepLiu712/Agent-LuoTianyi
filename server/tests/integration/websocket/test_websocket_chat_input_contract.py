@@ -32,6 +32,10 @@ class Socket:
 
 class Stage:
     input_suspended = False
+    connection_generation = 0
+
+    async def start(self):
+        pass
 
     def __init__(self):
         self.interaction_id = "interaction"
@@ -47,8 +51,9 @@ class Stage:
         self.stimuli.append(stimulus)
         return True
 
-    async def connection_changed(self, state):
-        pass
+    async def connection_changed(self, available, generation):
+        self.connection_generation = generation
+        return True
 
 
 def event(event_type, payload, client_msg_id="chat-1"):
