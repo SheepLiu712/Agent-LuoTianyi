@@ -55,6 +55,12 @@ def test_reply_latency_summary_keeps_failed_and_missing_samples_out_of_success_s
 
     try:
         timing = new("completed", 9.2)
+        timing.record_retrieval_details(
+            {
+                "embedding": {"duration_ms": 50.0, "count": 1, "status": "success"},
+                "vector_search": {"duration_ms": 10.0, "count": 2, "status": "success"},
+            }
+        )
         with reply_timing_scope(timing):
             for phase in (
                 "retrieval_started",
@@ -80,6 +86,8 @@ def test_reply_latency_summary_keeps_failed_and_missing_samples_out_of_success_s
         assert result["completed_count"] == 1
         assert result["summary"]["total"]["count"] == 1
         assert result["summary"]["total"]["avg_ms"] == pytest.approx(1400)
+        assert result["summary"]["retrieval.embedding"]["avg_ms"] == pytest.approx(50)
+        assert result["summary"]["retrieval.vector_search"]["avg_ms"] == pytest.approx(10)
         assert result["summary"]["retrieval"]["count"] == 1
         assert result["summary"]["retrieval"]["failed_count"] == 1
         failure = next(a for a in result["recent"] if a["request_id"] == "failed")

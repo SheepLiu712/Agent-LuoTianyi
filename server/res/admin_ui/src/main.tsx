@@ -932,6 +932,13 @@ const CALL_REPLY_PHASES = [
   ['endpointing', '判断说话结束'],
   ['scheduling', '等待开始检索'],
   ['retrieval', '记忆检索'],
+  ['retrieval.authorization', '检索明细：授权编号查询'],
+  ['retrieval.queue', '检索明细：线程池排队'],
+  ['retrieval.embedding', '检索明细：远程向量化'],
+  ['retrieval.vector_search', '检索明细：本地向量搜索'],
+  ['retrieval.hydration', '检索明细：记忆正本回查'],
+  ['retrieval.materialization', '检索明细：结果整理'],
+
   ['generation_queue', '准备生成回复'],
   ['generation', '生成首段回复'],
   ['submission', '提交首段回复'],
@@ -960,7 +967,7 @@ function CallReplyLatencyPanel() {
     <StatusBar loading={loading} error={error} />
     <p>仅统计用户发言触发的回复，不含开场白、主动发言和预制致歉。用户说完时间根据识别音频结束位置与服务端音频接收时间估算，不代表手机采集时钟。</p>
     <p>首包终点为服务端收到首个有效 TTS 音频包、发送给客户端之前；不含网络下行和扬声器播放。生成回复指首段可提交文本就绪，不是整段回复生成结束。</p>
-    <p>回复尝试：{formatNumber(data?.attempt_count || 0)}；已生成首包：{formatNumber(data?.completed_count || 0)}。各阶段仅汇总成功样本，缺失值不按零计入。</p>
+    <p>回复尝试：{formatNumber(data?.attempt_count || 0)}；已生成首包：{formatNumber(data?.completed_count || 0)}。各阶段仅汇总成功样本，缺失值不按零计入。检索明细已包含在记忆检索总耗时中，同类操作按每轮累计。</p>
     <table><thead><tr><th>阶段</th><th>成功样本</th><th>失败样本</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th><th>最大</th></tr></thead>
       <tbody>{CALL_REPLY_PHASES.map(([key, label]) => {
         const row = data?.summary[key];

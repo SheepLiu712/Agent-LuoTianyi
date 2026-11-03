@@ -23,6 +23,12 @@ def mark_reply_phase(phase: str, *, status: str = "success") -> None:
         timing.mark(phase, status=status)
 
 
+def record_retrieval_details(details):
+    timing = _current.get()
+    if timing is not None:
+        timing.record_retrieval_details(details)
+
+
 class CallReplyTiming:
     """一轮回复的阶段时钟；首次首包后冻结，重复分句不重复统计。"""
 
@@ -96,6 +102,20 @@ class CallReplyTiming:
             if "speech_end" in self._marks:
                 self._record("total", self._marks["speech_end"], now)
             self.finish("completed")
+
+    def record_retrieval_details(self, details):
+        if self._done:
+            return
+        end = self._clock()
+        for name, row in details.items():
+            self._record(
+                "retrieval." + name,
+                end - row["duration_ms"] / 1000,
+                end,
+                row["status"],
+                operation_count=row["count"],
+                aggregated=True,
+            )
 
     def finish(self, outcome):
         if self._done:
