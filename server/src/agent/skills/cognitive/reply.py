@@ -1,86 +1,104 @@
-"""聊天与通话共用的回复技能：调用生成流程并逐段交付行动计划。"""
+"""所有角色共享的回复生成技能；每次调用独立解析并输出草稿流。"""
 
-import src.domain.agent as d
-from src.agent.processing.plan_emitter import ActionPlanDraft, _DeliveryCancelled
-from src.agent.processing.reply_delivery import build_reply_delivery
-from src.domain.call import CallAudioRoute, CallSpeechDelivery
+import asyncio
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import asdict
+
+from src.agent.context.models import UserContextSnapshot
+from src.agent.skills.contracts import ReplyDraft
 from src.utils.logger import get_logger
 
+from ._reply_resources import ReplyResources
 from ._streaming_reply_parser import StreamingReplyParser
 
 
 class ReplySkill:
-    """生成函数通过 on_drafts 交付增量；返回值包含全部草稿，包括完整演唱指令。"""
+    """按角色标识选择已绑定资源，不持有当前交互或写入聊天记录。"""
+
+    def __init__(self, resources: Mapping[str, ReplyResources]) -> None:
+        if not resources:
+            raise ValueError("回复技能至少需要一个角色的生成资源")
+        self._resources = dict(resources)
+
+    async def generate(
+        self,
+        character_id: str,
+        *,
+        reply_topic: str,
+        user_context: UserContextSnapshot,
+        conversation_history: str = "",
+        fact_hits: list[str] | None = None,
+        memory_hits: list[str] | None = None,
+        sing_plan: tuple[str, str] | None = None,
+    ) -> AsyncIterator[ReplyDraft]:
+        """输出已完成解析的草稿；调用方提前结束消费时必须关闭此异步流。"""
+        resource = self._resources[character_id]
+        prompt = resource.prompt_assembler.build(
+            character_name=resource.character_name,
+            character_persona=resource.character_persona,
+            speaking_style=resource.speaking_style,
+            reply_topic=reply_topic,
+            user_nickname="你",
+            user_description=user_context.profile.description,
+            preference_context=resource._build_preference_context(user_context),
+            conversation_history=conversation_history,
+            fact_hits=fact_hits,
+            memory_hits=memory_hits,
+            sing_plan=sing_plan,
+        )
+        queue: asyncio.Queue[ReplyDraft] = asyncio.Queue(maxsize=1)
+        available = asyncio.Event()
+
+        async def emit(draft):
+            await queue.put(draft)
+            available.set()
+
+        async def produce():
+            try:
+                await self._generate(resource, asdict(prompt), sing_plan, emit)
+            except Exception as error:
+                get_logger(__name__).error(
+                    "回复生成失败 character_id=%s error_type=%s", character_id, type(error).__name__
+                )
+                raise
+
+        task = asyncio.create_task(produce())
+        task.add_done_callback(lambda _: available.set())
+        try:
+            while True:
+                await available.wait()
+                available.clear()
+                while not queue.empty():
+                    yield queue.get_nowait()
+                if task.done():
+                    await task
+                    break
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     @staticmethod
-    async def generate_stream(llm, prompt, response_parser, *, sing_plan=None, on_drafts=None):
+    async def _generate(resource, prompt, sing_plan, emit):
         if sing_plan is not None:
-            response = await llm.generate_response(**prompt)
-            return response_parser.parse(response, sing_plan)
-        parser = StreamingReplyParser(response_parser)
-        drafts = []
+            # 演唱指令需要完整结果，不将歌曲名按标点切成多段。
+            response = (
+                await resource.llm.generate_response(**prompt)
+                if getattr(resource.llm, "stream", False)
+                else await resource._call_llm(**prompt)
+            )
+            for draft in resource.response_parser.parse(response, sing_plan):
+                await emit(draft)
+            return
 
-        async def accept(items):
-            drafts.extend(items)
-            if items and on_drafts is not None:
-                await on_drafts(items)
+        parser = StreamingReplyParser(resource.response_parser)
 
         async def delta(text):
-            await accept(parser.feed(text))
+            for draft in parser.feed(text):
+                await emit(draft)
 
-        try:
-            await llm.generate_response(on_delta=delta, **prompt)
-            await accept(parser.finish())
-        except Exception as error:
-            get_logger(__name__).error("流式回复失败 error_type={}", type(error).__name__)
-            raise
-        return tuple(drafts)
-
-    async def deliver(self, request, plans, generate, *, prefix, sources, call=False):
-        delivered = 0
-        basis = request.interaction.interaction_revision
-
-        async def emit(drafts):
-            nonlocal delivered
-            if request.cancellation.is_cancelled or request.interaction.interaction_revision != basis:
-                raise _DeliveryCancelled()
-            offset = delivered
-            delivered += len(drafts)
-            if call:
-                actions = tuple(
-                    self.call_say(request, draft, suffix=f"{prefix}-{offset + index}")
-                    for index, draft in enumerate(drafts)
-                    if draft.sing is None and draft.sound_content.strip()
-                )
-            else:
-                entries, actions = build_reply_delivery(request, tuple(drafts), prefix=f"{prefix}-{offset}-")
-                if actions:
-                    plans.set_interruptible(False)
-                    await plans.context.conversation.append(entries)
-            if actions:
-                await plans.emit(ActionPlanDraft(source_stimulus_ids=sources, actions=actions))
-
-        drafts = await generate(emit)
-        # 批量生成（包括演唱）仅在完整结果就绪后交付；已交付的流式前缀不重复发送。
-        await emit(drafts[delivered:])
-        return drafts
-
-    @staticmethod
-    def call_say(request, draft, *, suffix, provisional=False):
-        return d.Say(
-            action_id=f"{request.request_id}-{suffix}",
-            content=draft.content,
-            sound_content=draft.sound_content,
-            prepared_audio_ref=None,
-            tone=d.Tone(value=draft.tone or "normal"),
-            expression=d.ChangeExpression(expression_id=draft.expression) if draft.expression else None,
-            delivery=d.OutputDelivery.EPHEMERAL_REACTION,
-            message_id=None,
-            call_delivery=CallSpeechDelivery(
-                audio_route=CallAudioRoute.CALL,
-                display_in_chat=False,
-                is_ephemeral=True,
-                provisional=provisional,
-                response_id=f"{request.request_id}-{suffix}",
-            ),
-        )
+        if getattr(resource.llm, "stream", False):
+            await resource.llm.generate_response(on_delta=delta, **prompt)
+        else:
+            await delta(await resource._call_llm(**prompt))
+        for draft in parser.finish():
+            await emit(draft)

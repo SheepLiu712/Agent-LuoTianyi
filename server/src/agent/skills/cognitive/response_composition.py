@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Mapping
+from contextlib import aclosing
 from dataclasses import replace
 from typing import Any, Protocol
 
 from src.agent.context.models import UserContextSnapshot
 from src.agent.skills.cognitive.topic_extraction import TopicExtractionSkill
 from src.agent.skills.contracts import ComposedReply, ComposedResponse, ReplyDraft, SkillInvocation
+
+from .reply import ReplySkill
 
 
 class _Memory(Protocol):
@@ -30,19 +33,6 @@ class _Singing(Protocol):
     def get_segment_lyrics(self, character_id: str, song: str, segment: str) -> str: ...
 
 
-class _ReplyGenerator(Protocol):
-    async def generate(
-        self,
-        *,
-        reply_topic: str,
-        user_context: UserContextSnapshot,
-        conversation_history: str,
-        fact_hits: list[str],
-        memory_hits: list[str],
-        sing_plan: tuple[str, str] | None,
-    ) -> tuple[ReplyDraft, ...]: ...
-
-
 class ResponseCompositionSkill:
     """隐藏召回、选歌、角色化生成和歌词补全，只暴露回复草稿 interface。"""
 
@@ -52,13 +42,13 @@ class ResponseCompositionSkill:
         *,
         memories: Mapping[str, _Memory],
         singing: _Singing,
-        generators: Mapping[str, _ReplyGenerator],
+        reply: ReplySkill,
         topic_extraction: TopicExtractionSkill,
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("reply_composition 必须是字典")
-        if not memories or set(memories) != set(generators):
-            raise ValueError("回复编排要求每个角色同时具备记忆和回复生成器")
+        if not memories:
+            raise ValueError("回复编排至少需要一个角色的记忆")
         slow = config.get("slow_recall", {})
         if not isinstance(slow, dict):
             raise TypeError("reply_composition.slow_recall 必须是字典")
@@ -72,7 +62,7 @@ class ResponseCompositionSkill:
         self._topic_extraction = topic_extraction
         self._memories = dict(memories)
         self._singing = singing
-        self._generators = dict(generators)
+        self._reply = reply
 
     async def compose(
         self,
@@ -172,21 +162,22 @@ class ResponseCompositionSkill:
         if invocation.cancellation.is_cancelled:
             return ComposedReply()
 
-        async def emit(items):
-            valid = tuple(draft for draft in items if draft.sing is None)
-            if valid:
-                await on_drafts(valid)
-
-        streaming = {"on_drafts": emit} if on_drafts is not None and sing_plan is None else {}
-        drafts = await self._generator_for(invocation.character_id).generate(
-            reply_topic=reply_topic,
-            user_context=user_context,
-            conversation_history=conversation_history,
-            memory_hits=memory_hits,
-            fact_hits=[],
-            sing_plan=sing_plan,
-            **streaming,
-        )
+        drafts = []
+        async with aclosing(
+            self._reply.generate(
+                invocation.character_id,
+                reply_topic=reply_topic,
+                user_context=user_context,
+                conversation_history=conversation_history,
+                memory_hits=memory_hits,
+                fact_hits=[],
+                sing_plan=sing_plan,
+            )
+        ) as stream:
+            async for draft in stream:
+                drafts.append(draft)
+                if on_drafts is not None and sing_plan is None and draft.sing is None:
+                    await on_drafts((draft,))
         enriched: list[ReplyDraft] = []
         for draft in drafts:
             if draft.sing is not None:
@@ -203,9 +194,3 @@ class ResponseCompositionSkill:
             return self._memories[character_id]
         except KeyError as error:
             raise KeyError(f"角色 {character_id} 未配置记忆") from error
-
-    def _generator_for(self, character_id: str) -> _ReplyGenerator:
-        try:
-            return self._generators[character_id]
-        except KeyError as error:
-            raise KeyError(f"角色 {character_id} 未配置回复生成器") from error

@@ -14,7 +14,7 @@ from src.agent.context import ContextFactory
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.relationship import NewRelationshipProposeHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
+from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.infrastructure.media import create_media_resolver
 from src.web.http import UserInterface
 from src.web.http.types import PreferenceOverwriteRequest
@@ -105,9 +105,7 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
         assert stage.context.user.read().preferences.relationship == "星际图书馆搭档"
         assert other_stage.context.user.read().preferences.relationship == "星际图书馆搭档"
         assert stage.context.user.read().preferences.speaking_style == "活泼"
-        assert "用户希望你是他的：星际图书馆搭档" in CharacterReplyGenerator._build_preference_context(
-            stage.context.user.read()
-        )
+        assert "用户希望你是他的：星际图书馆搭档" in ReplyResources._build_preference_context(stage.context.user.read())
 
         await runtime.stage_manager._test_chat_adapter._close_connection(first_connection)
         await user_interface.overwrite_preference(

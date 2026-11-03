@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from support.call_output import output_sink
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.reply_skill import make_reply_skill
 from support.stage_lifecycle import finish_call, observe_release, wait_call_finished
 from support.stage_manager import start_call_stage
 
@@ -1392,7 +1393,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
                 (
                     d.StimulusKind.CALL_REPLY_REQUESTED,
                     CallReplyRequestedHandler(
-                        recall, CallReplySkill({"luotianyi": Generator()}), PreparedSpeechCatalog({})
+                        recall, CallReplySkill(make_reply_skill({"luotianyi": Generator()})), PreparedSpeechCatalog({})
                     ),
                 ),
                 (d.StimulusKind.CALL_ENDING, _NoPlanHandler()),

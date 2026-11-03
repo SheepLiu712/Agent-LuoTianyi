@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from support.reply_skill import make_reply_skill
 from support.routing_support import Sink, request
 from support.skill_support import invocation
 
@@ -211,7 +212,7 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
         ),
         memories={"luotianyi": memory},
         singing=singing,
-        generators={"luotianyi": generator},
+        reply=make_reply_skill({"luotianyi": generator}),
     )
     drafts = await skill.compose(
         invocation(),

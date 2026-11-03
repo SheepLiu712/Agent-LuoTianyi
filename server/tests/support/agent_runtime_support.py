@@ -44,7 +44,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: store)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: True)
     monkeypatch.setattr(runtime_module, "AgentMemory", Dependency)
-    monkeypatch.setattr(runtime_module, "CharacterReplyGenerator", ReplyGenerator)
+    monkeypatch.setattr(runtime_module, "ReplyResources", ReplyGenerator)
     persona = tmp_path / "persona.json"
     persona.write_text(
         json.dumps(

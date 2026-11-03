@@ -18,6 +18,7 @@ from src.agent.context.models import (
 )
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
+from src.agent.processing.reply_dispatch import ReplyDelivery
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
@@ -25,7 +26,6 @@ from src.agent.skills.cognitive import (
     ResponseCompositionSkill,
     TextPreprocessingSkill,
 )
-from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.invocation import handling_invocation
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.utils.enum_type import ConversationSource
@@ -195,11 +195,11 @@ class ChatReplyHandler:
         composition: ResponseCompositionSkill,
         memory_intent: ExplicitMemoryIntentSkill | None = None,
         memory_commit: IntentionalMemoryCommit | None = None,
-        reply: ReplySkill | None = None,
+        reply: ReplyDelivery | None = None,
     ) -> None:
         """注入统一回复编排以及可选的明确记忆识别与提交技能。"""
         self._composition = composition
-        self._reply = reply or ReplySkill()
+        self._reply = reply or ReplyDelivery()
         self._memory_intent = memory_intent
         self._memory_commit = memory_commit
 

@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any
 from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
-    CharacterReplyGenerator,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
+    ReplyResources,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
     TopicExtractionSkill,
@@ -56,7 +56,7 @@ class SharedSkills:
         llm_service: LLMService,
         *,
         memories: Mapping[str, AgentMemory],
-        reply_generators: Mapping[str, CharacterReplyGenerator],
+        reply_resources: Mapping[str, ReplyResources],
         narratives: Mapping[str, CharacterNarrative],
         touch_configs: Mapping[str, Mapping[str, object]],
         prepared_speech: PreparedSpeechCatalog,
@@ -73,8 +73,8 @@ class SharedSkills:
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("skills 必须是字典")
-        if not memories or set(memories) != set(reply_generators) or set(memories) != set(narratives):
-            raise ValueError("共享技能要求每个启用角色具备完整的记忆、生成器和叙事资料")
+        if not memories or set(memories) != set(reply_resources) or set(memories) != set(narratives):
+            raise ValueError("共享技能要求每个启用角色具备完整的记忆、回复资源和叙事资料")
 
         dynamics = DynamicOperations(config.get("dynamic", {}))
         dynamics.create_llm_module(llm_service)
@@ -105,18 +105,18 @@ class SharedSkills:
             else None
         )
 
-        self.reply = ReplySkill()
+        self.reply = ReplySkill(reply_resources)
         self.response_composition = ResponseCompositionSkill(
             reply_composition_config,
             memories=memories,
             singing=self.singing.backend,
-            generators=reply_generators,
+            reply=self.reply,
             topic_extraction=TopicExtractionSkill(
                 topic_extraction_config, llm_service, understanding=self.text_preprocessing
             ),
         )
         self.call_recall = CallRecallDecisionSkill(memories=memories, model=call_recall_model)
-        self.call_reply = CallReplySkill(reply_generators)
+        self.call_reply = CallReplySkill(self.reply)
         self.call_summary = CallSummarySkill(dict(call_summary_models))
         self.call_maintenance = CallMaintenanceSkill(dict(memories), call_maintenance_batches)
         self.cognitive_maintenance = CognitiveMaintenanceSkill(

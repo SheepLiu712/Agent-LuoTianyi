@@ -1,27 +1,30 @@
 """逐字模型输出经真实回复处理器、行动计划和 SayHandler 提前进入 TTS。"""
 
 import asyncio
+from contextlib import aclosing
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from support.call_apology import _Plans, _request, _stimulus
+from support.reply_skill import make_reply_skill
 from support.routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.context import UserContextSnapshot
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembler
+from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.cognitive._response_parser import StructuredResponseParser
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
 from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive.response_composition import ResponseCompositionSkill
-from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
 from src.agent.skills.contracts import ReplyDraft, TopicExtraction
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking.skill import SpeakingAudioChunk
@@ -80,12 +83,10 @@ async def test_sentence_threshold_tags_and_spoken_content(chunk_size):
             yield {"content": text[index : index + chunk_size]}
 
     provider.stream_response = chunks
-    emitted = []
-
-    async def accept(drafts):
-        emitted.extend(drafts)
-
-    result = await ReplySkill.generate_stream(module(provider), {}, parser(), on_drafts=accept)
+    skill = ReplySkill({"luotianyi": generator(provider)})
+    result = [
+        draft async for draft in skill.generate("luotianyi", reply_topic="测试回复", user_context=UserContextSnapshot())
+    ]
     assert [draft.sound_content for draft in result] == [
         "一二三四五六七，一。",
         "八九十甲乙丙丁戊！",
@@ -98,7 +99,6 @@ async def test_sentence_threshold_tags_and_spoken_content(chunk_size):
         ("sad", "难过脸"),
         ("sad", "难过脸"),
     ]
-    assert tuple(emitted) == result
 
 
 class Memory:
@@ -112,7 +112,7 @@ class Topics:
 
 
 def generator(provider):
-    result = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
+    result = ReplyResources.__new__(ReplyResources)
     result.llm = module(provider)
     result.character_name = "天依"
     result.character_persona = "喜欢音乐"
@@ -153,7 +153,9 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
             )
         )
         handler = CallReplyRequestedHandler(
-            CallRecallDecisionSkill(memories={"luotianyi": Memory()}), CallReplySkill(generators), catalog
+            CallRecallDecisionSkill(memories={"luotianyi": Memory()}),
+            CallReplySkill(make_reply_skill(generators)),
+            catalog,
         )
     else:
         value = replace(request(), prepared_inputs=(d.PreprocessedInput(stimulus_id="m2", text="今天做什么"),))
@@ -162,7 +164,7 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
                 {},
                 memories={"luotianyi": Memory()},
                 singing=SimpleNamespace(),
-                generators=generators,
+                reply=make_reply_skill(generators),
                 topic_extraction=Topics(),
             )
         )
@@ -224,14 +226,119 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
 @pytest.mark.asyncio
 async def test_singing_keeps_complete_draft_and_is_not_split_at_punctuation():
     provider = CharacterStream("[开心]一二三四五六七八，九十。\n[sing] 《歌，曲。名》")
-    emitted = []
-
-    async def accept(drafts):
-        emitted.extend(drafts)
-
-    result = await ReplySkill.generate_stream(
-        module(provider), {}, parser(), sing_plan=("歌，曲。名", "副歌"), on_drafts=accept
-    )
-    assert emitted == []
+    skill = ReplySkill({"luotianyi": generator(provider)})
+    result = [
+        draft
+        async for draft in skill.generate(
+            "luotianyi", reply_topic="唱歌", user_context=UserContextSnapshot(), sing_plan=("歌，曲。名", "副歌")
+        )
+    ]
     assert result[0].sound_content == "一二三四五六七八，九十。"
     assert result[1].sing == ("歌，曲。名", "副歌")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_character", [False, True], ids=["different_characters", "same_character"])
+async def test_shared_reply_routes_persona_and_isolates_concurrent_drafts(same_character):
+    calls = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class Model:
+        stream = True
+
+        async def generate_response(self, *, on_delta, **prompt):
+            calls.append(prompt)
+            if len(calls) == 2:
+                entered.set()
+            await on_delta("[开心]" + prompt["reply_topic"][:4])
+            await release.wait()
+            await on_delta(prompt["reply_topic"][4:])
+
+    first = generator(CharacterStream(""))
+    second = generator(CharacterStream(""))
+    first.character_name, second.character_name = "角色甲", "角色乙"
+    first.llm = second.llm = Model()
+    skill = ReplySkill({"a": first, "b": second})
+
+    async def collect(character_id, text):
+        async with aclosing(
+            skill.generate(character_id, reply_topic=text, user_context=UserContextSnapshot())
+        ) as stream:
+            return [draft async for draft in stream]
+
+    tasks = [
+        asyncio.create_task(collect("a", "今天我们一起去公园散步。")),
+        asyncio.create_task(collect("a" if same_character else "b", "明天我们一起去海边听歌。")),
+    ]
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(*tasks), 2)
+    finally:
+        release.set()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    assert ["".join(draft.content for draft in result) for result in results] == [
+        "今天我们一起去公园散步。",
+        "明天我们一起去海边听歌。",
+    ]
+    assert [call["character_name"] for call in calls] == ["角色甲", "角色甲" if same_character else "角色乙"]
+
+
+@pytest.mark.asyncio
+async def test_closing_reply_stream_stops_provider_before_remaining_reply():
+    first = "[开心]今天我们一起去公园散步，"
+    provider = CharacterStream(first + "然后去听音乐。", gate_after=len(first))
+    skill = ReplySkill({"luotianyi": generator(provider)})
+    async with aclosing(
+        skill.generate("luotianyi", reply_topic="今天做什么", user_context=UserContextSnapshot())
+    ) as stream:
+        draft = await asyncio.wait_for(anext(stream), 2)
+        assert draft.content == first.removeprefix("[开心]")
+    assert provider.closed
+    assert not provider.finished
+
+
+@pytest.mark.asyncio
+async def test_provider_cancellation_ends_reply_stream_without_hanging():
+    class CancelledModel:
+        stream = True
+
+        async def generate_response(self, **kwargs):
+            raise asyncio.CancelledError()
+
+    resource = generator(CharacterStream(""))
+    resource.llm = CancelledModel()
+    skill = ReplySkill({"luotianyi": resource})
+    async with aclosing(
+        skill.generate("luotianyi", reply_topic="测试取消", user_context=UserContextSnapshot())
+    ) as stream:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(anext(stream), 2)
+
+
+@pytest.mark.asyncio
+async def test_complete_and_streaming_models_use_same_draft_rules():
+    text = "[开心]今天我们一起去公园散步，然后去听音乐。[难过]（叹气）今天下雨了。"
+    streaming = generator(CharacterStream(text))
+    complete = generator(CharacterStream(""))
+
+    async def response(**kwargs):
+        return text
+
+    complete.llm = SimpleNamespace(stream=False, generate_response=response)
+    skill = ReplySkill({"streaming": streaming, "complete": complete})
+    results = []
+    for character_id in ("streaming", "complete"):
+        results.append(
+            [
+                draft
+                async for draft in skill.generate(
+                    character_id, reply_topic="今天做什么", user_context=UserContextSnapshot()
+                )
+            ]
+        )
+    assert results[0] == results[1]
+    assert len(results[0]) == 3

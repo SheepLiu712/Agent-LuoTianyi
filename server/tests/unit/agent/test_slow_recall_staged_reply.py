@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from support.reply_skill import make_reply_skill
 from support.routing_support import Sink, request
 from support.skill_support import invocation
 
@@ -294,7 +295,7 @@ def _composition(config, delay):
         topic_extraction=SimpleNamespace(extract=AsyncMock(return_value=TopicExtraction(memory_queries=("你好",)))),
         memories={"luotianyi": _Memory(delay)},
         singing=_Singing(),
-        generators={"luotianyi": _Generator()},
+        reply=make_reply_skill({"luotianyi": _Generator()}),
     )
 
 

@@ -9,8 +9,8 @@ import src.domain.agent as d
 from src.agent.context import ConversationEntry, TextContent
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
+from src.agent.processing.reply_dispatch import ReplyDelivery
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
-from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
@@ -56,7 +56,7 @@ def _call_say(
     suffix: str,
     provisional: bool,
 ) -> d.Say:
-    return ReplySkill.call_say(request, draft, suffix=suffix, provisional=provisional)
+    return ReplyDelivery.call_say(request, draft, suffix=suffix, provisional=provisional)
 
 
 class CallAnswerRequestedHandler:
@@ -86,11 +86,11 @@ class CallAnswerRequestedHandler:
 
 class CallStartedHandler:
     def __init__(
-        self, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplySkill | None = None
+        self, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplyDelivery | None = None
     ) -> None:
         self._replies = replies
         self._prepared_speech = prepared_speech
-        self._reply = reply or ReplySkill()
+        self._reply = reply or ReplyDelivery()
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -154,12 +154,12 @@ class CallReplyRequestedHandler:
         recall: CallRecallDecisionSkill,
         replies: CallReplySkill,
         prepared_speech: PreparedSpeechCatalog,
-        reply: ReplySkill | None = None,
+        reply: ReplyDelivery | None = None,
     ) -> None:
         self._recall = recall
         self._replies = replies
         self._prepared_speech = prepared_speech
-        self._reply = reply or ReplySkill()
+        self._reply = reply or ReplyDelivery()
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -215,12 +215,12 @@ class CallSilenceElapsedHandler:
         recall: CallRecallDecisionSkill,
         replies: CallReplySkill,
         prepared_speech: PreparedSpeechCatalog,
-        reply: ReplySkill | None = None,
+        reply: ReplyDelivery | None = None,
     ) -> None:
         self._recall = recall
         self._replies = replies
         self._prepared_speech = prepared_speech
-        self._reply = reply or ReplySkill()
+        self._reply = reply or ReplyDelivery()
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus

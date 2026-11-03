@@ -7,8 +7,8 @@ import src.domain.agent as d
 from src.agent.context import ConversationEntry, TextContent
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
+from src.agent.processing.reply_dispatch import ReplyDelivery
 from src.agent.skills.cognitive import ResponseCompositionSkill
-from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
@@ -23,12 +23,12 @@ class FirstLoginHandler:
         prepared_names: tuple[str, ...],
         prepared_speech: PreparedSpeechCatalog,
         composition: ResponseCompositionSkill,
-        reply: ReplySkill | None = None,
+        reply: ReplyDelivery | None = None,
     ) -> None:
         self._prepared_names = prepared_names
         self._prepared_speech = prepared_speech
         self._composition = composition
-        self._reply = reply or ReplySkill()
+        self._reply = reply or ReplyDelivery()
         self._logger = get_logger(__name__)
 
     async def handle(

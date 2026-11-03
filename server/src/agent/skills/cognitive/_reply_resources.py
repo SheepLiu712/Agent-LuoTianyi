@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,7 +14,6 @@ from src.utils.logger import get_logger
 
 from ._prompt_assembly import RealizationPromptAssembler
 from ._response_parser import StructuredResponseParser
-from .reply import ReplySkill
 
 DEFAULT_LLM_TONE = "中性"
 DEFAULT_TTS_TONE = "normal"
@@ -59,8 +57,8 @@ TONE_MODIFIER_SUFFIXES = (
 )
 
 
-class CharacterReplyGenerator:
-    """根据角色资料、用户上下文和召回证据生成回复草稿。"""
+class ReplyResources:
+    """绑定一个角色的只读生成资源；生成入口统一由 ReplySkill 提供。"""
 
     def __init__(self, config: Dict[str, Any], llm_module: LLMModule, character_profile: CharacterProfile):
         self.logger = get_logger(__name__)
@@ -90,36 +88,6 @@ class CharacterReplyGenerator:
             tone_mapper=self._get_expressions_and_tts_tone,
         )
 
-    async def generate(
-        self,
-        reply_topic: str,
-        user_context: UserContextSnapshot,
-        conversation_history: str = "",
-        fact_hits: Optional[List[str]] = None,
-        memory_hits: Optional[List[str]] = None,
-        sing_plan: Optional[Tuple[str, str]] = None,
-        on_drafts=None,
-    ) -> tuple[ReplyDraft, ...]:
-        prompt_input = self.prompt_assembler.build(
-            character_name=self.character_name,
-            character_persona=self.character_persona,
-            speaking_style=self.speaking_style,
-            reply_topic=reply_topic,
-            user_nickname="你",
-            user_description=user_context.profile.description,
-            preference_context=self._build_preference_context(user_context),
-            conversation_history=conversation_history,
-            fact_hits=fact_hits,
-            memory_hits=memory_hits,
-            sing_plan=sing_plan,
-        )
-        if getattr(self.llm, "stream", False):
-            return await ReplySkill.generate_stream(
-                self.llm, asdict(prompt_input), self.response_parser, sing_plan=sing_plan, on_drafts=on_drafts
-            )
-        response = await self._call_llm(**asdict(prompt_input))
-        return self._parse_response(response, sing_plan)
-
     async def _call_llm(self, **kwargs) -> str:
         max_attempts = getattr(
             self,
@@ -144,16 +112,16 @@ class CharacterReplyGenerator:
                     return response
                 raise RuntimeError("LLM returned an empty response")
             except LLMContentInspectionError as e:
-                self.logger.warning(f"CharacterReplyGenerator LLM 内容审查失败，返回话题切换回复: {e}")
+                self.logger.warning(f"ReplyResources LLM 内容审查失败，返回话题切换回复: {e}")
                 return "[中性]这个话题不太合适，我们聊点别的吧"
             except Exception as e:
                 if attempt >= max_attempts:
                     self.logger.error(
-                        "CharacterReplyGenerator LLM failed after " f"{attempt} attempts ({type(e).__name__}): {e}"
+                        "ReplyResources LLM failed after " f"{attempt} attempts ({type(e).__name__}): {e}"
                     )
                     break
                 self.logger.warning(
-                    "CharacterReplyGenerator LLM request failed "
+                    "ReplyResources LLM request failed "
                     f"({attempt}/{max_attempts}), retrying: "
                     f"{type(e).__name__}: {e}"
                 )
@@ -161,9 +129,6 @@ class CharacterReplyGenerator:
                     await asyncio.sleep(retry_delay)
 
         return failure_response
-
-    def _parse_response(self, response: str, sing_plan: Optional[Tuple[str, str]]) -> tuple[ReplyDraft, ...]:
-        return self.response_parser.parse(response, sing_plan)
 
     @staticmethod
     def _build_preference_context(user_context: UserContextSnapshot) -> str:

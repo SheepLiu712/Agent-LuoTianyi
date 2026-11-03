@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from support.reply_skill import make_reply_skill
 from support.routing_support import Sink, request
 from support.skill_support import invocation
 
@@ -15,7 +16,7 @@ from src.agent.context import UserContextSnapshot
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import CharacterReplyGenerator, ResponseCompositionSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive import ReplyResources, ResponseCompositionSkill, TextPreprocessingSkill
 from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembler
 from src.agent.skills.cognitive._response_parser import StructuredResponseParser
 from src.agent.skills.cognitive.topic_extraction import TopicExtractionSkill
@@ -52,7 +53,7 @@ def pipeline(*, attempts=("权御天下",), queries=("用户喜欢的歌",), ava
         SimpleNamespace(register_llm_module=lambda *args: SimpleNamespace(generate_response=extract)),
         understanding=TextPreprocessingSkill(song_names=("权御天下",)),
     )
-    generator = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
+    generator = ReplyResources.__new__(ReplyResources)
     generator.character_name = "洛天依"
     generator.character_persona = "歌手"
     generator.speaking_style = "自然"
@@ -72,7 +73,7 @@ def pipeline(*, attempts=("权御天下",), queries=("用户喜欢的歌",), ava
             )
         },
         singing=singing,
-        generators={"luotianyi": generator},
+        reply=make_reply_skill({"luotianyi": generator}),
     )
     return composition, events, calls
 

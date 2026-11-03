@@ -47,9 +47,10 @@ from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
     WorldActivityHandler,
 )
+from src.agent.processing.reply_dispatch import ReplyDelivery
 from src.agent.skills import SharedSkills
 from src.agent.skills.adapters.memory import AgentMemory
-from src.agent.skills.cognitive import CharacterReplyGenerator
+from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent_runtime.character_registry import CharacterRegistry
@@ -124,7 +125,8 @@ class AgentRuntime:
             self.character_registry = CharacterRegistry(config.get("character_registry", {}))
             prepared_speech = PreparedSpeechCatalog(self.config.get("prepared_speech", {}).get("characters", {}))
             self.character_memories: dict[str, AgentMemory] = {}
-            self.reply_generators: dict[str, CharacterReplyGenerator] = {}
+            self.reply_resources: dict[str, ReplyResources] = {}
+            self.reply_delivery = ReplyDelivery()
             self._build_character_resources(
                 agent_config=self.config["agent"],
                 llm_service=llm_service,
@@ -132,11 +134,11 @@ class AgentRuntime:
             )
             narratives = {
                 character_id: CharacterNarrative(
-                    name=generator.character_name,
-                    persona=generator.character_persona,
-                    speaking_style=generator.speaking_style,
+                    name=resource.character_name,
+                    persona=resource.character_persona,
+                    speaking_style=resource.speaking_style,
                 )
-                for character_id, generator in self.reply_generators.items()
+                for character_id, resource in self.reply_resources.items()
             }
             touch_configs = {
                 character_id: self.character_registry.get(character_id).reflex.get("touch", {}).get("fast_reply", {})
@@ -146,7 +148,7 @@ class AgentRuntime:
                 self.config.get("skills", {}),
                 llm_service,
                 memories=self.character_memories,
-                reply_generators=self.reply_generators,
+                reply_resources=self.reply_resources,
                 narratives=narratives,
                 touch_configs=touch_configs,
                 prepared_speech=prepared_speech,
@@ -220,7 +222,7 @@ class AgentRuntime:
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
             (
                 StimulusKind.CALL_STARTED,
-                CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech, reply=self.skills.reply),
+                CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech, reply=self.reply_delivery),
             ),
             (
                 StimulusKind.CALL_REPLY_REQUESTED,
@@ -228,7 +230,7 @@ class AgentRuntime:
                     self.skills.call_recall,
                     self.skills.call_reply,
                     self.skills.prepared_speech,
-                    reply=self.skills.reply,
+                    reply=self.reply_delivery,
                 ),
             ),
             (
@@ -237,7 +239,7 @@ class AgentRuntime:
                     self.skills.call_recall,
                     self.skills.call_reply,
                     self.skills.prepared_speech,
-                    reply=self.skills.reply,
+                    reply=self.reply_delivery,
                 ),
             ),
             (StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
@@ -252,7 +254,7 @@ class AgentRuntime:
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
                     composition=self.skills.response_composition,
-                    reply=self.skills.reply,
+                    reply=self.reply_delivery,
                 ),
             ),
             (
@@ -261,7 +263,7 @@ class AgentRuntime:
                     self.skills.response_composition,
                     self.skills.explicit_memory_intent,
                     self.skills.intentional_memory,
-                    reply=self.skills.reply,
+                    reply=self.reply_delivery,
                 ),
             ),
             (
@@ -496,7 +498,7 @@ class AgentRuntime:
             "vector_store": self.vector_store,
             "character_registry": self.character_registry,
             "character_memories": self.character_memories,
-            "reply_generators": self.reply_generators,
+            "reply_resources": self.reply_resources,
             "skills": self.skills,
             "default_character_id": self.default_character_id,
         }
@@ -542,12 +544,12 @@ class AgentRuntime:
                 owner_character_id=profile.character_id,
             )
             self.character_memories[profile.character_id] = memory
-            generator = CharacterReplyGenerator(
+            resource = ReplyResources(
                 agent_config["main_chat"],
                 llm_modules["main_chat"],
                 profile,
             )
-            self.reply_generators[profile.character_id] = generator
+            self.reply_resources[profile.character_id] = resource
 
     @staticmethod
     def _first_login_prepared_names(config: dict[str, Any]) -> tuple[str, ...]:

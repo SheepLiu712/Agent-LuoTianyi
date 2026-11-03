@@ -25,7 +25,7 @@ from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
-    CharacterReplyGenerator,
+    ReplyResources,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
     TopicExtractionSkill,
@@ -41,6 +41,7 @@ from src.web.http import routes
 from src.web.http.user_interface import UserInterface
 from src.web.websocket import endpoint
 from src.web.websocket.service import WebSocketService
+from support.reply_skill import make_reply_skill
 from support.stage_manager import make_stage_manager
 
 
@@ -91,11 +92,15 @@ def make_agent(root, resolver, models):
     )
     text = TextPreprocessingSkill()
     memory = {"luotianyi": OfflineMemory()}
+    # TTS 的 stream 方法与文本模型的 stream 布尔配置属于不同接口。
+    reply_model = SimpleNamespace(
+        stream=False, prompt_template=models.prompt_template, generate_response=models.generate_response
+    )
     composition = ResponseCompositionSkill(
         {},
         memories=memory,
         singing=None,
-        generators={"luotianyi": CharacterReplyGenerator({}, models, profile)},
+        reply=make_reply_skill({"luotianyi": ReplyResources({}, reply_model, profile)}),
         topic_extraction=TopicExtractionSkill({}, None, understanding=text),
     )
     preprocessing = ChatPreprocessingHandler(

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from support.reply_skill import make_reply_skill
 
 import src.domain.agent as d
 from src.agent.skills.cognitive import ReplyDraft, ResponseCompositionSkill
@@ -91,7 +92,7 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
         ),
         memories=memories,
         singing=singing,
-        generators=generators,
+        reply=make_reply_skill(generators),
     )
 
     tasks = (

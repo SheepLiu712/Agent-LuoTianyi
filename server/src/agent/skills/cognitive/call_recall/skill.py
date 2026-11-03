@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from contextlib import aclosing
 from enum import Enum
 from typing import Any, Protocol
 
 from src.agent.context.memory_pool import CallMemory, CallMemoryPool
 from src.agent.context.models import UserContextSnapshot
+from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.contracts import ReplyDraft, SkillInvocation
 from src.domain.call import AckStyle, CallRecallDecision, RecallMode
 from src.utils.logger import get_logger
@@ -21,19 +23,6 @@ class _DecisionModel(Protocol):
 
 class _Memory(Protocol):
     async def search_memory_context_for_topic(self, user_id: str, queries: list[str]): ...
-
-
-class _ReplyGenerator(Protocol):
-    async def generate(
-        self,
-        *,
-        reply_topic: str,
-        user_context: UserContextSnapshot,
-        conversation_history: str,
-        fact_hits: list[str],
-        memory_hits: list[str],
-        sing_plan: tuple[str, str] | None,
-    ) -> tuple[ReplyDraft, ...]: ...
 
 
 class SilenceDecision(str, Enum):
@@ -165,10 +154,8 @@ class CallRecallDecisionSkill:
 class CallReplySkill:
     """Generate call-only spoken drafts without singing or ordinary chat composition."""
 
-    def __init__(self, generators: Mapping[str, _ReplyGenerator]) -> None:
-        if not generators:
-            raise ValueError("call reply requires character generators")
-        self._generators = dict(generators)
+    def __init__(self, reply: ReplySkill) -> None:
+        self._reply = reply
 
     async def generate(
         self,
@@ -180,23 +167,21 @@ class CallReplySkill:
         memory_pool: tuple[str, ...],
         on_drafts=None,
     ) -> tuple[ReplyDraft, ...]:
-        async def emit(items):
-            valid = tuple(
-                draft for draft in items if draft.sing is None and draft.content.strip() and draft.sound_content.strip()
+        drafts = []
+        async with aclosing(
+            self._reply.generate(
+                invocation.character_id,
+                reply_topic=reply_topic,
+                user_context=user_context,
+                conversation_history=conversation_history,
+                fact_hits=[],
+                memory_hits=list(memory_pool),
+                sing_plan=None,
             )
-            if valid:
-                await on_drafts(valid)
-
-        streaming = {"on_drafts": emit} if on_drafts is not None else {}
-        drafts = await self._generators[invocation.character_id].generate(
-            reply_topic=reply_topic,
-            user_context=user_context,
-            conversation_history=conversation_history,
-            fact_hits=[],
-            memory_hits=list(memory_pool),
-            sing_plan=None,
-            **streaming,
-        )
-        return tuple(
-            draft for draft in drafts if draft.sing is None and draft.content.strip() and draft.sound_content.strip()
-        )
+        ) as stream:
+            async for draft in stream:
+                if draft.sing is None and draft.content.strip() and draft.sound_content.strip():
+                    drafts.append(draft)
+                    if on_drafts is not None:
+                        await on_drafts((draft,))
+        return tuple(drafts)
