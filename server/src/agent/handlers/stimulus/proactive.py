@@ -43,9 +43,11 @@ class FirstLoginHandler:
         if stimulus.reason.value != "first_login":
             context = plans.context
             plans.set_interruptible(True)
+            learning_requests = ()
 
             async def generate(on_drafts):
-                return await self._composition.compose(
+                nonlocal learning_requests
+                result = await self._composition.compose(
                     handling_invocation(request, context),
                     user_context=context.user.read(),
                     reply_topic=self._reminder_topic(stimulus),
@@ -53,6 +55,8 @@ class FirstLoginHandler:
                     excluded_segments=set(),
                     on_drafts=on_drafts,
                 )
+                learning_requests = result.learning_requests
+                return result.drafts
 
             await self._reply.deliver(
                 request,
@@ -61,6 +65,7 @@ class FirstLoginHandler:
                 prefix="reminder",
                 sources=(stimulus.stimulus_id,),
             )
+            await self._reply.request_learning(request, plans, learning_requests, sources=(stimulus.stimulus_id,))
             return self._report(request, plans)
 
         for name in self._prepared_names:

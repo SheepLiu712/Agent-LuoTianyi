@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 import asyncio
 import hashlib
 from datetime import datetime, timedelta
@@ -1382,7 +1383,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
     skill = CognitiveMaintenanceSkill(
         memories={"luotianyi": memory}, compaction=compaction, call_maintenance=call_skill
     )
-    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": memory}))
     recall.decide = decide
     stage._agent = Agent(
         character_id="luotianyi",

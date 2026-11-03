@@ -128,6 +128,10 @@ class FakeMemoryStore:
             self.embedding_to_record[embedding_id] = memory_record
         return memory_record.id
 
+    def get_scoped_embedding_ids(self, owner, user_id, **kwargs):
+        return [key for key, record in self.embedding_to_record.items()
+                if record.owner_character_id == owner and record.subject_user_id == user_id]
+
     def get_agent_memory_records_by_embedding_ids(self, embedding_ids):
         return {
             embedding_id: self.embedding_to_record[embedding_id]

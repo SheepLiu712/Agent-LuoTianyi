@@ -1,3 +1,4 @@
+from src.agent.skills.contracts import ComposedReply
 """明确记忆请求的提交、承诺与隔离契约。"""
 
 from dataclasses import replace
@@ -47,14 +48,14 @@ class _Composer:
         self.calls.append(kwargs)
         if self.events is not None:
             self.events.append("compose")
-            return (
+            return ComposedReply(drafts=(
                 ReplyDraft(
                     content="compose-memory-ack",
                     sound_content="compose-memory-ack-sound",
                     tone="gentle",
                     expression="smile",
                 ),
-            )
+            ))
         pytest.fail("普通回复生成只允许由明确记忆确认路径按提示调用")
 
 

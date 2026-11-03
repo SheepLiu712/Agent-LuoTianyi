@@ -293,8 +293,11 @@ class ChatReplyHandler:
         if normal_topic:
             reply_topic = f"{reply_topic}\n{normal_topic}"
 
+        learning_requests = ()
+
         async def generate(on_drafts):
-            return await self._composition.compose(
+            nonlocal learning_requests
+            result = await self._composition.compose(
                 handling_invocation(request, plans.context),
                 user_context=plans.context.user.read(),
                 reply_topic=reply_topic,
@@ -302,8 +305,11 @@ class ChatReplyHandler:
                 excluded_segments=_recent_sung_segments(plans.context.conversation.read()),
                 on_drafts=on_drafts,
             )
+            learning_requests = result.learning_requests
+            return result.drafts
 
         await self._reply.deliver(request, plans, generate, prefix="r", sources=pending)
+        await self._reply.request_learning(request, plans, learning_requests, sources=pending)
         return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
 
     async def _handle_conversation_reply(
@@ -324,8 +330,10 @@ class ChatReplyHandler:
             )
         )
         snapshot = plans.context.conversation.read()
+        learning_requests = ()
 
         async def generate(on_drafts):
+            nonlocal learning_requests
             staged = await self._composition.compose_staged(
                 handling_invocation(request, plans.context),
                 user_context=plans.context.user.read(),
@@ -335,8 +343,10 @@ class ChatReplyHandler:
                 on_drafts=on_drafts,
             )
             formal = await staged.formal()
+            learning_requests = formal.learning_requests
             _attach_recall(plans, request, formal.memory_hits)
             return formal.drafts
 
         await self._reply.deliver(request, plans, generate, prefix="r", sources=pending)
+        await self._reply.request_learning(request, plans, learning_requests, sources=pending)
         return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))

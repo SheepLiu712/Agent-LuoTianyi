@@ -129,8 +129,6 @@ class SingingBackend:
             )
             if segment:
                 return correct_song_name, segment
-        if song_name and confirmed_intent:
-            manager.add_wished_song(song_name)
         return song_name, None
 
     async def tag_song_emotions(self, character_id: str, song_name: str) -> list[str]:

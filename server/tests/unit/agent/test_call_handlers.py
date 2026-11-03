@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -182,7 +183,7 @@ async def test_default_recall_replies_without_ack_and_reuses_memory_pool(decisio
     memory = _Memory()
     generator = CapturingGenerator()
     recall = CallRecallDecisionSkill(
-        memories={"luotianyi": memory},
+        retrieval=stub_retrieval({"luotianyi": memory}),
         config={"llm_module": {"test_model": "test"}} if decision_unavailable == "invalid_response" else {},
         llm_service=SimpleNamespace(register_llm_module=lambda *args: InvalidDecisionModel()),
     )
@@ -216,7 +217,7 @@ async def test_default_recall_replies_without_ack_and_reuses_memory_pool(decisio
 @pytest.mark.asyncio
 async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_updates_pool_once():
     memory = _Memory()
-    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": memory}))
 
     async def decide(*args, **kwargs):
         return CallRecallDecision(RecallMode.RECALL, ("喜欢什么",), AckStyle.THINKING)
@@ -255,7 +256,7 @@ async def test_recall_turn_emits_provisional_then_formal_hidden_call_speech_and_
 
 @pytest.mark.asyncio
 async def test_silence_end_call_places_farewell_before_end_action():
-    recall = CallRecallDecisionSkill(memories={"luotianyi": _Memory()})
+    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": _Memory()}))
 
     async def decide_silence(*args, **kwargs):
         return SilenceDecision.END_CALL
@@ -276,7 +277,7 @@ async def test_silence_end_call_places_farewell_before_end_action():
 
 @pytest.mark.asyncio
 async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow():
-    recall = CallRecallDecisionSkill(memories={"luotianyi": _Memory()})
+    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": _Memory()}))
 
     async def decide_silence(*args, **kwargs):
         return SilenceDecision.END_CALL
@@ -357,7 +358,7 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
 @pytest.mark.asyncio
 async def test_call_ending_emits_one_finalize_action_and_keeps_context_alive():
     memory = _Memory()
-    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": memory}))
     call_id = uuid4()
     plans = _Plans()
     await recall.recall_once(
@@ -394,7 +395,7 @@ async def test_call_ending_emits_one_finalize_action_and_keeps_context_alive():
 @pytest.mark.asyncio
 async def test_shared_recall_skill_uses_only_the_supplied_interaction_pool():
     memory = _Memory()
-    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": memory}))
     first, second = CallMemoryPool(), CallMemoryPool()
     invocation = SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "user")
     await recall.recall_once(invocation, memory_pool=first, queries=("first",))
@@ -408,7 +409,7 @@ async def test_shared_recall_skill_uses_only_the_supplied_interaction_pool():
 @pytest.mark.asyncio
 async def test_provisional_ack_is_not_appended_to_ephemeral_formal_facts():
     memory = _Memory()
-    recall = CallRecallDecisionSkill(memories={"luotianyi": memory})
+    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": memory}))
 
     async def decide(*args, **kwargs):
         return CallRecallDecision(RecallMode.RECALL, ("query",), AckStyle.EMPATHY)

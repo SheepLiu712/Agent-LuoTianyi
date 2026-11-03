@@ -1,3 +1,4 @@
+from src.agent.skills.contracts import ComposedReply
 """首次登录主动欢迎 handler 的失败结算。"""
 
 from datetime import datetime, timezone
@@ -35,7 +36,7 @@ class Composer:
 
     async def compose(self, invocation, **kwargs):
         self.calls.append({"invocation": invocation, **kwargs})
-        return self.drafts
+        return ComposedReply(drafts=self.drafts)
 
 
 class CancellingComposer(Composer):

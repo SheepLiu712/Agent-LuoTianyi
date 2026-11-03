@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 """所有 Agent 共用 Skill 实例，同时按调用身份隔离角色和用户。"""
 
 import asyncio
@@ -90,8 +91,8 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
                 ]
             )
         ),
-        memories=memories,
-        singing=singing,
+        retrieval=stub_retrieval(memories),
+        singing=stub_singing(singing),
         reply=make_reply_skill(generators),
     )
 
@@ -120,8 +121,8 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
     assert memories["agent-a"].calls == [("user-a", ("query-a",))]
     assert memories["agent-b"].calls == [("user-b", ("query-b",))]
     assert sorted(singing.calls) == ["agent-a", "agent-b"]
-    assert replies_a[0].content == "a:topic-a"
-    assert replies_b[0].content == "b:topic-b"
+    assert replies_a.drafts[0].content == "a:topic-a"
+    assert replies_b.drafts[0].content == "b:topic-b"
 
 
 def test_runtime_agents_reference_the_same_skill_instances(runtime_dependencies):

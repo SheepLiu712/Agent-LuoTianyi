@@ -1,3 +1,4 @@
+from support.retrieval import song_material
 import asyncio
 import json
 from pathlib import Path
@@ -14,7 +15,7 @@ from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.memory_write import MemoryWriteResult, MemoryWriteStatus
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
-from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
+from src.agent.skills.expression.song_learning import SongLearningTasks
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.infrastructure.persistence.database.database_service import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import InviteCode
@@ -314,7 +315,7 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
             "luotianyi",
             FakeMemory(),
             publishing,
-            SongLearningDispatchSkill(SimpleNamespace(singing_manager={"luotianyi": FakeSinging()})),
+            song_material(FakeSinging()),
         ).handle(request, _emitter(request, plan_sink))
     )
     plan = plan_sink.plans[0]

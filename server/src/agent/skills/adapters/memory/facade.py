@@ -77,6 +77,9 @@ class AgentMemory:
         queries: List[str],
         similarity_threshold: float = 0.8,
         k: int = 3,
+        *,
+        include_user: bool = True,
+        include_character: bool = True,
     ) -> MemoryContext:
         """按话题线索召回结构化记忆上下文。
 
@@ -86,13 +89,25 @@ class AgentMemory:
         if not queries:
             return MemoryContext()
 
-        candidate_hits = await self._search_candidates(user_id, queries, similarity_threshold, k)
+        allowed_ids = await asyncio.to_thread(
+            self.memory_store.get_scoped_embedding_ids,
+            self.owner_character_id,
+            user_id,
+            include_user=include_user,
+            include_character=include_character,
+            legacy_ids=self._legacy_character_ids(),
+        )
+        candidate_hits = await self._search_candidates(
+            user_id, queries, similarity_threshold, k, allowed_ids, include_user
+        )
         vector_ids = [vector_id for _, _, vector_id, _, _ in candidate_hits if vector_id]
         records_by_vector_id = await asyncio.to_thread(
             self.memory_store.get_agent_memory_records_by_embedding_ids,
             vector_ids,
         )
-        scored_hits = self._materialize_hits(candidate_hits, records_by_vector_id, user_id)
+        scored_hits = self._materialize_hits(
+            candidate_hits, records_by_vector_id, user_id, include_user, include_character
+        )
         return MemoryContext(self._top_distinct_hits(scored_hits, k))
 
     async def _search_candidates(
@@ -101,21 +116,17 @@ class AgentMemory:
         queries: List[str],
         similarity_threshold: float,
         k: int,
+        allowed_ids: list[str],
+        include_user: bool,
     ) -> List[Tuple[float, str, str, Any, str]]:
         candidates: List[Tuple[float, str, str, Any, str]] = []
         for query in queries:
             q = (query or "").strip()
             if not q:
                 continue
-            results = await self.vector_store.search(user_id, q, k=max(1, k))
-            results += await self.vector_store.search(
-                "",
-                q,
-                k=max(1, k),
-                where={"$and": [{"owner_character_id": self.owner_character_id}, {"memory_scope": "character"}]},
-            )
-            if self._legacy_character_ids():
-                results += await self.vector_store.search(self.owner_character_id, q, k=max(1, k))
+            results = await self.vector_store.search(user_id, q, k=max(1, k)) if include_user else []
+            if allowed_ids:
+                results += await self.vector_store.search(user_id, q, k=max(1, k), ids=allowed_ids, where=None)
             for doc, score in results:
                 if score < similarity_threshold:
                     continue
@@ -131,12 +142,14 @@ class AgentMemory:
         candidates: List[Tuple[float, str, str, Any, str]],
         records_by_vector_id: dict[str, Any],
         user_id: str,
+        include_user: bool,
+        include_character: bool,
     ) -> List[Tuple[float, str, MemoryHit]]:
         scored_hits: List[Tuple[float, str, MemoryHit]] = []
         for score, query, vector_id, doc, content in candidates:
             record = records_by_vector_id.get(vector_id) if vector_id else None
             metadata = doc.get_metadata()
-            if not self._can_read(record, metadata, user_id):
+            if not self._can_read(record, metadata, user_id, include_user, include_character):
                 continue
             rendered = self._render_memory_hit(record, content, doc)
             dedup_key = record.id if record else vector_id or rendered
@@ -160,20 +173,21 @@ class AgentMemory:
         """受控旧格式适配：仅信任部署者明确列出的旧角色事件正本 ID。"""
         return set(self.config.get("legacy_character_memory_ids", {}).get(self.owner_character_id, ()))
 
-    def _can_read(self, record, metadata, user_id) -> bool:
+    def _can_read(self, record, metadata, user_id, include_user, include_character) -> bool:
         if record is None:
             return (
                 "memory_scope" not in metadata
+                and include_user
                 and metadata.get("user_id") == user_id
                 and metadata.get("owner_character_id", "luotianyi") == self.owner_character_id
             )
         if record.owner_character_id != self.owner_character_id:
             return False
         if record.subject_user_id is None:
-            return record.visibility is MemoryVisibility.CHARACTER_PRIVATE
+            return include_character and record.visibility is MemoryVisibility.CHARACTER_PRIVATE
         if record.id in self._legacy_character_ids() and record.memory_type is MemoryType.INTERACTION_EVENT:
-            return record.subject_user_id == self.owner_character_id
-        return record.subject_user_id == user_id
+            return include_character and record.subject_user_id == self.owner_character_id
+        return include_user and record.subject_user_id == user_id
 
     @staticmethod
     def _top_distinct_hits(scored_hits: List[Tuple[float, str, MemoryHit]], k: int) -> tuple[MemoryHit, ...]:

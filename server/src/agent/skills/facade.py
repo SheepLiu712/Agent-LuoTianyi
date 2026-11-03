@@ -23,10 +23,11 @@ from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkil
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.singing import SingingSkill
-from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
+from src.agent.skills.expression.song_learning import SongLearningTasks
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchReactionSkill
-from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
+from src.agent.skills.knowledge.song_acceptance import SongKnowledgeStore
+from src.agent.skills.memory_retrieval import MemoryRetrievalSkill
 from src.agent.skills.memory_write import MemoryWriteSkill
 from src.agent.skills.resources import SkillResources
 from src.infrastructure.config.skills import SkillsConfig
@@ -94,17 +95,21 @@ class SharedSkills:
             else None
         )
 
+        self.song_knowledge = SongKnowledgeStore(config.get("knowledge"))
+        self.memory_retrieval = MemoryRetrievalSkill(
+            config.get("memory_retrieval"), memories=memories, singing=self.singing, knowledge=self.song_knowledge
+        )
         self.response_composition = ResponseCompositionSkill(
             config.get("response_composition"),
-            memories=memories,
-            singing=self.singing.backend,
+            retrieval=self.memory_retrieval,
+            singing=self.singing,
             reply=self.reply,
             topic_extraction=TopicExtractionSkill(
                 config.get("topic_extraction"), llm_service, understanding=self.text_preprocessing
             ),
         )
         self.call_recall = CallRecallDecisionSkill(
-            memories=memories, config=config.get("call_recall"), llm_service=llm_service
+            retrieval=self.memory_retrieval, config=config.get("call_recall"), llm_service=llm_service
         )
         self.call_reply = CallReplySkill(self.reply)
         self.call_summary = CallSummarySkill(config.get("call_summary"), llm_service=llm_service, characters=characters)
@@ -127,10 +132,9 @@ class SharedSkills:
         self.dynamic_publishing = DynamicPublishingSkill(dynamics, narratives)
         self.dynamic_reply = DynamicReplySkill(dynamics, narratives)
         self.diary_writing = DiaryWritingSkill(diary, dynamics, narratives)
-        self.song_learning = SongLearningDispatchSkill(self.singing.backend)
+        self.song_learning_tasks = SongLearningTasks(self.singing.backend)
         self.prepared_speech = prepared_speech
         self.touch_reaction = TouchReactionSkill(touch_configs, prepared_speech)
-        self.song_knowledge = SongKnowledgeAcceptanceSkill(config.get("knowledge"))
         self.speaking = SpeakingSkill(config.get("speaking"))
 
     def ensure_dependencies(self) -> None:

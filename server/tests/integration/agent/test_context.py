@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 """交互上下文的数据库边界、并发释放与刺激归属。"""
 
 import asyncio
@@ -510,7 +511,7 @@ async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
             await release.wait()
             return SimpleNamespace(hits=(SimpleNamespace(rendered_text="late", memory_record_id="late"),))
 
-    skill = CallRecallDecisionSkill(memories={"luotianyi": Memory()})
+    skill = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": Memory()}))
     recall = asyncio.create_task(
         skill.recall_once(
             SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),

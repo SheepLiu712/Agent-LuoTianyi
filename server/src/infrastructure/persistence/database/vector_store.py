@@ -240,6 +240,7 @@ class ChromaVectorStore(VectorStore):
                     query_texts=[query],
                     n_results=k,
                     where={"user_id": user_id} if "where" not in kwargs else kwargs.get("where"),
+                    **({"ids": kwargs["ids"]} if "ids" in kwargs else {}),
                 )
 
             results = await asyncio.get_event_loop().run_in_executor(self._executor, _do_query)
@@ -275,7 +276,7 @@ class ChromaVectorStore(VectorStore):
 
             traceback.print_exc()
             self.logger.error(f"文档搜索失败: {e}")
-            return []
+            raise
 
     def close(self) -> None:
         """Wait for all owned search work and release the dedicated executor."""

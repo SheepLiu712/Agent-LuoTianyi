@@ -54,7 +54,7 @@ def safe_song_name(name: str) -> str:
     return "".join(c for c in name if c.isalnum() or c in (" ", "-", "_")).strip()
 
 
-class SongKnowledgeAcceptanceSkill:
+class SongKnowledgeStore:
     """把已规范化的歌曲候选写入歌曲知识与关键词索引，不产生任何外部效果。"""
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -75,6 +75,45 @@ class SongKnowledgeAcceptanceSkill:
         self._lyric_file = knowledge_dir / "song_lyric_keywords.txt"
         self._database_lock = threading.Lock()
         self._database_ready = False
+
+    async def song_names(self) -> tuple[str, ...]:
+        def read():
+            self._ensure_database()
+            with get_song_session() as session:
+                return tuple(row.name for row in session.query(Song).order_by(Song.name).all())
+
+        return await asyncio.to_thread(read)
+
+    async def search(self, clues: tuple[str, ...], *, limit: int) -> tuple[tuple[str, str], ...]:
+        def read():
+            self._ensure_database()
+            found = {}
+            with get_song_session() as session:
+                for clue in clues:
+                    rows = (
+                        session.query(Song)
+                        .filter(Song.name.contains(clue) | Song.introduction.contains(clue))
+                        .order_by(Song.uuid)
+                        .limit(limit)
+                        .all()
+                    )
+                    found.update((row.uuid, row.introduction) for row in rows)
+            return tuple(found.items())[:limit]
+
+        return await asyncio.to_thread(read)
+
+    async def get_song(self, song_id: str) -> tuple[str, str, str] | None:
+        def read():
+            self._ensure_database()
+            with get_song_session() as session:
+                row = (
+                    session.query(Song)
+                    .filter((Song.name == song_id) | (Song.uuid == song_id) | (Song.safe_name == song_id))
+                    .first()
+                )
+                return (row.uuid, row.introduction, row.lyrics) if row else None
+
+        return await asyncio.to_thread(read)
 
     async def accept(
         self,

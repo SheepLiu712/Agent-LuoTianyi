@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 """慢召回只在完成后交付一轮正式回复。"""
 
 import asyncio
@@ -293,8 +294,8 @@ def _composition(config, delay):
     return ResponseCompositionSkill(
         config,
         topic_extraction=SimpleNamespace(extract=AsyncMock(return_value=TopicExtraction(memory_queries=("你好",)))),
-        memories={"luotianyi": _Memory(delay)},
-        singing=_Singing(),
+        retrieval=stub_retrieval({"luotianyi": _Memory(delay)}),
+        singing=stub_singing(_Singing()),
         reply=make_reply_skill({"luotianyi": _Generator()}),
     )
 

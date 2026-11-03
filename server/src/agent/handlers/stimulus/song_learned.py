@@ -7,8 +7,8 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
-from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.invocation import handling_invocation
+from src.agent.skills.memory_retrieval import MemoryRetrievalSkill
 from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill, MemoryWriteStatus
 from src.utils.logger import get_logger
 
@@ -27,12 +27,12 @@ class SongLearnedHandler:
         character_id: str,
         experience: MemoryWriteSkill,
         publishing: DynamicPublishingSkill,
-        dispatch: SongLearningDispatchSkill,
+        retrieval: MemoryRetrievalSkill,
     ) -> None:
         self._character_id = character_id
         self._experience = experience
         self._publishing = publishing
-        self._dispatch = dispatch
+        self._retrieval = retrieval
         self._logger = get_logger(__name__)
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
@@ -42,7 +42,9 @@ class SongLearnedHandler:
             raise TypeError("SongLearnedHandler 只处理 SongLearned")
         invocation = handling_invocation(request, plans.context)
         await self._record_experience(invocation, stimulus)
-        segment_description, lyrics = self._dispatch.material(invocation, song_id=stimulus.song_id)
+        song = await self._retrieval.get_song(invocation, song_id=stimulus.song_id)
+        segment_description = song.segments[0] if song.segments else ""
+        lyrics = song.lyrics
         body = await self._publishing.compose(
             invocation,
             dynamic_type=SONG_LEARNED_SOURCE_TYPE,

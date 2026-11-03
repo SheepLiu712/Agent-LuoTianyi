@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 """从统一 topic_extract 到真实回复解析和 Say/Sing ActionPlan 的离线链路。"""
 
 import json
@@ -67,12 +68,12 @@ def pipeline(*, attempts=("权御天下",), queries=("用户喜欢的歌",), ava
     composition = ResponseCompositionSkill(
         {},
         topic_extraction=extractor,
-        memories={
+        retrieval=stub_retrieval({
             "luotianyi": SimpleNamespace(
                 search_memory_context_for_topic=recall,
             )
-        },
-        singing=singing,
+        }),
+        singing=stub_singing(singing),
         reply=make_reply_skill({"luotianyi": generator}),
     )
     return composition, events, calls
@@ -144,6 +145,15 @@ async def run_handler(composition, mode="chat"):
     return report, [action for plan in sink.values for action in plan.actions], ctx
 
 
+@pytest.mark.parametrize("mode", ["chat", "memory", "proactive"])
+async def test_unavailable_requested_song_becomes_an_explicit_learning_action(mode):
+    composition, _, _ = pipeline(available=False)
+    report, actions, _ = await run_handler(composition, mode)
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert [action.song_id for action in actions if isinstance(action, d.RequestSongLearning)] == ["权御天下"]
+    assert not any(isinstance(action, d.Sing) for action in actions)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["chat", "memory"])
 async def test_extract_recall_song_then_replier_produces_ordered_say_sing_actions(mode):
@@ -209,5 +219,5 @@ async def test_cancellation_after_extraction_stops_recall_song_and_replier():
         reply_topic="唱歌",
         conversation_history="",
     )
-    assert result == ()
+    assert result.drafts == ()
     assert events == ["topic_extract"]

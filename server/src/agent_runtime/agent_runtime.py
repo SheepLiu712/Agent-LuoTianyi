@@ -260,7 +260,7 @@ class AgentRuntime:
                     character_id,
                     self.skills.memory_write,
                     self.skills.dynamic_publishing,
-                    self.skills.song_learning,
+                    self.skills.memory_retrieval,
                 ),
             ),
         ]
@@ -302,7 +302,7 @@ class AgentRuntime:
                 (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(character_id, self.skills.dynamic_publishing)),
                 (
                     ActionKind.REQUEST_SONG_LEARNING,
-                    RequestSongLearningHandler(character_id, self.skills.song_learning),
+                    RequestSongLearningHandler(character_id, self.skills.song_learning_tasks),
                 ),
                 (
                     ActionKind.REPLY_DYNAMIC,

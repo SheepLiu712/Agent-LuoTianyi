@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 """到期批次回复：生成、落库与 Say/Sing 计划交付。"""
 
 from dataclasses import replace
@@ -58,7 +59,7 @@ class Composer:
     async def compose(self, skill_invocation, **kwargs):
         kwargs["invocation"] = skill_invocation
         self.calls.append(kwargs)
-        return self.drafts
+        return ComposedReply(drafts=self.drafts)
 
     async def compose_staged(self, skill_invocation, **kwargs):
         kwargs["invocation"] = skill_invocation
@@ -210,8 +211,8 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
         topic_extraction=SimpleNamespace(
             extract=AsyncMock(return_value=TopicExtraction(memory_queries=("你好",), sing_attempts=("《歌》",)))
         ),
-        memories={"luotianyi": memory},
-        singing=singing,
+        retrieval=stub_retrieval({"luotianyi": memory}),
+        singing=stub_singing(singing),
         reply=make_reply_skill({"luotianyi": generator}),
     )
     drafts = await skill.compose(
@@ -220,17 +221,17 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
         reply_topic="你好",
         conversation_history="历史",
     )
-    assert [draft.sing for draft in drafts] == [None, ("歌", "副歌")]
-    assert drafts[0].content == "你好"
-    assert drafts[0].tone == "happy"
-    assert drafts[0].expression == "开心"
-    assert drafts[0].sound_content
+    assert [draft.sing for draft in drafts.drafts] == [None, ("歌", "副歌")]
+    assert drafts.drafts[0].content == "你好"
+    assert drafts.drafts[0].tone == "happy"
+    assert drafts.drafts[0].expression == "开心"
+    assert drafts.drafts[0].sound_content
     assert memory.memory_queries == [("u", ("你好",))]
     assert singing.plan_calls == [("luotianyi", ("《歌》",), None)]
     assert generator.kwargs["memory_hits"] == ["记忆1"]
     assert generator.kwargs["sing_plan"] == ("歌", "副歌")
     assert generator.kwargs["conversation_history"] == "历史"
-    assert drafts[1].lyrics == "歌词一行"
+    assert drafts.drafts[1].lyrics == "歌词一行"
     assert singing.calls == [("luotianyi", "歌", "副歌")]
 
 

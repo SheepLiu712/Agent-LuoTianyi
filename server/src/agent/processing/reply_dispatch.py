@@ -39,6 +39,23 @@ class ReplyDelivery:
         return drafts
 
     @staticmethod
+    async def request_learning(request, plans, songs, *, sources):
+        if songs:
+            await plans.emit(
+                ActionPlanDraft(
+                    source_stimulus_ids=sources,
+                    actions=tuple(
+                        d.RequestSongLearning(
+                            action_id=f"{request.request_id}-learn-{index}",
+                            song_id=song,
+                            dedup_key=f"song-learning:{plans.context.identity.character_id}:{song}",
+                        )
+                        for index, song in enumerate(dict.fromkeys(songs))
+                    ),
+                )
+            )
+
+    @staticmethod
     def call_say(request, draft, *, suffix, provisional=False):
         return d.Say(
             action_id=f"{request.request_id}-{suffix}",

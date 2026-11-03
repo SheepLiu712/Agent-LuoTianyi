@@ -287,7 +287,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         with pytest.raises(RuntimeError):
             call_memory.snapshot()
         assert not call_memory._items
-        assert vector.searches == [("user", "用户喜欢的音乐", 3), ("", "用户喜欢的音乐", 3)]
+        assert vector.searches == [("user", "用户喜欢的音乐", 3)]
         with database.open_sql_session() as sql:
             assert sql.query(Conversation).filter_by(user_id="user").count() == 1
     finally:

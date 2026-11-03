@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
 from contextlib import aclosing
 from enum import Enum
 from typing import Any, Protocol
@@ -13,16 +12,13 @@ from src.agent.context.memory_pool import CallMemory, CallMemoryPool
 from src.agent.context.models import UserContextSnapshot
 from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.contracts import ReplyDraft, SkillInvocation
+from src.agent.skills.memory_retrieval import MemoryQuery, MemoryRetrievalSkill
 from src.domain.call import AckStyle, CallRecallDecision, RecallMode
 from src.utils.logger import get_logger
 
 
 class _DecisionModel(Protocol):
     async def generate_response(self, **kwargs) -> str: ...
-
-
-class _Memory(Protocol):
-    async def search_memory_context_for_topic(self, user_id: str, queries: list[str]): ...
 
 
 class SilenceDecision(str, Enum):
@@ -37,13 +33,11 @@ class CallRecallDecisionSkill:
     def __init__(
         self,
         *,
-        memories: Mapping[str, _Memory],
+        retrieval: MemoryRetrievalSkill,
         config: dict | None = None,
         llm_service=None,
     ) -> None:
-        if not memories:
-            raise ValueError("call recall requires character memories")
-        self._memories = dict(memories)
+        self._retrieval = retrieval
         module = (config or {}).get("llm_module")
         self._model = llm_service.register_llm_module("skill.call_recall.decide", module) if module else None
         self._logger = get_logger(__name__)
@@ -83,9 +77,7 @@ class CallRecallDecisionSkill:
         if not queries:
             return tuple(item.content for item in memory_pool.snapshot())
         try:
-            context = await self._memories[invocation.character_id].search_memory_context_for_topic(
-                invocation.require_user_id(), list(queries)
-            )
+            context = await self._retrieval.search(invocation, query=MemoryQuery(queries))
         except Exception as error:
             self._logger.warning("call memory recall failed; continuing with existing pool: %s", type(error).__name__)
             return tuple(item.content for item in memory_pool.snapshot())

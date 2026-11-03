@@ -83,6 +83,7 @@ class ComposedReply:
 
     drafts: tuple[ReplyDraft, ...] = ()
     memory_hits: tuple[MemoryHit, ...] = ()
+    learning_requests: tuple[str, ...] = ()
 
 
 @dataclass

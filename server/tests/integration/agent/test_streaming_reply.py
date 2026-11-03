@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 """逐字模型输出经真实回复处理器、行动计划和 SayHandler 提前进入 TTS。"""
 
 import asyncio
@@ -152,7 +153,7 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
             )
         )
         handler = CallReplyRequestedHandler(
-            CallRecallDecisionSkill(memories={"luotianyi": Memory()}),
+            CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": Memory()})),
             CallReplySkill(make_reply_skill(generators)),
             catalog,
         )
@@ -161,8 +162,8 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
         handler = ChatReplyHandler(
             ResponseCompositionSkill(
                 {},
-                memories={"luotianyi": Memory()},
-                singing=SimpleNamespace(),
+                retrieval=stub_retrieval({"luotianyi": Memory()}),
+                singing=stub_singing(SimpleNamespace()),
                 reply=make_reply_skill(generators),
                 topic_extraction=Topics(),
             )

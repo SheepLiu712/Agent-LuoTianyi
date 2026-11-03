@@ -1,3 +1,4 @@
+from support.retrieval import stub_retrieval, stub_singing
 """Isolated loopback server for AC-27. Only models and long-term memory are fakes."""
 
 import io
@@ -98,8 +99,8 @@ def make_agent(root, resolver, models):
     )
     composition = ResponseCompositionSkill(
         {},
-        memories=memory,
-        singing=None,
+        retrieval=stub_retrieval(memory),
+        singing=stub_singing(None),
         reply=make_reply_skill({"luotianyi": ReplyResources({}, reply_model, profile)}),
         topic_extraction=TopicExtractionSkill({}, None, understanding=text),
     )

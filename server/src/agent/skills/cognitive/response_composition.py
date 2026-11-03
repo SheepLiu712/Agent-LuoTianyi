@@ -3,34 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable
 from contextlib import aclosing
 from dataclasses import replace
-from typing import Any, Protocol
+from typing import Any
 
 from src.agent.context.models import UserContextSnapshot
 from src.agent.skills.cognitive.topic_extraction import TopicExtractionSkill
 from src.agent.skills.contracts import ComposedReply, ComposedResponse, ReplyDraft, SkillInvocation
+from src.agent.skills.expression.singing import SingingSkill
+from src.agent.skills.memory_retrieval import MemoryQuery, MemoryRetrievalSkill
 
 from .reply import ReplySkill
-
-
-class _Memory(Protocol):
-    async def search_memory_context_for_topic(self, user_id: str, queries: list[str]): ...
-
-
-class _Singing(Protocol):
-    async def build_sing_plan(
-        self,
-        character_id: str,
-        attempts: list[str],
-        *,
-        excluded_segments: set[tuple[str, str]] | None = None,
-        emotion_context: str = "",
-        confirmed_intent: bool = False,
-    ): ...
-
-    def get_segment_lyrics(self, character_id: str, song: str, segment: str) -> str: ...
 
 
 class ResponseCompositionSkill:
@@ -40,15 +24,13 @@ class ResponseCompositionSkill:
         self,
         config: dict[str, Any],
         *,
-        memories: Mapping[str, _Memory],
-        singing: _Singing,
+        retrieval: MemoryRetrievalSkill,
+        singing: SingingSkill,
         reply: ReplySkill,
         topic_extraction: TopicExtractionSkill,
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("reply_composition 必须是字典")
-        if not memories:
-            raise ValueError("回复编排至少需要一个角色的记忆")
         slow = config.get("slow_recall", {})
         if not isinstance(slow, dict):
             raise TypeError("reply_composition.slow_recall 必须是字典")
@@ -60,7 +42,7 @@ class ResponseCompositionSkill:
             expression=(str(slow.get("provisional_expression", "") or "").strip() or None),
         )
         self._topic_extraction = topic_extraction
-        self._memories = dict(memories)
+        self._retrieval = retrieval
         self._singing = singing
         self._reply = reply
 
@@ -73,7 +55,7 @@ class ResponseCompositionSkill:
         conversation_history: str,
         excluded_segments: set[tuple[str, str]] | None = None,
         on_drafts=None,
-    ) -> tuple[ReplyDraft, ...]:
+    ) -> ComposedReply:
         """所有生成回复统一经过提取、召回/选歌、replier。"""
         staged = await self.compose_staged(
             invocation,
@@ -83,7 +65,7 @@ class ResponseCompositionSkill:
             excluded_segments=excluded_segments,
             on_drafts=on_drafts,
         )
-        return (await staged.formal()).drafts
+        return await staged.formal()
 
     async def compose_staged(
         self,
@@ -96,14 +78,14 @@ class ResponseCompositionSkill:
         on_drafts=None,
     ) -> ComposedResponse:
         """召回超时则先给出配置的临时草稿，正式草稿留待调用方继续 await。"""
-        user_id = invocation.require_user_id()
+        invocation.require_user_id()
         if invocation.cancellation.is_cancelled:
             return ComposedResponse()
         decision = await self._topic_extraction.extract(reply_topic, conversation_history=conversation_history)
         if invocation.cancellation.is_cancelled:
             return ComposedResponse()
         memory_queries = decision.memory_queries
-        recall = asyncio.ensure_future(self._recall(invocation.character_id, user_id, memory_queries))
+        recall = asyncio.ensure_future(self._recall(invocation, memory_queries))
 
         async def formal() -> ComposedReply:
             return await self._compose_reply(
@@ -127,10 +109,10 @@ class ResponseCompositionSkill:
     def _waits_for_slow_recall(self, memory_queries: tuple[str, ...]) -> bool:
         return bool(memory_queries) and self._provisional_after > 0 and bool(self._provisional.content)
 
-    async def _recall(self, character_id: str, user_id: str, memory_queries: tuple[str, ...]):
+    async def _recall(self, invocation, memory_queries):
         if not memory_queries:
             return None
-        return await self._memory_for(character_id).search_memory_context_for_topic(user_id, list(memory_queries))
+        return await self._retrieval.search(invocation, query=MemoryQuery(tuple(memory_queries)))
 
     async def _compose_reply(
         self,
@@ -149,16 +131,7 @@ class ResponseCompositionSkill:
             return ComposedReply()
         memory_hits = context.render_for_prompt() if context is not None else []
         hits = tuple(getattr(context, "hits", ()) or ()) if context is not None else ()
-        sing_plan = None
-        if sing_attempts:
-            candidate = await self._singing.build_sing_plan(
-                invocation.character_id,
-                list(sing_attempts),
-                excluded_segments=excluded_segments,
-                confirmed_intent=True,
-            )
-            if candidate and candidate[0] and candidate[1]:
-                sing_plan = candidate
+        sing_plan, learning_requests = await self._select_singing(invocation, sing_attempts, excluded_segments)
         if invocation.cancellation.is_cancelled:
             return ComposedReply()
 
@@ -184,13 +157,17 @@ class ResponseCompositionSkill:
                 if sing_plan is None or not draft.sing[1]:
                     continue
                 song, segment = draft.sing
-                lyrics = self._singing.get_segment_lyrics(invocation.character_id, song, segment)
+                information = self._singing.song_information(invocation, song_id=song, segment_id=segment)
+                lyrics = information[2] if information else ""
                 draft = replace(draft, lyrics=lyrics or "")
             enriched.append(draft)
-        return ComposedReply(drafts=tuple(enriched), memory_hits=hits)
+        return ComposedReply(drafts=tuple(enriched), memory_hits=hits, learning_requests=learning_requests)
 
-    def _memory_for(self, character_id: str) -> _Memory:
-        try:
-            return self._memories[character_id]
-        except KeyError as error:
-            raise KeyError(f"角色 {character_id} 未配置记忆") from error
+    async def _select_singing(self, invocation, attempts, excluded_segments):
+        if not attempts:
+            return None, ()
+        candidate = await self._singing.select(invocation, attempts=attempts, excluded_segments=excluded_segments)
+        if candidate and candidate[0] and candidate[1]:
+            return candidate, ()
+        requests = (candidate[0],) if candidate and candidate[0] and candidate[0] != "random_song" else ()
+        return None, requests

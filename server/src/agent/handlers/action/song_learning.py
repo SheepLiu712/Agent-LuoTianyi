@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import src.domain.agent as d
 from src.agent.processing.output_emitter import OutputEmitter
-from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
+from src.agent.skills.expression.song_learning import SongLearningTasks
 from src.agent.skills.invocation import execution_invocation
 from src.utils.logger import get_logger
 
@@ -12,7 +12,7 @@ from src.utils.logger import get_logger
 class RequestSongLearningHandler:
     """角色私有的学歌派发处理器；不在一次 realize 内等待完整学习。"""
 
-    def __init__(self, character_id: str, dispatch: SongLearningDispatchSkill) -> None:
+    def __init__(self, character_id: str, dispatch: SongLearningTasks) -> None:
         self._character_id = character_id
         self._dispatch = dispatch
         self._logger = get_logger(__name__)
