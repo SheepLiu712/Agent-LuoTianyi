@@ -889,7 +889,8 @@ function PipelinePage() {
 
   return (
     <>
-      <PageHeader title="链路耗时" subtitle="TopicPlanner、TopicReplier 和 TTS 首包延迟" />
+      <PageHeader title="链路耗时" subtitle="通话回复首包延迟与各处理阶段耗时" />
+      <CallReplyLatencyPanel />
       <StatusBar loading={loading} error={error} />
       <Panel title="7 日耗时分布">
         <table>
@@ -924,6 +925,68 @@ function PipelinePage() {
       </Panel>
     </>
   );
+}
+
+const CALL_REPLY_PHASES = [
+  ['total', '说完至首个 TTS 包'],
+  ['endpointing', '判断说话结束'],
+  ['scheduling', '等待开始检索'],
+  ['retrieval', '记忆检索'],
+  ['generation_queue', '准备生成回复'],
+  ['generation', '生成首段回复'],
+  ['submission', '提交首段回复'],
+  ['tts_first_packet', '提交至首个 TTS 包'],
+] as const;
+
+type CallReplyLatency = {
+  attempt_count: number;
+  completed_count: number;
+  summary: Record<string, LatencySummary & { failed_count: number }>;
+  recent: Array<{
+    trace_id: string; request_id: string; turn_seq: number; started_at: string;
+    speech_end_basis: string; outcome: string;
+    phases: Record<string, { duration_ms: number; status: string }>;
+  }>;
+};
+
+function CallReplyLatencyPanel() {
+  const { data, error, loading } = usePolling<CallReplyLatency>('/admin/api/pipeline/call-replies?days=7&limit=100');
+  const [selected, setSelected] = useState('');
+  const attempt = data?.recent.find(row => row.request_id === selected) || data?.recent[0];
+  const outcomes: Record<string, string> = {
+    completed: '已生成首包', interrupted: '已打断', failed: '失败', incomplete: '未完成或未收到结束记录',
+  };
+  return <Panel title="通话回复延迟（近 7 日）" className="scroll-panel">
+    <StatusBar loading={loading} error={error} />
+    <p>仅统计用户发言触发的回复，不含开场白、主动发言和预制致歉。用户说完时间根据识别音频结束位置与服务端音频接收时间估算，不代表手机采集时钟。</p>
+    <p>首包终点为服务端收到首个有效 TTS 音频包、发送给客户端之前；不含网络下行和扬声器播放。生成回复指首段可提交文本就绪，不是整段回复生成结束。</p>
+    <p>回复尝试：{formatNumber(data?.attempt_count || 0)}；已生成首包：{formatNumber(data?.completed_count || 0)}。各阶段仅汇总成功样本，缺失值不按零计入。</p>
+    <table><thead><tr><th>阶段</th><th>成功样本</th><th>失败样本</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th><th>最大</th></tr></thead>
+      <tbody>{CALL_REPLY_PHASES.map(([key, label]) => {
+        const row = data?.summary[key];
+        return <tr key={key}><td>{label}</td><td>{row?.count || 0}</td><td>{row?.failed_count || 0}</td>
+          {(['avg_ms', 'p50_ms', 'p90_ms', 'p99_ms', 'max_ms'] as const).map(field =>
+            <td key={field}>{row?.count ? formatMs(row[field]) : '—'}</td>)}</tr>;
+      })}</tbody>
+    </table>
+    <h3>最近回复的阶段明细</h3>
+    <select aria-label="选择通话回复" value={attempt?.request_id || ''} onChange={event => setSelected(event.target.value)}>
+      {!data?.recent.length && <option value="">暂无通话回复样本</option>}
+      {data?.recent.map(row => <option key={row.request_id} value={row.request_id}>
+        {new Date(row.started_at).toLocaleString()} · 第 {row.turn_seq} 轮 · {outcomes[row.outcome] || row.outcome} · {row.request_id.slice(0, 8)}
+      </option>)}
+    </select>
+    {attempt && <>
+      <p>通话链路：<code>{attempt.trace_id}</code>；回复请求：<code>{attempt.request_id}</code></p>
+      <p>说完时间依据：{attempt.speech_end_basis === 'audio_ingress_estimate' ? '服务端音频接收时间估算' : '不可用；不计入总延迟'}；状态：{outcomes[attempt.outcome] || attempt.outcome}</p>
+      <table><thead><tr><th>阶段</th><th>耗时</th><th>结果</th></tr></thead><tbody>
+        {CALL_REPLY_PHASES.map(([key, label]) => {
+          const phase = attempt.phases[key];
+          return <tr key={key}><td>{label}</td><td>{phase ? formatMs(phase.duration_ms) : '—'}</td><td>{phase ? phase.status === 'success' ? '成功' : '失败' : '未采集'}</td></tr>;
+        })}
+      </tbody></table>
+    </>}
+  </Panel>;
 }
 
 function TracePage() {

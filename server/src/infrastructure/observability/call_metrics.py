@@ -134,6 +134,24 @@ class CallMetrics:
     def __init__(self, sink: PipelineMetricSink | None) -> None:
         self._sink = sink
 
+    def record_reply_span(self, *, call_id, phase, start_ts, end_ts, duration_ms, status, metadata):
+        if self._sink is None:
+            return
+        try:
+            self._sink.record_pipeline_span(
+                trace_id=f"call:{call_id}",
+                span_name=f"call.reply.{phase}",
+                start_ts=start_ts,
+                end_ts=end_ts,
+                duration_ms=duration_ms,
+                status=status,
+                metadata=metadata,
+            )
+        except Exception as error:
+            from src.utils.logger import get_logger
+
+            get_logger(__name__).warning("Call reply metric failed call_id=%s type=%s", call_id, type(error).__name__)
+
     def record(self, metric: CallMetric) -> bool:
         if self._sink is None:
             return False

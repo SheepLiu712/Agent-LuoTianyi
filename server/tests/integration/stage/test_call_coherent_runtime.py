@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from functools import partial
+from types import SimpleNamespace
 
 import pytest
 from support.call_coherent_runtime import (
@@ -31,6 +33,7 @@ from src.infrastructure.models.realtime_speech import (
     SpeechStopped,
     TurnCompleted,
 )
+from src.infrastructure.observability.call_metrics import CallMetrics
 from src.infrastructure.persistence.database import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import Conversation, User
 from src.stage import CallStage
@@ -105,6 +108,8 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         call_sessions=database.call_sessions,
     )
     delivered = []
+    timing_rows = []
+    metrics = CallMetrics(SimpleNamespace(record_pipeline_span=lambda **row: timing_rows.append(row)))
 
     async def deliver(output):
         delivered.append(output)
@@ -144,6 +149,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         context_factory=runtime.context_factories["luotianyi"],
         call_sessions=database.call_sessions,
         speech_factory=provider_factory,
+        call_metrics=metrics,
         output_sink=output_sink(binding),
         save_history=save,
         own_initialization=partial(manager._own_initialization, user_id="user", release=manager._release_call_stage),
@@ -169,7 +175,14 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         )
         await session.receive_text(_completed(binding.call_id, 1, opening))
 
-        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="你还记得我喜欢什么吗")))
+        recognized = time.monotonic()
+        await provider.emit(
+            TurnCompleted(
+                CallAudioSemantic(transcript="你还记得我喜欢什么吗"),
+                speech_ended_at=recognized - 0.8,
+                recognized_at=recognized,
+            )
+        )
         call_memory = stage.context.call_memory
         await _eventually(lambda: bool(call_memory.snapshot()))
         assert tuple(item.content for item in call_memory.snapshot()) == ("用户喜欢音乐",)
@@ -190,6 +203,24 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
             )
         )
         before_interrupt = len(delivered)
+        phases = {
+            row["span_name"].removeprefix("call.reply."): row
+            for row in timing_rows
+            if row["span_name"].startswith("call.reply.")
+        }
+        assert phases["endpointing"]["duration_ms"] == pytest.approx(800)
+        assert phases["terminal"]["metadata"]["outcome"] == "completed"
+        segments = (
+            "endpointing",
+            "scheduling",
+            "retrieval",
+            "generation_queue",
+            "generation",
+            "submission",
+            "tts_first_packet",
+        )
+        assert phases["total"]["duration_ms"] == pytest.approx(sum(phases[p]["duration_ms"] for p in segments))
+        assert len({phases[p]["metadata"]["reply_request_id"] for p in segments}) == 1
         await provider.emit(SpeechStarted())
         await asyncio.sleep(0.1)
         assert stage._events_task is not None and not stage._events_task.done(), (
@@ -258,8 +289,17 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         assert stage.state is CallState.ACTIVE
         await session.receive_text(_completed(binding.call_id, 3, farewell))
         assert stage.state is CallState.ACTIVE
-        await session.receive_text(json.dumps({"protocol": "call.v1", "type": "call.hangup", "seq": 4,
-                                              "call_id": binding.call_id, "reason": "user_hangup"}))
+        await session.receive_text(
+            json.dumps(
+                {
+                    "protocol": "call.v1",
+                    "type": "call.hangup",
+                    "seq": 4,
+                    "call_id": binding.call_id,
+                    "reason": "user_hangup",
+                }
+            )
+        )
         snapshot = await asyncio.wait_for(wait_call_finished(stage), 2)
         await manager._finalizations.close()
 

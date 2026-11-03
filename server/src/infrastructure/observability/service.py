@@ -352,6 +352,17 @@ class ObservabilityService:
             grouped.setdefault(row["span_name"], []).append(float(row["duration_ms"] or 0.0))
         return {span_name: self._summarize_values(values) for span_name, values in grouped.items()}
 
+    def get_call_reply_latency(self, *, days: int = 7, limit: int = 100) -> Dict[str, Any]:
+        from .call_reply_summary import summarize_call_replies
+
+        rows = self._query_all(
+            """SELECT trace_id, span_name, start_ts, duration_ms, status, metadata_json
+               FROM pipeline_spans WHERE start_ts >= ? AND span_name LIKE 'call.reply.%'
+               ORDER BY id""",
+            (self._since_iso(days),),
+        )
+        return {"window_days": days, **summarize_call_replies(rows, self._summarize_values, limit)}
+
     def _summarize_llm_metric_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         count = len(rows)
         prompt_tokens = sum(int(row.get("prompt_tokens") or 0) for row in rows)

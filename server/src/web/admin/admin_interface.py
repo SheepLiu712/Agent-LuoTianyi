@@ -389,6 +389,14 @@ async def pipeline_spans(
     )
 
 
+@protected_router.get("/pipeline/call-replies")
+async def call_reply_latency(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=100, ge=1, le=200),
+) -> dict[str, Any]:
+    return get_admin_shell().observability.get_call_reply_latency(days=days, limit=limit)
+
+
 @protected_router.get("/traces")
 async def traces(
     days: int = Query(default=7, ge=1, le=90),

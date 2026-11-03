@@ -22,6 +22,7 @@ from src.domain.call import (
     CallOutcome,
     CallSpeechDelivery,
 )
+from src.infrastructure.observability.call_reply_timing import mark_reply_phase
 from src.utils.enum_type import ConversationSource
 from src.utils.logger import get_logger
 
@@ -274,12 +275,15 @@ class CallEndingHandler:
 
 
 async def _retrieve_call_memories(retrieval, invocation, plans, clues):
+    mark_reply_phase("retrieval_started")
     try:
         result = await retrieval.search(invocation, query=MemoryQuery(clues))
     except Exception as error:
+        mark_reply_phase("retrieval_finished", status="error")
         # 实时通话 spec 明确规定：检索失败仍使用已有上下文与记忆池回复。
         get_logger(__name__).warning("通话检索失败，沿用已有记忆池 error_type=%s", type(error).__name__)
     else:
+        mark_reply_phase("retrieval_finished")
         plans.context.call_memory.remember_hits(result.hits)
     return tuple(item.content for item in plans.context.call_memory.snapshot())
 
@@ -323,6 +327,7 @@ async def _generate_reply(skill, prepared_speech, reply, scene, plans, request, 
     accepted_before = len(plans.accepted_ids)
 
     async def generate(on_drafts):
+        mark_reply_phase("generation_started")
         drafts = await generate_call_reply(skill, invocation, on_drafts=on_drafts, **kwargs)
         if not drafts:
             raise ValueError("empty call reply")

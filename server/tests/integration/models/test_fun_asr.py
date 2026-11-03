@@ -177,3 +177,33 @@ async def test_finish_timeout_is_reported_and_releases_socket():
         await session.close()
     assert (await session.wait_failure()).error_code == "provider_finish_failed"
     assert socket.closed
+
+
+@pytest.mark.asyncio
+async def test_final_transcript_carries_audio_end_estimate_not_final_arrival_time(monkeypatch):
+    from src.infrastructure.models.realtime_speech import fun_asr
+
+    clock = [10.0]
+    monkeypatch.setattr(fun_asr.time, "monotonic", lambda: clock[0])
+    socket = AsrSocket()
+    session = await started(socket)
+    await session.push_audio(AudioFrame(bytes(3200), "pcm_s16le", 16000, 1))
+    clock[0] = 10.1
+    await session.push_audio(AudioFrame(bytes(3200), "pcm_s16le", 16000, 1))
+    clock[0] = 11.0
+    await socket.event(
+        "result-generated",
+        output={
+            "sentence": {
+                "sentence_id": 1,
+                "sentence_end": True,
+                "text": "你好",
+                "end_time": 150,
+            }
+        },
+    )
+    await session.close()
+    result = [e async for e in session.events()]
+    final = result[-1]
+    assert final.speech_ended_at == pytest.approx(10.05)
+    assert final.recognized_at == 11.0
