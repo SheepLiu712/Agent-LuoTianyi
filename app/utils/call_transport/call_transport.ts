@@ -582,6 +582,11 @@ export class CallTransportSession {
       this.playReplyFailureTone();
       return;
     }
+    // 服务端对 retryable=true 的错误（如 OVERLOADED）的语义是退避后由 nack 触发重放；
+    // 帧仍在 outbox，把背压当致命错误会把"暂时拥塞"放大成"通话失败"。
+    if (message.retryable) {
+      return;
+    }
     throw new Error(message.code || 'SERVER_PROTOCOL_ERROR');
   }
 
