@@ -11,7 +11,6 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
     TopicExtractionSkill,
 )
-from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
 from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
 from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
@@ -98,10 +97,6 @@ class SharedSkills:
                 config.get("topic_extraction"), llm_service, understanding=self.text_preprocessing
             ),
         )
-        self.call_recall = CallRecallDecisionSkill(
-            retrieval=self.memory_retrieval, config=config.get("call_recall"), llm_service=llm_service
-        )
-        self.call_reply = CallReplySkill(self.reply)
         self.call_summary = CallSummarySkill(config.get("call_summary"), llm_service=llm_service, characters=characters)
         self.call_maintenance = CallMaintenanceSkill(
             dict(memories), getattr(database_manager, "call_maintenance_batches", None)

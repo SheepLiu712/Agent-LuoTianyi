@@ -18,22 +18,14 @@ class DeterministicLLMModule:
 
     async def generate_response(self, **kwargs) -> str:
         self.calls.append(kwargs)
-        if self.name == "skill.call_recall.decide":
-            if "silence_ms" in kwargs:
-                return json.dumps({"decision": "end_call"})
-            return json.dumps(
-                {
-                    "mode": "recall",
-                    "memory_queries": ["用户喜欢的音乐"],
-                    "ack_style": "thinking",
-                }
-            )
         if self.name.startswith("skill.call_summary."):
             return "用户与角色讨论了音乐喜好，并约定之后继续交流。"
         if self.name.startswith("skill.reply."):
             topic = str(kwargs.get("reply_topic") or "")
             if "刚刚接通" in topic:
                 return "[中性]你好，我在这里。"
+            if "主动开启" in topic:
+                return "[中性]我们聊聊今天有什么开心的事吧。"
             if "告别" in topic:
                 return "[中性]那我们下次再聊，再见。"
             return "[中性]我记得你喜欢音乐，我们继续聊吧。"
@@ -173,7 +165,6 @@ def runtime_config(tmp_path) -> dict[str, object]:
             "reply": {"llm_module": {"llm": {"name": "test"}}},
             "memory_write": {"llm_module": {"llm": {"name": "test"}}},
             "cognitive_maintenance": {"user_profile": {"llm_module": {"llm": {"name": "test"}}}},
-            "call_recall": {"llm_module": {"llm": {"name": "test"}}},
             "call_summary": {"llm_module": {"llm": {"name": "test"}}},
             "speaking": {"characters": {"luotianyi": {}}},
             "singing": {"characters": {"luotianyi": {"resource_path": str(songs)}}},

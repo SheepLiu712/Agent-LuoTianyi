@@ -193,13 +193,13 @@ class AgentRuntime:
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
             (
                 StimulusKind.CALL_STARTED,
-                CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech, reply=self.reply_delivery),
+                CallStartedHandler(self.skills.reply, self.skills.prepared_speech, reply=self.reply_delivery),
             ),
             (
                 StimulusKind.CALL_REPLY_REQUESTED,
                 CallReplyRequestedHandler(
-                    self.skills.call_recall,
-                    self.skills.call_reply,
+                    self.skills.memory_retrieval,
+                    self.skills.reply,
                     self.skills.prepared_speech,
                     reply=self.reply_delivery,
                 ),
@@ -207,8 +207,8 @@ class AgentRuntime:
             (
                 StimulusKind.CALL_SILENCE_ELAPSED,
                 CallSilenceElapsedHandler(
-                    self.skills.call_recall,
-                    self.skills.call_reply,
+                    self.skills.memory_retrieval,
+                    self.skills.reply,
                     self.skills.prepared_speech,
                     reply=self.reply_delivery,
                 ),

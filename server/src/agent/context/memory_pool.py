@@ -1,7 +1,11 @@
 """Deterministic per-call LRU pool for already recalled memories."""
 
+import hashlib
 from collections import OrderedDict
+from collections.abc import Iterable
 from dataclasses import dataclass
+
+from src.domain import MemoryHit
 
 from ._lifecycle import _Lifecycle
 
@@ -34,6 +38,15 @@ class CallMemoryPool:
     def snapshot(self) -> tuple[CallMemory, ...]:
         self._state.check()
         return tuple(self._items.values())
+
+    def remember_hits(self, hits: Iterable[MemoryHit]) -> None:
+        """将授权命中加入本交互的记忆池，保留稳定身份与近似最近使用顺序。"""
+        self._state.check()
+        for hit in hits:
+            text = hit.rendered_text.strip()
+            if text:
+                identity = hit.memory_record_id or hit.vector_id or hashlib.sha256(text.encode("utf-8")).hexdigest()
+                self.remember(CallMemory(identity, text))
 
     def clear(self) -> None:
         self._state.check()

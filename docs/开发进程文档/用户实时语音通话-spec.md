@@ -188,19 +188,13 @@
 
 模型应尽可能逐字转写；缺失的情绪或声音描述可以为 `null`，不得为了补齐字段额外调用一次大模型。
 
-### AC-06 快速决策、记忆召回与首包延迟
+### AC-06 通用记忆检索与首包延迟
 
-**状态**：Agent 收到 `CallTurnCompleted`。  
-**输入**：当前通话上下文、用户画像和容量默认 10 的通话记忆池。  
-**输出**：`CallRecallDecisionSkill`（位于 `server/src/agent/skills/cognitive/call_recall/skill.py`，负责通话记忆召回决策）返回 `DIRECT`（直接回复）或 `RECALL`（检索后回复），同时返回 `ack_style`（过渡语类别）；决策过程不生成正式回复、不写记忆、不直接改变 Stage。未配置 `agent.call_recall.llm_module` 或决策失败时，以当前轮次语义作为检索词，采用 `RECALL` 和 `ack_style=none`，不自动输出固定过渡语。
+**状态**：Agent 收到有效的 `CallReplyRequested`（正式回复请求）。
+**输入**：本轮待回复内容、当前通话上下文、用户画像及容量默认 10 的通话记忆池。
+**输出**：处理器调用 [MemoryRetrievalSkill](../../server/src/agent/skills/memory_retrieval.py)（通用授权记忆检索能力），每个正式请求执行一次检索能力调用；已有记忆池非空时也不跳过。检索结果本身不更新交互状态，处理器通过上下文的 `remember_hits` 接口更新本次通话记忆池，再将整个池传入共享回复能力。
 
-**状态**：快速决策为 `DIRECT`。  
-**输入**：当前上下文和整个通话记忆池。  
-**输出**：回复 Agent 直接作答，不额外查询向量数据库，也不改变记忆池的使用顺序。
-
-**状态**：快速决策为 `RECALL`。  
-**输入**：`memory_queries` 和 `ack_style`。  
-**输出**：执行一次向量记忆召回，使用更新后的整个通话记忆池生成正式回复。`ack_style=none` 时不输出过渡语，直接等待正式回复；仅在决策模型明确选择非 `none` 类别时，播放对应的预批准固定短句，并同时执行召回。存在过渡语时，正式回答在过渡语播放结束后开始且不重叠。过渡语标记为 `provisional`（临时输出），不参与概要、画像或长期记忆提取。检索记忆不再强制要求过渡语。
+删除未启用的快速决策模型、`DIRECT/RECALL` 分支及 `agent_runtime.skills.call_recall` 配置；默认不输出回忆过渡语。首次回复仍通过流式草稿提前交付，未确认播放的内容不作为已发生的对话事实。
 
 **状态**：向量召回返回新命中。  
 **输入**：命中的记忆标识与内容。  
@@ -208,7 +202,7 @@
 
 **状态**：正常网络和设备条件下完成一个有效轮次。  
 **输入**：`turn_completed` 时间点。  
-**输出**：服务端发出第一个有效 TTS 音频块的 P95 不高于 2 秒；Android 开始播放的 P95 不高于 2.3 秒。决策模型显式选择的 `RECALL` 过渡语仍可计入首包指标，但必须另记 `formal_reply_latency`；无过渡语且正式回复成功时，首包来自正式回复；端点判断延迟单独统计。取消默认过渡语不代表上述延迟目标已达成，仍须通过真实通话测量验收。
+**输出**：服务端发出第一个有效 TTS 音频块的 P95 不高于 2 秒；Android 开始播放的 P95 不高于 2.3 秒。首包来自正式回复，同时记录 `formal_reply_latency`（正式回复延迟）；端点判断延迟单独统计。取消默认过渡语不代表上述延迟目标已达成，仍须通过真实通话测量验收。
 
 `call.first_audio` 从 CallStage 接纳有效 `TurnCompleted` 起，计至该轮首个非空 canonical PCM 的 `websocket.send_bytes` 成功返回，使用单调时钟计算耗时，每轮至多一次。排队、取出报文不算发送成功；网络失败、取消、失效连接反馈、空音频与已撤回输出不产生成功样本；同轮重试不重置起点，重放不重复计数。网络发送完成不代表客户端收到或开始播放，也不推进客户端 ACK。
 
@@ -220,7 +214,7 @@
 
 **输入**：回复模型连续返回的正文增量。
 
-**输出**：共用仓库内的 [ReplySkill](../../server/src/agent/skills/cognitive/reply.py)，由其 `generate_stream` 方法处理模型生成与解析，`deliver` 方法检查请求有效性并将短句交付为行动计划。角色回复模型创建时启用流式选项；无需等待全文生成结束即可开始文本转语音（TTS）。聊天与通话保留各自的记忆准备和记录规则，通话记忆池及按需回忆决策不变，不恢复每轮无条件过渡语。
+**输出**：共用仓库内的 [ReplySkill](../../server/src/agent/skills/cognitive/reply.py)，由其 `generate` 方法处理模型生成与解析；[ReplyDelivery](../../server/src/agent/processing/reply_dispatch.py)（处理器侧回复交付流程）检查请求有效性并将短句交付为行动计划。角色回复模型创建时启用流式选项；无需等待全文生成结束即可开始文本转语音（TTS）。聊天与通话保留各自的记忆准备和记录规则，保留通话记忆池并对每个正式回复请求检索，不恢复每轮无条件过渡语。
 
 增量解析器 [StreamingReplyParser](../../server/src/agent/skills/cognitive/_streaming_reply_parser.py) 遵循以下规则：
 
@@ -295,7 +289,7 @@
 
 **状态**：上述沉默时钟连续达到 5 秒。
 **输入**：CallStage 生成 `CallSilenceElapsed`。  
-**输出**：Agent 或快速判断返回 `SPEAK`、`WAIT` 或 `END_CALL`；不得使用固定沉默次数直接挂断。
+**输出**：有效沉默刺激默认采用 `SPEAK`（主动说话），生成并交付自然的新话题；不返回 `WAIT`（等待）或仅因沉默产生 `END_CALL`（挂断）行动。刺激有效性及回复并发资格仍由 CallStage 判断；用户挂断与通话期限机制保持不变。
 
 **状态**：Agent 决定挂断。  
 **输入**：`EndCall` 动作。  
@@ -488,7 +482,7 @@ async def maintain(
 
 向量候选使用 `(maintenance_id, candidate_index)` 幂等；画像使用完整值幂等写入。只有数据库成功后，才通过 InteractionContext 的正式接口更新当前用户画像。正常通话复用原 InteractionContext，先完成最终认知维护，再以维护后本次会话的工作摘要和未压缩内容生成最终概要；该概要作为 CallContent.summary 持久化，并在全部 owned 写入停止后关闭原 Context。维护失败沿用既有降级策略，不阻止通话记录清理；本次通话概要不参与本次维护，但作为 Conversation 条目参与以后全局聊天上下文的维护。`CallEndingHandler` 只发出一个 `FinalizeCall` 行动，行动内部按“维护 → 概要”执行，维护异常不触发通用执行器短路后续概要。Agent 通过类型化 `CallEndingResult` 返回概要、来源、维护成功与实际进度；CallStage 调用内部 `CallHistory` 保存 Conversation 和账本，不回调 Manager 执行业务。
 
-现有显式“请记住这些事”能力保持原行为；本功能不新增一句话级别的“请记住”识别，也不把它并入通话快速决策。
+现有显式“请记住这些事”能力保持原行为；本功能不新增一句话级别的“请记住”识别，本轮不扩展其通话内识别范围。
 
 ### AC-16 失败降级
 
@@ -496,7 +490,6 @@ async def maintain(
 | --- | --- |
 | 实时语音初始化失败且未接通 | 结束呼叫，不创建 Conversation |
 | `ACTIVE` 中供应商失败 | 结束通话，使用已完成轮次生成概要并创建记录 |
-| 快速决策失败 | 降级为 `RECALL`，以当前轮次语义检索，`ack_style=none`，不输出固定过渡语 |
 | 向量召回失败 | 使用当前上下文与现有记忆池正式回复 |
 | 主回复失败一次 | 播放预录歉意语，保持通话 |
 | 单次 TTS 失败 | 重试一次；仍失败则客户端播放内置错误音，保持通话 |
@@ -533,13 +526,13 @@ async def maintain(
 
 ### AC-19 测试
 
-- 单元测试：状态机、快速决策、记忆池近似 LRU、`CallContent` 渲染、UUIDv5 身份、概要约束、认知维护进度和幂等；分别验证 Database 与 Ephemeral Store 的 `append/compact` 可观察语义。
+- 单元测试：状态机、每轮检索与沉默主动回复、记忆池近似 LRU、`CallContent` 渲染、UUIDv5 身份、概要约束、认知维护进度和幂等；分别验证 Database 与 Ephemeral Store 的 `append/compact` 可观察语义。
 - 服务端集成测试：鉴权、进程内交互租约、混合帧协议、统一连续结算游标、ACK/NACK、重传、3 秒恢复、打断、异步结算、账户重置；覆盖控制/音频交错时的缺口恢复、取消范围越过音频缺口立即停止、推进游标并释放 payload，以及 TTS 快于播放、多话语排队、完成 ACK 丢失和重复完成时只在最后实际播放完成后启动一次沉默时钟；通话中及结算后断言 Conversation、ConversationContext、Redis、呼叫账本和媒体库均不存在逐轮转录或工作摘要。
 - 上下文初始化测试：最新 Conversation 记录在 3 分钟边界内时按时间正序加载最新最多 30 条及现有摘要；超过边界、属于其他用户或角色时不加载；初始化读取不产生任何写操作。
 - ChatStage 切换测试：只有当前已绑定聊天客户端登记的 `CallTransitionIntent` 能触发 `SWITCH_TO_CALL`；其他设备、错误角色、重复或缺失意图均不能抢占现有 ChatStage。
 - ChatStage 回收测试：匹配的 `call.start` 先创建 CallStage 并反馈响铃，初始化前段失败可恢复旧聊天；后段提交退出后取消旧 Stage 的处理、期限、计划和输出，已落库事实参与结束维护。旧 Context 安全关闭且维护成功后才创建 Call Context；维护失败或超时使通话建立失败，且不得同时存在两个 Context。
 - 普通断线回归测试：没有 `call.switch_prepare` 的 `chat_ws` 意外断开仍保留 ChatStage 60 秒并支持原有重连，不得被误判为主动切换。
-- Agent 测试：`DIRECT`、`RECALL`、决策模型显式选择的回忆过渡语、沉默决策、结束维护动作；覆盖未配置决策模型及决策失败时连续多轮只输出正式回复，并继续检索、更新和复用记忆池。
+- Agent 测试：每个正式请求检索、有效沉默主动生成新话题、结束维护动作；覆盖已有记忆池非空时继续检索、检索失败时沿用现有记忆池、流式首段提前交付与取消清理。
 - 流式回复测试：[test_streaming_reply.py](../../server/tests/integration/agent/test_streaming_reply.py) 验证阈值与标点切分、最近前置情绪映射、跨分片标签、尾段交付及演唱行为；模拟长文本逐字输出，验证全文结束前已有短句交付 TTS。[test_llm_streaming.py](../../server/tests/unit/infrastructure/test_llm_streaming.py) 验证模型增量、完整结果聚合及异常处理。这些测试不代替真实首包延迟验收。
 - 结束/取消契约测试：阻塞结算时 terminate 保持等待，新接入/重置仍被拒绝，终态消息与挂断 ACK 不等待结算；取消首次及重复等待者不取消底层唯一结束/收尾任务；生命周期超时后延迟写入或清理期间仍保持占用；初始化中终止后无晚到资源；成功或失败清理结束才解除占用；Adapter 先释放不影响收尾；关闭和回滚必须在业务排空后关闭 Agent/数据库。
 - 启动/恢复契约测试：账本建立后、初始化完成前确认 PREPARING→首 ACK→后续输出顺序；覆盖初始化中挂断、身份准备后发送失败、首 ACK 丢失、重复 start、接通前 resume、原连接仍有效时拒绝抢占、进入 ACTIVE 后状态消息丢失、旧连接晚到清理以及恢复校验与超时/挂断竞争。断线重绑不重置建立期限或重复接听/开场；全部测试同时断言单一呼叫身份、实际资源清理和既有收尾接入限制。
@@ -630,7 +623,7 @@ stateDiagram-v2
 | InteractionLeaseRegistry | `stage` | 由 StageManager 一侧持有，按同用户、同角色原子授予唯一交互所有权；主动切换期间以 `CallTransitionIntent` 保留过渡占用，旧 ChatStage 终止且 Context 关闭后才把所有权交给 CallStage | 分布式协调、接受未经当前绑定验证的客户端切换声明 |
 | CallStage | Stage | 状态机、PCM 顺序与背压、轮次、待播放项、沉默时钟、打断、恢复、播放结算、资源关闭 | 直接访问阿里 SDK、直接调用 Skill、用 TTS 生成进度推测客户端播放完成 |
 | RealtimeSpeechSession | `infrastructure/models/realtime_speech` | 把供应商实时 ASR/VAD 事件归一化为稳定领域事件 | 生成天依回复、写 Conversation |
-| CallRecallDecisionSkill | Agent Skill | 判定 `DIRECT/RECALL`，生成检索条件与过渡语类别 | 正式回答、写记忆、改变 Stage |
+| MemoryRetrievalSkill | Agent Skill | 查询当前角色及授权用户记忆并返回结构化命中 | 正式回答、写记忆、更新通话记忆池、改变 Stage |
 | Agent | Agent | 接听、回复、沉默行动、挂断、概要和认知维护行动计划 | 处理 PCM 包序与 WS 帧 |
 | Speaking Skill 与 TTS backend | `agent/skills/expression/speaking` | 作为角色说话能力合成 24 kHz 单声道 PCM，管理后端与进程并支持请求级取消 | 归入通用 Infrastructure、猜测聊天与通话路由 |
 | CognitiveMaintenanceSkill | Agent Skill | 压缩、记忆提取、画像更新、维护批次幂等 | 每轮无条件写长期记忆 |
@@ -714,31 +707,16 @@ class RealtimeSpeechSessionFactory(Protocol):
 
 首个实现位于 `infrastructure/models/realtime_speech`，可使用支持实时端点判断的阿里云模型，但 Spec 不绑定具体 Qwen Realtime 型号。另提供内存测试适配器。供应商若自动生成回答，适配器必须立即取消并丢弃，禁止进入 Agent、客户端或 Conversation。
 
-### 快速决策接口
+### 通话检索与回复能力接口
+
+处理器通过 [SkillInvocation](../../server/src/agent/skills/contracts.py)（受信角色、用户及交互身份）调用通用检索能力；`MemoryQuery`（查询线索、作用域与结果上限）限定本次访问范围。处理器更新交互记忆池后调用共享回复能力，不将 Stage 或计划交付接收器传入技能。
 
 ```python
-class RecallMode(Enum):
-    DIRECT = "direct"
-    RECALL = "recall"
-
-
-class AckStyle(Enum):
-    NONE = "none"
-    THINKING = "thinking"
-    EMPATHY = "empathy"
-    CONFIRMING = "confirming"
-
-
-@dataclass(frozen=True)
-class CallRecallDecision:
-    mode: RecallMode
-    memory_queries: tuple[str, ...]
-    ack_style: AckStyle
+result = await memory_retrieval.search(invocation, query=MemoryQuery((current_turn_text,)))
+context.call_memory.remember_hits(result.hits)
 ```
 
-`DIRECT` 要求检索词为空且 `ack_style=none`；`RECALL` 要求至少一个有效检索词，允许 `ack_style=none`。未配置决策模型或决策失败时，默认返回 `RECALL` 和 `AckStyle.NONE`；只有模型显式选择其他类别时才输出回忆过渡语。
-
-第一版可由现有快速模型实现。未来应优先调研独立本地 Judge；候选包括社区项目 AgentJev-0.6B。它是基于 Qwen3-0.6B 的社区决策模型，不等同于 TypeSafe 官方 Jev 的本地发行，不能在完成本项目数据集验证前直接用于生产路由。
+回复草稿筛选位于 [processing/call_reply.py](../../server/src/agent/processing/call_reply.py)，是处理器侧转换函数，不再注册为独立 Skill。
 
 ### 接口规范
 

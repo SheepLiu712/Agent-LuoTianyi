@@ -1,4 +1,4 @@
-from support.retrieval import stub_retrieval, stub_singing
+from support.retrieval import stub_retrieval
 """交互上下文的数据库边界、并发释放与刺激归属。"""
 
 import asyncio
@@ -495,7 +495,6 @@ async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
     from types import SimpleNamespace
 
     from src.agent.context.memory_pool import CallMemory
-    from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill
 
     contexts = factory(database)
     first = await contexts.create("a", mode=ConversationMode.CALL, user_id="u", requested_at=datetime(2026, 10, 10))
@@ -511,14 +510,12 @@ async def test_context_owns_call_memory_and_close_rejects_late_recall(database):
             await release.wait()
             return SimpleNamespace(hits=(SimpleNamespace(rendered_text="late", memory_record_id="late"),))
 
-    skill = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": Memory()}))
-    recall = asyncio.create_task(
-        skill.recall_once(
-            SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),
-            memory_pool=pool,
-            queries=("query",),
-        )
-    )
+    skill = stub_retrieval({"luotianyi": Memory()})
+    async def retrieve():
+        result = await skill.search(SimpleNamespace(character_id="luotianyi", require_user_id=lambda: "u"),
+                                    query=SimpleNamespace(clues=("query",)))
+        pool.remember_hits(result.hits)
+    recall = asyncio.create_task(retrieve())
     await entered.wait()
     await first.close()
     await first.close()

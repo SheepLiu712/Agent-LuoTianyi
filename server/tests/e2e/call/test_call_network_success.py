@@ -429,12 +429,9 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
         assert isinstance(call.recv(), bytes)
         _complete(call, call_id, 3, opening)
         assert http.post(url + f"/test/provider/{call_id}/turn", timeout=5).ok
-        provisional = _receive_until(call, "audio.stream_started")
-        assert "recall-ack" in provisional["response_id"]
-        assert isinstance(call.recv(), bytes)
-        _complete(call, call_id, 4, provisional)
         formal = _receive_until(call, "audio.stream_started")
         assert "turn-1" in formal["response_id"]
+        assert "recall-ack" not in formal["response_id"]
 
         started = time.monotonic()
         call.close()
@@ -461,7 +458,7 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
                 {
                     "protocol": "call.v1",
                     "type": "playback.stopped",
-                    "seq": 5,
+                    "seq": 4,
                     "call_id": call_id,
                     "response_id": formal["response_id"],
                     "stop_seq": stopped["seq"],
@@ -472,7 +469,7 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
                 {
                     "protocol": "call.v1",
                     "type": "call.hangup",
-                    "seq": 6,
+                    "seq": 5,
                     "call_id": call_id,
                     "reason": "user_hangup",
                 },

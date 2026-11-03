@@ -7,30 +7,23 @@ from datetime import datetime, timedelta
 
 import src.domain.agent as d
 from src.agent.context import ConversationEntry, TextContent
+from src.agent.processing.call_reply import generate_call_reply
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
 from src.agent.processing.reply_dispatch import ReplyDelivery
-from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
+from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
+from src.agent.skills.memory_retrieval import MemoryQuery, MemoryRetrievalSkill
 from src.domain.call import (
-    AckStyle,
     CallAnswerDecision,
     CallAudioRoute,
-    CallEndReason,
     CallOutcome,
     CallSpeechDelivery,
-    RecallMode,
 )
 from src.utils.enum_type import ConversationSource
 from src.utils.logger import get_logger
-
-_ACK_TEXT = {
-    AckStyle.THINKING: "嗯，让我想想。",
-    AckStyle.EMPATHY: "嗯，我在听。",
-    AckStyle.CONFIRMING: "好，我想起来了。",
-}
 
 
 def _report(request: d.HandleStimulusRequest) -> d.HandlingReport:
@@ -86,7 +79,7 @@ class CallAnswerRequestedHandler:
 
 class CallStartedHandler:
     def __init__(
-        self, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplyDelivery | None = None
+        self, replies: ReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplyDelivery | None = None
     ) -> None:
         self._replies = replies
         self._prepared_speech = prepared_speech
@@ -151,12 +144,12 @@ class CallReplyConfirmedHandler:
 class CallReplyRequestedHandler:
     def __init__(
         self,
-        recall: CallRecallDecisionSkill,
-        replies: CallReplySkill,
+        retrieval: MemoryRetrievalSkill,
+        replies: ReplySkill,
         prepared_speech: PreparedSpeechCatalog,
         reply: ReplyDelivery | None = None,
     ) -> None:
-        self._recall = recall
+        self._retrieval = retrieval
         self._replies = replies
         self._prepared_speech = prepared_speech
         self._reply = reply or ReplyDelivery()
@@ -173,21 +166,7 @@ class CallReplyRequestedHandler:
             semantic += "\n此前回复被打断。结合已确认播放的对话继续处理所有待回复内容，不要假设未确认部分已被听到。"
         invocation = handling_invocation(request, plans.context)
         history = render_conversation_history(plans.context.conversation.read())
-        decision = await self._recall.decide(
-            invocation,
-            memory_pool=plans.context.call_memory,
-            audio_semantic=semantic,
-            conversation_history=history,
-            user_context=plans.context.user.read(),
-        )
-        memory_pool = tuple(item.content for item in plans.context.call_memory.snapshot())
-        if decision.mode is RecallMode.RECALL:
-            await _emit_ack(plans, request, decision.ack_style)
-            memory_pool = await self._recall.recall_once(
-                invocation,
-                memory_pool=plans.context.call_memory,
-                queries=decision.memory_queries,
-            )
+        memory_pool = await _retrieve_call_memories(self._retrieval, invocation, plans, (semantic,))
         drafts = await _generate_reply(
             self._replies,
             self._prepared_speech,
@@ -212,12 +191,12 @@ class CallReplyRequestedHandler:
 class CallSilenceElapsedHandler:
     def __init__(
         self,
-        recall: CallRecallDecisionSkill,
-        replies: CallReplySkill,
+        retrieval: MemoryRetrievalSkill,
+        replies: ReplySkill,
         prepared_speech: PreparedSpeechCatalog,
         reply: ReplyDelivery | None = None,
     ) -> None:
-        self._recall = recall
+        self._retrieval = retrieval
         self._replies = replies
         self._prepared_speech = prepared_speech
         self._reply = reply or ReplyDelivery()
@@ -228,19 +207,8 @@ class CallSilenceElapsedHandler:
             raise TypeError("CallSilenceElapsedHandler requires CallSilenceElapsed")
         invocation = handling_invocation(request, plans.context)
         history = render_conversation_history(plans.context.conversation.read())
-        decision = await self._recall.decide_silence(
-            invocation,
-            memory_pool=plans.context.call_memory,
-            silence_ms=stimulus.silence_ms,
-            conversation_history=history,
-        )
-        if decision is SilenceDecision.WAIT:
-            return _report(request)
-        topic = (
-            "通话中短暂安静了，请自然地继续话题或关心用户，不要提及计时器"
-            if decision is SilenceDecision.SPEAK
-            else "请用一句自然简短的告别结束这次实时语音通话"
-        )
+        topic = "通话中短暂安静了，请主动开启一个自然的新话题或关心用户，不要提及计时器"
+        memory_pool = await _retrieve_call_memories(self._retrieval, invocation, plans, (history or topic,))
         drafts = await _generate_reply(
             self._replies,
             self._prepared_speech,
@@ -252,17 +220,10 @@ class CallSilenceElapsedHandler:
             reply_topic=topic,
             user_context=plans.context.user.read(),
             conversation_history=history,
-            memory_pool=tuple(item.content for item in plans.context.call_memory.snapshot()),
+            memory_pool=memory_pool,
         )
         if drafts is None:
             return _failed_report(request, plans)
-        if decision is SilenceDecision.END_CALL:
-            await plans.emit(
-                ActionPlanDraft(
-                    source_stimulus_ids=(stimulus.stimulus_id,),
-                    actions=(d.EndCall(action_id=f"{request.request_id}-end-call", reason=CallEndReason.AGENT_HANGUP),),
-                )
-            )
         return _with_emitted(request, plans)
 
 
@@ -309,17 +270,15 @@ class CallEndingHandler:
         return _with_emitted(request, plans)
 
 
-async def _emit_ack(plans: PlanEmitter, request: d.HandleStimulusRequest, style: AckStyle) -> None:
-    text = _ACK_TEXT.get(style)
-    if text is None:
-        return
-    draft = ReplyDraft(content=text, sound_content=text, tone="normal", expression=None)
-    await plans.emit(
-        ActionPlanDraft(
-            source_stimulus_ids=(request.stimulus.stimulus_id,),
-            actions=(_call_say(request, draft, suffix="recall-ack", provisional=True),),
-        )
-    )
+async def _retrieve_call_memories(retrieval, invocation, plans, clues):
+    try:
+        result = await retrieval.search(invocation, query=MemoryQuery(clues))
+    except Exception as error:
+        # 实时通话 spec 明确规定：检索失败仍使用已有上下文与记忆池回复。
+        get_logger(__name__).warning("通话检索失败，沿用已有记忆池 error_type=%s", type(error).__name__)
+    else:
+        plans.context.call_memory.remember_hits(result.hits)
+    return tuple(item.content for item in plans.context.call_memory.snapshot())
 
 
 async def _emit_maintenance(plans: PlanEmitter, request: d.HandleStimulusRequest) -> None:
@@ -361,7 +320,7 @@ async def _generate_reply(skill, prepared_speech, reply, scene, plans, request, 
     accepted_before = len(plans.accepted_ids)
 
     async def generate(on_drafts):
-        drafts = await skill.generate(invocation, on_drafts=on_drafts, **kwargs)
+        drafts = await generate_call_reply(skill, invocation, on_drafts=on_drafts, **kwargs)
         if not drafts:
             raise ValueError("empty call reply")
         return drafts

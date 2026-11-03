@@ -82,6 +82,13 @@ def test_old_character_touch_policy_cannot_be_silently_ignored(runtime_dependenc
         AgentRuntime(**kwargs)
 
 
+def test_removed_call_decision_configuration_is_not_silently_ignored(runtime_dependencies):
+    kwargs, _ = runtime_dependencies
+    kwargs["config"]["skills"]["call_recall"] = {}
+    with pytest.raises(ValueError, match=r"skills.call_recall.*已删除"):
+        AgentRuntime(**kwargs)
+
+
 def test_admin_model_edit_preserves_other_skill_configuration():
     config = {"agent_runtime": {"skills": {
         "reply": {"llm_module": {"llm": {"name": "旧模型"}}},

@@ -23,7 +23,6 @@ from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembler
 from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.cognitive._response_parser import StructuredResponseParser
-from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
 from src.agent.skills.cognitive.response_composition import ResponseCompositionSkill
 from src.agent.skills.contracts import ReplyDraft, TopicExtraction
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
@@ -153,8 +152,8 @@ async def test_long_character_stream_delivers_tts_before_generation_finishes(cal
             )
         )
         handler = CallReplyRequestedHandler(
-            CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": Memory()})),
-            CallReplySkill(make_reply_skill(generators)),
+            stub_retrieval({"luotianyi": Memory()}),
+            make_reply_skill(generators),
             catalog,
         )
     else:

@@ -1,4 +1,4 @@
-from support.retrieval import stub_retrieval, stub_singing
+from support.retrieval import stub_retrieval
 import asyncio
 import hashlib
 from datetime import datetime, timedelta
@@ -1342,15 +1342,17 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
 
     from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
     from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
-    from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill
     from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill
     from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
     from src.agent.skills.contracts import ReplyDraft
     from src.agent.skills.conversation.compaction import ConversationCompactionSkill
-    from src.domain.call import AckStyle, CallRecallDecision, RecallMode
 
     class Memory:
         inputs = []
+
+        async def search_memory_context_for_topic(self, *args):
+            from src.domain import MemoryContext
+            return MemoryContext()
 
         async def extract_maintenance_candidates(self, **kwargs):
             self.inputs.append(kwargs)
@@ -1370,9 +1372,6 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
         async def generate(self, **kwargs):
             return (ReplyDraft("正式回答", "正式回答", "normal", None),)
 
-    async def decide(*args, **kwargs):
-        return CallRecallDecision(RecallMode.DIRECT, (), AckStyle.NONE)
-
     stage, provider, transport, _ = await _create(call_setup)
     repository, record, _, _ = call_setup
     memory = Memory()
@@ -1383,8 +1382,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
     skill = CognitiveMaintenanceSkill(
         memories={"luotianyi": memory}, compaction=compaction, call_maintenance=call_skill
     )
-    recall = CallRecallDecisionSkill(retrieval=stub_retrieval({"luotianyi": memory}))
-    recall.decide = decide
+    recall = stub_retrieval({"luotianyi": memory})
     stage._agent = Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
@@ -1394,7 +1392,7 @@ async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_se
                 (
                     d.StimulusKind.CALL_REPLY_REQUESTED,
                     CallReplyRequestedHandler(
-                        recall, CallReplySkill(make_reply_skill({"luotianyi": Generator()})), PreparedSpeechCatalog({})
+                        recall, make_reply_skill({"luotianyi": Generator()}), PreparedSpeechCatalog({})
                     ),
                 ),
                 (d.StimulusKind.CALL_ENDING, _NoPlanHandler()),

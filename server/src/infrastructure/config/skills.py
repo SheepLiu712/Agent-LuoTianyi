@@ -25,6 +25,8 @@ class SkillsConfig:
         values = runtime.get("skills")
         if not isinstance(values, dict):
             raise TypeError("agent_runtime.skills 必须是字典")
+        if "call_recall" in values:
+            raise ValueError("agent_runtime.skills.call_recall 已删除，通话每轮使用通用记忆检索")
         if "conversation_compaction" in values:
             raise ValueError("agent_runtime.skills.conversation_compaction 请迁移到 skills.cognitive_maintenance")
         for key, value in values.items():
