@@ -30,6 +30,7 @@ class AliyunRealtimeSpeechConfig:
     write_queue_size: int = 32
     event_queue_size: int = 64
     max_audio_frame_bytes: int = 64 * 1024
+    max_sentence_silence: int = 800
 
     def __post_init__(self) -> None:
         _required_string(self.api_key, "api_key")
@@ -38,6 +39,8 @@ class AliyunRealtimeSpeechConfig:
         _required_string(self.model, "model")
         _optional_typed_string(self.workspace_id, "workspace_id")
         _optional_typed_string(self.endpoint, "endpoint")
+        if type(self.max_sentence_silence) is not int or not 200 <= self.max_sentence_silence <= 6000:
+            raise RealtimeSpeechConfigError("max_sentence_silence must be an integer between 200 and 6000")
         if not self.endpoint and not self.workspace_id:
             raise RealtimeSpeechConfigError("realtime speech endpoint or workspace_id is required")
         for name in ("write_queue_size", "event_queue_size", "max_audio_frame_bytes"):
@@ -51,11 +54,22 @@ class AliyunRealtimeSpeechConfig:
             _positive_finite_number(getattr(self, name), name)
 
     @property
+    def is_fun_asr(self) -> bool:
+        return self.model == "fun-asr-realtime" or self.model.startswith("fun-asr-realtime-")
+
+    @property
     def websocket_url(self) -> str:
-        base = self.endpoint or (f"wss://{self.workspace_id}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime")
+        protocol = "inference" if self.is_fun_asr else "realtime"
+        base = self.endpoint or (f"wss://{self.workspace_id}.cn-beijing.maas.aliyuncs.com/api-ws/v1/{protocol}")
         parsed = urlparse(base)
         if parsed.scheme != "wss" or not parsed.netloc:
             raise RealtimeSpeechConfigError("realtime speech endpoint must be a secure wss URL")
+        if self.is_fun_asr:
+            if parsed.path != "/api-ws/v1/inference" or parsed.query:
+                raise RealtimeSpeechConfigError(
+                    "Fun-ASR endpoint must use /api-ws/v1/inference without query parameters"
+                )
+            return base
         query = parse_qs(parsed.query, keep_blank_values=True)
         query["model"] = [self.model]
         return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
@@ -76,6 +90,7 @@ class AliyunRealtimeSpeechConfig:
             write_queue_size=_mapping_int(value, "write_queue_size", 32),
             event_queue_size=_mapping_int(value, "event_queue_size", 64),
             max_audio_frame_bytes=_mapping_int(value, "max_audio_frame_bytes", 64 * 1024),
+            max_sentence_silence=_mapping_int(value, "max_sentence_silence", 800),
         )
 
 

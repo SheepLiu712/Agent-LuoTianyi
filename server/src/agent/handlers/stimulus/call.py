@@ -339,7 +339,7 @@ async def _generate_reply(skill, prepared_speech, reply, scene, plans, request, 
         )
     except Exception as error:
         get_logger(__name__).warning(
-            "Call reply generation failed request_id={} error_type={}", request.request_id, type(error).__name__
+            "Call reply generation failed request_id=%s error_type=%s", request.request_id, type(error).__name__
         )
         if len(plans.accepted_ids) != accepted_before:
             raise

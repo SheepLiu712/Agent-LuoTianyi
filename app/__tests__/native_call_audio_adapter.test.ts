@@ -6,6 +6,7 @@ import type {
   NativePlaybackStopped,
 } from '../modules/call-audio/src/CallAudio.types';
 import { AndroidCallAudio, CAPTURE_FORMAT, PLAYBACK_FORMAT } from '../utils/call_audio/native_call_audio';
+import { clearDebugTrace, getDebugTraceSnapshot } from '../utils/debug_trace';
 
 jest.mock('expo-modules-core', () => ({
   requireOptionalNativeModule: jest.fn(() => null),
@@ -53,6 +54,23 @@ class FakeNativeCallAudio implements CallAudioNativeModule {
 }
 
 describe('AndroidCallAudio adapter', () => {
+  it('exposes the native initialization failure reason in the device debug panel', async () => {
+    clearDebugTrace();
+    const native = new FakeNativeCallAudio();
+    native.capability = {
+      ...native.capability,
+      available: false,
+      reason: 'aec_create_failed',
+      aec: { available: true, enabled: false, error: 'aec_create_failed' },
+    };
+    const audio = new AndroidCallAudio({}, native, 'android');
+    await expect(audio.initialize()).resolves.toBe('unavailable');
+    const trace = getDebugTraceSnapshot().find((entry) => entry.scope === 'call-audio');
+    expect(JSON.parse(trace!.detail!)).toMatchObject({
+      reason: 'aec_create_failed', aec: { available: true, enabled: false },
+    });
+  });
+
   it.each(['resolve', 'reject'])('old session enqueue %s cannot reset a reused key in the new visual session', async (outcome) => {
     const native = new FakeNativeCallAudio();
     const pending: { resolve(generation: number): void; reject(error: Error): void }[] = [];

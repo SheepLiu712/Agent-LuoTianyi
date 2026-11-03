@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from 'expo-asset';
 import Constants from 'expo-constants';
+import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,7 +32,7 @@ import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from '../hooks/useHistoryLogic';
 import { getDynamicUnreadStatus } from '../utils/dynamics';
-import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import { addDebugTrace, clearDebugTrace, DebugTraceEntry, formatDebugTraceReport, subscribeDebugTrace } from '../utils/debug_trace';
 import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
 import DynamicsScreen from './dynamics';
 import PreferencesScreen from './preferences';
@@ -290,7 +291,27 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     );
   };
 
-  const visibleDebugEntries = debugEntries.slice(-50).reverse();
+  const visibleDebugEntries = debugEntries.slice(-200).reverse();
+  const copyDebugLogs = async () => {
+    const report = formatDebugTraceReport({
+      appVersion: Constants.expoConfig?.version,
+      versionCode: Constants.expoConfig?.android?.versionCode,
+      platform: Platform.OS,
+      systemVersion: Platform.Version,
+      ...(Platform.OS === 'android' ? {
+        model: Platform.constants.Model,
+        manufacturer: Platform.constants.Manufacturer,
+        androidRelease: Platform.constants.Release,
+      } : {}),
+    });
+    try {
+      if (!await Clipboard.setStringAsync(report)) throw new Error('clipboard_write_failed');
+      Alert.alert('已复制日志', '已复制全部保留日志及设备信息，可直接粘贴反馈。');
+    } catch (error) {
+      addDebugTrace('debug', 'copy logs failed', { error: String(error) });
+      Alert.alert('复制失败', '无法写入剪贴板，请重试。');
+    }
+  };
 
   const formatDebugTs = (ts: number) => {
     const d = new Date(ts);
@@ -448,7 +469,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
         {debugOpen ? (
           <View style={[styles.debugPanel, { backgroundColor: theme.debugBackground, borderColor: theme.debugBorder }]}>
             <View style={styles.debugHeaderRow}>
-              <Text style={[styles.debugHeaderText, { color: theme.debugHeader }]}>发送调试日志（最近 {visibleDebugEntries.length} 条）</Text>
+              <Text style={[styles.debugHeaderText, { color: theme.debugHeader }]}>日志 {visibleDebugEntries.length}/{debugEntries.length}</Text>
+              <TouchableOpacity accessibilityLabel="复制全部日志" onPress={() => { void copyDebugLogs(); }}>
+                <Text style={[styles.debugClearText, { color: theme.debugAction }]}>复制全部日志</Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={clearDebugTrace}>
                 <Text style={[styles.debugClearText, { color: theme.debugAction }]}>清空</Text>
               </TouchableOpacity>

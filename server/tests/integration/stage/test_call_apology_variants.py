@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -6,6 +7,7 @@ import pytest
 from support.call_apology import Recall, Replies, _Plans, _request, _stimulus, catalog
 
 import src.domain.agent as d
+from src.agent.handlers.stimulus import call as call_handlers
 from src.agent.handlers.stimulus.call import CallReplyRequestedHandler, CallSilenceElapsedHandler, CallStartedHandler
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.domain.call import CallAudioSemantic
@@ -33,6 +35,15 @@ def variants(tmp_path):
 async def test_failed_handler_randomly_selects_only_its_scene(tmp_path, monkeypatch, scene):
     resources = variants(tmp_path)
     replies, recall = Replies(failing=True), Recall()
+    messages = []
+
+    class FormattingHandler(logging.Handler):
+        def emit(self, record):
+            messages.append(record.getMessage())
+
+    log = logging.Logger("call-handler-format-test")
+    log.addHandler(FormattingHandler())
+    monkeypatch.setattr(call_handlers, "get_logger", lambda _name: log)
 
     now, call_id = datetime.now(timezone.utc), uuid4()
     handlers = {
@@ -71,6 +82,9 @@ async def test_failed_handler_randomly_selects_only_its_scene(tmp_path, monkeypa
         assert action.content == ""
         assert not any(entry.source == "agent" for entry in plans.context.conversation.entries)
     assert len(set(chosen)) == 3
+    assert any(
+        "Call reply generation failed request_id=" in message and "error_type=" in message for message in messages
+    )
 
 
 @pytest.mark.parametrize("missing", ["opening", "turn", "silence"])
