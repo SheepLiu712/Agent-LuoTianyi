@@ -50,6 +50,7 @@ class ClientLLMExecutor:
         self._lookup_connection: Any = None
         # request_id -> (user_id, asyncio.Future, 发起请求的连接)
         self._pending: Dict[str, tuple[str, asyncio.Future, Any]] = {}
+        self._streams: dict[str, asyncio.Queue] = {}
         # user_id -> 最近一次处理该用户请求的连接（用于把失败通知发回正确的客户端）
         self._user_connections: Dict[str, Any] = {}
 
@@ -100,6 +101,8 @@ class ClientLLMExecutor:
         enable_thinking: bool = False,
         use_json: bool = False,
         image_base64: Optional[str] = None,
+        stream: bool = False,
+        on_delta=None,
     ) -> Optional[Dict[str, Any]]:
         """按客户端模型类型向用户客户端转发请求并等待响应。
 
@@ -107,16 +110,11 @@ class ClientLLMExecutor:
         应使用服务端接口直连。返回成功时与 LLMAPIInterface.generate_response
         相同结构：{"content", "usage", "response_time_s"}。执行失败抛错，不回退。
         """
-        if not model_type:
-            return None
         normalized_kind = str(model_kind or "").strip().lower()
         if normalized_kind not in {"llm", "vlm"}:
             raise ValueError(f"unsupported client model kind: {model_kind}")
-        ws_connection = self._get_live_connection(user_id)
+        ws_connection = self._delegation_connection(user_id, model_type, stream)
         if ws_connection is None:
-            return None
-        mode = getattr(ws_connection, "client_mode", None) or {}
-        if model_type not in (mode.get("types") or []):
             return None
 
         self._user_connections[user_id] = ws_connection
@@ -125,6 +123,8 @@ class ClientLLMExecutor:
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         self._pending[request_id] = (user_id, future, ws_connection)
+        if stream:
+            self._streams[request_id] = asyncio.Queue(maxsize=256)
 
         payload: Dict[str, Any] = {
             "request_id": request_id,
@@ -136,15 +136,18 @@ class ClientLLMExecutor:
             "enable_thinking": bool(enable_thinking),
             "use_json": bool(use_json),
         }
+        if stream:
+            payload["stream"] = True
         if image_base64:
             payload["image_base64"] = image_base64
 
         event = encode_event("llm_request", payload)
 
         started = time.perf_counter()
-        await self._send_request(ws_connection, request_id, event, future)
         try:
-            result = await asyncio.wait_for(future, timeout=self.timeout_seconds)
+            await self._send_request(ws_connection, request_id, event, future)
+            waiter = self._consume_stream(request_id, future, on_delta) if stream else future
+            result = await asyncio.wait_for(waiter, timeout=self.timeout_seconds)
         except asyncio.TimeoutError:
             self._pending.pop(request_id, None)
             raise ClientLLMTimeout(
@@ -153,6 +156,10 @@ class ClientLLMExecutor:
             ) from None
         finally:
             self._pending.pop(request_id, None)
+            self._streams.pop(request_id, None)
+            if stream and not future.done():
+                future.cancel()
+                await ws_connection.send(encode_event("llm_cancel", {"request_id": request_id}))
 
         if isinstance(result, dict) and result.get("error"):
             raise ClientLLMError(str(result["error"]), connection=ws_connection)
@@ -169,6 +176,49 @@ class ClientLLMExecutor:
             "usage": (result or {}).get("usage"),
             "response_time_s": (time.perf_counter() - started),
         }
+
+    def _delegation_connection(self, user_id, model_type, stream):
+        if not model_type:
+            return None
+        connection = self._get_live_connection(user_id)
+        if connection is None:
+            return None
+        mode = getattr(connection, "client_mode", None) or {}
+        if model_type not in (mode.get("types") or []):
+            return None
+        if stream and mode.get("stream") is not True:
+            raise ClientLLMError("客户端版本不支持流式模型委托，请更新客户端", connection=connection)
+        return connection
+
+    async def _consume_stream(self, request_id, future, on_delta):
+        queue = self._streams[request_id]
+        sequence, parts = 0, []
+        while True:
+            receive = asyncio.create_task(queue.get())
+            try:
+                done, _ = await asyncio.wait((receive, future), return_when=asyncio.FIRST_COMPLETED)
+                if future in done:
+                    return future.result()
+                packet = receive.result()
+            finally:
+                receive.cancel()
+                await asyncio.gather(receive, return_exceptions=True)
+            if packet.get("error"):
+                raise ClientLLMError(str(packet["error"]))
+            if type(packet.get("sequence")) is not int or packet["sequence"] != sequence:
+                raise ClientLLMError("客户端模型流分片序号不连续")
+            sequence += 1
+            if packet.get("done") is True:
+                if packet.get("content") != "".join(parts):
+                    raise ClientLLMError("客户端模型流完整文本与分片不一致")
+                future.set_result(packet)
+                return packet
+            delta = packet.get("delta")
+            if not isinstance(delta, str) or not delta:
+                raise ClientLLMError("客户端模型流包含无效分片")
+            parts.append(delta)
+            if on_delta is not None:
+                await on_delta(delta)
 
     async def _send_request(self, ws_connection, request_id, event, future) -> None:
         try:
@@ -199,5 +249,12 @@ class ClientLLMExecutor:
         if connection is not None and _owner is not connection:
             return
         if future.done():
+            return
+        queue = self._streams.get(request_id)
+        if queue is not None:
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                future.set_exception(ClientLLMError("客户端模型流缓冲区已满", connection=_owner))
             return
         future.set_result(payload)

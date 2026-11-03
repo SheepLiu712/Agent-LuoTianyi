@@ -262,8 +262,8 @@ async def test_silence_end_call_places_farewell_before_end_action():
     await handler.handle(request, plans)
 
     assert isinstance(plans.drafts[0].actions[0], d.Say)
-    assert isinstance(plans.drafts[0].actions[-1], d.EndCall)
-    assert plans.drafts[0].actions[-1].reason is CallEndReason.AGENT_HANGUP
+    assert isinstance(plans.drafts[-1].actions[-1], d.EndCall)
+    assert plans.drafts[-1].actions[-1].reason is CallEndReason.AGENT_HANGUP
 
 
 @pytest.mark.asyncio
@@ -302,8 +302,8 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
     handling = await agent.handle_stimulus(request, plan_sink, context=interaction_context)
 
     assert handling.request_status is d.HandlingRequestStatus.COMPLETED
-    assert len(plan_sink.plans) == 1
-    assert isinstance(plan_sink.plans[0].actions[-1], d.EndCall)
+    assert len(plan_sink.plans) == 2
+    assert isinstance(plan_sink.plans[-1].actions[-1], d.EndCall)
     output_sink = _OutputSink()
     response_id = plan_sink.plans[0].actions[0].call_delivery.response_id
     permit = _ResponseScopedPermit(response_id)
@@ -323,10 +323,19 @@ async def test_real_agent_handle_plan_emitter_and_realize_execute_call_end_flow(
     )
 
     assert execution.status is d.ExecutionStatus.COMPLETED
-    assert [result.status for result in execution.action_results] == [
-        d.ActionExecutionStatus.COMPLETED,
-        d.ActionExecutionStatus.COMPLETED,
-    ]
+    assert [result.status for result in execution.action_results] == [d.ActionExecutionStatus.COMPLETED]
+    ending = await agent.realize_action_plan(
+        plan_sink.plans[-1],
+        d.ExecutionContext(
+            execution_id="ending",
+            interaction_id="call",
+            current_interaction_revision=1,
+            cancellation=d.CancellationToken(),
+            interaction_context=interaction_context,
+        ),
+        output_sink,
+    )
+    assert ending.status is d.ExecutionStatus.COMPLETED
     assert [type(output) for output in output_sink.outputs] == [
         d.TextFinalOutput,
         d.AudioChunkOutput,

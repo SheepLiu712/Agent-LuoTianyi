@@ -10,6 +10,7 @@ from src.agent.context import ConversationEntry, TextContent
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import render_conversation_history
 from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, CallReplySkill, SilenceDecision
+from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.contracts import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
@@ -55,23 +56,7 @@ def _call_say(
     suffix: str,
     provisional: bool,
 ) -> d.Say:
-    return d.Say(
-        action_id=f"{request.request_id}-{suffix}",
-        content=draft.content,
-        sound_content=draft.sound_content,
-        prepared_audio_ref=None,
-        tone=d.Tone(value=draft.tone or "normal"),
-        expression=d.ChangeExpression(expression_id=draft.expression) if draft.expression else None,
-        delivery=d.OutputDelivery.EPHEMERAL_REACTION,
-        message_id=None,
-        call_delivery=CallSpeechDelivery(
-            audio_route=CallAudioRoute.CALL,
-            display_in_chat=False,
-            is_ephemeral=True,
-            provisional=provisional,
-            response_id=f"{request.request_id}-{suffix}",
-        ),
-    )
+    return ReplySkill.call_say(request, draft, suffix=suffix, provisional=provisional)
 
 
 class CallAnswerRequestedHandler:
@@ -100,9 +85,12 @@ class CallAnswerRequestedHandler:
 
 
 class CallStartedHandler:
-    def __init__(self, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog) -> None:
+    def __init__(
+        self, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog, reply: ReplySkill | None = None
+    ) -> None:
         self._replies = replies
         self._prepared_speech = prepared_speech
+        self._reply = reply or ReplySkill()
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -111,6 +99,7 @@ class CallStartedHandler:
         drafts = await _generate_reply(
             self._replies,
             self._prepared_speech,
+            self._reply,
             "opening",
             plans,
             request,
@@ -122,7 +111,6 @@ class CallStartedHandler:
         )
         if drafts is None:
             return _failed_report(request, plans)
-        await _emit_formal(plans, request, drafts, prefix="opening")
         return _with_emitted(request, plans)
 
 
@@ -162,11 +150,16 @@ class CallReplyConfirmedHandler:
 
 class CallReplyRequestedHandler:
     def __init__(
-        self, recall: CallRecallDecisionSkill, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog
+        self,
+        recall: CallRecallDecisionSkill,
+        replies: CallReplySkill,
+        prepared_speech: PreparedSpeechCatalog,
+        reply: ReplySkill | None = None,
     ) -> None:
         self._recall = recall
         self._replies = replies
         self._prepared_speech = prepared_speech
+        self._reply = reply or ReplySkill()
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -198,6 +191,7 @@ class CallReplyRequestedHandler:
         drafts = await _generate_reply(
             self._replies,
             self._prepared_speech,
+            self._reply,
             "turn",
             plans,
             request,
@@ -209,7 +203,6 @@ class CallReplyRequestedHandler:
         )
         if drafts is None:
             return _failed_report(request, plans)
-        await _emit_formal(plans, request, drafts, prefix=f"turn-{stimulus.turn_seq}")
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
         return replace(
             _with_emitted(request, plans), consumed_pending_stimulus_ids=pending, retained_pending_stimulus_ids=()
@@ -218,11 +211,16 @@ class CallReplyRequestedHandler:
 
 class CallSilenceElapsedHandler:
     def __init__(
-        self, recall: CallRecallDecisionSkill, replies: CallReplySkill, prepared_speech: PreparedSpeechCatalog
+        self,
+        recall: CallRecallDecisionSkill,
+        replies: CallReplySkill,
+        prepared_speech: PreparedSpeechCatalog,
+        reply: ReplySkill | None = None,
     ) -> None:
         self._recall = recall
         self._replies = replies
         self._prepared_speech = prepared_speech
+        self._reply = reply or ReplySkill()
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         stimulus = request.stimulus
@@ -246,6 +244,7 @@ class CallSilenceElapsedHandler:
         drafts = await _generate_reply(
             self._replies,
             self._prepared_speech,
+            self._reply,
             "silence",
             plans,
             request,
@@ -257,17 +256,13 @@ class CallSilenceElapsedHandler:
         )
         if drafts is None:
             return _failed_report(request, plans)
-        actions = tuple(
-            _call_say(request, draft, suffix=f"silence-{index}", provisional=False)
-            for index, draft in enumerate(drafts)
-        )
         if decision is SilenceDecision.END_CALL:
-            actions = (
-                *actions,
-                d.EndCall(action_id=f"{request.request_id}-end-call", reason=CallEndReason.AGENT_HANGUP),
+            await plans.emit(
+                ActionPlanDraft(
+                    source_stimulus_ids=(stimulus.stimulus_id,),
+                    actions=(d.EndCall(action_id=f"{request.request_id}-end-call", reason=CallEndReason.AGENT_HANGUP),),
+                )
             )
-        if actions:
-            await plans.emit(ActionPlanDraft(source_stimulus_ids=(stimulus.stimulus_id,), actions=actions))
         return _with_emitted(request, plans)
 
 
@@ -327,20 +322,6 @@ async def _emit_ack(plans: PlanEmitter, request: d.HandleStimulusRequest, style:
     )
 
 
-async def _emit_formal(
-    plans: PlanEmitter,
-    request: d.HandleStimulusRequest,
-    drafts: tuple[ReplyDraft, ...],
-    *,
-    prefix: str,
-) -> None:
-    actions = tuple(
-        _call_say(request, draft, suffix=f"{prefix}-{index}", provisional=False) for index, draft in enumerate(drafts)
-    )
-    if actions:
-        await plans.emit(ActionPlanDraft(source_stimulus_ids=(request.stimulus.stimulus_id,), actions=actions))
-
-
 async def _emit_maintenance(plans: PlanEmitter, request: d.HandleStimulusRequest) -> None:
     await plans.emit(
         ActionPlanDraft(
@@ -376,16 +357,30 @@ def _with_emitted(request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.Han
     )
 
 
-async def _generate_reply(skill, prepared_speech, scene, plans, request, invocation, **kwargs):
-    try:
-        drafts = await skill.generate(invocation, **kwargs)
+async def _generate_reply(skill, prepared_speech, reply, scene, plans, request, invocation, **kwargs):
+    accepted_before = len(plans.accepted_ids)
+
+    async def generate(on_drafts):
+        drafts = await skill.generate(invocation, on_drafts=on_drafts, **kwargs)
         if not drafts:
             raise ValueError("empty call reply")
         return drafts
+
+    try:
+        return await reply.deliver(
+            request,
+            plans,
+            generate,
+            prefix=f"turn-{request.stimulus.turn_seq}" if scene == "turn" else scene,
+            sources=(request.stimulus.stimulus_id,),
+            call=True,
+        )
     except Exception as error:
         get_logger(__name__).warning(
             "Call reply generation failed request_id={} error_type={}", request.request_id, type(error).__name__
         )
+        if len(plans.accepted_ids) != accepted_before:
+            raise
         if request.cancellation.is_cancelled:
             return None
         resource = prepared_speech.choose_call_apology(invocation.character_id, scene)

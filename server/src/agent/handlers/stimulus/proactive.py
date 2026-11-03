@@ -6,8 +6,9 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.agent.context import ConversationEntry, TextContent
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.processing.reply_delivery import build_reply_delivery, render_conversation_history
+from src.agent.processing.reply_delivery import render_conversation_history
 from src.agent.skills.cognitive import ResponseCompositionSkill
+from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
@@ -22,10 +23,12 @@ class FirstLoginHandler:
         prepared_names: tuple[str, ...],
         prepared_speech: PreparedSpeechCatalog,
         composition: ResponseCompositionSkill,
+        reply: ReplySkill | None = None,
     ) -> None:
         self._prepared_names = prepared_names
         self._prepared_speech = prepared_speech
         self._composition = composition
+        self._reply = reply or ReplySkill()
         self._logger = get_logger(__name__)
 
     async def handle(
@@ -40,25 +43,23 @@ class FirstLoginHandler:
         if stimulus.reason.value != "first_login":
             context = plans.context
             plans.set_interruptible(True)
-            drafts = await self._composition.compose(
-                handling_invocation(request, context),
-                user_context=context.user.read(),
-                reply_topic=self._reminder_topic(stimulus),
-                conversation_history=render_conversation_history(context.conversation.read()),
-                excluded_segments=set(),
-            )
-            if request.cancellation.is_cancelled:
-                return self._report(request, plans, status=d.HandlingRequestStatus.CANCELLED)
-            entries, actions = build_reply_delivery(request, tuple(drafts), prefix="reminder")
-            if not actions:
-                return self._report(request, plans)
-            plans.set_interruptible(False)
-            await context.conversation.append(entries)
-            await plans.emit(
-                ActionPlanDraft(
-                    source_stimulus_ids=(stimulus.stimulus_id,),
-                    actions=actions,
+
+            async def generate(on_drafts):
+                return await self._composition.compose(
+                    handling_invocation(request, context),
+                    user_context=context.user.read(),
+                    reply_topic=self._reminder_topic(stimulus),
+                    conversation_history=render_conversation_history(context.conversation.read()),
+                    excluded_segments=set(),
+                    on_drafts=on_drafts,
                 )
+
+            await self._reply.deliver(
+                request,
+                plans,
+                generate,
+                prefix="reminder",
+                sources=(stimulus.stimulus_id,),
             )
             return self._report(request, plans)
 

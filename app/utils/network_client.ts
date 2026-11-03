@@ -18,8 +18,10 @@ export interface ConnectCallbacks {
   onAgentStateChanged: (state: string) => void;
   onError: (errorText: string) => void;
 
-  onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
-  getLlmMode?: () => Promise<{ types: string[] }>;
+  onLlmRequest?: (
+    payload: Record<string, unknown>, onDelta?: (text: string) => void | Promise<void>, signal?: AbortSignal,
+  ) => Promise<Record<string, unknown> | null>;
+  getLlmMode?: () => Promise<{ types: string[]; stream?: boolean }>;
 }
 
 function sanitizeBase64(input: string) {

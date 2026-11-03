@@ -19,6 +19,7 @@ from src.agent.skills.cognitive.call_recall import CallRecallDecisionSkill, Call
 from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
+from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
@@ -104,6 +105,7 @@ class SharedSkills:
             else None
         )
 
+        self.reply = ReplySkill()
         self.response_composition = ResponseCompositionSkill(
             reply_composition_config,
             memories=memories,

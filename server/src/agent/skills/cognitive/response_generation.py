@@ -15,6 +15,7 @@ from src.utils.logger import get_logger
 
 from ._prompt_assembly import RealizationPromptAssembler
 from ._response_parser import StructuredResponseParser
+from .reply import ReplySkill
 
 DEFAULT_LLM_TONE = "中性"
 DEFAULT_TTS_TONE = "normal"
@@ -97,6 +98,7 @@ class CharacterReplyGenerator:
         fact_hits: Optional[List[str]] = None,
         memory_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
+        on_drafts=None,
     ) -> tuple[ReplyDraft, ...]:
         prompt_input = self.prompt_assembler.build(
             character_name=self.character_name,
@@ -111,6 +113,10 @@ class CharacterReplyGenerator:
             memory_hits=memory_hits,
             sing_plan=sing_plan,
         )
+        if getattr(self.llm, "stream", False):
+            return await ReplySkill.generate_stream(
+                self.llm, asdict(prompt_input), self.response_parser, sing_plan=sing_plan, on_drafts=on_drafts
+            )
         response = await self._call_llm(**asdict(prompt_input))
         return self._parse_response(response, sing_plan)
 

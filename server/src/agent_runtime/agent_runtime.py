@@ -218,14 +218,27 @@ class AgentRuntime:
         )
         registrations = [
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
-            (StimulusKind.CALL_STARTED, CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech)),
+            (
+                StimulusKind.CALL_STARTED,
+                CallStartedHandler(self.skills.call_reply, self.skills.prepared_speech, reply=self.skills.reply),
+            ),
             (
                 StimulusKind.CALL_REPLY_REQUESTED,
-                CallReplyRequestedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
+                CallReplyRequestedHandler(
+                    self.skills.call_recall,
+                    self.skills.call_reply,
+                    self.skills.prepared_speech,
+                    reply=self.skills.reply,
+                ),
             ),
             (
                 StimulusKind.CALL_SILENCE_ELAPSED,
-                CallSilenceElapsedHandler(self.skills.call_recall, self.skills.call_reply, self.skills.prepared_speech),
+                CallSilenceElapsedHandler(
+                    self.skills.call_recall,
+                    self.skills.call_reply,
+                    self.skills.prepared_speech,
+                    reply=self.skills.reply,
+                ),
             ),
             (StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
             (StimulusKind.CALL_TIME_LIMIT_WARNING, CallTimeLimitWarningHandler()),
@@ -239,6 +252,7 @@ class AgentRuntime:
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
                     composition=self.skills.response_composition,
+                    reply=self.skills.reply,
                 ),
             ),
             (
@@ -247,6 +261,7 @@ class AgentRuntime:
                     self.skills.response_composition,
                     self.skills.explicit_memory_intent,
                     self.skills.intentional_memory,
+                    reply=self.skills.reply,
                 ),
             ),
             (
@@ -579,7 +594,10 @@ class AgentRuntime:
             ),
             "main_chat": llm_service.register_llm_module(
                 f"{character_id}_main_chat",
-                agent_config["main_chat"]["llm_module"],
+                {
+                    **agent_config["main_chat"]["llm_module"],
+                    "llm": {**agent_config["main_chat"]["llm_module"].get("llm", {}), "stream": True},
+                },
             ),
         }
         return modules

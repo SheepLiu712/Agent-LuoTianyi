@@ -82,6 +82,7 @@ class ResponseCompositionSkill:
         reply_topic: str,
         conversation_history: str,
         excluded_segments: set[tuple[str, str]] | None = None,
+        on_drafts=None,
     ) -> tuple[ReplyDraft, ...]:
         """所有生成回复统一经过提取、召回/选歌、replier。"""
         staged = await self.compose_staged(
@@ -90,6 +91,7 @@ class ResponseCompositionSkill:
             reply_topic=reply_topic,
             conversation_history=conversation_history,
             excluded_segments=excluded_segments,
+            on_drafts=on_drafts,
         )
         return (await staged.formal()).drafts
 
@@ -101,6 +103,7 @@ class ResponseCompositionSkill:
         reply_topic: str,
         conversation_history: str,
         excluded_segments: set[tuple[str, str]] | None = None,
+        on_drafts=None,
     ) -> ComposedResponse:
         """召回超时则先给出配置的临时草稿，正式草稿留待调用方继续 await。"""
         user_id = invocation.require_user_id()
@@ -121,6 +124,7 @@ class ResponseCompositionSkill:
                 sing_attempts=decision.sing_attempts,
                 excluded_segments=excluded_segments,
                 recall=recall,
+                on_drafts=on_drafts,
             )
 
         if self._waits_for_slow_recall(memory_queries):
@@ -148,6 +152,7 @@ class ResponseCompositionSkill:
         sing_attempts: tuple[str, ...],
         excluded_segments: set[tuple[str, str]] | None,
         recall: Awaitable,
+        on_drafts=None,
     ) -> ComposedReply:
         context = await recall
         if invocation.cancellation.is_cancelled:
@@ -166,6 +171,13 @@ class ResponseCompositionSkill:
                 sing_plan = candidate
         if invocation.cancellation.is_cancelled:
             return ComposedReply()
+
+        async def emit(items):
+            valid = tuple(draft for draft in items if draft.sing is None)
+            if valid:
+                await on_drafts(valid)
+
+        streaming = {"on_drafts": emit} if on_drafts is not None and sing_plan is None else {}
         drafts = await self._generator_for(invocation.character_id).generate(
             reply_topic=reply_topic,
             user_context=user_context,
@@ -173,6 +185,7 @@ class ResponseCompositionSkill:
             memory_hits=memory_hits,
             fact_hits=[],
             sing_plan=sing_plan,
+            **streaming,
         )
         enriched: list[ReplyDraft] = []
         for draft in drafts:

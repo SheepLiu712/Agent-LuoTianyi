@@ -17,7 +17,7 @@ from src.agent.context.models import (
     TextContent,
 )
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.processing.reply_delivery import build_reply_delivery, render_conversation_history
+from src.agent.processing.reply_delivery import render_conversation_history
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
@@ -25,6 +25,7 @@ from src.agent.skills.cognitive import (
     ResponseCompositionSkill,
     TextPreprocessingSkill,
 )
+from src.agent.skills.cognitive.reply import ReplySkill
 from src.agent.skills.invocation import handling_invocation
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.utils.enum_type import ConversationSource
@@ -178,11 +179,6 @@ def _attach_recall(plans: PlanEmitter, request: d.HandleStimulusRequest, hits) -
         plans.context.recalled_memory.append(entries)
 
 
-def _may_emit_formal(request: d.HandleStimulusRequest, basis: int) -> bool:
-    """正式计划只在未取消且依据修订未变时交付。"""
-    return not request.cancellation.is_cancelled and request.interaction.interaction_revision == basis
-
-
 def _failed_memory_report(request: d.HandleStimulusRequest) -> d.HandlingReport:
     return replace(
         _report(request),
@@ -199,9 +195,11 @@ class ChatReplyHandler:
         composition: ResponseCompositionSkill,
         memory_intent: ExplicitMemoryIntentSkill | None = None,
         memory_commit: IntentionalMemoryCommit | None = None,
+        reply: ReplySkill | None = None,
     ) -> None:
         """注入统一回复编排以及可选的明确记忆识别与提交技能。"""
         self._composition = composition
+        self._reply = reply or ReplySkill()
         self._memory_intent = memory_intent
         self._memory_commit = memory_commit
 
@@ -284,14 +282,18 @@ class ChatReplyHandler:
         normal_topic = "\n".join(reply_parts)
         if normal_topic:
             reply_topic = f"{reply_topic}\n{normal_topic}"
-        drafts = await self._composition.compose(
-            handling_invocation(request, plans.context),
-            user_context=plans.context.user.read(),
-            reply_topic=reply_topic,
-            conversation_history=render_conversation_history(plans.context.conversation.read()),
-            excluded_segments=_recent_sung_segments(plans.context.conversation.read()),
-        )
-        await self._deliver(plans, request, pending, drafts, prefix="r")
+
+        async def generate(on_drafts):
+            return await self._composition.compose(
+                handling_invocation(request, plans.context),
+                user_context=plans.context.user.read(),
+                reply_topic=reply_topic,
+                conversation_history=render_conversation_history(plans.context.conversation.read()),
+                excluded_segments=_recent_sung_segments(plans.context.conversation.read()),
+                on_drafts=on_drafts,
+            )
+
+        await self._reply.deliver(request, plans, generate, prefix="r", sources=pending)
         return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
 
     async def _handle_conversation_reply(
@@ -312,32 +314,19 @@ class ChatReplyHandler:
             )
         )
         snapshot = plans.context.conversation.read()
-        basis = request.interaction.interaction_revision
-        staged = await self._composition.compose_staged(
-            handling_invocation(request, plans.context),
-            user_context=plans.context.user.read(),
-            reply_topic=reply_topic,
-            conversation_history=render_conversation_history(snapshot),
-            excluded_segments=_recent_sung_segments(snapshot),
-        )
-        if not staged.awaits_formal:
-            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
-        formal = await staged.formal()
-        if not _may_emit_formal(request, basis):
-            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
-        _attach_recall(plans, request, formal.memory_hits)
-        await self._deliver(plans, request, pending, formal.drafts, prefix="r")
-        return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
 
-    @staticmethod
-    async def _deliver(
-        plans: PlanEmitter, request: d.HandleStimulusRequest, pending: tuple[str, ...], drafts, *, prefix: str
-    ) -> None:
-        """把一组草稿落库并作为一份独立完整计划交付；无可交付行动时不产生计划。"""
-        entries, actions = build_reply_delivery(request, tuple(drafts), prefix=prefix)
-        if not actions:
-            return
-        plans.set_interruptible(False)
-        if entries:
-            await plans.context.conversation.append(entries)
-        await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))
+        async def generate(on_drafts):
+            staged = await self._composition.compose_staged(
+                handling_invocation(request, plans.context),
+                user_context=plans.context.user.read(),
+                reply_topic=reply_topic,
+                conversation_history=render_conversation_history(snapshot),
+                excluded_segments=_recent_sung_segments(snapshot),
+                on_drafts=on_drafts,
+            )
+            formal = await staged.formal()
+            _attach_recall(plans, request, formal.memory_hits)
+            return formal.drafts
+
+        await self._reply.deliver(request, plans, generate, prefix="r", sources=pending)
+        return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))

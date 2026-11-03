@@ -178,7 +178,16 @@ class CallReplySkill:
         user_context: UserContextSnapshot,
         conversation_history: str,
         memory_pool: tuple[str, ...],
+        on_drafts=None,
     ) -> tuple[ReplyDraft, ...]:
+        async def emit(items):
+            valid = tuple(
+                draft for draft in items if draft.sing is None and draft.content.strip() and draft.sound_content.strip()
+            )
+            if valid:
+                await on_drafts(valid)
+
+        streaming = {"on_drafts": emit} if on_drafts is not None else {}
         drafts = await self._generators[invocation.character_id].generate(
             reply_topic=reply_topic,
             user_context=user_context,
@@ -186,6 +195,7 @@ class CallReplySkill:
             fact_hits=[],
             memory_hits=list(memory_pool),
             sing_plan=None,
+            **streaming,
         )
         return tuple(
             draft for draft in drafts if draft.sing is None and draft.content.strip() and draft.sound_content.strip()
