@@ -266,10 +266,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     audioRecord = record
     aecStatus = enableAec(record.audioSessionId)
     noiseSuppressorStatus = enableNoiseSuppressor(record.audioSessionId)
-    return when {
-      !aecStatus.first -> aecStatus.second ?: "aec_initialization_failed"
-      else -> null
-    }
+    return null
   }
 
   private fun captureLoop(record: AudioRecord, eventSessionGeneration: Long) {
@@ -642,11 +639,19 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
 
   private fun enableAec(audioSessionId: Int): Pair<Boolean, String?> {
     if (!AcousticEchoCanceler.isAvailable()) return false to "aec_unavailable"
-    val effect = AcousticEchoCanceler.create(audioSessionId)
-      ?: return false to "aec_create_failed"
+    val effect = try {
+      AcousticEchoCanceler.create(audioSessionId)
+    } catch (error: RuntimeException) {
+      android.util.Log.w("CallAudio", "AEC creation failed", error)
+      null
+    } ?: return false to "aec_create_failed"
     echoCanceler = effect
-    val result = effect.setEnabled(true)
-    return if (result == 0 && effect.enabled) true to null else false to "aec_enable_failed"
+    return try {
+      if (effect.setEnabled(true) == 0 && effect.enabled) true to null else false to "aec_enable_failed"
+    } catch (error: RuntimeException) {
+      android.util.Log.w("CallAudio", "AEC activation failed", error)
+      false to "aec_enable_failed"
+    }
   }
 
   private fun enableNoiseSuppressor(audioSessionId: Int): Pair<Boolean, String?> {

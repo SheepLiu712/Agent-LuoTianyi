@@ -56,8 +56,6 @@ function capabilityOf(native: NativeCapability): CallAudioCapability {
   return native.available &&
     matchesFormat(native.captureFormat, CAPTURE_FORMAT) &&
     matchesFormat(native.playbackFormat, PLAYBACK_FORMAT) &&
-    native.aec.available &&
-    native.aec.enabled &&
     native.audioFocus.granted
     ? 'available'
     : 'unavailable';
@@ -119,6 +117,9 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
       }
       if (nativeCapability.reason === 'permission_denied') throw new Error('MICROPHONE_PERMISSION_DENIED');
       if (capability === 'available') {
+        if (!nativeCapability.aec.enabled) {
+          addDebugTrace('call-audio', 'initialization without echo cancellation', { aec: nativeCapability.aec });
+        }
         if (!nativeCapability.noiseSuppressor.enabled) {
           addDebugTrace('call-audio', 'initialization without noise suppression', {
             noiseSuppressor: nativeCapability.noiseSuppressor,
