@@ -42,6 +42,7 @@ class FinalizeCallHandler:
         generated = await self._summary.generate(
             invocation,
             material=CallSummaryMaterial(
+                final_snapshot=action.final_snapshot,
                 working=interaction.conversation.read_working(),
                 accepted_turns=action.final_snapshot.completed_turns,
                 summarized_turn_seq=action.final_snapshot.maintenance_turn_seq,
@@ -66,5 +67,5 @@ class FinalizeCallHandler:
             # 维护失败也可能已经写入部分记忆，禁止把整个行动作为无副作用重试。
             irreversible_effect_committed=True,
             effect_ref=None,
-            call_ending=result,
+            value=result,
         )

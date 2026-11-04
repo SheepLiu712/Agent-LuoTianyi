@@ -9,9 +9,9 @@
         "realtime_speech": {
             "enabled": true,
             "api_key": "$QWEN_API_KEY",
-            "model": "fun-asr-realtime",
-            "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
-            "max_sentence_silence": 800
+            "model": "qwen3.5-omni-plus-realtime",
+            "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+            "max_sentence_silence": 500
         }
     },
     "llm_service": {
@@ -235,6 +235,7 @@
         }
     },
     "agent_runtime": {
+        "omni_prompt_file": "res/agent/prompts/realtime_call_prompt.json",
         "skills": {
             "speaking": {
                 "characters": {

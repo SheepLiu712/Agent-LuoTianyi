@@ -206,7 +206,7 @@ async def test_final_summary_keeps_accepted_input_missing_from_context_after_end
     result = await FinalizeCallHandler("luotianyi", setup.skill, make_call_summary({"luotianyi": setup.model})).realize(
         d.FinalizeCall(action_id="ending", user_id="user", final_snapshot=snapshot), execution, None
     )
-    assert result.call_ending.maintenance_succeeded
+    assert result.value.maintenance_succeeded
     assert context.conversation.read_call_maintenance_progress() == 2
     inputs = setup.model.inputs[0]["completed_turns"]
     assert sum("accepted but context append failed" in item for item in inputs) == 1

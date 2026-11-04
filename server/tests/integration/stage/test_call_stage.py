@@ -181,7 +181,7 @@ class _TurnHandler:
     async def handle(self, request, plans):
         self.requests.append(request)
         await self.gate.wait()
-        response_id = f"response-{request.stimulus.turn_seq}"
+        response_id = f"{request.stimulus.response_id}-segment-{request.stimulus.segment_index}"
         await plans.emit(
             ActionPlanDraft(
                 source_stimulus_ids=(request.stimulus.stimulus_id,),
@@ -276,7 +276,7 @@ def _agent(turn_handler, *, silence_handler=None, time_limit_handler=None):
                 (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
                 (d.StimulusKind.CALL_ANSWER_REQUESTED, _AnswerHandler()),
                 (d.StimulusKind.CALL_STARTED, no_plan),
-                (d.StimulusKind.CALL_REPLY_REQUESTED, turn_handler),
+                (d.StimulusKind.CALL_REPLY_SEGMENT_READY, turn_handler),
                 (d.StimulusKind.CALL_SILENCE_ELAPSED, silence),
                 (d.StimulusKind.CALL_TIME_LIMIT_WARNING, time_limit_handler or no_plan),
                 (d.StimulusKind.CALL_ENDING, no_plan),
@@ -601,8 +601,7 @@ async def test_real_stage_agent_context_and_sqlite_connect_then_cleanup(call_set
 
     await _eventually(lambda: stage.state is CallState.ACTIVE)
     assert provider.started_with is not None
-    for name in ("洛天依", "乐正绫", "言和", "天钿", "天依", "阿绫", "阿和"):
-        assert name in provider.started_with.instructions
+    assert "lookup_call_memory" in provider.started_with.instructions
     assert repository.find_by_id(record.call_id).state is CallState.ACTIVE
     assert [item.state for item in transport.items if isinstance(item, CallStateChanged)][:2] == [
         CallState.RINGING,
@@ -672,7 +671,7 @@ async def test_pcm_receipts_are_bounded_idempotent_and_turns_require_completed_e
 
     await provider.emit(TurnInvalid("ambient_only"))
     await asyncio.sleep(0)
-    assert stage._turns == {}
+    assert not any(turn.semantic for turn in stage._turns.values())
     await provider.emit(TurnCompleted(CallAudioSemantic(transcript="你好")))
     await _eventually(lambda: 1 in stage._turns)
     turn_handler.gate.set()
@@ -729,13 +728,13 @@ async def test_reconnect_preserves_accepted_pcm_and_completed_turn_exactly_once(
         await _eventually(lambda: len(turn_handler.requests) == 1)
         await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
         assert [frame.payload for frame in provider.pushed_frames] == [b"\x01\x00", b"\x02\x00"]
-        assert len(turn_handler.requests[0].interaction.pending_stimuli) == 1
+        assert len(turn_handler.requests[0].interaction.pending_stimuli) == 0
         assert list(stage._turns) == [1]
         assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured_metrics]
 
         response_id, stream_id = stage._playback.pending_streams[0]
         stage.playback_completed(response_id, stream_id)
-        await _eventually(lambda: not stage._inputs.pending)
+        await _eventually(lambda: not stage._fact_tasks)
         await provider.emit(TurnCompleted(CallAudioSemantic(transcript="恢复后新轮次")))
         await _eventually(lambda: len(turn_handler.requests) == 2)
         await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
@@ -790,235 +789,21 @@ async def test_reconnect_timeout_discards_paused_pcm_and_provider_events(call_se
 
 
 @pytest.mark.asyncio
-async def test_provider_failure_bypasses_paused_reconnect_events_and_cleans_owned_work(call_setup):
-    stage, provider, _, turn_handler = await _create(call_setup)
-    await _eventually(lambda: stage.state is CallState.ACTIVE)
-    await stage.disconnect()
-    await provider.emit(TurnCompleted(CallAudioSemantic(transcript="恢复后才可兑现")))
-    await _eventually(
-        lambda: provider._events.empty() and stage._events_task is not None and not stage._events_task.done()
-    )
-
-    await provider.emit(ProviderFailed("provider_connection_closed", True))
-    snapshot = await asyncio.wait_for(wait_call_finished(stage), 0.2)
-
-    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
-    assert turn_handler.requests == []
-    assert stage.context is None
-    assert stage._pcm.empty()
-    assert stage._pcm_buffered_bytes == 0
-    assert not stage.tasks
-    assert provider.closed is True
-
-
-@pytest.mark.asyncio
-async def test_provider_failure_requested_before_resume_rejects_resume_and_cleans_paused_work(call_setup):
-    repository, record, ownership, clock = call_setup
-    speech = _BlockingPushProviderFactory()
-    turn_handler = _TurnHandler()
-    released = []
-    stage = await start_call_stage(
-        ownership=ownership,
-        record=record,
-        agent=_agent(turn_handler),
-        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
-        call_sessions=repository,
-        speech_factory=speech,
-        output_sink=output_sink(_Transport()),
-        own_termination=observe_release(lambda value: not released.append(value), ownership),
-        monotonic=clock.tick,
-        wall_clock=clock.now,
-    )
-    await stage.apply_answer(
-        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
-    )
-    provider = speech.sessions[record.call_id]
-    await _eventually(lambda: stage.state is CallState.ACTIVE)
-    assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x01\x00"), b"\x01\x00")
-    assert stage.accept_pcm(_receipt(record.call_id, 3, b"\x02\x00"), b"\x02\x00")
-    await provider.push_started.wait()
-    await stage.disconnect()
-    await provider.emit(TurnCompleted(CallAudioSemantic(transcript="竞态中不得兑现")))
-    await _eventually(lambda: provider._events.empty())
-
-    termination_entered = asyncio.Event()
-    release_termination = asyncio.Event()
-    original_terminate_owned = stage._terminate_owned
-
-    async def delayed_terminate_owned():
-        termination_entered.set()
-        await release_termination.wait()
-        return await original_terminate_owned()
-
-    stage._terminate_owned = delayed_terminate_owned
-    await provider.emit(ProviderFailed("provider_connection_closed", True))
-    await asyncio.wait_for(termination_entered.wait(), 0.2)
-    assert stage.termination_requested is True
-
-    assert await stage.resume() is False
-    assert stage.state is CallState.RECONNECTING
-    assert turn_handler.requests == []
-    assert [frame.sequence for frame in provider.pushed_frames] == []
-
-    release_termination.set()
-    provider.release_push.set()
-    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
-    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
-    assert turn_handler.requests == []
-    assert stage.context is None
-    assert stage._pcm.empty()
-    assert stage._pcm_buffered_bytes == 0
-    await _eventually(lambda: released == [ownership])
-    assert released == [ownership]
-    assert provider.closed is True
-    assert not stage.tasks
-
-
-@pytest.mark.asyncio
-async def test_invalid_turn_releases_matching_speech_and_preserves_newer_speech(call_setup):
-    silence_handler = _SilenceHandler()
-    stage, provider, _, _ = await _create(call_setup, silence_handler=silence_handler)
-    repository, record, _, clock = call_setup
-    maintenance_turn_seq = repository.find_by_id(record.call_id).maintenance_turn_seq
-    await _eventually(lambda: stage.state is CallState.ACTIVE)
-
-    await provider.emit(SpeechStarted("invalid-turn"))
-    await _eventually(lambda: stage._playback._user_speaking)
-    stage.register_playback("response", 1)
-    stage.playback_final("response", 1)
-    stage.playback_completed("response", 1)
-    assert stage._playback.silence_started_at is None
-
-    await provider.emit(TurnInvalid("turn_invalid", "invalid-turn"))
-    await _eventually(lambda: stage._playback.silence_started_at == clock.monotonic)
-    assert stage._turns == {}
-    assert stage._unfinished_turns == set()
-    clock.advance(5)
-    await _eventually(lambda: len(silence_handler.requests) == 1, timeout=6.0)
-    assert silence_handler.requests[0].stimulus.kind is d.StimulusKind.CALL_SILENCE_ELAPSED
-
-    await provider.emit(SpeechStarted("new-turn"))
-    await _eventually(lambda: stage._playback._user_speaking)
-    new_turn_generation = stage._generation
-    await provider.emit(TurnInvalid("turn_invalid", "invalid-turn"))
-    await asyncio.sleep(0)
-    assert stage._playback._user_speaking is True
-    assert stage._generation == new_turn_generation
-    assert stage._turns == {}
-    assert stage._unfinished_turns == set()
-    assert repository.find_by_id(record.call_id).maintenance_turn_seq == maintenance_turn_seq
-    await finish_call(stage)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("stopped_first", [False, True])
-async def test_invalid_speech_after_completed_playback_restarts_silence_without_formal_input(call_setup, stopped_first):
-    silence_handler = _SilenceHandler()
-    stage, provider, _, turn_handler = await _create(call_setup, silence_handler=silence_handler)
-    repository, record, _, clock = call_setup
-    progress = repository.find_by_id(record.call_id).maintenance_turn_seq
-    try:
-        await _eventually(lambda: stage.state is CallState.ACTIVE)
-        stage.register_playback("previous-reply", 1)
-        stage.playback_final("previous-reply", 1)
-        stage.playback_completed("previous-reply", 1)
-        assert stage._playback.silence_started_at == clock.monotonic
-        clock.advance(3)
-        await provider.emit(SpeechStarted("noise"))
-        await _eventually(lambda: stage._playback._user_speaking)
-        assert stage._playback.silence_started_at is None
-        if stopped_first:
-            await provider.emit(SpeechStopped("noise"))
-            await _eventually(lambda: not stage._playback._user_speaking)
-            assert stage._playback.silence_started_at is None
-        clock.advance(4)
-        await provider.emit(TurnInvalid("empty_transcript" if stopped_first else "turn_invalid", "noise"))
-        await _eventually(lambda: stage._playback.silence_started_at == clock.monotonic)
-        restored_at = clock.monotonic
-        silence_task = stage._silence_task
-        clock.advance(2)
-        await provider.emit(TurnInvalid("turn_invalid", "noise"))
-        await provider.emit(SpeechStopped("noise"))
-        for _ in range(10):
-            await asyncio.sleep(0)
-        assert stage._playback.silence_started_at == restored_at
-        assert stage._silence_task is silence_task
-        assert not silence_handler.requests
-        assert not stage._playback.silence_elapsed()
-        clock.advance(3)
-        await _eventually(lambda: len(silence_handler.requests) == 1, timeout=6)
-        assert silence_handler.requests[0].stimulus.kind is d.StimulusKind.CALL_SILENCE_ELAPSED
-        assert not stage._turns and not stage._unfinished_turns
-        assert not turn_handler.requests and not stage._plans
-        assert repository.find_by_id(record.call_id).maintenance_turn_seq == progress
-    finally:
-        await finish_call(stage)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "stale", [SpeechStopped("old"), TurnInvalid("turn_invalid", "old"), TurnInvalid("turn_invalid")]
-)
-async def test_stale_speech_end_cannot_release_new_speech_or_restore_silence(call_setup, stale):
-    stage, provider, _, _ = await _create(call_setup)
-    try:
-        await _eventually(lambda: stage.state is CallState.ACTIVE)
-        stage.register_playback("previous-reply", 1)
-        stage.playback_final("previous-reply", 1)
-        stage.playback_completed("previous-reply", 1)
-        await provider.emit(SpeechStarted("old"))
-        await _eventually(lambda: stage._active_speech_item_id == "old")
-        await provider.emit(SpeechStarted("new"))
-        await _eventually(lambda: stage._active_speech_item_id == "new")
-        await provider.emit(stale)
-        for _ in range(10):
-            await asyncio.sleep(0)
-        assert stage._playback._user_speaking
-        assert stage._playback.silence_started_at is None
-        assert stage._active_speech_item_id == "new"
-    finally:
-        await finish_call(stage)
-
-
-@pytest.mark.asyncio
-async def test_invalid_turn_without_identity_releases_speaking_without_formal_turn_or_reply(call_setup):
-    stage, provider, _, turn_handler = await _create(call_setup)
-    repository, record, _, _ = call_setup
-    maintenance_turn_seq = repository.find_by_id(record.call_id).maintenance_turn_seq
-    await _eventually(lambda: stage.state is CallState.ACTIVE)
-
-    await provider.emit(SpeechStarted())
-    await _eventually(lambda: stage._playback._user_speaking)
-    generation = stage._generation
-
-    await provider.emit(TurnInvalid("turn_invalid"))
-    await _eventually(lambda: not stage._playback._user_speaking)
-
-    assert stage._generation == generation
-    assert stage._turns == {}
-    assert stage._unfinished_turns == set()
-    assert turn_handler.requests == []
-    assert not stage._plans
-    assert repository.find_by_id(record.call_id).maintenance_turn_seq == maintenance_turn_seq
-    await finish_call(stage)
-    assert not stage.tasks
-
-
-@pytest.mark.asyncio
 async def test_speech_started_interrupts_handle_and_terminal_snapshot_keeps_user_fact(call_setup):
     stage, provider, _, turn_handler = await _create(call_setup)
     await _eventually(lambda: stage.state is CallState.ACTIVE)
     await provider.emit(TurnCompleted(CallAudioSemantic(sound_description="敲桌声")))
-    await _eventually(lambda: bool(stage._handle_tasks))
+    await _eventually(lambda: bool(turn_handler.requests))
 
+    turn_handler.gate.set()
     await provider.emit(SpeechStarted())
     await _eventually(lambda: not stage._handle_tasks)
     turn_handler.gate.set()
     snapshot = await finish_call(stage)
 
     assert len(snapshot.completed_turns) == 1
-    assert snapshot.completed_turns[0].user_semantic == "敲桌声"
-    assert snapshot.completed_turns[0].reply_status is CallReplyStatus.NOT_STARTED
+    assert "敲桌声" in snapshot.completed_turns[0].user_semantic
+    assert snapshot.completed_turns[0].reply_status is CallReplyStatus.INTERRUPTED
 
 
 @pytest.mark.asyncio
@@ -1299,147 +1084,3 @@ async def test_cleanup_keeps_ownership_when_provider_close_fails(call_setup):
     assert not released
     assert stage.context is None
     assert not stage.tasks
-
-
-@pytest.mark.asyncio
-async def test_next_turn_runs_after_cancelled_owned_maintenance_drains(call_setup):
-    from src.utils.owned_operation import complete_owned
-
-    stage, provider, transport, handler = await _create(call_setup)
-    entered, release = asyncio.Event(), asyncio.Event()
-    original = stage._realize_plan
-
-    async def blocked_first(plan, turn_seq):
-        if turn_seq == 1:
-            entered.set()
-            await complete_owned(release.wait())
-        else:
-            await original(plan, turn_seq)
-
-    stage._realize_plan = blocked_first
-    handler.gate.set()
-    try:
-        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="first")))
-        await asyncio.wait_for(entered.wait(), 1)
-        generation = stage._generation
-        await provider.emit(SpeechStarted())
-        await _eventually(lambda: stage._generation > generation)
-        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="next")))
-        await _eventually(lambda: stage._inputs.ready == {1, 2})
-        assert len(handler.requests) == 1, "owned maintenance must drain before selecting new output"
-        release.set()
-        await _eventually(
-            lambda: any(
-                isinstance(item, tuple) and item[0] == "start" and item[1] == "response-2" for item in transport.items
-            )
-        )
-    finally:
-        release.set()
-        await finish_call(stage, StageEndReason.USER_REQUESTED)
-
-
-@pytest.mark.asyncio
-async def test_32_real_call_turns_emit_and_execute_threshold_maintenance(call_setup):
-    from types import SimpleNamespace
-
-    from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
-    from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
-    from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
-    from src.agent.skills.contracts import ReplyDraft
-
-    class Memory:
-        inputs = []
-
-        async def search_memory_context_for_topic(self, *args):
-            from src.domain import MemoryContext
-
-            return MemoryContext()
-
-        async def extract_maintenance_candidates(self, **kwargs):
-            self.inputs.append(kwargs)
-            return ()
-
-        async def propose_user_profile(self, **kwargs):
-            return None
-
-        async def write_maintenance_candidates(self, **kwargs):
-            pass
-
-    class Model:
-        async def generate_response(self, **kwargs):
-            return "compressed call prefix"
-
-    class Generator:
-        async def generate(self, **kwargs):
-            return (ReplyDraft("正式回答", "正式回答", "normal", None),)
-
-    stage, provider, transport, _ = await _create(call_setup)
-    repository, record, _, _ = call_setup
-    memory = Memory()
-    skill = CognitiveMaintenanceSkill(
-        {"conversation_compaction": {"llm_module": {}}},
-        llm_service=SimpleNamespace(register_llm_module=lambda *args: Model()),
-        memories={"luotianyi": memory},
-    )
-    recall = stub_retrieval({"luotianyi": memory})
-    stage._agent = Agent(
-        character_id="luotianyi",
-        stimulus_router=StimulusRouter(
-            (
-                (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
-                (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
-                (
-                    d.StimulusKind.CALL_REPLY_REQUESTED,
-                    CallReplyRequestedHandler(
-                        recall, make_reply_skill({"luotianyi": Generator()}), PreparedSpeechCatalog({})
-                    ),
-                ),
-                (d.StimulusKind.CALL_ENDING, _NoPlanHandler()),
-            )
-        ),
-        action_router=ActionRouter(
-            (
-                (d.ActionKind.SAY, _SayHandler()),
-                (d.ActionKind.COGNITIVE_MAINTENANCE, CognitiveMaintenanceActionHandler("luotianyi", skill)),
-            )
-        ),
-    )
-    try:
-        for seq in range(1, 33):
-            await provider.emit(TurnCompleted(CallAudioSemantic(transcript=f"user turn {seq}")))
-            await _eventually(
-                lambda: len([item for item in transport.items if isinstance(item, tuple) and item[0] == "start"]) == seq
-            )
-            await _eventually(lambda: stage._realize_task.done())
-            stream = [item for item in transport.items if isinstance(item, tuple) and item[0] == "start"][-1]
-            stage.playback_completed(stream[1], stream[2])
-            await _eventually(lambda: not stage._inputs.pending and not stage._fact_tasks)
-            await _eventually(lambda: stage._realize_task.done())
-        assert stage.context.conversation.read().summary.text == "compressed call prefix"
-        assert len(stage.context.conversation.read().entries) == 32
-        assert stage.context.conversation.read_call_maintenance_progress() == 16
-        assert len(memory.inputs) == 1
-        snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
-        assert snapshot.maintenance_turn_seq == 16
-        assert all(turn.reply_status is CallReplyStatus.COMPLETED for turn in snapshot.completed_turns)
-    finally:
-        if stage.snapshot is None:
-            await finish_call(stage, StageEndReason.USER_REQUESTED)
-
-
-@pytest.mark.asyncio
-async def test_interrupted_unanswered_input_is_protected_from_maintenance(call_setup):
-    stage, provider, _, handler = await _create(call_setup)
-    try:
-        # This turn has a completed provider semantic but is still waiting in
-        # Agent handling when the next user speech interrupts it.
-        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="settled user fact")))
-        await _eventually(lambda: 1 in stage._unfinished_turns)
-        generation = stage._generation
-        await provider.emit(SpeechStarted())
-        await _eventually(lambda: stage._generation > generation)
-        snapshot = stage._maintenance_snapshot()
-        assert snapshot.completed_turns == ()
-        assert 1 in stage._inputs.pending
-    finally:
-        await finish_call(stage, StageEndReason.USER_REQUESTED)

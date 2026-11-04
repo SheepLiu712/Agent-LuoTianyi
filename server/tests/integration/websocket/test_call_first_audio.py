@@ -52,6 +52,9 @@ async def network_call(call_setup):
     adapter._sessions[stage.call_id] = session
     adapter._bindings[handle] = binding
     await bind_protocol_connection(session, binding, start_message(stage.client_request_id))
+    from support.call_session import bind_test_omni
+
+    bind_test_omni(stage._agent, stage._speech_factory)
     await stage.start()
     await stage.apply_answer(
         b.d.AnswerCall(action_id="answer", call_id=record.call_id, decision=b.CallAnswerDecision.ACCEPT)
@@ -120,7 +123,7 @@ async def test_first_audio_waits_for_actual_websocket_completion(network_call, r
             assert first_audio(captured) == [875.0]
             for response_id, stream_id in stage._playback.pending_streams:
                 stage.playback_completed(response_id, stream_id)
-            await b._eventually(lambda: not stage._inputs.pending)
+            await b._eventually(lambda: not stage._fact_tasks)
             await produce_turn(stage)
             await b._eventually(lambda: len(first_audio(captured)) == 2)
             assert first_audio(captured) == [875.0, 250.0]

@@ -14,7 +14,7 @@ from src.application.user import UserResetFence, UserResetService
 from src.domain.stage import StageState
 from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
-from src.infrastructure.models.realtime_speech import AliyunRealtimeSpeechSessionFactory
+from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
@@ -53,7 +53,7 @@ class ServerRuntime:
     call_adapter: CallWebSocketAdapter | None = None
     call_metrics: CallMetrics | None = None
     user_reset_fence: UserResetFence | None = None
-    realtime_speech_factory: AliyunRealtimeSpeechSessionFactory | None = None
+    realtime_speech_factory: QwenOmniSessionFactory | None = None
     user_reset_service: UserResetService | None = None
     _call_transport_requested: bool = field(default=False, repr=False)
     _host_context: ServerHostContext = field(default_factory=ServerHostContext, repr=False)
@@ -103,6 +103,16 @@ class ServerRuntime:
             media_config = config.get("infrastructure", {}).get("media_resolution", {})
             media_resolver = create_media_resolver(media_config)
 
+            call_transport_config = config.get("call_transport", {})
+            if not isinstance(call_transport_config, dict):
+                raise ValueError("call_transport must be an object")
+            call_requested = parse_call_transport_enabled(config)
+            resolved_host_context = host_context or ServerHostContext()
+            speech_factory = (
+                QwenOmniSessionFactory.from_mapping(call_transport_config.get("realtime_speech", {}))
+                if call_requested and resolved_host_context.supports_single_process_calls
+                else QwenOmniSessionFactory(None)
+            )
             # 5. 初始化 Agent 运行时
             SkillsConfig.reject_legacy_summary(config)
             agent_config = dict(config.get("agent_runtime", {}))
@@ -111,6 +121,7 @@ class ServerRuntime:
                 llm_service,
                 database_manager,
                 media_resolver=media_resolver,
+                omni_factory=speech_factory,
             )
 
             # 6. 初始化箱庭世界运行时，并显式注入它需要的角色能力端口。
@@ -120,19 +131,7 @@ class ServerRuntime:
             )
 
             # 7. 组装系统运行时
-            call_transport_config = config.get("call_transport", {})
-            if not isinstance(call_transport_config, dict):
-                raise ValueError("call_transport must be an object")
-            call_requested = parse_call_transport_enabled(config)
-            resolved_host_context = host_context or ServerHostContext()
             call_metrics = CallMetrics(observability)
-            speech_factory = (
-                AliyunRealtimeSpeechSessionFactory.from_mapping(
-                    call_transport_config.get("realtime_speech", {}), call_metrics=call_metrics
-                )
-                if call_requested and resolved_host_context.supports_single_process_calls
-                else AliyunRealtimeSpeechSessionFactory(None, call_metrics=call_metrics)
-            )
             reset_fence = UserResetFence()
             runtime = cls(
                 user_interface=UserInterface(database_manager, media_resolver),
@@ -249,7 +248,7 @@ class ServerRuntime:
     @property
     def call_capability_status(self) -> CallCapabilityStatus:
         if self.call_adapter is None:
-            return CallCapabilityStatus(False, False, False, False, False, False, False, False, ())
+            return CallCapabilityStatus(False, False, False, False, False, False, False, ())
         return self.call_adapter.capability_status
 
     def supports_call_character(self, character_id: str) -> bool:

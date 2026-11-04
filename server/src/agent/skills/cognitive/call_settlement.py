@@ -14,6 +14,17 @@ from src.domain.call import CallFinalSnapshot, CallFinalTurn, CallReplyStatus
 
 def render_call_turns(snapshot: CallFinalSnapshot, *, after_turn_seq: int = 0) -> tuple[str, ...]:
     """Keep every completed user fact; include only fully completed formal replies."""
+    if isinstance(snapshot, CallFinalSnapshot) and snapshot.confirmed_segments:
+        items = [
+            (turn.turn_seq, 0, 0, f"用户：{turn.user_semantic}")
+            for turn in snapshot.completed_turns
+            if turn.turn_seq > after_turn_seq
+        ]
+        items.extend(
+            (segment.anchor_turn_seq, 1, index, f"角色：{segment.text}")
+            for index, segment in enumerate(snapshot.confirmed_segments)
+        )
+        return tuple(item[3] for item in sorted(items, key=lambda item: item[:3]))
     rendered = []
     for turn in snapshot.completed_turns:
         if turn.turn_seq <= after_turn_seq:
@@ -35,6 +46,7 @@ class CallSummaryMaterial:
     working: ConversationSnapshot
     accepted_turns: tuple[CallFinalTurn, ...]
     summarized_turn_seq: int
+    final_snapshot: CallFinalSnapshot | None = None
 
 
 class CallSummaryStatus(str, Enum):
@@ -50,6 +62,12 @@ class CallSummaryResult:
 
 
 def _summary_inputs(material: CallSummaryMaterial) -> tuple[str, ...]:
+    if material.final_snapshot is not None:
+        return render_call_turns(material.final_snapshot)
+    return _legacy_summary_inputs(material)
+
+
+def _legacy_summary_inputs(material):
     lines = []
     if material.working.summary.text.strip():
         lines.append(f"本次通话已有摘要：{material.working.summary.text.strip()}")

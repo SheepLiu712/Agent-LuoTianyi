@@ -11,7 +11,8 @@ from support.call_coherent_runtime import (
     NoopMediaResolver,
     runtime_config,
 )
-from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.call_omni import factory, send_reply
+from support.aliyun_realtime_speech import FakeAliyunWebSocket
 from support.stage_lifecycle import wait_call_finished
 from support.stage_manager import make_call_adapter, make_stage_manager
 
@@ -40,8 +41,14 @@ async def test_public_config_warning_audio_playback_ack_and_complete_deadline_se
     with database.open_sql_session() as sql:
         sql.add(User(uuid="user", username="deadline-user", password="offline", description=""))
         sql.commit()
+    socket = FakeAliyunWebSocket()
+    omni = factory(socket)
     runtime = runtime_module.AgentRuntime(
-        runtime_config(tmp_path), DeterministicLLMService(), database, media_resolver=NoopMediaResolver()
+        runtime_config(tmp_path),
+        DeterministicLLMService(),
+        database,
+        media_resolver=NoopMediaResolver(),
+        omni_factory=omni,
     )
     clock = _Clock()
     manager = make_stage_manager(
@@ -51,7 +58,7 @@ async def test_public_config_warning_audio_playback_ack_and_complete_deadline_se
         call_sessions=database.call_sessions,
         conversation_service=database.conversation_service,
         call_maintenance_batches=database.call_maintenance_batches,
-        realtime_speech_factory=FakeRealtimeSpeechSessionFactory(),
+        realtime_speech_factory=omni,
         user_reset_fence=UserResetFence(),
         monotonic=clock.tick,
         wall_clock=clock.now,
@@ -117,6 +124,8 @@ async def test_public_config_warning_audio_playback_ack_and_complete_deadline_se
         pumping = asyncio.create_task(pump(connection))
         await _eventually(lambda: stage.state is CallState.ACTIVE, timeout=5)
         assert stage._time_limit_seconds == 20 and stage._time_limit_warning_seconds == 8
+        await _eventually(lambda: any(e["type"] == "response.create" for e in socket.sent))
+        await send_reply(socket, response_id="opening", text="你好。", item_id=None)
         await confirm(connection, stage, "opening", 2)
         clock.advance(12)
         stage._time_limit_changed.set()

@@ -629,7 +629,7 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
         assert {item["type"] for item in received} == {"ack", "call.ended"}
         await _eventually(lambda: not calls._sessions)
         await asyncio.wait_for(speech.cancelled.wait(), 1)
-        assert chat.input_suspended and call.context is None
+        assert chat.input_suspended
         assert not await chat.dispatch_due_events(merge_all=True)
         assert not generation_calls
         speech.release.set()

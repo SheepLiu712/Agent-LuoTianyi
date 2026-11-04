@@ -40,6 +40,10 @@ class ReplySkill:
             for key, value in self._resources.items()
         }
 
+    def expression_for_tone(self, character_id: str, tone: str) -> tuple[str, str]:
+        """复用角色语气映射，返回表情及语音合成语气，不生成回复。"""
+        return self._resources[character_id]._get_expressions_and_tts_tone(tone)
+
     async def generate(
         self,
         character_id: str,

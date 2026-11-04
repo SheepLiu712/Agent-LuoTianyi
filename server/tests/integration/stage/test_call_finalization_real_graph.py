@@ -251,11 +251,12 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
                 )
             )
         stage._turns = {
-            1: _Turn("turn one user", CallReplyStatus.COMPLETED, "turn one agent"),
+            1: _Turn("turn one user", CallReplyStatus.COMPLETED, "turn one agent", confirmed_text="turn one agent"),
             2: _Turn(
                 "uncompressed tail user",
                 CallReplyStatus.COMPLETED,
                 "uncompressed tail agent",
+                confirmed_text="uncompressed tail agent",
             ),
         }
 
@@ -301,7 +302,7 @@ async def test_stage_handoff_uses_one_context_until_real_sqlite_settlement_finis
         assert len(summary_calls) == 1
         rendered = repr(summary_calls[0]["completed_turns"])
         if summary_mode != "default":
-            assert "maintained working prefix" in rendered
+            assert "turn one user" in rendered and "turn one agent" in rendered
         assert "uncompressed tail user" in rendered
         assert "uncompressed tail agent" in rendered
         assert "seed history must stay out" not in rendered

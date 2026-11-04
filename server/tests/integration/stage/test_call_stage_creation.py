@@ -15,7 +15,7 @@ from src.domain.call import CallState
 from src.domain.stage.lifecycle import StageEndReason
 from src.stage import StageManager
 from src.stage.call._call_records import PreparedCall
-from src.stage.call.call_stage import bind_call_stage_creator
+from support.call_session import bind_call_test_creator as bind_call_stage_creator
 
 from . import test_call_stage
 from .test_call_stage import _Transport

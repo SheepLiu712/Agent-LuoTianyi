@@ -23,7 +23,9 @@ class ProtocolDriver:
         async def connection_changed(available, generation):
             return True
 
+        self.audio_acks = []
         stage = SimpleNamespace(
+            audio_acknowledged=self.audio_acks.append,
             call_id=call_id,
             user_id=user_id,
             character_id=character_id,

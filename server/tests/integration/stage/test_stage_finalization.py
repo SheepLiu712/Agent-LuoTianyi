@@ -368,8 +368,7 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
         await creation
     await asyncio.sleep(0)
     assert created_contexts == []
-    assert len(speech_factory.sessions) == 1
-    assert all(provider.closed for provider in speech_factory.sessions.values())
+    assert not speech_factory.sessions  # 上下文尚未建好，不能打开 Omni 会话。
     assert stages._call_stages.get(str(claim.prepared._record.call_id)) is None
     await stages.close()
 
@@ -489,7 +488,7 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
     with pytest.raises(StageStartAborted):
         await creation
     await stages._finalizations.close()
-    assert contexts == []
+    assert len(contexts) == 1 and contexts[0].was_closed
     assert len(providers) == 1 and providers[0].closed
     assert stages._call_stages.get(str(claim.prepared._record.call_id)) is None
     await stages.close()

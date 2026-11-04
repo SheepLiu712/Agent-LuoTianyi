@@ -25,6 +25,7 @@ from .contracts import (
     RealtimeSpeechEvent,
     SpeechStarted,
     SpeechStopped,
+    TranscriptUpdated,
     TurnCompleted,
     TurnInvalid,
 )
@@ -204,6 +205,8 @@ class FunAsrRealtimeSpeechSession:
             self._speech_started = True
             await self._emit(SpeechStarted(item_id))
         if not sentence["sentence_end"]:
+            if text:
+                await self._emit(TranscriptUpdated(text, item_id))
             return
         self._last_completed = identity
         self._active_sentence = None

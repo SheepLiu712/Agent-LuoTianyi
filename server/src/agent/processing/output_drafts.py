@@ -1,4 +1,4 @@
-"""处理器提交的不可变内容；路由身份和序号由 Agent 绑定。"""
+"""处理器提交的不可变呈现内容；路由身份和序号由 Agent 绑定。"""
 
 from dataclasses import dataclass
 

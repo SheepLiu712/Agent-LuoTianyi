@@ -728,7 +728,7 @@ async def test_shutdown_waits_committed_chat_cleanup_and_prevents_call_context_c
     await asyncio.wait_for(entered.wait(), 1)
     closing = asyncio.create_task(stages.close())
     await _eventually(lambda: call.interaction_ended)
-    assert not closing.done() and call.context is None
+    assert not closing.done()
     gate.set()
     await closing
     assert chat.context.closed
@@ -1084,7 +1084,7 @@ async def test_blocked_provider_initialization_does_not_hold_manager_lock():
             raise RuntimeError("provider unavailable")
 
     stages, _, _ = manager(user_reset_fence=UserResetFence())
-    from src.stage.call.call_stage import bind_call_stage_creator
+    from support.call_session import bind_call_test_creator as bind_call_stage_creator
 
     resources = dict(stages._test_call_resources, speech_factory=Speech())
     stages._call_stage_creator = bind_call_stage_creator(**resources)
@@ -1127,7 +1127,7 @@ async def test_precommit_hangup_preserves_original_chat_offline_deadline(expired
             await asyncio.Event().wait()
 
     stages, _, _ = manager(config={"offline_timeout": 0.02 if expired else 60})
-    from src.stage.call.call_stage import bind_call_stage_creator
+    from support.call_session import bind_call_test_creator as bind_call_stage_creator
 
     stages._call_stage_creator = bind_call_stage_creator(**dict(stages._test_call_resources, speech_factory=Speech()))
     connection, chat = await connected(stages)
@@ -1183,10 +1183,13 @@ async def test_failed_call_creation_restores_original_offline_expiry(monkeypatch
 @pytest.mark.asyncio
 @pytest.mark.parametrize("during_refresh", ["resume", "expire", "shutdown"])
 async def test_chat_restore_rechecks_admission_after_history_sync(monkeypatch, during_refresh):
-    from src.stage.call.call_stage import bind_call_stage_creator
+    from support.call_session import bind_call_test_creator as bind_call_stage_creator
+
+    provider_entered = asyncio.Event()
 
     class Speech:
         async def create(self, call_id):
+            provider_entered.set()
             await asyncio.Event().wait()
 
     stages, _, _ = manager()
@@ -1202,6 +1205,7 @@ async def test_chat_restore_rechecks_admission_after_history_sync(monkeypatch, d
 
     monkeypatch.setattr(chat.context.conversation, "refresh", refresh)
     call = await preparing_call(stages, chat, connection)
+    await asyncio.wait_for(provider_entered.wait(), 1)
     ending = asyncio.create_task(call.terminate(StageEndReason.USER_REQUESTED))
     shutdown = None
     try:

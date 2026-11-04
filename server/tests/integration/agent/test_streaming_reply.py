@@ -18,7 +18,6 @@ from src.agent.context import UserContextSnapshot
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.reply_skills import ReplySkills
-from src.agent.handlers.stimulus.call import CallReplyRequestedHandler
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembler
@@ -134,38 +133,23 @@ class Speaking:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("call", [False, True], ids=["chat", "call"])
 @pytest.mark.parametrize("fail", [False, True], ids=["complete", "failure_after_first_sentence"])
-async def test_long_character_stream_delivers_tts_before_generation_finishes(call, fail):
+async def test_long_character_stream_delivers_tts_before_generation_finishes(fail):
+    call = False
     first = "今天我们一起去公园散步，"
     rest = "然后坐在湖边欣赏风景。" * 12
     provider = CharacterStream("[开心]" + first + rest, gate_after=len("[开心]" + first), fail=fail)
     generators = {"luotianyi": generator(provider)}
     catalog = PreparedSpeechCatalog({})
-    if call:
-        value = _request(
-            _stimulus(
-                d.CallReplyRequested,
-                call_id=uuid4(),
-                turn_seq=1,
-                audio_content=CallAudioSemantic(transcript="今天做什么"),
-            )
+    value = replace(request(), prepared_inputs=(d.PreprocessedInput(stimulus_id="m2", text="今天做什么"),))
+    handler = ChatReplyHandler(
+        ReplySkills(
+            retrieval=stub_retrieval({"luotianyi": Memory()}),
+            singing=stub_singing(SimpleNamespace()),
+            reply=make_reply_skill(generators),
+            topic_extraction=Topics(),
         )
-        handler = CallReplyRequestedHandler(
-            stub_retrieval({"luotianyi": Memory()}),
-            make_reply_skill(generators),
-            catalog,
-        )
-    else:
-        value = replace(request(), prepared_inputs=(d.PreprocessedInput(stimulus_id="m2", text="今天做什么"),))
-        handler = ChatReplyHandler(
-            ReplySkills(
-                retrieval=stub_retrieval({"luotianyi": Memory()}),
-                singing=stub_singing(SimpleNamespace()),
-                reply=make_reply_skill(generators),
-                topic_extraction=Topics(),
-            )
-        )
+    )
     context = _Plans().context
     context.identity = SimpleNamespace(
         character_id="luotianyi", user_id=value.interaction.user_id, interaction_id=value.interaction.interaction_id
@@ -364,9 +348,12 @@ async def test_reply_scene_reaches_rendered_model_prompt(scene):
     template = PromptTemplate("\n".join(json.loads(path.read_text(encoding="utf-8"))["template"]))
     resource.llm = LLMModule("reply", {}, template, provider, stream=True)
     skill = make_reply_skill({"luotianyi": resource})
-    drafts = [draft async for draft in skill.generate(
-        "luotianyi", scene=scene, reply_topic="你好", user_context=UserContextSnapshot()
-    )]
+    drafts = [
+        draft
+        async for draft in skill.generate(
+            "luotianyi", scene=scene, reply_topic="你好", user_context=UserContextSnapshot()
+        )
+    ]
     assert drafts[0].sound_content == "嗯，我在呢。"
     assert len(prompts) == 1
     assert ("实时电话通话" in prompts[0]) == (scene == "call")

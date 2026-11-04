@@ -13,6 +13,7 @@ from src.infrastructure.models.realtime_speech import (
     RealtimeSpeechConfig,
     SpeechStarted,
     SpeechStopped,
+    TranscriptUpdated,
     TurnCompleted,
     TurnInvalid,
 )
@@ -68,6 +69,7 @@ async def started(socket, **overrides):
     )
     session = await factory.create(uuid4())
     await session.start(RealtimeSpeechConfig(language="zh"))
+    assert socket.sent[0]["payload"]["parameters"]["max_sentence_silence"] == 500
     return session
 
 
@@ -84,7 +86,9 @@ async def test_sentence_start_interrupts_once_and_final_delivers_once_across_sil
     await socket.sentence(1)
     await socket.sentence(1, "你好")
     assert isinstance(await next_event(events), SpeechStarted)
+    assert (await next_event(events)).text == "你好"
     await socket.sentence(1, "你好啊")
+    assert (await next_event(events)).text == "你好啊"
     await socket.sentence(1, "你好。", final=True)
     stop = await next_event(events)
     turn = await next_event(events)
@@ -95,6 +99,7 @@ async def test_sentence_start_interrupts_once_and_final_delivers_once_across_sil
     await socket.sentence(1, "你好。", final=True)
     await socket.sentence(2, "嗯")
     assert isinstance(await next_event(events), SpeechStarted)
+    assert isinstance(await next_event(events), TranscriptUpdated)
     await socket.sentence(2, final=True)
     assert isinstance(await next_event(events), SpeechStopped)
     assert isinstance(await next_event(events), TurnInvalid)
@@ -127,7 +132,7 @@ async def test_empty_sentence_then_real_speech_does_not_block_next_turn():
     await socket.sentence(2, "你好", final=True)
     await session.close()
     result = [event async for event in session.events()]
-    assert [type(event) for event in result] == [SpeechStarted, SpeechStopped, TurnCompleted]
+    assert [type(event) for event in result] == [SpeechStarted, TranscriptUpdated, SpeechStopped, TurnCompleted]
     assert result[-1].semantic.transcript == "你好"
 
 

@@ -8,31 +8,13 @@ from typing import Protocol, TypeAlias
 from uuid import UUID
 
 from src.domain.call import CallAudioSemantic
+from src.domain.call.omni import AudioFrame as AudioFrame
 
 
 @dataclass(frozen=True, slots=True)
 class RealtimeSpeechConfig:
     language: str | None = None
     instructions: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AudioFrame:
-    payload: bytes
-    encoding: str
-    sample_rate: int
-    channels: int
-    sequence: int | None = None
-
-    def __post_init__(self) -> None:
-        if not self.payload:
-            raise ValueError("audio frame payload cannot be empty")
-        if not self.encoding:
-            raise ValueError("audio frame encoding is required")
-        if self.sample_rate <= 0 or self.channels <= 0:
-            raise ValueError("sample_rate and channels must be positive")
-        if self.sequence is not None and self.sequence < 0:
-            raise ValueError("sequence cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +25,12 @@ class SpeechStarted:
 @dataclass(frozen=True, slots=True)
 class SpeechStopped:
     item_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptUpdated:
+    text: str
+    item_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +59,7 @@ class ProviderFailed:
 
 
 RealtimeSpeechEvent: TypeAlias = (
-    SpeechStarted | SpeechStopped | TurnCompleted | TurnInvalid | AmbientAudio | ProviderFailed
+    SpeechStarted | SpeechStopped | TranscriptUpdated | TurnCompleted | TurnInvalid | AmbientAudio | ProviderFailed
 )
 
 

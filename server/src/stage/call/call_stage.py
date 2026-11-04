@@ -15,7 +15,6 @@ from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -34,7 +33,20 @@ from src.domain.call import (
     CallTerminalFacts,
     fallback_call_summary,
 )
-from src.domain.call.contracts import CallMaintenanceSnapshot
+from src.domain.call.contracts import CallConfirmedSegment, CallMaintenanceSnapshot
+from src.domain.call.omni import (
+    AudioFrame,
+    InstructionText,
+    MemoryLookupRequested,
+    MemoryLookupResult,
+    OmniSession,
+    ReplyFinished,
+    ReplySegment,
+    ReplyStarted,
+    SpeechStarted,
+    SpeechStopped,
+    TranscriptFinal,
+)
 from src.domain.call.terminal import CallTerminated
 from src.domain.stage.lifecycle import (
     StageEndReason,
@@ -43,24 +55,12 @@ from src.domain.stage.lifecycle import (
     StageTerminationOwner,
     StageTerminationResult,
 )
-from src.infrastructure.models.realtime_speech import (
-    AmbientAudio,
-    AudioFrame,
-    ProviderFailed,
-    RealtimeSpeechConfig,
-    RealtimeSpeechSession,
-    RealtimeSpeechSessionFactory,
-    SpeechStarted,
-    SpeechStopped,
-    TurnCompleted,
-    TurnInvalid,
-)
+from src.infrastructure.observability.call_latency import call_latency
 from src.infrastructure.observability.call_metrics import (
     CallMetric,
     CallMetricName,
     CallMetricResult,
     CallMetricStatus,
-    CallProvider,
 )
 from src.infrastructure.observability.call_reply_timing import CallReplyTiming, reply_timing_scope
 from src.infrastructure.persistence.call_sessions.repository import CallSessionRecord, CallSessionRepository
@@ -69,13 +69,10 @@ from src.utils.owned_operation import complete_owned
 
 from .._lifecycle import StageLifetime
 from ._call_history import CallHistory
-from ._call_inputs import CallInputs, ReplyAttempt
 from ._call_playback import CallPlaybackCoordinator, PlaybackCompletion, PlaybackSettlementError
 from ._call_records import PreparedCall
 from ._call_warning import CallWarning, WarningState
 from .call_lifecycle import CallLifecycle
-
-_ASR_INSTRUCTIONS_PATH = Path(__file__).resolve().parents[3] / "res/agent/prompts/call_asr_instructions.txt"
 
 
 def bind_call_stage_creator(
@@ -240,6 +237,7 @@ class _Turn:
     started_at: float = 0.0
     started_at_timestamp: str = ""
     speech_ended_at: float | None = None
+    speech_ended_timestamp: str | None = None
     recognized_at: float | None = None
     first_audio_recorded: bool = False
     first_audio_disqualified: bool = False
@@ -258,7 +256,7 @@ class CallStage:
         agent: Any,
         context_factory: ContextFactory,
         call_sessions: CallSessionRepository,
-        speech_factory: RealtimeSpeechSessionFactory,
+        speech_factory: object,
         output_sink: Callable[[str, CallStageOutput], Awaitable[None]],
         save_history: Callable[..., Awaitable[object]] | None = None,
         own_termination: StageTerminationOwner | None = None,
@@ -306,14 +304,24 @@ class CallStage:
             raise ValueError("time_limit_warning_seconds must be nonnegative and less than time_limit_seconds")
         self._lifecycle = CallLifecycle()
         self._context: InteractionContext | None = None
-        self._provider: RealtimeSpeechSession | None = None
+        self._provider: OmniSession | None = None
         self._pcm: asyncio.Queue[AudioFrame] = asyncio.Queue(self._pcm_capacity)
         self._pcm_buffered_bytes = 0
         self._receipts: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
+        self._item_turns: dict[str, int] = {}
+        self._model_replies: dict[str, tuple[int | None, int]] = {}
+        self._generating: set[str] = set()
+        self._model_started_at: dict[str, float] = {}
+        self._cancelled_replies: set[str] = set()
+        self._tool_calls: dict[str, str] = {}
+        self._tool_results: set[str] = set()
+        self._segment_keys: set[tuple[str, int]] = set()
+        self._segment_models: dict[str, tuple[str, int]] = {}
         self._provider_audio_sequence = 0
         self._plans: deque[_QueuedPlan] = deque()
         self._request_tokens: set[d.CancellationToken] = set()
         self._reply_timings: dict[str, CallReplyTiming] = {}
+        self._latency_invalidated: set[str] = set()
         self._handle_tasks: set[asyncio.Task[Any]] = set()
         self._execution_tokens: set[d.CancellationToken] = set()
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -331,7 +339,7 @@ class CallStage:
         self._reply_failures = 0
         self._failed_reply_requests: set[str] = set()
         self._unfinished_turns: set[int] = set()
-        self._inputs = CallInputs()
+        self._completed_items: set[str] = set()
         self._fact_tasks: set[asyncio.Task[Any]] = set()
         self._fact_tail: asyncio.Task[Any] | None = None
         self._fact_error: Exception | None = None
@@ -460,16 +468,6 @@ class CallStage:
     async def _start(self) -> None:
         try:
             self._require_setup_time()
-            instructions = _ASR_INSTRUCTIONS_PATH.read_text(encoding="utf-8").strip()
-            if not instructions:
-                raise ValueError(f"通话语音识别提示词不能为空: {_ASR_INSTRUCTIONS_PATH}")
-            self._provider = await self._await_setup(
-                self._speech_factory.create(self._record.call_id), cleanup=lambda provider: provider.close()
-            )
-            await self._await_setup(self._provider.start(RealtimeSpeechConfig(instructions=instructions)))
-            if self._finish_source_interaction is not None:
-                await self._await_setup(self._finish_source_interaction(self))
-            self._require_setup_time()
             if self.termination_requested:
                 raise asyncio.CancelledError
             requested_at = self._record.requested_at.replace(tzinfo=None)
@@ -482,14 +480,17 @@ class CallStage:
                 ),
                 cleanup=lambda context: context.close(),
             )
+            self._provider = await self._await_setup(
+                self._agent.open_omni_session(self._context, self._record.call_id),
+                cleanup=lambda provider: provider.close(),
+            )
+            if self._finish_source_interaction is not None:
+                await self._await_setup(self._finish_source_interaction(self))
             await self._transition(CallState.RINGING)
             self._require_setup_time()
             self._started = True
             self._pcm_task = self._track(asyncio.create_task(self._drain_pcm(), name="call-pcm"))
             self._events_task = self._track(asyncio.create_task(self._consume_events(), name="call-speech-events"))
-            self._provider_failure_task = self._track(
-                asyncio.create_task(self._await_provider_failure(), name="call-provider-failure")
-            )
             self._spawn_handle(self._submit_stimulus(self._answer_requested()), name="call-answer-request")
         except asyncio.CancelledError:
             raise
@@ -515,7 +516,9 @@ class CallStage:
             return False
         self._provider_audio_sequence += 1
         try:
-            self._pcm.put_nowait(AudioFrame(payload, "pcm_s16le", 16000, 1, self._provider_audio_sequence))
+            self._pcm.put_nowait(
+                AudioFrame(payload, "pcm_s16le", 16000, 1, self._provider_audio_sequence, time.monotonic_ns())
+            )
         except asyncio.QueueFull:
             self._provider_audio_sequence -= 1
             return False
@@ -549,6 +552,13 @@ class CallStage:
     def playback_final(self, response_id: str, stream_id: int) -> None:
         self._playback.mark_final_sent(response_id, stream_id)
 
+    def audio_acknowledged(self, response_id: str) -> None:
+        response = self._responses.get(response_id)
+        if response is not None:
+            timing = self._reply_timings.get(response.request_id)
+            if timing is not None:
+                timing.acknowledged(response_id)
+
     def audio_sent(self, response_id: str) -> None:
         """接纳非空 PCM 的网络发送成功通知，按正式轮次记录一次首音频耗时。"""
         response = self._responses.get(response_id)
@@ -559,19 +569,29 @@ class CallStage:
             or self.state is not CallState.ACTIVE
         ):
             return
+        timing = self._reply_timings.get(response.request_id)
+        if timing is not None:
+            timing.delivered(response_id)
         turn = self._turns.get(response.turn_seq)
-        if turn is None or turn.first_audio_recorded or turn.first_audio_disqualified:
+        if turn is None or turn.first_audio_recorded or turn.first_audio_disqualified or turn.speech_ended_at is None:
             return
         turn.first_audio_recorded = True
         self._record_metric(
             CallMetricName.FIRST_AUDIO,
-            duration_ms=max(0, (self._monotonic() - turn.started_at) * 1000),
-            labels={"result": CallMetricResult.SUCCEEDED.value},
-            start_ts=turn.started_at_timestamp,
+            duration_ms=max(0, (self._monotonic() - turn.speech_ended_at) * 1000),
+            labels={"result": CallMetricResult.SUCCEEDED.value, "measurement": "provider_speech_stopped_to_first_sent"},
+            start_ts=turn.speech_ended_timestamp,
         )
 
     def playback_completed(self, response_id: str, stream_id: int) -> PlaybackCompletion:
         result = self._playback.complete_playback(response_id, stream_id)
+        call_latency(
+            "audio.playback_completed",
+            self.call_id,
+            response_id=response_id,
+            stream_id=stream_id,
+            measurement="whole_stream_completion_not_first_audio",
+        )
         response = self._responses.get(response_id)
         if response is not None:
             response.playback_completed = True
@@ -651,7 +671,6 @@ class CallStage:
                 self._recovery_deadline = None
                 await self._transition_or_close(CallState.ACTIVE)
                 self._time_limit_changed.set()
-                self._inputs.blocked = False
                 self._schedule_output()
                 # Product policy: a successful resume always starts a fresh full silence period.
                 if self._playback.silence_started_at is None:
@@ -785,109 +804,207 @@ class CallStage:
 
     async def _consume_events(self) -> None:
         assert self._provider is not None
-        async for event in self._provider.events():
-            if self.state in {CallState.ENDED, CallState.FAILED}:
-                return
-            observed_at = self._monotonic()
-            observed_at_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
-            if self._lifetime.termination is not None:
-                continue
-            observed_disconnected = self.state is CallState.RECONNECTING
-            if isinstance(event, SpeechStarted):
-                self._active_speech_item_id = event.item_id
-                self._inputs.speech.add(event.item_id)
-                self._user_speaking = True
-                self._playback.set_user_speaking(True)
-                self._interrupt()
-            elif isinstance(event, SpeechStopped):
-                self._release_user_speaking(event.item_id)
-            elif isinstance(event, TurnCompleted):
-                await self._on_turn(
-                    event,
-                    started_at=observed_at,
-                    started_at_timestamp=observed_at_timestamp,
-                    first_audio_disqualified=observed_disconnected,
-                )
-            elif isinstance(event, TurnInvalid):
-                self._inputs.speech.discard(event.item_id)
-                self._release_user_speaking(event.item_id, invalid=True)
-                self._schedule_output()
-            elif isinstance(event, ProviderFailed):
-                return
-            elif isinstance(event, AmbientAudio):
-                continue
+        try:
+            async for event in self._provider.events():
+                if self.termination_requested:
+                    return
+                await self._on_omni_event(event)
+            if not self.termination_requested:
+                raise RuntimeError("omni session closed unexpectedly")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            get_logger(__name__).exception("实时通话会话失败 call=%s", self.call_id)
+            await self._terminate_call(CallEndReason.PROVIDER_FAILED)
 
-    async def _await_provider_failure(self) -> None:
-        assert self._provider is not None
-        failure = await self._provider.wait_failure()
-        if failure is None or self._final is not None:
-            return
-        self._record_metric(
-            CallMetricName.PROVIDER_ENDPOINT,
-            duration_ms=0,
-            status=CallMetricStatus.ERROR,
-            labels={
-                "provider": CallProvider.UNKNOWN.value,
-                "result": CallMetricResult.FAILED.value,
-                "error_code": "PROVIDER_EVENT_FAILED",
-            },
-        )
-        await self._terminate_call(CallEndReason.PROVIDER_FAILED)
+    def _turn_for_item(self, item_id: str) -> int:
+        if item_id not in self._item_turns:
+            seq = len(self._turns) + 1
+            self._item_turns[item_id] = seq
+            self._turns[seq] = _Turn(
+                "",
+                first_audio_disqualified=self.state is CallState.RECONNECTING,
+                started_at=self._monotonic(),
+                started_at_timestamp=self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds"),
+            )
+        return self._item_turns[item_id]
 
-    def _release_user_speaking(self, item_id: str | None, *, invalid: bool = False) -> None:
-        """Release only the provider turn that currently owns speaking state."""
-        if item_id is not None and item_id != self._active_speech_item_id:
+    async def _on_omni_event(self, event):
+        if self.termination_requested:
             return
-        if item_id is None and self._active_speech_item_id is not None:
+        if isinstance(event, SpeechStarted):
+            seq = self._turn_for_item(event.item_id)
+            call_latency("input.speech_started", self.call_id, turn_seq=seq, item_id=event.item_id)
+            self._active_speech_item_id = event.item_id
+            self._user_speaking = True
+            self._playback.set_user_speaking(True)
+            self._interrupt(event.item_id)
+            await self._cancel_model_replies()
+        elif isinstance(event, SpeechStopped):
+            seq = self._turn_for_item(event.item_id)
+            self._turns[seq].speech_ended_at = self._monotonic()
+            self._turns[seq].speech_ended_timestamp = (
+                self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
+            )
+            call_latency(
+                "input.provider_speech_stopped",
+                self.call_id,
+                turn_seq=seq,
+                item_id=event.item_id,
+                estimated_end_ns=event.estimated_end_ns,
+                estimate_method="pcm_rms_200_10ms",
+            )
+            self._release_user_speaking(event.item_id)
+        elif isinstance(event, TranscriptFinal):
+            self._accept_transcript(event)
+        elif isinstance(event, ReplyStarted):
+            seq = self._turn_for_item(event.item_id) if event.item_id is not None else None
+            self._model_replies[event.response_id] = (seq, len(self._turns))
+            self._generating.add(event.response_id)
+            self._model_started_at[event.response_id] = self._monotonic()
+            call_latency(
+                "reply.generation_started",
+                self.call_id,
+                turn_seq=seq,
+                response_id=event.response_id,
+                item_id=event.item_id,
+            )
+            self._cancel_task(self._silence_task)
+        elif isinstance(event, ReplyFinished):
+            call_latency("reply.generation_finished", self.call_id, response_id=event.response_id)
+            self._generating.discard(event.response_id)
+            self._refresh_silence_task()
+            self._schedule_output()
+        elif isinstance(event, ReplySegment):
+            await self._accept_segment(event)
+        elif isinstance(event, MemoryLookupRequested):
+            self._request_memory(event)
+
+    def _release_user_speaking(self, item_id, *, invalid=False):
+        if item_id != self._active_speech_item_id:
             return
         self._user_speaking = False
-        previous_silence = self._playback.silence_started_at
         if invalid:
-            self._active_speech_item_id = None
             self._playback.finish_invalid_user_speech()
         else:
-            # Keep this identity until the final transcript or next speech:
-            # an empty transcript can invalidate an already stopped item.
             self._playback.set_user_speaking(False)
-        if self._playback.silence_started_at != previous_silence:
+        self._refresh_silence_task()
+
+    def _accept_transcript(self, event):
+        if not event.text.strip():
+            self._release_user_speaking(event.item_id, invalid=True)
+            return
+        if event.item_id in self._completed_items:
+            return
+        self._completed_items.add(event.item_id)
+        seq = self._turn_for_item(event.item_id)
+        turn = self._turns[seq]
+        turn.semantic = event.text
+        turn.recognized_at = self._monotonic()
+        call_latency(
+            "turn.final", self.call_id, turn_seq=seq, item_id=event.item_id, measurement="final_transcript_received"
+        )
+        self._own_fact(
+            self._write_fact(
+                d.CallTurnCompleted(
+                    **self._stimulus_fields(),
+                    call_id=self._record.call_id,
+                    turn_seq=seq,
+                    audio_content=CallAudioSemantic(transcript=event.text),
+                )
+            )
+        )
+
+    async def _accept_segment(self, event):
+        key = (event.response_id, event.segment_index)
+        if event.response_id in self._cancelled_replies or key in self._segment_keys:
+            return
+        seq, _ = self._model_replies[event.response_id]
+        call_latency(
+            "reply.segment_ready",
+            self.call_id,
+            turn_seq=seq,
+            response_id=event.response_id,
+            segment_index=event.segment_index,
+        )
+        self._segment_keys.add(key)
+        self._segment_models[event.delivery_id] = key
+        await self._submit_stimulus(
+            d.CallReplySegmentReady(
+                **self._stimulus_fields(),
+                call_id=self._record.call_id,
+                response_id=event.response_id,
+                segment_index=event.segment_index,
+                turn_seq=seq,
+                text=event.text,
+                tone=event.tone,
+            ),
+            turn_seq=seq,
+        )
+
+    def _request_memory(self, event):
+        if event.response_id in self._cancelled_replies or event.tool_call_id in self._tool_calls:
+            return
+        call_latency(
+            "retrieval.tool_requested",
+            self.call_id,
+            response_id=event.response_id,
+            tool_call_id=event.tool_call_id,
+            turn_seq=self._model_replies[event.response_id][0],
+        )
+        self._tool_calls[event.tool_call_id] = event.response_id
+        self._spawn_handle(
+            self._submit_stimulus(
+                d.CallMemoryLookupRequested(
+                    **self._stimulus_fields(),
+                    call_id=self._record.call_id,
+                    response_id=event.response_id,
+                    tool_call_id=event.tool_call_id,
+                    query=event.query,
+                    turn_seq=self._model_replies[event.response_id][0],
+                )
+            ),
+            name="call-memory-lookup",
+        )
+
+    async def _complete_memory_lookup(self, response_id, tool_call_id, result):
+        owner = self._tool_calls.get(tool_call_id)
+        if (
+            owner == response_id
+            and owner not in self._cancelled_replies
+            and tool_call_id not in self._tool_results
+            and not self.termination_requested
+        ):
+            self._tool_results.add(tool_call_id)
+            call_latency(
+                "retrieval.tool_completed",
+                self.call_id,
+                response_id=response_id,
+                tool_call_id=tool_call_id,
+                hit_count=len(result.hits),
+                error=result.error,
+                turn_seq=self._model_replies[response_id][0],
+            )
+            await self._provider.submit_tool_result(tool_call_id, result)
+            call_latency(
+                "retrieval.tool_submitted",
+                self.call_id,
+                response_id=response_id,
+                tool_call_id=tool_call_id,
+                turn_seq=self._model_replies[response_id][0],
+            )
             self._refresh_silence_task()
 
-    async def _on_turn(
-        self,
-        event: TurnCompleted,
-        *,
-        started_at: float | None = None,
-        started_at_timestamp: str | None = None,
-        first_audio_disqualified: bool = False,
-    ) -> None:
-        if self._lifetime.termination is not None or self.state not in {CallState.ACTIVE, CallState.RECONNECTING}:
-            return
-        if event.item_id is not None:
-            if event.item_id in self._inputs.completed_items:
-                return
-            self._inputs.completed_items.add(event.item_id)
-        self._inputs.speech.discard(event.item_id)
-        self._release_user_speaking(event.item_id)
-        if started_at is None:
-            started_at = self._monotonic()
-        if started_at_timestamp is None:
-            started_at_timestamp = self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
-        sequence = len(self._turns) + 1
-        self._turns[sequence] = _Turn(
-            event.semantic.render(),
-            started_at=started_at,
-            started_at_timestamp=started_at_timestamp,
-            speech_ended_at=event.speech_ended_at,
-            recognized_at=event.recognized_at,
-            first_audio_disqualified=first_audio_disqualified,
-        )
-        self._unfinished_turns.add(sequence)
-        self._playback.set_unfinished_user_turn_count(len(self._unfinished_turns))
-        stimulus = d.CallTurnCompleted(
-            **self._stimulus_fields(), call_id=self._record.call_id, turn_seq=sequence, audio_content=event.semantic
-        )
-        self._inputs.accept(stimulus)
-        self._own_fact(self._accept_input(stimulus))
+    async def _cancel_model_replies(self):
+        # 本地许可和停播已经由 _interrupt 撤销；取消云端失败不影响停播。
+        stops = [task for task in self._tasks if task.get_name() == "call-playback-stop"]
+        if stops:
+            await asyncio.gather(*stops)
+        responses = set(self._model_replies) - self._cancelled_replies
+        self._cancelled_replies.update(responses)
+        self._generating.difference_update(responses)
+        for response_id in responses:
+            await self._provider.interrupt(response_id)
 
     def _own_fact(self, operation: Awaitable[None]) -> None:
         previous = self._fact_tail
@@ -924,10 +1041,6 @@ class CallStage:
             raise RuntimeError("call fact could not be accepted")
         return tuple(sink.plans)
 
-    async def _accept_input(self, stimulus: d.CallTurnCompleted) -> None:
-        await self._write_fact(stimulus)
-        self._inputs.ready.add(stimulus.turn_seq)
-
     def _schedule_output(self) -> None:
         if self._lifetime.termination is not None:
             return
@@ -947,8 +1060,11 @@ class CallStage:
             or self.state is not CallState.ACTIVE
             or self._pending_end_reason is not None
             or self._user_speaking
-            or self._inputs.speech
-            or not self._inputs.ready.issuperset(self._inputs.pending)
+            or self._generating
+            or any(
+                key not in self._tool_results and owner not in self._cancelled_replies
+                for key, owner in self._tool_calls.items()
+            )
             or any(not task.done() for task in self._fact_tasks | self._handle_tasks)
             or self._request_tokens
             or self._execution_tokens
@@ -965,7 +1081,7 @@ class CallStage:
         if self.state is CallState.ACTIVE and self._deadline_reached():
             self._request_call_end(CallEndReason.TIME_LIMIT)
             return
-        if not self._output_available() or self._inputs.attempt is not None:
+        if not self._output_available():
             return
         if self._warning.state is WarningState.IN_FLIGHT:
             return
@@ -985,26 +1101,11 @@ class CallStage:
                 name="call-time-limit-warning",
             )
             return
-        if not self._inputs.can_reply():
-            return
-        attempt = self._inputs.begin(str(uuid4()))
-        semantic = "\n".join(item.audio_content.transcript or item.audio_content.render() for item in attempt.inputs)
-        stimulus = d.CallReplyRequested(
-            **self._stimulus_fields(),
-            call_id=self._record.call_id,
-            turn_seq=attempt.anchor,
-            audio_content=CallAudioSemantic(transcript=semantic),
-            interrupted=self._inputs.interrupted,
-        )
-        self._spawn_handle(
-            self._submit_stimulus(stimulus, turn_seq=attempt.anchor, attempt=attempt), name="call-batch-reply"
-        )
 
     async def _submit_stimulus(
         self,
         stimulus: d.Stimulus,
         turn_seq: int | None = None,
-        attempt: ReplyAttempt | None = None,
         request_id: str | None = None,
     ) -> None:
         if self.termination_requested or self.state in {
@@ -1015,13 +1116,13 @@ class CallStage:
         }:
             return
         token = d.CancellationToken()
-        request_id = attempt.request_id if attempt is not None else (request_id or str(uuid4()))
+        request_id = request_id or str(uuid4())
         self._request_tokens.add(token)
         self._request_turn[request_id] = turn_seq
         request = d.HandleStimulusRequest(
             request_id=request_id,
             stimulus=stimulus,
-            interaction=self._agent_snapshot(pending=attempt.inputs if attempt else ()),
+            interaction=self._agent_snapshot(),
             cancellation=token,
         )
         sink = _PlanSink(self, request_id, token, turn_seq)
@@ -1031,23 +1132,18 @@ class CallStage:
                 report = await self._agent.handle_stimulus(request, sink, context=self._context)
             if request_id == self._warning.request_id:
                 self._warning.report = report
-            if attempt is not None:
-                attempt.report = report
-                self._settle_attempt()
             if (
-                isinstance(stimulus, (d.CallReplyRequested, d.CallStarted, d.CallSilenceElapsed))
+                isinstance(stimulus, (d.CallReplySegmentReady, d.CallMemoryLookupRequested))
                 and report.request_status is d.HandlingRequestStatus.FAILED
                 and not token.is_cancelled
             ):
                 if turn_seq is not None:
                     self._turns[turn_seq].status = CallReplyStatus.FAILED
-                self._record_reply_failure(request_id)
+                raise RuntimeError("实时通话刺激处理失败")
         except Exception:
             self._finish_reply_timing(request_id, "failed")
             if request_id == self._warning.request_id:
                 self._warning.finish(success=False)
-            if attempt is not None and self._inputs.attempt is attempt:
-                self._inputs.settle(attempt, success=False)
             raise
         finally:
             self._request_tokens.discard(token)
@@ -1057,21 +1153,24 @@ class CallStage:
                 self._finish_user_turn(turn_seq)
 
     def _new_reply_timing(self, request_id, turn_seq, stimulus):
-        if not isinstance(stimulus, d.CallReplyRequested):
+        if not isinstance(stimulus, d.CallReplySegmentReady):
             return None
         turn = self._turns.get(turn_seq)
-        if turn is None:
-            return None
         timing = CallReplyTiming(
             call_id=self._record.call_id,
             request_id=request_id,
             turn_seq=turn_seq,
-            recognized_at=turn.recognized_at if turn.recognized_at is not None else turn.started_at,
-            speech_ended_at=turn.speech_ended_at,
+            recognized_at=turn.recognized_at if turn else None,
+            speech_ended_at=turn.speech_ended_at if turn else None,
+            speech_end_basis="provider_speech_stopped_received",
+            generation_started_at=self._model_started_at[stimulus.response_id],
+            response_id=stimulus.response_id,
+            segment_index=stimulus.segment_index,
             sink=getattr(self._call_metrics, "record_reply_span", None),
             clock=self._monotonic,
             wall_clock=self._now,
         )
+        timing.mark("reply_generated")
         self._reply_timings[request_id] = timing
         return timing
 
@@ -1084,12 +1183,21 @@ class CallStage:
         for timing in self._reply_timings.values():
             timing.finish("interrupted")
 
+    def _playback_barriers(self, plan: d.ActionPlan) -> tuple[str, ...]:
+        pending = (key for key, r in self._responses.items() if not r.playback_completed and not r.failed)
+        if len(plan.actions) == 1 and isinstance(plan.actions[0], d.Say):
+            current = self._segment_models.get(plan.actions[0].call_delivery.response_id)
+            if current is not None:
+                # 同一回复的前序短句由单一执行队列保证发送顺序，播放确认只用于结算。
+                return tuple(key for key in pending if not self._is_earlier_segment(key, current))
+        return tuple(pending)
+
+    def _is_earlier_segment(self, delivery_id: str, current: tuple[str, int]) -> bool:
+        previous = self._segment_models.get(delivery_id)
+        return previous is not None and previous[0] == current[0] and previous[1] < current[1]
+
     def _enqueue_plan(self, plan: d.ActionPlan, token: d.CancellationToken, turn_seq: int | None) -> None:
-        barriers = tuple(
-            response_id
-            for response_id, response in self._responses.items()
-            if response.turn_seq == turn_seq and response.provisional and not response.playback_completed
-        )
+        barriers = self._playback_barriers(plan)
         for action in plan.actions:
             if isinstance(action, d.Say) and action.call_delivery.response_id is not None:
                 self._responses[action.call_delivery.response_id] = _Response(
@@ -1099,6 +1207,9 @@ class CallStage:
                     settled=asyncio.Event(),
                     request_id=plan.origin_request_id,
                 )
+        if any(isinstance(action, d.LookupCallMemory) for action in plan.actions):
+            self._spawn_handle(self._realize_plan(plan, None), name="call-memory-action")
+            return
         self._plans.append(_QueuedPlan(plan, token, turn_seq, barriers))
         if self._realize_task is None or self._realize_task.done():
             self._realize_task = self._track(asyncio.create_task(self._realize(), name="call-realize"))
@@ -1175,12 +1286,13 @@ class CallStage:
                 self._turns[turn_seq].status = CallReplyStatus.INTERRUPTED
             raise
         except Exception:
+            get_logger(__name__).exception("通话行动执行失败 call=%s", self.call_id)
+            self._request_call_end(CallEndReason.SYSTEM_FAILURE)
             if turn_seq is not None:
                 self._turns[turn_seq].status = CallReplyStatus.FAILED
         finally:
             self._execution_tokens.discard(execution_token)
             self._settle_warning()
-            self._settle_attempt()
             set_busy_count(0)
             if turn_seq is not None and not self._turn_has_unsettled_response(turn_seq):
                 self._finish_user_turn(turn_seq)
@@ -1188,7 +1300,12 @@ class CallStage:
             self._finish_pending_end_if_ready()
 
     async def _handle_plan_result(self, plan, report, turn_seq, token, retried, response_ids):
+        if any(isinstance(action, d.LookupCallMemory) for action in plan.actions):
+            await self._handle_memory_results(plan, report, token)
+            return
         if report.status is d.ExecutionStatus.FAILED and not token.is_cancelled:
+            for response_id in response_ids:
+                self._invalidate_latency(response_id, "action_failed")
             retry = self._retry_say_plan(plan, report, turn_seq, retried)
             if retry is not None:
                 await self._realize_plan(retry, turn_seq, retried=retried | {retry.actions[0].action_id})
@@ -1200,6 +1317,25 @@ class CallStage:
                 self._retire_unrealized_responses(response_ids)
             if turn_seq is not None:
                 self._turns[turn_seq].status = CallReplyStatus.FAILED
+
+    async def _handle_memory_results(self, plan, report, token):
+        if token.is_cancelled:
+            return
+        results = {result.action_id: result for result in report.action_results}
+        for action in plan.actions:
+            if not isinstance(action, d.LookupCallMemory):
+                continue
+            result = results[action.action_id]
+            if result.status in {d.ActionExecutionStatus.COMPLETED, d.ActionExecutionStatus.ALREADY_COMPLETED}:
+                value = result.value
+                if not isinstance(value, MemoryLookupResult):
+                    raise TypeError("记忆查询行动没有返回 MemoryLookupResult")
+            elif result.status is d.ActionExecutionStatus.FAILED:
+                get_logger(__name__).warning("通话记忆工具执行失败 call=%s，解除本次等待", self.call_id)
+                value = MemoryLookupResult((), "lookup_failed")
+            else:
+                continue
+            await self._complete_memory_lookup(action.response_id, action.tool_call_id, value)
 
     def _record_reply_failure(self, request_id: str) -> None:
         if request_id in self._reply_timings:
@@ -1213,6 +1349,34 @@ class CallStage:
                 asyncio.create_task(self._terminate_call(CallEndReason.SYSTEM_FAILURE), name="call-reply-failed")
             )
             task.add_done_callback(self._observe_task)
+
+    def _invalidate_latency(self, response_id, reason):
+        if response_id in self._latency_invalidated:
+            return
+        self._latency_invalidated.add(response_id)
+        response = self._responses.get(response_id)
+        call_latency(
+            "reply.invalidated",
+            self.call_id,
+            response_id=response_id,
+            reason=reason,
+            turn_seq=response.turn_seq if response is not None else None,
+        )
+        timing = self._reply_timings.get(response.request_id) if response is not None else None
+        if timing is not None:
+            timing.invalidate(response_id, reason)
+
+    def _record_response_latency(self, response_id, turn_seq, request_id):
+        model_id, index = self._segment_models.get(response_id, (None, None))
+        call_latency(
+            "reply.response",
+            self.call_id,
+            turn_seq=turn_seq,
+            request_id=request_id,
+            response_id=response_id,
+            model_response_id=model_id,
+            segment_index=index,
+        )
 
     def _retire_unrealized_responses(self, response_ids) -> None:
         for response_id in response_ids:
@@ -1244,6 +1408,9 @@ class CallStage:
         old_id = action.call_delivery.response_id
         old = self._responses[old_id]
         new_id = f"{old_id}-retry"
+        if old_id in self._segment_models:
+            self._segment_models[new_id] = self._segment_models[old_id]
+        self._record_response_latency(new_id, turn_seq, plan.origin_request_id)
         retry = replace(
             action,
             action_id=action.action_id,
@@ -1273,7 +1440,7 @@ class CallStage:
 
     @staticmethod
     def _final_turn(seq: int, turn: _Turn) -> CallFinalTurn:
-        text = turn.formal_text if turn.status in {CallReplyStatus.COMPLETED, CallReplyStatus.INTERRUPTED} else None
+        text = turn.confirmed_text if turn.status in {CallReplyStatus.COMPLETED, CallReplyStatus.INTERRUPTED} else None
         return CallFinalTurn(seq, turn.semantic, turn.status, text, turn.reply_turn_seq, turn.confirmed_text)
 
     def _maintenance_snapshot(self) -> CallMaintenanceSnapshot:
@@ -1281,7 +1448,7 @@ class CallStage:
         if any(not task.done() for task in self._fact_tasks):
             return CallMaintenanceSnapshot(self._record.call_id, ())
         for seq, turn in sorted(self._turns.items()):
-            if seq in self._inputs.pending or seq in self._unfinished_turns or self._turn_has_unsettled_response(seq):
+            if not turn.semantic or seq in self._unfinished_turns or self._turn_has_unsettled_response(seq):
                 break
             turns.append(self._final_turn(seq, turn))
         return CallMaintenanceSnapshot(self._record.call_id, tuple(turns))
@@ -1290,7 +1457,7 @@ class CallStage:
         if self.termination_requested or action.call_id != self._record.call_id or self.state is not CallState.RINGING:
             return
         if action.decision.value == "decline":
-            await self._terminate_call(CallEndReason.DECLINED)
+            self._request_call_end(CallEndReason.DECLINED)
             return
         if not self._connection_available:
             self._pending_answer = action
@@ -1303,16 +1470,19 @@ class CallStage:
         self._time_limit_task = self._track(asyncio.create_task(self._run_time_limit(), name="call-time-limit"))
         if not self._started:
             return
-        await self._submit_stimulus(
-            d.CallStarted(**self._stimulus_fields(), call_id=self._record.call_id, connected_at=connected_at)
-        )
+        await self._provider.push(InstructionText("opening", "opening"))
 
     async def _drain_pcm(self) -> None:
         while True:
             frame = await self._pcm.get()
             try:
                 if self.state in {CallState.ACTIVE, CallState.RECONNECTING} and self._provider is not None:
-                    await self._provider.push_audio(frame)
+                    try:
+                        await self._provider.push(frame)
+                    except Exception:
+                        get_logger(__name__).exception("实时模型音频写入失败 call=%s", self.call_id)
+                        await self._terminate_call(CallEndReason.PROVIDER_FAILED)
+                        return
             finally:
                 self._pcm_buffered_bytes = max(0, self._pcm_buffered_bytes - len(frame.payload))
                 self._pcm.task_done()
@@ -1357,13 +1527,10 @@ class CallStage:
         if (
             self._output_available()
             and not self._deadline_reached()
-            and not self._inputs.pending
             and self._warning.state not in {WarningState.PENDING, WarningState.IN_FLIGHT}
             and self._playback.silence_elapsed()
         ):
-            await self._submit_stimulus(
-                d.CallSilenceElapsed(**self._stimulus_fields(), call_id=self._record.call_id, silence_ms=5000)
-            )
+            await self._provider.push(InstructionText("silence", "silence"))
 
     async def _run_time_limit(self) -> None:
         assert self._connected_monotonic is not None
@@ -1500,12 +1667,23 @@ class CallStage:
                     CallState.ENDED, outcome=outcome, end_reason=reason, ledger_facts=terminal_facts, publish=False
                 )
             terminal = CallTerminalFacts(self._record.call_id, outcome, reason, duration, ended)
-            completed = tuple(self._final_turn(seq, turn) for seq, turn in sorted(self._turns.items()))
+            completed = tuple(self._final_turn(seq, turn) for seq, turn in sorted(self._turns.items()) if turn.semantic)
             persisted = await complete_owned(asyncio.to_thread(self._repository.find_by_id, self._record.call_id))
             progress = persisted.maintenance_turn_seq if persisted is not None else self._record.maintenance_turn_seq
             if self._context is not None:
                 progress = self._context.conversation.read_call_maintenance_progress()
-            self._final = CallFinalSnapshot(terminal, completed, progress)
+            segments = tuple(
+                CallConfirmedSegment(
+                    response_id=model_id,
+                    segment_index=index,
+                    turn_seq=self._model_replies[model_id][0],
+                    anchor_turn_seq=self._model_replies[model_id][1],
+                    text=response.formal_text,
+                )
+                for delivery_id, (model_id, index) in self._segment_models.items()
+                if (response := self._responses.get(delivery_id)) is not None and response.confirmed
+            )
+            self._final = CallFinalSnapshot(terminal, completed, progress, segments)
         except BaseException:
             await complete_owned(self._cleanup())
             raise
@@ -1560,9 +1738,9 @@ class CallStage:
             realized = await self._agent.realize_action_plan(sink.plans[0], execution, _EndingOutputSink())
             if realized.status is not d.ExecutionStatus.COMPLETED or len(realized.action_results) != 1:
                 raise RuntimeError("FinalizeCall failed")
-            result = realized.action_results[0].call_ending
-            if result is None:
-                raise RuntimeError("FinalizeCall returned no result")
+            result = realized.action_results[0].value
+            if not isinstance(result, CallEndingResult):
+                raise TypeError("FinalizeCall must return CallEndingResult")
             return result
         except Exception:
             self._finalization_error = "call ending maintenance failed"
@@ -1615,7 +1793,7 @@ class CallStage:
             await asyncio.gather(task, return_exceptions=True)
             raise
 
-    def _interrupt(self) -> None:
+    def _interrupt(self, item_id=None) -> None:
         self._interrupt_reply_timings()
         self._record_metric(
             CallMetricName.INTERRUPT,
@@ -1633,26 +1811,19 @@ class CallStage:
             and all(r.message_completed and r.playback_completed and not r.failed for r in warning_responses)
         )
         self._generation += 1
-        attempt = self._inputs.attempt
-        formal = [
-            r
-            for r in self._responses.values()
-            if attempt is not None and r.request_id == attempt.request_id and not r.provisional
-        ]
-        if not (formal and all(r.message_completed and r.playback_completed and not r.failed for r in formal)):
-            self._inputs.interrupt()
         for token in self._request_tokens:
             token.cancel(d.CancellationReason.SUPERSEDED)
         for token in self._execution_tokens:
             token.cancel(d.CancellationReason.SUPERSEDED)
-        affected = {
+        affected = [
             response_id
-            for response_id, response in self._responses.items()
-            if not response.playback_completed and not response.failed
-        }
-        if self._active_response_id is not None:
-            affected.add(self._active_response_id)
+            for response_id, response in reversed(self._responses.items())
+            if response_id == self._active_response_id or (not response.playback_completed and not response.failed)
+        ]
+        stops = []
         for affected_response in affected:
+            call_latency("reply.interrupt", self.call_id, response_id=affected_response, item_id=item_id)
+            self._invalidate_latency(affected_response, "interrupted")
             self._tombstones.add(affected_response)
             response = self._responses.get(affected_response)
             turn_seq = response.turn_seq if response is not None else None
@@ -1671,13 +1842,13 @@ class CallStage:
                 response.failed = True
                 if not stream_ids and response.settled is not None:
                     response.settled.set()
-            task = self._track(
-                asyncio.create_task(self._stop_response(affected_response, stream_ids), name="call-playback-stop")
-            )
+            stops.append((affected_response, stream_ids))
+        if stops:
+            task = self._track(asyncio.create_task(self._stop_responses(stops), name="call-playback-stop"))
             task.add_done_callback(self._observe_task)
         self._plans.clear()
         # Cancel reply work, but keep accepted inputs pending for the next batch.
-        self._unfinished_turns.intersection_update(self._inputs.pending)
+        self._unfinished_turns.clear()
         self._playback.set_unfinished_user_turn_count(len(self._unfinished_turns))
         for task in tuple(self._handle_tasks):
             self._cancel_task(task)
@@ -1718,7 +1889,7 @@ class CallStage:
         self._receipts.clear()
         self._turns.clear()
         self._unfinished_turns.clear()
-        self._inputs.close()
+        self._completed_items.clear()
         self._responses.clear()
         self._fact_tasks.clear()
         self._fact_tail = None
@@ -1869,11 +2040,13 @@ class CallStage:
             and len(payload) % 2 == 0
         )
 
-    async def _stop_response(self, response_id: str, stream_ids: tuple[int, ...]) -> None:
-        if stream_ids:
-            await self._transport_send(self._emit(CallPlaybackStop(response_id, stream_ids)))
-            return
-        self._settle_response_if_complete(response_id)
+    async def _stop_responses(self, stops: list[tuple[str, tuple[int, ...]]]) -> None:
+        # 先撤回队尾，避免停止当前句后客户端开始播放已预发的下一句。
+        for response_id, stream_ids in stops:
+            if stream_ids:
+                await self._transport_send(self._emit(CallPlaybackStop(response_id, stream_ids)))
+            else:
+                self._settle_response_if_complete(response_id)
 
     async def _transport_send(self, operation: Awaitable[None]) -> None:
         try:
@@ -1915,7 +2088,17 @@ class CallStage:
         task = self._track(asyncio.create_task(awaitable, name=name))
         self._handle_tasks.add(task)
         task.add_done_callback(self._handle_tasks.discard)
+        task.add_done_callback(self._handle_finished)
         task.add_done_callback(lambda _: self._schedule_output())
+
+    def _handle_finished(self, task):
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None and not self.termination_requested:
+            get_logger(__name__).error("通话工作失败 call=%s type=%s", self.call_id, type(error).__name__)
+            failed = self._track(asyncio.create_task(self._terminate_call(CallEndReason.SYSTEM_FAILURE)))
+            failed.add_done_callback(self._observe_task)
 
     def _finish_pending_end_if_ready(self) -> None:
         if (
@@ -1949,7 +2132,6 @@ class CallStage:
         ):
             response.confirmation_started = True
             self._own_fact(self._confirm_response(response_id, response))
-        self._settle_attempt()
         if self._active_response_id == response_id:
             self._active_response_id = None
         self._schedule_output()
@@ -1967,6 +2149,7 @@ class CallStage:
         response.confirmed = True
         if response.turn_seq is not None:
             turn = self._turns[response.turn_seq]
+            turn.status = CallReplyStatus.COMPLETED
             turn.confirmed_text = "\n".join(
                 item.formal_text
                 for item in self._responses.values()
@@ -1975,7 +2158,6 @@ class CallStage:
         if response.request_id != self._warning.request_id:
             self._reset_failures_after_playback(response)
         self._settle_warning()
-        self._settle_attempt()
         if self._lifetime.termination is None:
             for plan in plans:
                 self._enqueue_plan(plan, d.CancellationToken(), None)
@@ -2000,27 +2182,6 @@ class CallStage:
             get_logger(__name__).warning("Call time-limit warning failed call={}", self.call_id)
         self._schedule_output()
 
-    def _settle_attempt(self) -> None:
-        attempt = self._inputs.attempt
-        if attempt is None or attempt.report is None or self._execution_tokens:
-            return
-        formal = [r for r in self._responses.values() if r.request_id == attempt.request_id and not r.provisional]
-        failed = attempt.report.request_status is not d.HandlingRequestStatus.COMPLETED
-        if not failed and formal and not any(r.failed for r in formal) and not all(r.confirmed for r in formal):
-            return
-        success = not failed and bool(formal) and all(r.confirmed and not r.failed for r in formal)
-        settled = self._inputs.settle(attempt, success=success)
-        for seq in settled:
-            turn = self._turns[seq]
-            turn.status = CallReplyStatus.COMPLETED
-            turn.reply_turn_seq = attempt.anchor
-            turn.formal_text = turn.confirmed_text
-            self._finish_user_turn(seq)
-        if not success:
-            for item in attempt.inputs:
-                self._turns[item.turn_seq].status = CallReplyStatus.FAILED
-        self._schedule_output()
-
     def _reset_failures_after_playback(self, response) -> None:
         if not response.provisional and response.request_id is not None:
             request_responses = [
@@ -2034,8 +2195,7 @@ class CallStage:
                 self._reply_failures = 0
 
     def _finish_user_turn(self, turn_seq: int) -> None:
-        if turn_seq not in self._inputs.pending:
-            self._unfinished_turns.discard(turn_seq)
+        self._unfinished_turns.discard(turn_seq)
         self._playback.set_unfinished_user_turn_count(len(self._unfinished_turns))
 
     def _turn_has_unsettled_response(self, turn_seq: int) -> bool:
@@ -2093,6 +2253,10 @@ class _PlanSink:
             raise d.SinkRejectedError("stale or invalid call plan", code=d.SinkRejectionCode.IDENTITY_MISMATCH)
         self._ids.append(plan.plan_id)
         self._stage._enqueue_plan(plan, self._token, self._turn_seq)
+        for action in plan.actions:
+            if isinstance(action, d.Say) and action.call_delivery.response_id:
+                self._stage._record_response_latency(action.call_delivery.response_id, self._turn_seq, self._request_id)
+
         timing = self._stage._reply_timings.get(self._request_id)
         if timing is not None and any(
             isinstance(action, d.Say) and not action.call_delivery.provisional for action in plan.actions
@@ -2160,6 +2324,7 @@ class _OutputSink:
                 if response.message_completed and response.playback_completed and response.stream_id is not None:
                     self._stage._settle_response_if_complete(response_id)
                 if not response.message_completed:
+                    self._stage._invalidate_latency(response_id, "output_failed")
                     self._stage._tombstones.add(response_id)
                     response.failed = True
                     stream_ids = (response.stream_id,) if response.stream_id is not None else ()

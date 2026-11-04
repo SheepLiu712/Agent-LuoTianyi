@@ -61,7 +61,7 @@ class CallProvider(str, Enum):
 _STATES = frozenset({"preparing", "ringing", "active", "reconnecting", "ending", "declined", "ended", "failed"})
 _COUNT_FIELDS = frozenset({"seq", "buffered_bytes", "reconnect_count", "interrupt_count", "ack_retry_count"})
 _NUMERIC_FIELDS = _COUNT_FIELDS | frozenset({"latency_ms", "state_duration_ms", "usage_units", "cost_microunits"})
-_LABEL_FIELDS = frozenset({"state", "result", "error_code", "provider", "cost_status"})
+_LABEL_FIELDS = frozenset({"state", "result", "error_code", "provider", "cost_status", "measurement"})
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_.-]{0,31}$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 

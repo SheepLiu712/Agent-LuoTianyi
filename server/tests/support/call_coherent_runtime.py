@@ -163,6 +163,7 @@ def runtime_config(tmp_path) -> dict[str, object]:
     songs = tmp_path / "songs"
     songs.mkdir()
     return {
+        "omni_prompt_file": "res/agent/prompts/realtime_call_prompt.json",
         "skills": {
             "prepared_speech": {"characters": {"luotianyi": {"manifest": str(manifest)}}},
             "reply": {"llm_module": {"llm": {"name": "test"}}},

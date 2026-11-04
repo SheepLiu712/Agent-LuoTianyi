@@ -9,7 +9,8 @@ from src.agent.skills.expression.prepared_speech import EmptyPreparedAudioError,
 from src.agent.skills.expression.speaking import EmptySpeechError, SpeakingSkill, UnsupportedCallAudioError
 from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from src.agent.skills.invocation import execution_invocation
-from src.infrastructure.observability.call_reply_timing import mark_reply_phase
+from src.infrastructure.observability.call_latency import call_latency
+from src.infrastructure.observability.call_reply_timing import call_tts_scope, mark_reply_phase
 from src.utils.logger import get_logger
 
 
@@ -101,6 +102,8 @@ class SayHandler:
         await self._emit_presentation(action, outputs)
         if is_call:
             outputs.ensure_call_allowed()
+            with call_tts_scope(execution_context.interaction_id, action.call_delivery.response_id):
+                return await self._stream_tts(action, execution_context, outputs, is_call=True)
         return await self._stream_tts(action, execution_context, outputs, is_call=is_call)
 
     # Reviewed exception: generation, cancellation, look-behind finalization, and
@@ -122,6 +125,7 @@ class SayHandler:
             )
         ) as stream:
             pending = None
+            packet_index = 0
             while True:
                 try:
                     if is_call:
@@ -136,10 +140,34 @@ class SayHandler:
                 if execution_context.cancellation.is_cancelled:
                     return self._result(action, d.ExecutionErrorCode.CANCELLED)
                 if is_call:
+                    if chunk.data:
+                        call_latency(
+                            "audio.generated",
+                            execution_context.interaction_id,
+                            response_id=action.call_delivery.response_id,
+                            packet_index=packet_index,
+                            bytes=len(chunk.data),
+                            provisional=action.call_delivery.provisional,
+                        )
                     if chunk.data and not action.call_delivery.provisional:
                         mark_reply_phase("tts_first_packet")
+                    if pending is not None:
+                        call_latency(
+                            "audio.hold_released",
+                            execution_context.interaction_id,
+                            response_id=action.call_delivery.response_id,
+                            packet_index=packet_index - 1,
+                        )
                     await self._emit_pending_call_chunk(action, outputs, pending)
+                    if pending is not None:
+                        call_latency(
+                            "audio.emit_completed",
+                            execution_context.interaction_id,
+                            response_id=action.call_delivery.response_id,
+                            packet_index=packet_index - 1,
+                        )
                     pending = chunk
+                    packet_index += 1
                 else:
                     await outputs.emit(
                         AudioChunkDraft(delivery=action.delivery, data=chunk.data, framing=chunk.framing)
@@ -157,6 +185,13 @@ class SayHandler:
                     )
                 )
                 return self._result(action, d.ExecutionErrorCode.AUDIO_EMPTY)
+            call_latency(
+                "audio.hold_released",
+                execution_context.interaction_id,
+                response_id=action.call_delivery.response_id,
+                packet_index=packet_index - 1,
+                final=True,
+            )
             await outputs.emit(
                 AudioChunkDraft(
                     delivery=action.delivery,
@@ -165,6 +200,13 @@ class SayHandler:
                     audio_format=d.CALL_PCM_FORMAT,
                     final=True,
                 )
+            )
+            call_latency(
+                "audio.emit_completed",
+                execution_context.interaction_id,
+                response_id=action.call_delivery.response_id,
+                packet_index=packet_index - 1,
+                final=True,
             )
         await outputs.emit(
             MessageEndDraft(delivery=action.delivery, status=d.MessageEndStatus.COMPLETED, error_code=None)

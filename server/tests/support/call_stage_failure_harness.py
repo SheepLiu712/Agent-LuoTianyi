@@ -186,7 +186,7 @@ def build_agent(*, response_count: int = 1) -> Agent:
                 (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
                 (d.StimulusKind.CALL_ANSWER_REQUESTED, no_plan),
                 (d.StimulusKind.CALL_STARTED, no_plan),
-                (d.StimulusKind.CALL_REPLY_REQUESTED, TurnHandler(response_count=response_count)),
+                (d.StimulusKind.CALL_REPLY_SEGMENT_READY, TurnHandler(response_count=response_count)),
                 (d.StimulusKind.CALL_SILENCE_ELAPSED, no_plan),
                 (d.StimulusKind.CALL_ENDING, no_plan),
             )

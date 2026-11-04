@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, TypeVar
 from src.domain.call import CallState
 from src.domain.call.terminal import CallTerminated
 from src.domain.stage.lifecycle import StageEndReason
+from src.infrastructure.observability.call_latency import call_latency
 from src.stage.call.call_stage import (
     CallOutput,
     CallPCM,
@@ -45,7 +46,13 @@ class Session:
         self.user_id = stage.user_id
         self.character_id = stage.character_id
         self._config = config or TransportConfig()
-        self._delivery = Delivery(self.call_id, self._emit, config=self._config, call_metrics=call_metrics)
+        self._delivery = Delivery(
+            self.call_id,
+            self._emit,
+            config=self._config,
+            call_metrics=call_metrics,
+            on_audio_ack=getattr(stage, "audio_acknowledged", None),
+        )
         self._binding = None
         self._connection_changed = asyncio.Condition()
         self._input_lock = asyncio.Lock()
@@ -278,7 +285,15 @@ class Session:
         if value[0] == "completed":
             self._stage.playback_completed(value[1], value[2])
         elif value[0] == "stopped":
-            self._stage.playback_stopped(value[1], value[2])
+            accepted = self._stage.playback_stopped(value[1], value[2])
+            call_latency(
+                "audio.stop_confirmed",
+                self.call_id,
+                response_id=value[1],
+                stream_id=value[2],
+                stop_seq=frame.control["stop_seq"],
+                accepted=accepted,
+            )
         else:
             self._stage.begin_termination(StageEndReason.USER_REQUESTED)
         return True
@@ -338,9 +353,15 @@ class Session:
 
     def _enqueue(self, binding, output):
         on_sent = (
-            partial(self._stage.audio_sent, output.audio_response_id) if output.audio_response_id is not None else None
+            partial(self._audio_sent, output.audio_response_id, output.audio_seq)
+            if output.audio_response_id is not None
+            else None
         )
         binding.enqueue(output.text if output.text is not None else output.binary, on_sent=on_sent)
+
+    def _audio_sent(self, response_id, seq):
+        call_latency("audio.sent", self.call_id, response_id=response_id, seq=seq)
+        self._stage.audio_sent(response_id)
 
     def _preview_resume(self, cursor):
         self._require_open()

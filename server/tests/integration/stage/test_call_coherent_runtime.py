@@ -18,7 +18,8 @@ from support.call_coherent_runtime import (
 )
 from support.call_output import output_sink
 from support.call_protocol import ProtocolDriver, StageOutputDriver
-from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.call_omni import factory, send_reply
+from support.aliyun_realtime_speech import FakeAliyunWebSocket
 from support.stage_lifecycle import wait_call_finished
 from support.stage_manager import make_stage_manager
 
@@ -31,6 +32,7 @@ from src.domain.call import CallAudioSemantic, CallEndReason, CallState
 from src.infrastructure.models.realtime_speech import (
     SpeechStarted,
     SpeechStopped,
+    TranscriptUpdated,
     TurnCompleted,
 )
 from src.infrastructure.observability.call_metrics import CallMetrics
@@ -94,11 +96,14 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         )
         sql.commit()
     llm = DeterministicLLMService()
+    socket = FakeAliyunWebSocket()
+    provider_factory = factory(socket)
     runtime = runtime_module.AgentRuntime(
         runtime_config(tmp_path),
         llm,
         database,
         media_resolver=NoopMediaResolver(),
+        omni_factory=provider_factory,
     )
     adapter = WebSocketAdapter()
     manager = make_stage_manager(
@@ -114,7 +119,6 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     async def deliver(output):
         delivered.append(output)
 
-    provider_factory = FakeRealtimeSpeechSessionFactory()
     settled = []
 
     history = CallHistory(call_sessions=database.call_sessions, conversation_service=database.conversation_service)
@@ -161,83 +165,51 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     try:
         await stage.start()
         await _eventually(lambda: stage.state is CallState.ACTIVE)
-        provider = provider_factory.sessions[claim.prepared._record.call_id]
-        assert provider.started_with is not None
-
+        await _eventually(lambda: any(e["type"] == "response.create" for e in socket.sent))
+        await send_reply(socket, response_id="opening", text="你好，我在这里。", item_id=None)
         await _eventually(lambda: any(item["type"] == "audio.stream_started" for item in _controls(delivered)))
         opening = _latest_stream(delivered)
-        await _eventually(
-            lambda: any(
-                item.binary is not None
-                and BinaryAudioFrameCodec().decode(item.binary).stream_id == opening["stream_id"]
-                for item in delivered
-            )
-        )
+        await _eventually(lambda: stage._responses[opening["response_id"]].message_completed)
         await session.receive_text(_completed(binding.call_id, 1, opening))
+        await stage._drain_facts()
 
-        recognized = time.monotonic()
-        await provider.emit(
-            TurnCompleted(
-                CallAudioSemantic(transcript="你还记得我喜欢什么吗"),
-                speech_ended_at=recognized - 0.8,
-                recognized_at=recognized,
-            )
+        await send_reply(socket, response_id="lookup", text="", item_id="user-1", done=False)
+        await socket.server_event(
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "user-1",
+                "transcript": "你还记得我喜欢什么吗",
+            }
         )
+        await socket.server_event(
+            {
+                "type": "response.function_call_arguments.done",
+                "response_id": "lookup",
+                "call_id": "memory-1",
+                "name": "lookup_call_memory",
+                "arguments": '{"query":"用户喜欢什么"}',
+            }
+        )
+        await socket.server_event({"type": "response.done", "response": {"id": "lookup", "status": "completed"}})
+        await _eventually(lambda: "memory-1" in stage._tool_results)
         call_memory = stage.context.call_memory
-        await _eventually(lambda: bool(call_memory.snapshot()))
         assert tuple(item.content for item in call_memory.snapshot()) == ("用户喜欢音乐",)
+        assert len(vector.searches) == 1
+        await send_reply(
+            socket, response_id="answer", text="我记得你喜欢音乐，我们继续聊吧。未播第二句。", item_id=None, done=False
+        )
         await _eventually(lambda: tts.formal_started.is_set())
         await _eventually(
             lambda: any(
-                item["type"] == "audio.stream_started" and "turn-1" in item["response_id"]
-                for item in _controls(delivered)
+                i["type"] == "audio.stream_started" and "answer" in i["response_id"] for i in _controls(delivered)
             )
         )
-        formal = _latest_stream(delivered, response_marker="turn-1")
-        assert formal["response_id"] in stage._responses
-        assert stage._responses[formal["response_id"]].playback_completed is False
-        await _eventually(
-            lambda: any(
-                item.binary is not None and BinaryAudioFrameCodec().decode(item.binary).stream_id == formal["stream_id"]
-                for item in delivered
-            )
-        )
-        before_interrupt = len(delivered)
-        phases = {
-            row["span_name"].removeprefix("call.reply."): row
-            for row in timing_rows
-            if row["span_name"].startswith("call.reply.")
-        }
-        assert phases["endpointing"]["duration_ms"] == pytest.approx(800)
-        assert phases["terminal"]["metadata"]["outcome"] == "completed"
-        segments = (
-            "endpointing",
-            "scheduling",
-            "retrieval",
-            "generation_queue",
-            "generation",
-            "submission",
-            "tts_first_packet",
-        )
-        assert phases["total"]["duration_ms"] == pytest.approx(sum(phases[p]["duration_ms"] for p in segments))
-        assert len({phases[p]["metadata"]["reply_request_id"] for p in segments}) == 1
-        await provider.emit(SpeechStarted())
-        await asyncio.sleep(0.1)
-        assert stage._events_task is not None and not stage._events_task.done(), (
-            stage._events_task.exception() if stage._events_task is not None and stage._events_task.done() else None
-        )
+        formal = _latest_stream(delivered, response_marker="answer")
+        await _eventually(lambda: any(item.binary is not None for item in delivered))
+        await socket.server_event({"type": "input_audio_buffer.speech_started", "item_id": "user-2"})
         await _eventually(lambda: formal["response_id"] in stage._tombstones)
-        await _eventually(
-            lambda: any(
-                item["type"] == "playback.stop" and item["response_id"] == formal["response_id"]
-                for item in _controls(delivered)
-            )
-        )
-        stop = next(
-            item
-            for item in reversed(_controls(delivered))
-            if item["type"] == "playback.stop" and item["response_id"] == formal["response_id"]
-        )
+        await _eventually(lambda: tts.formal_cancelled.is_set())
+        stop = next(item for item in reversed(_controls(delivered)) if item["type"] == "playback.stop")
         await session.receive_text(
             json.dumps(
                 {
@@ -250,51 +222,21 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
                 }
             )
         )
-        await _eventually(lambda: tts.formal_cancelled.is_set())
-        await asyncio.sleep(0)
-        assert not any(
-            item.binary is not None
-            and BinaryAudioFrameCodec().decode(item.binary).stream_id == formal["stream_id"]
-            and index >= before_interrupt
-            for index, item in enumerate(delivered)
+        await socket.server_event({"type": "input_audio_buffer.speech_stopped", "item_id": "user-2"})
+        await socket.server_event(
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "user-2",
+                "transcript": "先等一下",
+            }
         )
-
-        await provider.emit(SpeechStopped())
-        await stage._submit_stimulus(
-            d.CallSilenceElapsed(
-                **stage._stimulus_fields(),
-                call_id=claim.prepared._record.call_id,
-                silence_ms=5000,
-            )
-        )
-        await _eventually(
-            lambda: any(
-                item["type"] == "audio.stream_started" and "silence" in item["response_id"]
-                for item in _controls(delivered)
-            )
-        )
-        farewell = next(
-            item
-            for item in reversed(_controls(delivered))
-            if item["type"] == "audio.stream_started" and "silence" in item["response_id"]
-        )
-        await _eventually(
-            lambda: any(
-                item.binary is not None
-                and BinaryAudioFrameCodec().decode(item.binary).stream_id == farewell["stream_id"]
-                and BinaryAudioFrameCodec().decode(item.binary).flags == 1
-                for item in delivered
-            )
-        )
-        assert stage.state is CallState.ACTIVE
-        await session.receive_text(_completed(binding.call_id, 3, farewell))
-        assert stage.state is CallState.ACTIVE
+        await _eventually(lambda: len(stage._completed_items) == 2)
         await session.receive_text(
             json.dumps(
                 {
                     "protocol": "call.v1",
                     "type": "call.hangup",
-                    "seq": 4,
+                    "seq": 3,
                     "call_id": binding.call_id,
                     "reason": "user_hangup",
                 }
@@ -302,17 +244,16 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
         )
         snapshot = await asyncio.wait_for(wait_call_finished(stage), 2)
         await manager._finalizations.close()
-
         assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
-        assert stage.state is CallState.ENDED
-        assert provider.closed is True
-        assert stage.context is None
+        assert socket.closed and stage.context is None and not stage.tasks
         assert manager._current_call_ownership(binding.call_id) is None
         assert settled == [snapshot]
-        with pytest.raises(RuntimeError):
-            call_memory.snapshot()
-        assert not call_memory._items
-        assert vector.searches and all(user == "user" and "喜欢什么" in query for user, query, _ in vector.searches)
+        summaries = llm.modules["skill.call_summary.generate.luotianyi"].calls
+        assert len(summaries) == 1
+        summary_input = "\n".join(summaries[0]["completed_turns"])
+        assert "你好，我在这里。" in summary_input
+        assert "你还记得我喜欢什么吗" in summary_input and "先等一下" in summary_input
+        assert "未播第二句" not in summary_input and "我们继续聊吧" not in summary_input
         with database.open_sql_session() as sql:
             assert sql.query(Conversation).filter_by(user_id="user").count() == 1
     finally:

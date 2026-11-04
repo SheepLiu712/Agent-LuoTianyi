@@ -18,6 +18,7 @@ from .action_plan import (
     DynamicSource,
     EndCall,
     FinalizeCall,
+    LookupCallMemory,
     PublishDynamic,
     Reflection,
     ReplyDynamic,
@@ -33,12 +34,15 @@ from .call_contracts import (
     CallAnswerRequested,
     CallEnding,
     CallInteractionSnapshot,
+    CallMemoryLookupRequested,
     CallReplyConfirmed,
     CallReplyRequested,
+    CallReplySegmentReady,
     CallSilenceElapsed,
     CallStarted,
     CallStimulus,
     CallTimeLimitWarning,
+    CallTranscriptUpdated,
     CallTurnCompleted,
 )
 from .execution_output import (
@@ -56,6 +60,7 @@ from .execution_output import (
 )
 from .execution_report import (
     ActionResult,
+    ActionValue,
     EffectRef,
     ExecutionReport,
 )
@@ -293,7 +298,11 @@ __all__ = (
     "CallStarted",
     "CallStimulus",
     "CallTimeLimitWarning",
+    "CallTranscriptUpdated",
     "CallTurnCompleted",
     "CallReplyRequested",
     "CallReplyConfirmed",
 )
+
+
+__all__ += ("CallReplySegmentReady", "CallMemoryLookupRequested", "LookupCallMemory", "ActionValue")

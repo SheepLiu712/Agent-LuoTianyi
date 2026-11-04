@@ -356,7 +356,7 @@ class ObservabilityService:
         from .call_reply_summary import summarize_call_replies
 
         rows = self._query_all(
-            """SELECT trace_id, span_name, start_ts, duration_ms, status, metadata_json
+            """SELECT trace_id, span_name, start_ts, end_ts, duration_ms, status, metadata_json
                FROM pipeline_spans WHERE start_ts >= ? AND span_name LIKE 'call.reply.%'
                ORDER BY id""",
             (self._since_iso(days),),

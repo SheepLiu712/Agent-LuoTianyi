@@ -256,6 +256,7 @@ def test_agent_domain_exports_the_registered_stimulus_contract() -> None:
         "NEW_RELATIONSHIP_PROPOSE": "new_relationship_propose",
         "CALL_ANSWER_REQUESTED": "call_answer_requested",
         "CALL_STARTED": "call_started",
+        "CALL_TRANSCRIPT_UPDATED": "call_transcript_updated",
         "CALL_TURN_COMPLETED": "call_turn_completed",
         "CALL_REPLY_REQUESTED": "call_reply_requested",
         "CALL_REPLY_CONFIRMED": "call_reply_confirmed",

@@ -71,10 +71,10 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
         interaction_context=context,
     )
     result = await FinalizeCallHandler("luotianyi", Maintenance(), skill).realize(action, execution, None)
-    assert result.call_ending.summary == expected
-    assert result.call_ending.summary_source is source
-    assert result.call_ending.maintenance_succeeded is not maintenance_fails
-    assert result.call_ending.maintenance_turn_seq == (0 if maintenance_fails else 1)
+    assert result.value.summary == expected
+    assert result.value.summary_source is source
+    assert result.value.maintenance_succeeded is not maintenance_fails
+    assert result.value.maintenance_turn_seq == (0 if maintenance_fails else 1)
     assert calls == (["maintenance"] if response is None else ["maintenance", "summary"])
     plan = d.ActionPlan(
         plan_id="plan",

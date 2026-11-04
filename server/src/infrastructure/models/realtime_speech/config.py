@@ -30,7 +30,7 @@ class AliyunRealtimeSpeechConfig:
     write_queue_size: int = 32
     event_queue_size: int = 64
     max_audio_frame_bytes: int = 64 * 1024
-    max_sentence_silence: int = 800
+    max_sentence_silence: int = 500
 
     def __post_init__(self) -> None:
         _required_string(self.api_key, "api_key")
@@ -90,7 +90,7 @@ class AliyunRealtimeSpeechConfig:
             write_queue_size=_mapping_int(value, "write_queue_size", 32),
             event_queue_size=_mapping_int(value, "event_queue_size", 64),
             max_audio_frame_bytes=_mapping_int(value, "max_audio_frame_bytes", 64 * 1024),
-            max_sentence_silence=_mapping_int(value, "max_sentence_silence", 800),
+            max_sentence_silence=_mapping_int(value, "max_sentence_silence", 500),
         )
 
 

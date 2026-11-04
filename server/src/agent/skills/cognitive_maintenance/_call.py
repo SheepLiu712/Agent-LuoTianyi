@@ -55,7 +55,7 @@ class _CallMaintenance:
     ) -> tuple[int, str | None]:
         turns = tuple(turn for turn in snapshot.completed_turns if turn.turn_seq > snapshot.maintenance_turn_seq)
         lines = render_call_turns(snapshot, after_turn_seq=snapshot.maintenance_turn_seq)
-        if not lines:
+        if not lines or not turns:
             return snapshot.maintenance_turn_seq, None
         identity = f"call:{_call_id(snapshot)}:{snapshot.maintenance_turn_seq}:{turns[-1].turn_seq}"
         maintenance_id = "call-maint-v1-" + sha256(identity.encode("utf-8")).hexdigest()
@@ -270,4 +270,11 @@ def _maintenance_digest(snapshot: CallMaintenanceSnapshot | CallFinalSnapshot) -
             for turn in snapshot.completed_turns
         ],
     ]
+    if isinstance(snapshot, CallFinalSnapshot):
+        payload.append(
+            [
+                [s.response_id, s.segment_index, s.turn_seq, s.anchor_turn_seq, s.text]
+                for s in snapshot.confirmed_segments
+            ]
+        )
     return sha256(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()

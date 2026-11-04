@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.action.call import AnswerCallHandler, EndCallHandler
+from src.agent.handlers.action.call_memory import LookupCallMemoryHandler
 from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
@@ -20,10 +21,9 @@ from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.call import (
     CallAnswerRequestedHandler,
     CallEndingHandler,
+    CallMemoryLookupRequestedHandler,
     CallReplyConfirmedHandler,
-    CallReplyRequestedHandler,
-    CallSilenceElapsedHandler,
-    CallStartedHandler,
+    CallReplySegmentReadyHandler,
     CallTimeLimitWarningHandler,
     CallTurnCompletedHandler,
 )
@@ -48,6 +48,7 @@ from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
     WorldActivityHandler,
 )
+from src.agent.processing.omni_background import CallSessionPrompt
 from src.agent.processing.reply_dispatch import ReplyDelivery
 from src.agent.skills import SharedSkills
 from src.agent.skills.resources import SkillResources
@@ -55,6 +56,7 @@ from src.agent_runtime.character_registry import CharacterRegistry
 from src.domain.agent import ActionKind, StimulusKind
 from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver
+from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.persistence.database.vector_store import (
     clear_vector_store,
     get_vector_store,
@@ -88,7 +90,6 @@ class AgentRuntime:
             character_id
             for character_id in self.character_ids
             if self.skills.speaking.supports_call_audio(character_id)
-            and self.skills.prepared_speech.supports_call_apology(character_id)
         )
 
     @property
@@ -107,6 +108,7 @@ class AgentRuntime:
         database_manager: DatabaseManager,
         *,
         media_resolver: MediaResolver,
+        omni_factory=None,
     ) -> None:
         """初始化启用角色及注册表，为门面注入数据库会话工厂；初始化失败回滚资源。"""
         self.logger = get_logger(__name__)
@@ -142,6 +144,7 @@ class AgentRuntime:
                 character_id: ContextFactory(character_id=character_id, database=database_manager.conversation_service)
                 for character_id in self.character_ids
             }
+            self.omni_factory = omni_factory or QwenOmniSessionFactory(None)
             self._agents = self._build_agents(first_login_names)
             set_agent_runtime(self)
         except BaseException:
@@ -168,8 +171,14 @@ class AgentRuntime:
         world_activity: WorldActivityHandler,
     ) -> Agent:
         """为一个角色装配私有路由；共享处理器只在其行为无角色状态时复用。"""
+        prompt_file = self.config.get("omni_prompt_file")
+        if self.omni_factory.is_configured and not prompt_file:
+            raise ValueError("实时通话必须配置 agent_runtime.omni_prompt_file")
         return Agent(
             character_id=character_id,
+            omni_factory=self.omni_factory,
+            narrative=self.skills.reply.narratives()[character_id],
+            omni_prompt=CallSessionPrompt(prompt_file) if prompt_file is not None else None,
             stimulus_router=self._build_stimulus_router(
                 character_id,
                 first_login_names,
@@ -198,28 +207,8 @@ class AgentRuntime:
         )
         registrations = [
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
-            (
-                StimulusKind.CALL_STARTED,
-                CallStartedHandler(self.skills.reply, self.skills.prepared_speech, reply=self.reply_delivery),
-            ),
-            (
-                StimulusKind.CALL_REPLY_REQUESTED,
-                CallReplyRequestedHandler(
-                    self.skills.memory_retrieval,
-                    self.skills.reply,
-                    self.skills.prepared_speech,
-                    reply=self.reply_delivery,
-                ),
-            ),
-            (
-                StimulusKind.CALL_SILENCE_ELAPSED,
-                CallSilenceElapsedHandler(
-                    self.skills.memory_retrieval,
-                    self.skills.reply,
-                    self.skills.prepared_speech,
-                    reply=self.reply_delivery,
-                ),
-            ),
+            (StimulusKind.CALL_REPLY_SEGMENT_READY, CallReplySegmentReadyHandler(self.skills.reply)),
+            (StimulusKind.CALL_MEMORY_LOOKUP_REQUESTED, CallMemoryLookupRequestedHandler()),
             (StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
             (StimulusKind.CALL_TIME_LIMIT_WARNING, CallTimeLimitWarningHandler()),
             (StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
@@ -304,6 +293,7 @@ class AgentRuntime:
                     ActionKind.SAY,
                     SayHandler(character_id, self.skills.speaking, self.skills.prepared_speech),
                 ),
+                (ActionKind.LOOKUP_CALL_MEMORY, LookupCallMemoryHandler(self.skills.memory_retrieval)),
                 (ActionKind.SING, SingHandler(character_id, self.skills.singing)),
                 (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
                 (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(character_id, self.skills.dynamic)),
@@ -437,6 +427,7 @@ class AgentRuntime:
         llm_service: LLMService,
         database_manager: DatabaseManager,
         media_resolver: MediaResolver,
+        omni_factory=None,
     ) -> None:
         """记录运行时外部依赖，并检查角色私有技能。"""
         self.llm_service = llm_service

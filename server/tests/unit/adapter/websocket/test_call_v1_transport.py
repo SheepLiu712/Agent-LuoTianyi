@@ -61,7 +61,13 @@ def message(output) -> dict:
     return json.loads(output.text)
 
 
-def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields() -> None:
+def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields(monkeypatch) -> None:
+    import src.adapter.websocket.call_v1._delivery as delivery_module
+
+    events = []
+    monkeypatch.setattr(
+        delivery_module, "call_latency", lambda event, call_id, **fields: events.append((event, fields))
+    )
     captured = []
 
     class Metrics:
@@ -91,6 +97,11 @@ def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields() -> No
     )
     transport._send_audio(WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
     transport.acknowledge_server(2)
+    transport.acknowledge_server(2)
+    assert [event for event, _ in events] == ["audio.enqueued", "audio.ack"]
+    assert events[-1][1]["measurement"] == "client_ack_not_playback"
+    assert events[-1][1]["seq"] == 2
+    assert transport.audio_acks == ["response-1"]
     with pytest.raises(CallTransportError, match="REPLAY_NOT_AVAILABLE"):
         transport.replay_missing(2)
 

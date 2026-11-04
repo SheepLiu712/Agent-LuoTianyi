@@ -453,3 +453,42 @@ async def test_prepared_read_cancellation_stops_all_delivery(runtime_dependencie
     finally:
         proceed.set()
         await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_call_worker_timing_survives_thread_handoff_and_ignores_stale_requests(monkeypatch):
+    from queue import Queue
+    from src.agent.skills.expression.speaking.tts_server import TTSServer
+    from src.infrastructure.observability import call_reply_timing as timing
+
+    server = object.__new__(TTSServer)
+    server.server_process = SimpleNamespace(is_alive=lambda: True)
+    server.request_queue, server.response_queue = Queue(), Queue()
+    server._synthesize_lock = threading.Lock()
+    server._request_counter, server._stopping = 0, False
+    server.stop_event = threading.Event()
+    server._begin_request = server._end_request = lambda: None
+    server.logger = SimpleNamespace(warning=lambda *args: None)
+    events = []
+    monkeypatch.setattr(timing, "call_latency", lambda name, call_id, **fields: events.append((name, call_id, fields)))
+
+    def consume():
+        return list(server.stream_synthesize_call_pcm("文字", "ref", "ref", "prompt"))
+
+    with timing.call_tts_scope("call", "segment"):
+        task = asyncio.create_task(asyncio.to_thread(consume))
+        request = await asyncio.to_thread(server.request_queue.get, True, 2)
+        server.response_queue.put(dict(request_id="stale", tts_phase="started", monotonic_ns=1))
+        for phase, ns, payload in (
+            ("started", 100, {}),
+            ("synthesized", 200, {"audio_bytes": b"pcm"}),
+            ("finished", 300, {"is_final": True}),
+        ):
+            server.response_queue.put(
+                dict(request_id=request["request_id"], ok=True, tts_phase=phase, monotonic_ns=ns, **payload)
+            )
+        assert await asyncio.wait_for(task, 2) == [b"pcm"]
+        await asyncio.sleep(0)
+    assert [row[0] for row in events] == ["tts.requested", "tts.started", "tts.synthesized", "tts.finished"]
+    assert [row[2]["monotonic_ns"] for row in events[1:]] == [100, 200, 300]
+    assert all(row[1] == "call" and row[2]["response_id"] == "segment" for row in events)

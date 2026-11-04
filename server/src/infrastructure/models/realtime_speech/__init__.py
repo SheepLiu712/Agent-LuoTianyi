@@ -12,6 +12,7 @@ from .contracts import (
     RealtimeSpeechSessionFactory,
     SpeechStarted,
     SpeechStopped,
+    TranscriptUpdated,
     TurnCompleted,
     TurnInvalid,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "RealtimeSpeechUnavailable",
     "SpeechStarted",
     "SpeechStopped",
+    "TranscriptUpdated",
     "TurnCompleted",
     "TurnInvalid",
 ]
