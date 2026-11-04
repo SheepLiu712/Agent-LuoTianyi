@@ -249,7 +249,7 @@ class ServerRuntime:
     @property
     def call_capability_status(self) -> CallCapabilityStatus:
         if self.call_adapter is None:
-            return CallCapabilityStatus(False, False, False, False, False, False, False, False, ())
+            return CallCapabilityStatus(False, False, False, False, False, False, False, ())
         return self.call_adapter.capability_status
 
     def supports_call_character(self, character_id: str) -> bool:

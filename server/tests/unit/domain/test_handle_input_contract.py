@@ -12,6 +12,8 @@ import src.domain.agent as domain
 NOW = datetime(2026, 9, 6, 8, 0, tzinfo=timezone.utc)
 LOCAL_ZONE = ZoneInfo("Asia/Shanghai")
 SNAPSHOTS = ("ChatInteractionSnapshot", "ToyInteractionSnapshot", "WorldInteractionSnapshot")
+# 联合成员包含通话快照；其字段行为由通话契约测试单独覆盖。
+SNAPSHOT_UNION = (*SNAPSHOTS, "CallInteractionSnapshot")
 COORDINATION = ("UserTyping", "ImageSelectionOpened", "ImageSelectionClosed", "InteractionDeadline")
 
 
@@ -128,7 +130,7 @@ def _readonly(obj, field, replacement):
 @pytest.mark.parametrize(
     "name, expected",
     [
-        ("InteractionKind", {"CHAT": "chat", "TOY": "toy", "WORLD": "world"}),
+        ("InteractionKind", {"CHAT": "chat", "TOY": "toy", "WORLD": "world", "CALL": "call"}),
         ("ConnectionState", {"CONNECTED": "connected", "DISCONNECTED": "disconnected"}),
         (
             "AgentOutputKind",
@@ -157,9 +159,9 @@ def test_handle_enums_have_only_specified_members_and_wire_values(name, expected
     assert {member.name: member.value for member in _public(name)} == expected
 
 
-def test_snapshot_union_contains_only_the_three_public_variants():
+def test_snapshot_union_contains_only_the_public_variants():
     """保证公开快照联合只有 Chat、Toy、World，不引入通用或未来变体。"""
-    assert set(get_args(_public("InteractionSnapshot"))) == {_public(name) for name in SNAPSHOTS}
+    assert set(get_args(_public("InteractionSnapshot"))) == {_public(name) for name in SNAPSHOT_UNION}
 
 
 def test_removed_snapshot_types_are_not_public():

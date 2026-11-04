@@ -39,7 +39,8 @@ def test_run_server_owns_lifecycle_around_uvicorn(monkeypatch):
     event_loops = []
 
     class Lifecycle:
-        async def start(self):
+        async def start(self, host_context=None):
+            assert host_context is not None, "run_server 必须传入单 worker 启动器上下文"
             events.append("start")
             event_loops.append(asyncio.get_running_loop())
 

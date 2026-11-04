@@ -59,13 +59,24 @@ def _real_reset_service_with_failing_vectors(**_kwargs):
     """用真实 UserResetService：向量步骤失败应被映射成 vectors 失败步骤，而不是抛到调用方。"""
     from src.application.user.user_reset import UserResetService
 
+    async def _begin_reset(user_id):
+        return "reset-token"
+
+    async def _end_reset(user_id, token):
+        return None
+
     return UserResetService(
+        interactions=SimpleNamespace(begin_user_data_reset=_begin_reset, end_user_data_reset=_end_reset),
         conversation_service=SimpleNamespace(reset_user_conversations=lambda user_id: 0),
+        memory_store=SimpleNamespace(delete_user_memory_records=lambda user_id: 0),
+        user_store=SimpleNamespace(reset_user_profile=lambda user_id: 0),
         vector_store=_FailingStore(),
         redis_buffer=SimpleNamespace(clear_user=lambda user_id: None),
         media_store=SimpleNamespace(
             delete_owned_by=lambda owner_user_id: SimpleNamespace(deleted_count=0, failures=())
         ),
+        call_sessions=SimpleNamespace(delete_by_user=lambda user_id: 0),
+        call_maintenance_batches=SimpleNamespace(delete_by_user=lambda user_id: 0),
     )
 
 
@@ -83,7 +94,15 @@ def _drive(monkeypatch, module, *, store, choices, capsys, session=None):
     monkeypatch.setattr(
         module,
         "database_service",
-        SimpleNamespace(get_database_manager=lambda: SimpleNamespace(conversation_service=SimpleNamespace())),
+        SimpleNamespace(
+            get_database_manager=lambda: SimpleNamespace(
+                conversation_service=SimpleNamespace(),
+                memory_store=SimpleNamespace(delete_user_memory_records=lambda user_id: 0),
+                user_store=SimpleNamespace(reset_user_profile=lambda user_id: 0),
+                call_sessions=SimpleNamespace(delete_by_user=lambda user_id: 0),
+                call_maintenance_batches=SimpleNamespace(delete_by_user=lambda user_id: 0),
+            )
+        ),
     )
     monkeypatch.setattr(
         module, "_authenticate", lambda *args, **kwargs: SimpleNamespace(username="probe", uuid="user-1")

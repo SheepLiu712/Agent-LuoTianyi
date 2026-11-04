@@ -9,7 +9,16 @@ import pytest
 import server_main
 
 
-@pytest.mark.parametrize("is_debug, expected_port", [(True, 24523), (False, 15673)])
+_CONFIG_PATH = Path(server_main.current_dir) / "config/config.json"
+_CONFIG = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+# 期望端口必须与被测代码读取同一份配置，避免把某个部署环境的端口写死进测试。
+_EXPECTED_PORTS = [
+    (True, _CONFIG["server"]["debug_port"]),
+    (False, _CONFIG["server"]["production_port"]),
+]
+
+
+@pytest.mark.parametrize("is_debug, expected_port", _EXPECTED_PORTS)
 def test_startup_selects_configured_mode_port(monkeypatch, capsys, is_debug, expected_port):
     config_path = Path(server_main.current_dir) / "config/config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
