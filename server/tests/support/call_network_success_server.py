@@ -36,14 +36,42 @@ import src.agent.skills.expression.speaking.backend as speaking_backend  # noqa:
 import src.agent_runtime.agent_runtime as agent_runtime_module  # noqa: E402
 import src.server_runtime as server_runtime_module  # noqa: E402
 from src.application.server_lifecycle import ServerLifecycle  # noqa: E402
+from src.domain.call import omni  # noqa: E402
+from src.infrastructure.models.realtime_speech import RealtimeSpeechConfig  # noqa: E402
 from support.call_coherent_runtime import (  # noqa: E402
     DeterministicCallTTSModule,
     DeterministicLLMService,
     DeterministicVectorStore,
 )
-from support.realtime_speech import FakeRealtimeSpeechSessionFactory  # noqa: E402
+from support.realtime_speech import FakeRealtimeSpeechSession, FakeRealtimeSpeechSessionFactory  # noqa: E402
 
 _startup_phase("imports-complete")
+
+
+class _LoopbackOmniSession(FakeRealtimeSpeechSession):
+    """只替换外部模型，按当前实时模型契约产生开场和受控回复。"""
+
+    async def push(self, frame):
+        if isinstance(frame, omni.AudioFrame):
+            await self.push_audio(frame)
+        else:
+            await self.emit(omni.ReplyStarted(frame.kind))
+            await self.emit(omni.ReplySegment(frame.kind, 0, "你好", tone="normal"))
+            await self.emit(omni.ReplyFinished(frame.kind))
+
+    async def interrupt(self, response_id):
+        pass
+
+    async def submit_tool_result(self, tool_call_id, result):
+        pass
+
+
+class _LoopbackOmniFactory(FakeRealtimeSpeechSessionFactory):
+    async def open(self, call_id, instructions):
+        session = _LoopbackOmniSession()
+        self.sessions[call_id] = session
+        await session.start(RealtimeSpeechConfig(instructions=instructions))
+        return session
 
 
 class _DeterministicSpeechFactory:
@@ -52,8 +80,8 @@ class _DeterministicSpeechFactory:
     instance: FakeRealtimeSpeechSessionFactory | None = None
 
     @classmethod
-    def from_mapping(cls, _config: object, **_kwargs) -> FakeRealtimeSpeechSessionFactory:
-        cls.instance = FakeRealtimeSpeechSessionFactory()
+    def from_mapping(cls, _config: object, **_kwargs) -> _LoopbackOmniFactory:
+        cls.instance = _LoopbackOmniFactory()
         return cls.instance
 
 
@@ -83,7 +111,8 @@ class _AddressPublishingLifecycle(ServerLifecycle):
 
 
 def _runtime_config(root: Path) -> Path:
-    source = Path(server_main.current_dir) / "config" / "config.json"
+    # 与持续集成使用同一份公开配置，避免依赖开发者本机的私有配置。
+    source = Path(server_main.current_dir) / "config" / "config.json.template"
     config = json.loads(source.read_text(encoding="utf-8"))
     config["call_transport"] = {
         "enabled": True,
@@ -178,7 +207,7 @@ def _install_external_seams() -> None:
     agent_runtime_module.clear_vector_store = lambda expected: expected is vector
     speaking_backend.init_tts_module = lambda _config: DeterministicCallTTSModule()
     server_runtime_module.LLMService = DeterministicLLMService
-    server_runtime_module.AliyunRealtimeSpeechSessionFactory = _DeterministicSpeechFactory
+    server_runtime_module.QwenOmniSessionFactory = _DeterministicSpeechFactory
 
 
 def main() -> None:  # noqa: C901 - production-loopback support exposes bounded evidence routes
@@ -544,24 +573,21 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
 
     @server_main.app.post("/test/provider/{call_id}/turn")
     async def emit_turn(call_id: str):
-        from src.domain.call import CallAudioSemantic
-        from src.infrastructure.models.realtime_speech import TurnCompleted
-
         provider = _provider(call_id)
-        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="你还记得我喜欢什么吗")))
+        await provider.emit(omni.SpeechStarted("input-1"))
+        await provider.emit(omni.SpeechStopped("input-1"))
+        await provider.emit(omni.TranscriptFinal("input-1", "你还记得我喜欢什么吗"))
+        await provider.emit(omni.ReplyStarted("turn-1", "input-1"))
+        await provider.emit(omni.ReplySegment("turn-1", 0, "我记得你喜欢音乐", tone="normal"))
+        await provider.emit(omni.ReplyFinished("turn-1"))
         return {"ok": True}
 
     @server_main.app.post("/test/provider/{call_id}/interrupt")
     async def interrupt(call_id: str):
-        from src.infrastructure.models.realtime_speech import (
-            SpeechStarted,
-            SpeechStopped,
-        )
-
         provider = _provider(call_id)
-        await provider.emit(SpeechStarted())
+        await provider.emit(omni.SpeechStarted("interrupt-1"))
         await asyncio.sleep(0)
-        await provider.emit(SpeechStopped())
+        await provider.emit(omni.SpeechStopped("interrupt-1"))
         return {"ok": True}
 
     def _provider(call_id: str):

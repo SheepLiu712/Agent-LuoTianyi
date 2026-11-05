@@ -16,7 +16,7 @@ from src.infrastructure.models.realtime_speech import SpeechStarted, SpeechStopp
 from src.stage.call._call_warning import WarningState
 from tests.integration.stage import test_call_stage as base
 from tests.integration.stage.test_call_failure_policy import Speech
-from tests.integration.stage.test_call_pending_inputs import completed, finish_reply
+from tests.integration.stage.test_call_pending_inputs import completed
 from tests.integration.stage.test_call_stage import _eventually
 
 call_setup = base.call_setup
@@ -195,7 +195,7 @@ async def test_warning_due_offline_waits_for_resumed_speech_and_invalid_final(ca
         assert await stage.resume()
         await provider.emit(SpeechStopped("noise"))
         await _eventually(lambda: not stage._user_speaking)
-        await asyncio.sleep(0.01)
+        await stage._try_output()
         assert speech.calls == {}
         await provider.emit(TurnInvalid("empty_transcript", "noise"))
         stream = await warning_stream(stage)

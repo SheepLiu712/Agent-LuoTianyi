@@ -4,13 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 测试范围；完整外部测试需要已准备资源的专用运行器
+        description: 选择需要调用真实 API 的测试
         required: true
         type: choice
         options:
           - aliyun-realtime
           - real-llm
-          - full-external
 
 permissions:
   contents: read
@@ -24,7 +23,7 @@ jobs:
     name: manual-api-tests
     # 只执行默认分支中经过审查的代码，不接受任意 PR 提交作为带密钥的执行对象。
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ${{ inputs.suite == 'full-external' && fromJSON('["self-hosted", "Windows", "agentluo-external"]') || fromJSON('["ubuntu-24.04"]') }}
+    runs-on: ubuntu-24.04
     environment: external-api
     timeout-minutes: 45
     defaults:
@@ -36,8 +35,6 @@ jobs:
       RUN_EXTERNAL_TESTS: '1'
       RUN_REAL_LLM_TESTS: '1'
       QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
-      SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-      AMAP_KEY: ${{ secrets.AMAP_KEY }}
       ALIYUN_REALTIME_SPEECH_API_KEY: ${{ secrets.ALIYUN_REALTIME_SPEECH_API_KEY }}
       ALIYUN_REALTIME_SPEECH_WORKSPACE_ID: ${{ vars.ALIYUN_REALTIME_SPEECH_WORKSPACE_ID }}
       ALIYUN_REALTIME_SPEECH_ENDPOINT: ${{ vars.ALIYUN_REALTIME_SPEECH_ENDPOINT }}
@@ -47,58 +44,34 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
-        if: inputs.suite != 'full-external'
         with:
           python-version: '3.10'
           cache: pip
           cache-dependency-path: server/pyproject.toml
       - name: 安装普通 API 测试依赖
-        if: inputs.suite != 'full-external'
         run: python -m pip install -e '.[dev]' httpx
-      - name: 选择完整环境的 Python
-        if: inputs.suite == 'full-external'
-        env:
-          EXTERNAL_TEST_PYTHON: ${{ vars.EXTERNAL_TEST_PYTHON }}
-        run: |
-          test -n "$EXTERNAL_TEST_PYTHON" || { echo '必须配置 EXTERNAL_TEST_PYTHON'; exit 1; }
-          "$EXTERNAL_TEST_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 10)'
-          # 专用运行器使用预装的完整依赖环境，不能使用生产服务环境。
-          echo "$(dirname "$EXTERNAL_TEST_PYTHON")" >> "$GITHUB_PATH"
       - name: 准备独立的测试配置
         env:
           SUITE: ${{ inputs.suite }}
           SERVER_TEST_CONFIG_JSON: ${{ secrets.SERVER_TEST_CONFIG_JSON }}
-          BILI_TEST_COOKIE: ${{ secrets.BILI_TEST_COOKIE }}
-          EXTERNAL_TEST_IMAGE: ${{ vars.EXTERNAL_TEST_IMAGE }}
         run: |
           python - <<'PY'
           import json
           import os
-          import shutil
           from pathlib import Path
           suite = os.environ['SUITE']
-          if suite == 'aliyun-realtime' or suite == 'full-external':
+          if suite == 'aliyun-realtime':
               assert os.environ.get('ALIYUN_REALTIME_SPEECH_API_KEY'), '缺少实时语音测试密钥'
               assert os.environ.get('ALIYUN_REALTIME_SPEECH_MODEL'), '缺少实时语音测试模型'
               assert os.environ.get('ALIYUN_REALTIME_SPEECH_WORKSPACE_ID') or os.environ.get('ALIYUN_REALTIME_SPEECH_ENDPOINT'), '缺少工作空间或服务地址'
-          if suite == 'real-llm' or suite == 'full-external':
+          if suite == 'real-llm':
               assert os.environ.get('QWEN_API_KEY'), '缺少 QWEN_API_KEY'
           config_text = os.environ.get('SERVER_TEST_CONFIG_JSON')
-          if suite == 'full-external':
-              assert config_text, '完整外部测试必须配置 SERVER_TEST_CONFIG_JSON'
-              assert os.environ.get('BILI_TEST_COOKIE'), '缺少 BILI_TEST_COOKIE'
-              image = Path(os.environ['EXTERNAL_TEST_IMAGE'])
-              assert image.is_file(), 'EXTERNAL_TEST_IMAGE 必须指向专用测试图片'
-              target = Path('data/images/00bbd621-e786-40e5-8ff0-6655da25daa7/2026-03-02_23-00-12..png')
-              target.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copyfile(image, target)
           if config_text:
               json.loads(config_text)
               Path('config/config.json').write_text(config_text, encoding='utf-8')
           else:
               Path('config/config.json').write_bytes(Path('config/config.json.template').read_bytes())
-          if os.environ.get('BILI_TEST_COOKIE'):
-              Path('config/bili_cookie.txt').write_text(os.environ['BILI_TEST_COOKIE'], encoding='utf-8')
           PY
       - name: 运行选定的真实服务测试
         env:
@@ -111,9 +84,6 @@ jobs:
             real-llm)
               python -m pytest tests/integration/persistence/test_agent_memory.py -m real_llm --run-real-llm -q --tb=short --junitxml=api-results.xml
               ;;
-            full-external)
-              python -m pytest tests -m 'external or real_llm' --run-external --run-real-llm -q --tb=short --junitxml=api-results.xml
-              ;;
             *) echo '未知测试范围'; exit 1 ;;
           esac
       - name: 不将跳过或空测试集算作真实服务验证通过
@@ -123,7 +93,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          for name in ('config/config.json', 'config/bili_cookie.txt', 'api-results.xml',
-                       'data/images/00bbd621-e786-40e5-8ff0-6655da25daa7/2026-03-02_23-00-12..png'):
+          for name in ('config/config.json', 'api-results.xml'):
               Path(name).unlink(missing_ok=True)
           PY

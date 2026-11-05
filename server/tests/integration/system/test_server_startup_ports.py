@@ -1,7 +1,5 @@
 """启动入口根据运行模式选择实际传给服务器的监听端口。"""
 
-import json
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,9 +9,10 @@ import server_main
 
 @pytest.mark.parametrize("is_debug, expected_port", [(True, 24523), (False, 15673)])
 def test_startup_selects_configured_mode_port(monkeypatch, capsys, is_debug, expected_port):
-    config_path = Path(server_main.current_dir) / "config/config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["is_debug"] = is_debug
+    config = {
+        "is_debug": is_debug,
+        "server": {"debug_port": 24523, "production_port": 15673},
+    }
     monkeypatch.setattr(server_main, "config", config)
     monkeypatch.delenv("SERVER_PORT", raising=False)
     monkeypatch.setenv("SERVER_HOST", "127.0.0.1")

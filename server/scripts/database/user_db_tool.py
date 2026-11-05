@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import traceback
@@ -126,19 +127,36 @@ def _reset_user_profile(session, redis_client, user: User) -> None:
     session.commit()
 
 
+class _OfflineResetFence:
+    """仅供已停止服务端的离线维护使用；本进程没有需要结束的交互。"""
+
+    async def begin_user_data_reset(self, user_id: str) -> object:
+        return object()
+
+    async def end_user_data_reset(self, user_id: str, token: object) -> None:
+        pass
+
+
 def _reset_user(session, redis_client, vector_store, media_store, user: User) -> bool:
     """完全重置用户；返回是否成功（取消视为未失败）。"""
-    confirm = input("确认完全重置用户（删除所有对话、向量记录，并重置画像）？输入 YES 确认：").strip()
+    confirm = input("请先停止服务端。确认已停止并完全重置用户（删除所有对话、记忆和通话记录）？输入 YES 确认：").strip()
     if confirm != "YES":
         print("已取消重置。")
         return True
 
-    report = UserResetService(
-        conversation_service=database_service.get_database_manager().conversation_service,
+    database = database_service.get_database_manager()
+    service = UserResetService(
+        interactions=_OfflineResetFence(),
+        conversation_service=database.conversation_service,
+        memory_store=database.memory_store,
+        user_store=database.user_store,
         vector_store=vector_store,
         redis_buffer=redis_client,
         media_store=media_store,
-    ).reset(user.uuid)
+        call_sessions=database.call_sessions,
+        call_maintenance_batches=database.call_maintenance_batches,
+    )
+    report = asyncio.run(service.reset(user.uuid))
     if not report.success:
         print(f"完全重置失败，可安全重试；失败步骤：{', '.join(report.failed_steps)}")
         return False

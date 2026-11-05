@@ -64,8 +64,7 @@ def _log_failure_locations(error: BaseException) -> None:
     while error is not None and id(error) not in seen:
         seen.add(id(error))
         locations = [
-            (frame.f_code.co_filename, line, frame.f_code.co_name)
-            for frame, line in walk_tb(error.__traceback__)
+            (frame.f_code.co_filename, line, frame.f_code.co_name) for frame, line in walk_tb(error.__traceback__)
         ]
         logger.error("Call WebSocket failure type=%s stack=%s", type(error).__name__, locations)
         error = error.__cause__ or (None if error.__suppress_context__ else error.__context__)

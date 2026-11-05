@@ -735,10 +735,13 @@ async def test_late_protocol_release_drains_terminal_after_history_failure(monke
 
 @pytest.mark.asyncio
 async def test_hangup_ack_and_protocol_release_do_not_wait_for_full_termination():
-    stages, _ = manager(speech_factory=BlockingSpeechFactory())
+    speech = BlockingSpeechFactory()
+    stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
     connection, call_id = await _opened(adapter)
     stage = stages._call_stages[call_id]
+    # 等待通话上下文建立，确保本场景确实经过历史结算，而不是初始化前取消。
+    await asyncio.wait_for(speech.entered.wait(), 1)
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def settle(_snapshot, *, result):
@@ -874,7 +877,8 @@ async def test_terminal_queue_overflow_still_releases_protocol_session():
 
 @pytest.mark.asyncio
 async def test_terminal_before_handshake_is_delivered_once_after_start_ack(monkeypatch):
-    stages, _ = manager(speech_factory=BlockingSpeechFactory())
+    speech = BlockingSpeechFactory()
+    stages, _ = manager(speech_factory=speech)
     adapter = call_adapter(stages)
     entered, release = asyncio.Event(), asyncio.Event()
     original = Session._receive_start
@@ -890,6 +894,8 @@ async def test_terminal_before_handshake_is_delivered_once_after_start_ack(monke
         await asyncio.wait_for(entered.wait(), 1)
         stage = next(iter(stages._call_stages.values()))
         session = adapter._sessions[stage.call_id]
+        # 只阻塞协议握手；先让上下文加载结束，避免把线程资源回收耗时混入本场景。
+        await asyncio.wait_for(speech.entered.wait(), 1)
         await asyncio.wait_for(stage.terminate(StageEndReason.USER_REQUESTED), 1)
         await adapter.submit_output(stage.call_id, stage._terminal)
         with pytest.raises(ValueError, match="conflicting call terminal"):
