@@ -39,7 +39,8 @@ def test_run_server_owns_lifecycle_around_uvicorn(monkeypatch):
     event_loops = []
 
     class Lifecycle:
-        async def start(self):
+        async def start(self, *, host_context):
+            assert host_context.supports_single_process_calls
             events.append("start")
             event_loops.append(asyncio.get_running_loop())
 

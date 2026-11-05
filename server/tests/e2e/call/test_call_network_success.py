@@ -16,7 +16,13 @@ import websocket
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from src.adapter.websocket.call_v1._audio_codec import CALL_ROUTE, VERSION, BinaryAudioFrameCodec, WireAudioFrame
+from src.adapter.websocket.call_v1._audio_codec import (
+    CALL_ROUTE,
+    FINAL_FLAG,
+    VERSION,
+    BinaryAudioFrameCodec,
+    WireAudioFrame,
+)
 
 
 @pytest.fixture
@@ -426,8 +432,21 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
             }
         ]
         opening = _receive_until(call, "audio.stream_started")
-        assert isinstance(call.recv(), bytes)
+        # 客户端必须收到音频结束帧后才能报告播放完成，不能把第一帧当成整段音频。
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            raw = call.recv()
+            if not isinstance(raw, bytes):
+                assert json.loads(raw)["type"] != "error"
+                continue
+            audio = BinaryAudioFrameCodec().decode(raw)
+            assert audio.stream_id == opening["stream_id"]
+            if audio.flags & FINAL_FLAG:
+                break
+        else:
+            raise AssertionError("opening audio did not reach its final frame")
         _complete(call, call_id, 3, opening)
+        assert _receive_until(call, "ack")["ack_seq"] == 3
         assert http.post(url + f"/test/provider/{call_id}/turn", timeout=5).ok
         formal = _receive_until(call, "audio.stream_started")
         assert "turn-1" in formal["response_id"]
@@ -445,7 +464,8 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
                     "type": "call.resume",
                     "call_id": call_id,
                     "character_id": "luotianyi",
-                    "last_contiguous_server_seq": 0,
+                    # 与真实客户端一致，重连从已收到的正式回复开始帧之后继续。
+                    "last_contiguous_server_seq": formal["seq"],
                 },
             )
             assert _receive_until(resumed, "call.resumed")["call_id"] == call_id
