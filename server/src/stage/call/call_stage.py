@@ -340,6 +340,7 @@ class CallStage:
         self._failed_reply_requests: set[str] = set()
         self._unfinished_turns: set[int] = set()
         self._completed_items: set[str] = set()
+        self._awaiting_transcript: set[str] = set()
         self._fact_tasks: set[asyncio.Task[Any]] = set()
         self._fact_tail: asyncio.Task[Any] | None = None
         self._fact_error: Exception | None = None
@@ -833,6 +834,8 @@ class CallStage:
         if self.termination_requested:
             return
         if isinstance(event, SpeechStarted):
+            if event.item_id not in self._completed_items:
+                self._awaiting_transcript.add(event.item_id)
             seq = self._turn_for_item(event.item_id)
             call_latency("input.speech_started", self.call_id, turn_seq=seq, item_id=event.item_id)
             self._active_speech_item_id = event.item_id
@@ -891,8 +894,10 @@ class CallStage:
         self._refresh_silence_task()
 
     def _accept_transcript(self, event):
+        self._awaiting_transcript.discard(event.item_id)
         if not event.text.strip():
             self._release_user_speaking(event.item_id, invalid=True)
+            self._schedule_output()
             return
         if event.item_id in self._completed_items:
             return
@@ -1085,7 +1090,7 @@ class CallStage:
             return
         if self._warning.state is WarningState.IN_FLIGHT:
             return
-        if self._warning.state is WarningState.PENDING:
+        if self._warning.state is WarningState.PENDING and not self._awaiting_transcript:
             request_id = str(uuid4())
             self._warning.begin(request_id)
             remaining = self._connected_monotonic + self._time_limit_seconds - self._monotonic()
@@ -1965,7 +1970,11 @@ class CallStage:
             raise TimeoutError("call setup deadline elapsed")
         task = asyncio.create_task(awaitable)
         try:
-            return await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+            # 结束通话时，即使资源同时就绪，也必须处理初始化协程的取消请求。
+            done, _ = await asyncio.wait({task}, timeout=remaining)
+            if not done:
+                raise asyncio.TimeoutError
+            return task.result()
         except (asyncio.CancelledError, asyncio.TimeoutError) as error:
             task.cancel()
             await complete_owned(self._dispose_late_setup(task, cleanup))

@@ -432,6 +432,15 @@
         }
     },
     "world": {
+        "dynamic_interaction": {
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 240,
+                    "run_immediately": false
+                }
+            }
+        },
         "citywalk": {
             "clock_config": {
                 "type": "daily",
