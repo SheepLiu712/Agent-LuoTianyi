@@ -6,10 +6,12 @@ api-key 直接调用 OpenAI 兼容的 chat/completions 接口，并把结果回�
 """
 
 import asyncio
+import json
 import time
 from typing import Any, Dict, Optional
 
 import requests
+import httpx
 
 from ..utils.logger import get_logger
 
@@ -119,8 +121,11 @@ async def call_llm_api_async(
     api_key: str,
     payload: Dict[str, Any],
     timeout: float = 120.0,
+    on_delta=None,
 ) -> Dict[str, Any]:
     """异步包装，避免阻塞 WebSocket 接收循环。"""
+    if payload.get("stream"):
+        return await _stream_llm(url, api_key, payload, timeout, on_delta)
     return await asyncio.to_thread(
         call_llm_api,
         url=url,
@@ -128,3 +133,36 @@ async def call_llm_api_async(
         payload=payload,
         timeout=timeout,
     )
+
+
+async def _stream_llm(url, api_key, payload, timeout, on_delta):
+    started = time.perf_counter()
+    parts, usage, finished = [], None, False
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", url, headers={"Authorization": f"Bearer {api_key}"}, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                if not data:
+                    continue
+                event = json.loads(data)
+                if event.get("error"):
+                    raise RuntimeError("模型流返回错误事件")
+                for choice in event.get("choices", ()):
+                    reason = choice.get("finish_reason")
+                    if reason is not None:
+                        if reason != "stop":
+                            raise RuntimeError(f"模型流未正常完成：{reason}")
+                        finished = True
+                    delta = choice.get("delta", {}).get("content")
+                    if delta:
+                        parts.append(delta)
+                        await on_delta(delta)
+                usage = event.get("usage") or usage
+    if not finished:
+        raise RuntimeError("模型流意外断开")
+    return {"content": "".join(parts), "usage": usage, "response_time_s": time.perf_counter() - started}

@@ -27,6 +27,7 @@ from .stimulus_values import (
     ActivityFact,
     BodyRegion,
     DynamicMessage,
+    EventReminder,
     EvidenceRef,
     MediaRef,
     ProactiveReason,
@@ -71,7 +72,10 @@ class StimulusKind(str, Enum):
     NEW_RELATIONSHIP_PROPOSE = "new_relationship_propose"
     CALL_ANSWER_REQUESTED = "call_answer_requested"
     CALL_STARTED = "call_started"
+    CALL_TRANSCRIPT_UPDATED = "call_transcript_updated"
     CALL_TURN_COMPLETED = "call_turn_completed"
+    CALL_REPLY_SEGMENT_READY = "call_reply_segment_ready"
+    CALL_MEMORY_LOOKUP_REQUESTED = "call_memory_lookup_requested"
     CALL_REPLY_REQUESTED = "call_reply_requested"
     CALL_REPLY_CONFIRMED = "call_reply_confirmed"
     CALL_SILENCE_ELAPSED = "call_silence_elapsed"
@@ -305,6 +309,7 @@ class ProactivePromptDue(Stimulus):
     due_at: datetime
     dedup_key: str
     fact_refs: tuple[EvidenceRef, ...]
+    events: tuple[EventReminder, ...] = ()
 
     def __post_init__(self) -> None:
         Stimulus.__post_init__(self)
@@ -312,6 +317,7 @@ class ProactivePromptDue(Stimulus):
         _require_aware_datetime(self.due_at)
         _require_nonblank_string(self.dedup_key)
         _require_tuple_of(self.fact_refs, EvidenceRef)
+        _require_tuple_of(self.events, EventReminder)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

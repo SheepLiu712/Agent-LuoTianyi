@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 
 from src.domain import MemoryUpdateCommand
@@ -14,6 +15,7 @@ from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
 from src.infrastructure.persistence.database.sql_database import (
     AgentMemoryRecord,
     MemoryChunkRecord,
+    MemoryEventBatch,
     MemoryUpdateRecord,
 )
 from src.infrastructure.persistence.database.sql_writer import run_sql_write
@@ -359,6 +361,9 @@ class MemoryStore:
                 count = len(rows)
                 for row in rows:
                     db.delete(row)
+                db.query(MemoryEventBatch).filter(MemoryEventBatch.subject_user_id == user_id).delete(
+                    synchronize_session=False
+                )
                 db.query(MemoryUpdateRecord).filter(MemoryUpdateRecord.user_id == user_id).delete(
                     synchronize_session=False
                 )
@@ -416,6 +421,39 @@ class MemoryStore:
             return self._domain_record_from_row(row)
         finally:
             db.close()
+
+    def get_scoped_embedding_ids(
+        self, owner: str, user_id: str | None, *, include_user: bool, include_character: bool, legacy_ids: set[str]
+    ) -> list[str]:
+        """先按规范记录授权，再对其向量集合计算相关性，避免其他角色挤占结果。"""
+        scopes = []
+        if include_user:
+            scopes.append(AgentMemoryRecord.subject_user_id == user_id)
+        if include_character:
+            scopes.extend(
+                (
+                    and_(
+                        AgentMemoryRecord.subject_user_id.is_(None), AgentMemoryRecord.visibility == "character_private"
+                    ),
+                    and_(
+                        AgentMemoryRecord.id.in_(legacy_ids),
+                        AgentMemoryRecord.subject_user_id == owner,
+                        AgentMemoryRecord.memory_type == "interaction_event",
+                    ),
+                )
+            )
+        with self._new_session() as session:
+            return [
+                row[0]
+                for row in session.query(MemoryChunkRecord.embedding_id)
+                .join(AgentMemoryRecord, MemoryChunkRecord.memory_record_id == AgentMemoryRecord.id)
+                .filter(
+                    AgentMemoryRecord.owner_character_id == owner,
+                    or_(*scopes),
+                    MemoryChunkRecord.embedding_id.isnot(None),
+                )
+                .all()
+            ]
 
     def get_agent_memory_record_by_embedding_id(self, embedding_id: str) -> DomainMemoryRecord | None:
         """根据向量索引 embedding_id 反查规范记忆记录。"""

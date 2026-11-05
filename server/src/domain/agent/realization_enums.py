@@ -18,6 +18,7 @@ class ActionKind(str, Enum):
     REFLECTION = "reflection"
     END_CALL = "end_call"
     ANSWER_CALL = "answer_call"
+    LOOKUP_CALL_MEMORY = "lookup_call_memory"
     FINALIZE_CALL = "finalize_call"
 
 

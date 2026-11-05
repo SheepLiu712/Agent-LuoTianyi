@@ -1,6 +1,9 @@
 工作前请牢记[《开发守则》](docs/开发守则.md)
 
-产出或提交 PR 审查报告时，加载并遵守 `docs/开发进程文档/skills/pr-review-report/SKILL.md`。
+使用以下模板撰写文档以保证人类可读性：
+- 创建SPEC文档时，使用[spec文档模板](docs/模板/spec文档模板.md)撰写。
+- 提交PR时，使用[pr描述模板](docs\模板\pr描述模板.md)撰写PR描述，确保PR的目的、改动内容、改动范围、关键调用链和验证方法清晰可读。
+- AI 审查或复审 PR 时，必须读取并执行仓库内的 [PR 审查技能](docs/模板/skills/pr-review-report/SKILL.md)。它是 AI 执行项目 PR 审查的唯一流程标准，并要求按 [PR 审查结论模板](docs/模板/pr审查结论模板.md)撰写报告。
 
 ## 仓库架构
 

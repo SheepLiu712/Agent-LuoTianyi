@@ -159,6 +159,36 @@ function stopCurrent(socket: Socket) {
   }));
 }
 
+test.each([false, true])('interrupt retires the playing and prefetched streams (reverse stops: %s)', async (reverse) => {
+  const { socket, bridge, transport } = await establish();
+  const nativeStop = jest.spyOn(bridge, 'stopPlayback');
+  const nativeRetire = jest.spyOn(bridge, 'tombstone');
+  bridge.acceptEnqueue();
+  await flush();
+  bridge.progress(0.5);
+  await enqueueFinal(socket, 5, 'response-2', 10);
+  bridge.acceptEnqueue(8);
+  await flush();
+  const streams = [
+    { response_id: 'response-1', stream_id: 9, from: 3 },
+    { response_id: 'response-2', stream_id: 10, from: 5 },
+  ];
+  if (reverse) streams.reverse();
+  streams.forEach(({ response_id, stream_id, from }, index) => socket.message(control({
+    protocol: 'call.v1', type: 'playback.stop', seq: 7 + index, call_id: CALL_ID, response_id, stream_id,
+    retire_server_seq: { from, through: from + 1 }, reason: 'user_interrupted',
+  })));
+  await flush();
+  bridge.complete();
+  bridge.complete('response-2', 10, 8);
+  expect(nativeRetire).toHaveBeenCalledWith('response-2', 10);
+  expect(nativeStop).toHaveBeenCalledWith('response-2', 10);
+  expect(wireCompletions(socket)).toHaveLength(0);
+  expect(wireControls(socket).filter(m => m.type === 'playback.stopped').map(m => m.response_id).sort())
+    .toEqual(['response-1', 'response-2']);
+  expect(transport.state.status).toBe('connected');
+});
+
 test.each(['early', 'late'])('native %s completion reaches call.v1 wire once', async (timing) => {
   const { socket, bridge, transport } = await establish();
   if (timing === 'early') bridge.complete();
@@ -227,6 +257,26 @@ test.each(['tombstone', 'stopPlayback'] as const)('a native %s failure still fai
   await flush();
   expect(wireCompletions(socket)).toHaveLength(0);
   expect(transport.state).toMatchObject({ status: 'failed', errorCode: 'native_stop_failed' });
+});
+
+test.each(['provider_failed', 'time_limit'] as const)('原生音频接纳阻塞时，%s 终态仍能停止播放并结束通话', async (reason) => {
+  const { socket, bridge, transport } = await establish();
+  const stopPlayback = jest.spyOn(bridge, 'stopPlayback');
+  stopCurrent(socket);
+  socket.message(control({
+    protocol: 'call.v1', type: 'call.ended', seq: 6, call_id: CALL_ID,
+    outcome: 'connected', end_reason: reason, active_duration_ms: 1_000,
+  }));
+  await flush();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(stopPlayback).toHaveBeenCalled();
+  expect(transport.state).toMatchObject({ status: 'closed', endReason: reason });
+  expect(wireCompletions(socket)).toHaveLength(0);
+  bridge.acceptEnqueue();
+  bridge.complete();
+  await flush();
+  expect(transport.state.status).toBe('closed');
+  expect(wireCompletions(socket)).toHaveLength(0);
 });
 
 test.each([

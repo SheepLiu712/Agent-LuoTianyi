@@ -103,6 +103,39 @@ def test_official_feed_fetcher_marks_ids_only_after_processing(tmp_path, monkeyp
     assert fetcher.fetch_all_new() == []
 
 
+@pytest.mark.parametrize("cached_tag", ["置顶", None, "其他标签"])
+def test_official_feed_fetcher_skips_cached_pinned_but_stops_at_cached_regular(tmp_path, monkeypatch, cached_tag):
+    cache_file = tmp_path / "feed_cache.json"
+    cache_file.write_text(json.dumps({"36081646": ["cached", "cached-regular"]}), encoding="utf-8")
+    fetcher = OfficialFeedFetcher(
+        {"data_file": str(cache_file), "bili_cookie_file": str(tmp_path / "missing-cookie.txt")}
+    )
+
+    def dynamic(dynamic_id, tag=None):
+        modules = {"module_dynamic": {"desc": {"text": dynamic_id}}}
+        if tag is not None:
+            modules["module_tag"] = {"text": tag}
+        return {"id_str": dynamic_id, "modules": modules}
+
+    items = [
+        dynamic("cached", cached_tag),
+        dynamic("new-regular"),
+        dynamic("new-pinned", "置顶"),
+        dynamic("cached-regular"),
+        dynamic("older-unseen"),
+    ]
+    response = SimpleNamespace(status_code=200, json=lambda: {"code": 0, "data": {"items": items}})
+    monkeypatch.setattr(fetcher.session, "get", lambda *args, **kwargs: response)
+    monkeypatch.setattr("src.world.bili_event_updater.official_feed_fetcher.time.sleep", lambda _: None)
+
+    result = fetcher.fetch_all_new()
+
+    expected = ["new-regular", "new-pinned"] if cached_tag == "置顶" else []
+    assert [item.dynamic_id for item in result] == expected
+    assert [item.content for item in result] == [f"动态文本：{dynamic_id}" for dynamic_id in expected]
+    assert json.loads(cache_file.read_text(encoding="utf-8")) == {"36081646": ["cached", "cached-regular"]}
+
+
 @pytest.mark.asyncio
 async def test_bili_event_update_run_once_skips_without_updater():
     task = BiliEventUpdateTask({})

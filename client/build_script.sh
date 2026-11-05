@@ -47,6 +47,9 @@ echo "Activating Conda environment 'lty_c'..."
 source D:/Anaconda/etc/profile.d/conda.sh || exit 1
 conda activate lty_c || exit 1
 
+# 拒绝使用旧证书包生成发布版本。
+python -c 'import certifi; from packaging.version import Version; assert Version(certifi.__version__) >= Version("2026.10.23"), "Please update certifi before building"' || exit 1
+
 BUILD_OPTIONS=()
 if [ "$BUILD_TYPE" = "Debug" ]; then
     BUILD_OPTIONS+=(--debug=all)

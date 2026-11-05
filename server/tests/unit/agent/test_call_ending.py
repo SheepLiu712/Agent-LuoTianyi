@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from support.model_service import make_call_summary
 
 import src.domain.agent as d
 from src.agent.context import ContextIdentity, ConversationContext, ConversationSnapshot, ConversationSummary
@@ -10,7 +11,6 @@ from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.ledgers._execution_codec import ActionFact, decode_facts, encode_facts
 from src.agent.processing.plan_identity import decode_plan, encode_plan
-from src.agent.skills.cognitive.call_settlement import CallSummarySkill
 from src.domain.call import CallFinalTurn, CallReplyStatus, CallSummarySource
 
 from .test_call_settlement_skills import _snapshot
@@ -44,12 +44,13 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
     calls = []
 
     class Maintenance:
-        async def maintain_ending(self, invocation, supplied, snapshot):
-            assert supplied is context
+        async def maintain(self, invocation, *, request):
+            assert request.context is context
             calls.append("maintenance")
             if maintenance_fails:
                 raise TimeoutError("attempts exhausted")
             conversation.advance_call_maintenance_progress(expected=0, new=1)
+            return SimpleNamespace(status=d.MaintenanceStatus.COMPLETED)
 
     class Model:
         async def generate_response(self, **kwargs):
@@ -59,7 +60,7 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
                 raise response
             return response
 
-    skill = CallSummarySkill({"luotianyi": Model()} if response is not None else {})
+    skill = make_call_summary({"luotianyi": Model()} if response is not None else {})
     snapshot = _snapshot(turns=(CallFinalTurn(1, "fact", CallReplyStatus.NOT_STARTED, None),))
     action = d.FinalizeCall(action_id="finalize", user_id="user", final_snapshot=snapshot)
     execution = d.ExecutionContext(
@@ -70,10 +71,10 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
         interaction_context=context,
     )
     result = await FinalizeCallHandler("luotianyi", Maintenance(), skill).realize(action, execution, None)
-    assert result.call_ending.summary == expected
-    assert result.call_ending.summary_source is source
-    assert result.call_ending.maintenance_succeeded is not maintenance_fails
-    assert result.call_ending.maintenance_turn_seq == (0 if maintenance_fails else 1)
+    assert result.value.summary == expected
+    assert result.value.summary_source is source
+    assert result.value.maintenance_succeeded is not maintenance_fails
+    assert result.value.maintenance_turn_seq == (0 if maintenance_fails else 1)
     assert calls == (["maintenance"] if response is None else ["maintenance", "summary"])
     plan = d.ActionPlan(
         plan_id="plan",
@@ -88,3 +89,43 @@ async def test_finalize_maintains_then_summarizes_with_three_level_fallback(
     assert decode_plan(encode_plan(plan)) == plan
     facts = [ActionFact(started=True, result=result)]
     assert decode_facts(encode_facts(facts), plan) == facts
+
+
+@pytest.mark.asyncio
+async def test_finalize_does_not_report_generated_summary_when_context_commit_fails(monkeypatch):
+    conversation = ConversationContext(
+        identity=ContextIdentity("luotianyi", "call", "user"),
+        _store=EphemeralCallConversationStore(ConversationSnapshot()),
+    )
+    await conversation.update_call_working_summary(ConversationSummary("原工作摘要"))
+
+    class Maintenance:
+        async def maintain(self, *args, **kwargs):
+            return SimpleNamespace(status=d.MaintenanceStatus.COMPLETED)
+
+    class Model:
+        async def generate_response(self, **kwargs):
+            return "新生成概要"
+
+    async def failed_commit(summary):
+        assert summary.text == "新生成概要"
+        raise RuntimeError("摘要提交失败")
+
+    monkeypatch.setattr(conversation, "update_call_working_summary", failed_commit)
+    execution = d.ExecutionContext(
+        execution_id="execution",
+        interaction_id="call",
+        current_interaction_revision=0,
+        cancellation=d.CancellationToken(),
+        interaction_context=SimpleNamespace(conversation=conversation),
+    )
+    action = d.FinalizeCall(
+        action_id="ending",
+        user_id="user",
+        final_snapshot=_snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.NOT_STARTED, None),)),
+    )
+    with pytest.raises(RuntimeError, match="摘要提交失败"):
+        await FinalizeCallHandler("luotianyi", Maintenance(), make_call_summary({"luotianyi": Model()})).realize(
+            action, execution, None
+        )
+    assert conversation.read_working().summary.text == "原工作摘要"

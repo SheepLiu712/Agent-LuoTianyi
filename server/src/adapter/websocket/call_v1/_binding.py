@@ -16,15 +16,46 @@ class Binding:
     """关联唯一 Session，失效后不能被恢复或影响后续连接。"""
 
     def __init__(self, session, *, connection_id: object):
-        self.session = session
+        self._session = session
         self.connection_id = connection_id
         self._outbox = _Outbox(max_outputs=512, max_bytes=8 * 1024 * 1024)
         self.is_closed = False
-        self.is_ready = False
+        self._generation: int | None = None
+        self._is_ready = False
+
+    @property
+    def session(self):
+        return self._session
+
+    @property
+    def generation(self) -> int:
+        if self._generation is None:
+            raise RuntimeError("binding is not prepared")
+        return self._generation
+
+    @property
+    def is_ready(self) -> bool:
+        return self._is_ready
+
+    def prepare(self, generation: int) -> None:
+        """Session 预留唯一连接代次，失效后的 Binding 不复用。"""
+        self._require_open()
+        if self._generation is not None:
+            raise ValueError("binding already assigned to a generation")
+        self._generation = generation
+
+    def activate(self) -> None:
+        """握手及恢复输出已排队，开放此连接的输入。"""
+        self._require_open()
+        if self._generation is None:
+            raise RuntimeError("binding is not prepared")
+        self._is_ready = True
 
     async def receive(self, frame) -> None:
         """仅允许有效连接向关联会话投递。"""
         self._require_open()
+        if not self._is_ready:
+            raise CallTransportError("STALE_CALL_CONNECTION", close_code=1008)
         await self.session.receive(self, frame)
 
     def enqueue(self, message: str | bytes, *, on_sent: Callable[[], None] | None = None) -> None:
@@ -48,6 +79,7 @@ class Binding:
     def invalidate(self) -> None:
         """永久撤销连接权限，清理发送任务并唤醒等待者。"""
         self.is_closed = True
+        self._is_ready = False
         self._outbox._close()
 
     async def drain(self) -> None:

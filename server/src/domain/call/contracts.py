@@ -100,10 +100,20 @@ class CallFinalTurn:
 
 
 @dataclass(frozen=True, slots=True)
+class CallConfirmedSegment:
+    response_id: str
+    segment_index: int
+    turn_seq: int | None
+    anchor_turn_seq: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class CallFinalSnapshot:
     terminal: CallTerminalFacts
     completed_turns: tuple[CallFinalTurn, ...]
     maintenance_turn_seq: int
+    confirmed_segments: tuple[CallConfirmedSegment, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.terminal, CallTerminalFacts):

@@ -106,13 +106,26 @@ async function waitForReady(
 
 async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<number | null> {
   if (child.exitCode !== null) return child.exitCode;
-  const exit = new Promise<number | null>((resolveExit) => child.once('exit', resolveExit));
-  const timeout = delay(timeoutMs).then(() => 'timeout' as const);
-  if (await Promise.race([exit, timeout]) === 'timeout') {
-    child.kill();
-    return await Promise.race([exit, delay(5_000).then(() => child.exitCode)]);
+  let onExit!: (code: number | null) => void;
+  const exit = new Promise<number | null>((resolveExit) => {
+    onExit = resolveExit;
+    child.once('exit', onExit);
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = (milliseconds: number) => new Promise<'timeout'>((resolveTimeout) => {
+    timer = setTimeout(() => resolveTimeout('timeout'), milliseconds);
+  });
+  try {
+    if (await Promise.race([exit, timeout(timeoutMs)]) === 'timeout') {
+      clearTimeout(timer);
+      child.kill();
+      await Promise.race([exit, timeout(5_000)]);
+    }
+    return child.exitCode;
+  } finally {
+    clearTimeout(timer);
+    child.off('exit', onExit);
   }
-  return child.exitCode;
 }
 
 function finished(stream: NodeJS.WritableStream): Promise<void> {

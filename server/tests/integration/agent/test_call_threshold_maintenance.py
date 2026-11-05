@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from support.model_service import make_call_summary
 
 import src.domain.agent as d
 from src.agent.context import (
@@ -26,10 +27,10 @@ from src.agent.context import (
 from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
-from src.agent.skills.cognitive.call_settlement import CallMaintenanceSkill, CallSummarySkill
-from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
+from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill, MaintenanceRequest
+from src.agent.skills.cognitive_maintenance._call import _CallMaintenance
+from src.agent.skills.cognitive_maintenance._compaction import _ConversationCompaction
 from src.agent.skills.contracts import SkillInvocation
-from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.domain.call import (
     CallEndReason,
     CallFinalSnapshot,
@@ -112,12 +113,12 @@ def setup(tmp_path):
         CallSessionRecord(call_id, "request", "user", "luotianyi", CallState.ACTIVE, now, now, now)
     )
     memory, model = Memory(), SummaryModel()
-    call_skill = CallMaintenanceSkill({"luotianyi": memory}, batches)
-    compaction = ConversationCompactionSkill(
-        {"llm_module": {}}, SimpleNamespace(register_llm_module=lambda *args: model)
-    )
+    call_skill = _CallMaintenance({"luotianyi": memory}, batches)
     skill = CognitiveMaintenanceSkill(
-        memories={"luotianyi": memory}, compaction=compaction, call_maintenance=call_skill
+        {"conversation_compaction": {"llm_module": {}}},
+        llm_service=SummaryService(model),
+        memories={"luotianyi": memory},
+        batches=batches,
     )
     yield SimpleNamespace(
         engine=engine,
@@ -202,10 +203,10 @@ async def test_final_summary_keeps_accepted_input_missing_from_context_after_end
         cancellation=d.CancellationToken(),
         interaction_context=context,
     )
-    result = await FinalizeCallHandler(
-        "luotianyi", setup.call_skill, CallSummarySkill({"luotianyi": setup.model})
-    ).realize(d.FinalizeCall(action_id="ending", user_id="user", final_snapshot=snapshot), execution, None)
-    assert result.call_ending.maintenance_succeeded
+    result = await FinalizeCallHandler("luotianyi", setup.skill, make_call_summary({"luotianyi": setup.model})).realize(
+        d.FinalizeCall(action_id="ending", user_id="user", final_snapshot=snapshot), execution, None
+    )
+    assert result.value.maintenance_succeeded
     assert context.conversation.read_call_maintenance_progress() == 2
     inputs = setup.model.inputs[0]["completed_turns"]
     assert sum("accepted but context append failed" in item for item in inputs) == 1
@@ -254,7 +255,7 @@ async def test_failed_threshold_is_frozen_and_recovered_before_new_ending_tail(s
     assert len(context.conversation.read().entries) == 64
     assert context.conversation.read_call_maintenance_progress() == 0
     # A new stateless Skill instance must recover the frozen prefix from persistence.
-    setup.call_skill = CallMaintenanceSkill({"luotianyi": setup.memory}, setup.batches)
+    setup.call_skill = _CallMaintenance({"luotianyi": setup.memory}, setup.batches)
     turns += (CallFinalTurn(33, "new user tail", CallReplyStatus.NOT_STARTED, None),)
     result = await setup.call_skill.maintain_ending(
         SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
@@ -325,7 +326,7 @@ async def test_no_maintenance_below_threshold_or_over_unsettled_prefix(setup):
 async def test_partial_turn_compaction_keeps_both_halves_and_finally_maintains_tail(setup):
     context, turns = await context_with_turns(count=3)
     model = SummaryModel()
-    compaction = ConversationCompactionSkill(
+    compaction = _ConversationCompaction(
         {
             "raw_conversation_context_limit": 5,
             "not_zip_conversation_count": 3,
@@ -369,7 +370,7 @@ async def test_real_compaction_failure_keeps_progress_and_every_unmaintained_ent
             raise RuntimeError("summary unavailable")
 
     context, turns = await context_with_turns(count=3)
-    compaction = ConversationCompactionSkill(
+    compaction = _ConversationCompaction(
         {
             "raw_conversation_context_limit": 5,
             "not_zip_conversation_count": 3,
@@ -483,3 +484,41 @@ async def test_factory_seed_is_answer_context_only_after_compaction_and_ending(s
     restored = await factory.create("restored", mode=ConversationMode.CHAT, user_id="user")
     assert restored.conversation.read().entries == seeds
     await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_unified_call_maintenance_reports_skipped_and_processed_scope(setup):
+    context, turns = await context_with_turns(count=1)
+    invocation = SkillInvocation("luotianyi", "user", "call", d.CancellationToken())
+    skipped = await setup.skill.maintain(
+        invocation,
+        request=MaintenanceRequest(
+            reason=d.MaintenanceReason.COMPACTION_THRESHOLD,
+            context=context,
+            call_snapshot=CallMaintenanceSnapshot(setup.record.call_id, turns),
+        ),
+    )
+    assert skipped.status is d.MaintenanceStatus.SKIPPED
+    assert skipped.new_progress == 0
+    assert setup.memory.inputs == setup.memory.writes == setup.memory.profile_inputs == []
+    completed = await setup.skill.maintain(
+        invocation,
+        request=MaintenanceRequest(
+            reason=d.MaintenanceReason.INTERACTION_ENDING,
+            context=context,
+            call_snapshot=final_snapshot(setup, turns),
+        ),
+    )
+    assert completed.status is d.MaintenanceStatus.COMPLETED
+    assert completed.previous_progress == 0 and completed.new_progress == 1
+    assert completed.maintained_entry_ids == ("call-turn-1-user",)
+    again = await setup.skill.maintain(
+        invocation,
+        request=MaintenanceRequest(
+            reason=d.MaintenanceReason.INTERACTION_ENDING,
+            context=context,
+            call_snapshot=final_snapshot(setup, turns, 1),
+        ),
+    )
+    assert again.status is d.MaintenanceStatus.SKIPPED
+    assert len(setup.memory.inputs) == len(setup.memory.writes) == 1

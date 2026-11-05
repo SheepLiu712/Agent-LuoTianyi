@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.agent_runtime import agent_runtime as runtime_module
+from src.agent.skills import facade as skills_module
 
 
 class Dependency:
@@ -43,8 +44,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
     store = VectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: store)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: True)
-    monkeypatch.setattr(runtime_module, "AgentMemory", Dependency)
-    monkeypatch.setattr(runtime_module, "CharacterReplyGenerator", ReplyGenerator)
+    monkeypatch.setattr(skills_module, "AgentMemory", Dependency)
     persona = tmp_path / "persona.json"
     persona.write_text(
         json.dumps(
@@ -62,6 +62,9 @@ def runtime_dependencies(monkeypatch, tmp_path):
     previous = runtime_module._agent_runtime
     config = {
         "skills": {
+            "reply": {"llm_module": {"llm": {"name": "test"}}},
+            "memory_write": {"llm_module": {"llm": {"name": "test"}}},
+            "cognitive_maintenance": {"user_profile": {"llm_module": {"llm": {"name": "test"}}}},
             "singing": {
                 "characters": {
                     "luotianyi": {"resource_path": str(tmp_path / "sing-luotianyi")},
@@ -69,10 +72,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
                 }
             }
         },
-        "agent": {
-            "memory": {"memory_writer": {"llm_module": {}}, "user_profile": {"llm_module": {}}},
-            "main_chat": {"llm_module": {}},
-        },
+
         "character_registry": {
             "characters": {
                 "luotianyi": profile | {"default_target": True},
@@ -84,7 +84,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
     yield {
         "config": config,
         "llm_service": SimpleNamespace(
-            register_llm_module=lambda *args: SimpleNamespace(
+            register_llm_module=lambda *args, **kwargs: SimpleNamespace(
                 prompt_template=SimpleNamespace(get_variables=list),
             ),
             register_vlm_module=lambda *args: SimpleNamespace(generate_response=None),
@@ -94,7 +94,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
             resolve=lambda media_ref, **kwargs: None,
             ensure_dependencies=lambda: None,
         ),
-        "database_manager": SimpleNamespace(open_sql_session=sessions, conversation_service=object()),
+        "database_manager": SimpleNamespace(open_sql_session=sessions, conversation_service=object(), memory_store=SimpleNamespace(sql_session_factory=sessions)),
     }, store
     runtime_module.set_agent_runtime(previous)
     engine.dispose()

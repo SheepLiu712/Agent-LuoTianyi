@@ -59,7 +59,13 @@ describe('call UI', () => {
     await act(async () => { await result.start(true); });
     await act(async () => { root.update(render()); });
     expect(permission).toHaveBeenCalledTimes(1);
+    act(() => { (globalThis as any).__emitAppState('background'); });
+    expect(session.hangup).not.toHaveBeenCalled();
     await act(async () => { resolvePermission('granted'); });
+    expect(initialize).not.toHaveBeenCalled();
+    expect(session.prepare).not.toHaveBeenCalled();
+    expect(result.state.phase).toBe('REQUESTING_PERMISSION');
+    await act(async () => { (globalThis as any).__emitAppState('active'); });
     await act(async () => { root.update(render()); });
     expect(session.prepare).toHaveBeenCalledTimes(1);
     await act(async () => { resolvePrepare(); });

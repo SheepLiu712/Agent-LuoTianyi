@@ -1,5 +1,7 @@
 cryptography
 requests
+httpx
+certifi>=2026.10.23
 websockets
 colorlog
 soundfile

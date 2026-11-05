@@ -16,6 +16,7 @@ from typing import Any, Dict, Generator, Optional
 
 import yaml
 
+from src.infrastructure.observability.call_reply_timing import record_tts_worker_event
 from src.utils.logger import get_logger
 
 from .call_pcm import normalize_clip_to_pcm16_mono
@@ -215,6 +216,16 @@ def _run_gsv_worker(  # noqa: C901
                         text = message["text"]
 
                         is_first_chunk = True
+                        first_call_packet = True
+                        if command == "stream_synthesize_call_pcm":
+                            response_queue.put(
+                                {
+                                    "request_id": request_id,
+                                    "ok": True,
+                                    "tts_phase": "started",
+                                    "monotonic_ns": time.monotonic_ns(),
+                                }
+                            )
                         for clip in tts.infer_stream(
                             spk_audio_path=spk_audio_path,
                             prompt_audio_path=prompt_audio_path,
@@ -239,14 +250,26 @@ def _run_gsv_worker(  # noqa: C901
                                     "ok": True,
                                     "audio_bytes": chunk_bytes,
                                     "is_final": False,
+                                    **(
+                                        {"tts_phase": "synthesized", "monotonic_ns": time.monotonic_ns()}
+                                        if command == "stream_synthesize_call_pcm" and first_call_packet and chunk_bytes
+                                        else {}
+                                    ),
                                 }
                             )
+                            if chunk_bytes:
+                                first_call_packet = False
 
                         response_queue.put(
                             {
                                 "request_id": request_id,
                                 "ok": True,
                                 "is_final": True,
+                                **(
+                                    {"tts_phase": "finished", "monotonic_ns": time.monotonic_ns()}
+                                    if command == "stream_synthesize_call_pcm"
+                                    else {}
+                                ),
                             }
                         )
                     except Exception as e:
@@ -738,6 +761,8 @@ class TTSServer:
                 continue
 
             if message.get("request_id") == request_id:
+                if "tts_phase" in message:
+                    record_tts_worker_event(message["tts_phase"], message["monotonic_ns"])
                 return message
 
             self.logger.warning(f"Discarding unexpected response id: {message.get('request_id')}")

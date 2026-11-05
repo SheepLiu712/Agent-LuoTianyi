@@ -22,6 +22,7 @@ import type { PlaybackProgress } from './playback_progress';
 import type { CallAudioCapability } from '../../types/call';
 import { PlaybackGenerationLedger } from './playback_ledger';
 import { CaptureRecoveryBuffer } from './recovery_buffer';
+import { addDebugTrace } from '../debug_trace';
 
 const CAPTURE_FORMAT: CallAudioFormat = {
   encoding: 'pcm_s16le',
@@ -55,10 +56,6 @@ function capabilityOf(native: NativeCapability): CallAudioCapability {
   return native.available &&
     matchesFormat(native.captureFormat, CAPTURE_FORMAT) &&
     matchesFormat(native.playbackFormat, PLAYBACK_FORMAT) &&
-    native.aec.available &&
-    native.aec.enabled &&
-    native.noiseSuppressor.available &&
-    native.noiseSuppressor.enabled &&
     native.audioFocus.granted
     ? 'available'
     : 'unavailable';
@@ -99,16 +96,44 @@ export class AndroidCallAudio implements CallAudioCapturePort, CallAudioPlayback
   }
 
   async initialize(): Promise<CallAudioCapability> {
-    if (this.terminationFailed || this.platform !== 'android' || this.native === null) return 'unavailable';
+    if (this.terminationFailed || this.platform !== 'android' || this.native === null) {
+      addDebugTrace('call-audio', 'initialization unavailable', {
+        reason: this.terminationFailed ? 'session_termination_failed' : this.platform !== 'android' ? 'unsupported_platform' : 'native_module_missing',
+      });
+      return 'unavailable';
+    }
     try {
       const nativeCapability = await this.native.startSession();
       const capability = capabilityOf(nativeCapability);
+      if (capability !== 'available') {
+        addDebugTrace('call-audio', 'initialization unavailable', {
+          reason: nativeCapability.reason ?? 'capability_contract_mismatch',
+          captureFormat: nativeCapability.captureFormat,
+          playbackFormat: nativeCapability.playbackFormat,
+          aec: nativeCapability.aec,
+          noiseSuppressor: nativeCapability.noiseSuppressor,
+          audioFocus: nativeCapability.audioFocus,
+        });
+      }
+      if (nativeCapability.reason === 'permission_denied') throw new Error('MICROPHONE_PERMISSION_DENIED');
       if (capability === 'available') {
+        if (!nativeCapability.aec.enabled) {
+          addDebugTrace('call-audio', 'initialization without echo cancellation', { aec: nativeCapability.aec });
+        }
+        if (!nativeCapability.noiseSuppressor.enabled) {
+          addDebugTrace('call-audio', 'initialization without noise suppression', {
+            noiseSuppressor: nativeCapability.noiseSuppressor,
+          });
+        }
         this.resetSessionState(nativeCapability.sessionGeneration);
         this.subscribe();
       }
       return capability;
-    } catch {
+    } catch (error) {
+      addDebugTrace('call-audio', 'initialization rejected', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (error instanceof Error && error.message === 'MICROPHONE_PERMISSION_DENIED') throw error;
       return 'unavailable';
     }
   }

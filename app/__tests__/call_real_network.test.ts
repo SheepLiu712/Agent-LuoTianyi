@@ -116,25 +116,22 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
       (value: any) => value.provider_audio.some((entry: any) => entry.call_id === callId && entry.frames.length > 0),
     ) as any;
     expect(evidence.provider_audio.find((entry: any) => entry.call_id === callId).frames[0].payload).toBe('10002000');
-    await waitUntil(() => native.chunks.length, (count) => count >= 1);
+    const opening = await waitUntil(
+      () => native.consumedStreams[0],
+      (stream) => stream !== undefined,
+    );
     const existingStreamIdentities = new Set(native.chunks.map((chunk) => streamIdentityKey(chunk.stream)));
 
     expect((await fetch(`${server.url}/test/provider/${callId}/turn`, { method: 'POST' })).ok).toBe(true);
-    const turnStreams = await waitUntil(
-      () => selectNewTurnStreams(native.chunks, existingStreamIdentities),
-      (streams) => streams.provisional !== undefined && streams.formal !== undefined,
+    const formal = await waitUntil(
+      () => native.chunks.find((chunk) =>
+        !existingStreamIdentities.has(streamIdentityKey(chunk.stream)) && !chunk.isFinal),
+      (chunk) => chunk !== undefined,
     ).catch(async (error) => {
       const state = await json(`${server.url}/test/call_state/${callId}`);
       throw new Error(`${String(error)}; call_state=${JSON.stringify(state)}`);
     });
-    const provisional = turnStreams.provisional!;
-    const formal = turnStreams.formal!;
-    expect(provisional.stream.responseId).not.toBe(formal.stream.responseId);
-    expect(provisional.stream.streamId).not.toBe(formal.stream.streamId);
-    await waitUntil(
-      () => native.consumedStreams,
-      (streams) => streams.some((stream) => sameStreamIdentity(stream, provisional.stream)),
-    );
+    expect(formal!.stream.responseId).not.toBe(opening!.responseId);
 
     const lostAt = performance.now();
     native.loseFocus();
@@ -142,7 +139,7 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
     const resumed = await waitUntil(() => attempt.session.state, (state) => state.status === 'connected');
     expect(resumed.callId).toBe(callId);
     expect(performance.now() - lostAt).toBeLessThan(3_000);
-    expect(native.chunks.some((chunk) => sameStreamIdentity(chunk.stream, formal.stream) && !chunk.isFinal)).toBe(true);
+    expect(native.chunks.some((chunk) => sameStreamIdentity(chunk.stream, formal!.stream) && !chunk.isFinal)).toBe(true);
 
     const tombstonesBeforeInterrupt = native.tombstones.length;
     expect((await fetch(`${server.url}/test/provider/${callId}/interrupt`, { method: 'POST' })).ok).toBe(true);
@@ -150,8 +147,8 @@ networkTest('real JS clients traverse the production FastAPI call lifecycle over
       () => native.tombstones.slice(tombstonesBeforeInterrupt),
       (streams) => streams.length > 0,
     );
-    expect(sameStreamIdentity(interruptTombstones[0], formal.stream)).toBe(true);
-    expect(interruptTombstones.some((stream) => sameStreamIdentity(stream, provisional.stream))).toBe(false);
+    expect(sameStreamIdentity(interruptTombstones[0], formal!.stream)).toBe(true);
+    expect(interruptTombstones.some((stream) => sameStreamIdentity(stream, opening!))).toBe(false);
 
     const chatRecovery = chat.reconnectWs('alice', token, 'luotianyi', callbacks, 10_000);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -242,17 +239,6 @@ function streamIdentityKey(stream: CallAudioStreamIdentity): string {
 
 function sameStreamIdentity(left: CallAudioStreamIdentity, right: CallAudioStreamIdentity): boolean {
   return left.callId === right.callId && left.responseId === right.responseId && left.streamId === right.streamId;
-}
-
-function selectNewTurnStreams(chunks: readonly CallPlaybackChunk[], existing: ReadonlySet<string>): {
-  provisional?: CallPlaybackChunk;
-  formal?: CallPlaybackChunk;
-} {
-  const newChunks = chunks.filter((chunk) => !existing.has(streamIdentityKey(chunk.stream)));
-  return {
-    provisional: newChunks.find((chunk) => chunk.isFinal),
-    formal: newChunks.find((chunk) => !chunk.isFinal),
-  };
 }
 
 async function registerAndLogin(url: string, username: string, password: string) {

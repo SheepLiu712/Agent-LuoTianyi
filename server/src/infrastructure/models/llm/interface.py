@@ -59,6 +59,9 @@ def _is_content_inspection_failure(error: Any) -> bool:
 class LLMAPIInterface(ABC):
     default_parameters: Dict[str, Any] = {}
 
+    def stream_response(self, prompt: str, params: Dict[str, Any], **kwargs):
+        raise NotImplementedError("该模型接口不支持流式输出")
+
     @abstractmethod
     async def generate_response(
         self, prompt: str, params: Dict[str, Any], enable_thinking: bool = False, use_json: bool = False, **kwargs
@@ -138,6 +141,25 @@ class OpenAIAPIInterface(LLMAPIInterface):
             if self._ssl_cert_file_removed:
                 os.environ["SSL_CERT_FILE"] = self._ssl_cert_file
         return self.client
+
+    def stream_response(self, prompt: str, params: Dict[str, Any], enable_thinking=False, use_json=False):
+        from .streaming import stream_completion
+
+        payload = {
+            **self.default_parameters,
+            **params,
+            "model": self.model,
+            "messages": [{"role": "system", "content": prompt}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self.can_enable_thinking:
+            payload["enable_thinking"] = enable_thinking
+        if use_json and self.can_use_json:
+            payload["response_format"] = {"type": "json_object"}
+        return stream_completion(
+            self.base_url.rstrip("/") + "/chat/completions", self.api_key, payload, self.request_timeout
+        )
 
     async def generate_response(
         self, prompt: str, params: Dict[str, Any], enable_thinking: bool = False, use_json: bool = False, **kwargs
@@ -268,6 +290,20 @@ class RequestsAPIInterface(LLMAPIInterface):
         self.config = config
         self.logger = get_logger(__name__)
         self._init_parameters()
+
+    def stream_response(self, prompt: str, params: Dict[str, Any], enable_thinking=False, use_json=False):
+        from .streaming import stream_completion
+
+        payload = {
+            **self.payload,
+            **params,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if use_json:
+            payload["response_format"] = {"type": "json_object"}
+        return stream_completion(self.url, self.api_key, payload, self.request_timeout)
 
     async def generate_response(self, prompt: str, use_json: bool = False, **kwargs) -> str:
         # 实现调用SiliconFlow API生成响应的逻辑

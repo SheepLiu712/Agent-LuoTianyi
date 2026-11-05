@@ -13,7 +13,8 @@ async def receive_events(runtime, connection):
     adapter._bindings[handle] = peer
     if connection.stage is not None:
         await adapter._bind(connection.stage, peer)
-    peer.release_business_outputs()
+        ready = await peer.next_output()
+        peer.complete_output(ready.delivery_id)
     try:
         while True:
             raw = await connection.websocket.receive_json()

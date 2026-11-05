@@ -7,12 +7,14 @@ import pytest
 from support.call_output import output_sink
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import finish_call
 from support.stage_manager import make_stage_manager
 
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
-from src.domain.call import CallEndReason, CallState
+from src.domain.call import CallState
+from src.domain.stage.lifecycle import StageEndReason
 
 from .test_call_handoff import connected, manager
 from .test_call_stage import _agent, _ContextDatabase, _eventually, _Transport, _TurnHandler
@@ -46,7 +48,7 @@ async def test_public_switch_record_failure_preserves_binding_and_chat_input():
 
 
 @pytest.mark.asyncio
-async def test_public_switch_constructor_failure_does_not_revive_old_chat(monkeypatch):
+async def test_public_switch_constructor_failure_restores_original_chat(monkeypatch):
     stages, repository, _ = manager()
     connection, chat = await connected(stages)
 
@@ -58,10 +60,10 @@ async def test_public_switch_constructor_failure_does_not_revive_old_chat(monkey
         await stages.prepare_call_transition(connection, character_id="luotianyi", client_request_id="switch")
         with pytest.raises(RuntimeError, match="stage construction failed"):
             await _get_call(stages, "switch")
-        assert chat.context.closed
+        assert not chat.context.closed and not chat.input_suspended
         assert repository.find_by_request("switch").state is CallState.FAILED
         _, replacement = await connected(stages)
-        assert replacement is not chat
+        assert replacement is chat
     finally:
         await stages.close()
 
@@ -135,7 +137,7 @@ async def test_public_admission_remains_closed_through_settlement_and_context_cl
             await original_close()
 
         context.close = close_context
-        ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+        ending = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
         await asyncio.wait_for(settling.wait(), 1)
         assert not ending.done()
         for phase in ("settling", "closing"):

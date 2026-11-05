@@ -22,6 +22,9 @@ class _FailingStore:
     def delete_user_records(self, user_id):
         raise RuntimeError("probe failure")
 
+    def delete_user_records_strict(self, user_id):
+        raise RuntimeError("probe failure")
+
 
 class _WorkingStore:
     def __init__(self):
@@ -30,6 +33,9 @@ class _WorkingStore:
     def delete_user_records(self, user_id):
         self.deleted.append(user_id)
         return 3
+
+    def delete_user_records_strict(self, user_id):
+        return self.delete_user_records(user_id)
 
 
 class _Session:
@@ -55,18 +61,11 @@ class _Session:
         self.closed = True
 
 
-def _real_reset_service_with_failing_vectors(**_kwargs):
+def _real_reset_service_with_failing_vectors(**kwargs):
     """用真实 UserResetService：向量步骤失败应被映射成 vectors 失败步骤，而不是抛到调用方。"""
     from src.application.user.user_reset import UserResetService
 
-    return UserResetService(
-        conversation_service=SimpleNamespace(reset_user_conversations=lambda user_id: 0),
-        vector_store=_FailingStore(),
-        redis_buffer=SimpleNamespace(clear_user=lambda user_id: None),
-        media_store=SimpleNamespace(
-            delete_owned_by=lambda owner_user_id: SimpleNamespace(deleted_count=0, failures=())
-        ),
-    )
+    return UserResetService(**{**kwargs, "vector_store": _FailingStore()})
 
 
 def _drive(monkeypatch, module, *, store, choices, capsys, session=None):
@@ -75,15 +74,29 @@ def _drive(monkeypatch, module, *, store, choices, capsys, session=None):
     answers = iter(choices)
     monkeypatch.setattr(module, "_init_databases", lambda: None)
     monkeypatch.setattr(module, "get_sql_session", lambda: session)
-    monkeypatch.setattr(module, "get_redis_buffer", lambda: SimpleNamespace())
+    monkeypatch.setattr(module, "get_redis_buffer", lambda: SimpleNamespace(clear_user=lambda user_id: None))
     monkeypatch.setattr(module, "get_vector_store", lambda: store)
     monkeypatch.setattr(module, "load_config", lambda *args, **kwargs: {})
-    monkeypatch.setattr(module, "PermanentMediaStore", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        module,
+        "PermanentMediaStore",
+        lambda *args, **kwargs: SimpleNamespace(
+            delete_owned_by=lambda owner_user_id: SimpleNamespace(deleted_count=0, failures=())
+        ),
+    )
     # 真实数据库未初始化：只提供 _reset_user 构造服务时需要的占位组合根。
     monkeypatch.setattr(
         module,
         "database_service",
-        SimpleNamespace(get_database_manager=lambda: SimpleNamespace(conversation_service=SimpleNamespace())),
+        SimpleNamespace(
+            get_database_manager=lambda: SimpleNamespace(
+                conversation_service=SimpleNamespace(reset_user_conversations=lambda user_id: 0),
+                memory_store=SimpleNamespace(delete_user_memory_records=lambda user_id: 0),
+                user_store=SimpleNamespace(reset_user_profile=lambda user_id: 0),
+                call_sessions=SimpleNamespace(delete_by_user=lambda user_id: 0),
+                call_maintenance_batches=SimpleNamespace(delete_by_user=lambda user_id: 0),
+            )
+        ),
     )
     monkeypatch.setattr(
         module, "_authenticate", lambda *args, **kwargs: SimpleNamespace(username="probe", uuid="user-1")
@@ -161,3 +174,41 @@ def test_main_exits_nonzero_when_full_reset_fails_and_skips_profile_update(monke
     captured = capsys.readouterr()
     assert "完全重置失败" in captured.out
     assert "vectors" in captured.out
+
+
+def test_full_reset_executes_all_user_data_deletions_before_reporting_success(monkeypatch, capsys):
+    module = load_tool()
+    deleted = []
+
+    def delete(name):
+        def operation(user_id):
+            deleted.append((name, user_id))
+            return 1
+
+        return operation
+
+    database = SimpleNamespace(
+        conversation_service=SimpleNamespace(reset_user_conversations=delete("conversations")),
+        memory_store=SimpleNamespace(delete_user_memory_records=delete("memory")),
+        user_store=SimpleNamespace(reset_user_profile=delete("profile")),
+        call_sessions=SimpleNamespace(delete_by_user=delete("calls")),
+        call_maintenance_batches=SimpleNamespace(delete_by_user=delete("maintenance")),
+    )
+    monkeypatch.setattr(module.database_service, "get_database_manager", lambda: database)
+    monkeypatch.setattr("builtins.input", lambda *_: "YES")
+    user = SimpleNamespace(uuid="user-1", description="旧画像", last_login="旧时间")
+    session = _Session()
+    session.first = lambda: user
+    vectors = _WorkingStore()
+    cache = SimpleNamespace(clear_user=delete("cache"))
+    media = SimpleNamespace(delete_owned_by=lambda **_: SimpleNamespace(deleted_count=1, failures=()))
+
+    assert module._reset_user(session, cache, vectors, media, user) is True
+
+    assert vectors.deleted == ["user-1"]
+    assert {name for name, _ in deleted} == {"conversations", "memory", "profile", "calls", "maintenance", "cache"}
+    assert all(user_id == "user-1" for _, user_id in deleted)
+    assert user.description == "新认识的朋友，还需要了解。"
+    assert user.last_login is None
+    assert session.commits == 1
+    assert "已完全重置用户" in capsys.readouterr().out

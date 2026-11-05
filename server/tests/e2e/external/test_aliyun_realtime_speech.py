@@ -15,8 +15,9 @@ from src.infrastructure.models.realtime_speech import (
 async def test_aliyun_realtime_speech_handshake_smoke():
     api_key = os.getenv("ALIYUN_REALTIME_SPEECH_API_KEY")
     workspace_id = os.getenv("ALIYUN_REALTIME_SPEECH_WORKSPACE_ID")
+    endpoint = os.getenv("ALIYUN_REALTIME_SPEECH_ENDPOINT")
     model = os.getenv("ALIYUN_REALTIME_SPEECH_MODEL")
-    if not api_key or not workspace_id or not model:
+    if not api_key or not (workspace_id or endpoint) or not model:
         pytest.skip("Aliyun realtime speech smoke configuration is incomplete")
 
     factory = AliyunRealtimeSpeechSessionFactory.from_mapping(
@@ -24,6 +25,7 @@ async def test_aliyun_realtime_speech_handshake_smoke():
             "enabled": True,
             "api_key": api_key,
             "workspace_id": workspace_id,
+            "endpoint": endpoint,
             "model": model,
         }
     )

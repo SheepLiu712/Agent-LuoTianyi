@@ -6,6 +6,7 @@ import threading
 import pytest
 from support.chat_connection import StubChatConnection
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import finish_call, wait_interaction_end
 from support.stage_manager import create_call_stage, make_stage_manager
 
 import src.domain.agent as d
@@ -13,7 +14,8 @@ from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
-from src.stage._call_history import CallHistory
+from src.domain.stage.lifecycle import StageEndReason, StageStartAborted
+from src.stage.call._call_history import CallHistory
 
 from . import test_call_stage
 from .test_call_handoff import connected, manager
@@ -174,13 +176,13 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         await original_close()
 
     stage._provider.close = close_provider
-    ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    ending = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
     await asyncio.wait_for(cleanup_entered.wait(), 1)
     try:
         await assert_finalizing(stages)
     finally:
         cleanup_release.set()
-    await stage.wait_realtime_stopped()
+    await wait_interaction_end(stage)
     assert not ending.done()
     await asyncio.wait_for(entered.wait(), 1)
     try:
@@ -188,7 +190,7 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
         if mode == "timeout":
             await asyncio.wait_for(cancelling.wait(), 1)
             await assert_finalizing(stages)
-        assert stage.begin_termination(CallEndReason.USER_HANGUP) is stage._termination
+        assert stage.begin_termination(StageEndReason.USER_REQUESTED) is None
         if shutdown:
             closing = asyncio.create_task(stages.close())
             await asyncio.sleep(0)
@@ -196,11 +198,11 @@ async def test_call_finalization_remains_busy_through_cleanup_and_shutdown(call_
     finally:
         release.set()
         await stages._finalizations.close()
+        await ending
+        result = await stage.terminate(StageEndReason.USER_REQUESTED)
         if mode == "failure":
-            with pytest.raises(RuntimeError, match="settlement failed"):
-                await ending
-        else:
-            await ending
+            assert result.finalization_error == "RuntimeError"
+        assert result.resources_released
     if not shutdown:
         token = await stages.begin_user_data_reset("user")
         await stages.end_user_data_reset("user", token)
@@ -274,9 +276,9 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
     stage._save_history = settle
 
     stage._provider.close = close_provider
-    first = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    first = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
     await asyncio.wait_for(entered.wait(), 1)
-    second = asyncio.create_task(stage.terminate(CallEndReason.SYSTEM_FAILURE))
+    second = asyncio.create_task(finish_call(stage, StageEndReason.SYSTEM_FAILURE))
     second.cancel()
     with pytest.raises(asyncio.CancelledError):
         await second
@@ -290,7 +292,7 @@ async def test_call_termination_waiter_cancellation_keeps_one_owned_task_and_fir
     assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
     assert close_calls == 1
     assert settlement_calls == 1
-    third = asyncio.create_task(stage.terminate(CallEndReason.PROVIDER_FAILED))
+    third = asyncio.create_task(finish_call(stage, StageEndReason.SYSTEM_FAILURE))
     await asyncio.sleep(0)
     assert not third.done()
     assert settlement_calls == 1
@@ -359,13 +361,14 @@ async def test_terminate_during_context_initialization_prevents_late_resources(
     assert ownership is not None
     stage = transport.stage
     stage._save_history = lambda *args, **kwargs: asyncio.sleep(0)
-    snapshot = await stage.terminate(CallEndReason.USER_HANGUP)
+    snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
     assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
     create_release.set()
-    assert await creation is stage
+    with pytest.raises(StageStartAborted):
+        await creation
     await asyncio.sleep(0)
     assert created_contexts == []
-    assert speech_factory.sessions == {}
+    assert not speech_factory.sessions  # 上下文尚未建好，不能打开 Omni 会话。
     assert stages._call_stages.get(str(claim.prepared._record.call_id)) is None
     await stages.close()
 
@@ -476,13 +479,14 @@ async def test_terminate_after_context_creation_closes_partial_provider_resource
     )
     await asyncio.wait_for(entered.wait(), 1)
     transport.stage._save_history = lambda _snapshot, **_kwargs: asyncio.sleep(0)
-    ending = asyncio.create_task(transport.stage.terminate(CallEndReason.USER_HANGUP))
+    ending = asyncio.create_task(finish_call(transport.stage, StageEndReason.USER_REQUESTED))
     await asyncio.sleep(0)
     assert not ending.done()
     release.set()
     snapshot = await ending
     assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
-    assert await creation is transport.stage
+    with pytest.raises(StageStartAborted):
+        await creation
     await stages._finalizations.close()
     assert len(contexts) == 1 and contexts[0].was_closed
     assert len(providers) == 1 and providers[0].closed
@@ -539,7 +543,7 @@ async def test_full_termination_waits_for_real_thread_write_before_releasing_adm
         transport=_Transport(),
         speech_factory=FakeRealtimeSpeechSessionFactory(),
     )
-    ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    ending = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
     await asyncio.wait_for(asyncio.to_thread(thread_started.wait, 3), 4)
     assert not ending.done()
     await asyncio.sleep(0.02)
@@ -631,11 +635,11 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
         await original_close()
 
     context.close = blocked_close
-    ending = asyncio.create_task(stage.terminate(CallEndReason.USER_HANGUP))
+    ending = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
     assert await asyncio.to_thread(close_entered.wait, 2)
     finalization = stages._finalizations._tasks[str(claim.prepared._record.call_id)].finalization
     for _ in range(cancel_count):
-        finalization.cancel()
+        ending.cancel()
         await asyncio.sleep(0)
 
     assert finalization.done() is False
@@ -647,7 +651,7 @@ async def test_cancelled_finalization_waiter_keeps_context_close_and_admission_o
     with pytest.raises(asyncio.CancelledError):
         await ending
 
-    assert isinstance(result[0], asyncio.CancelledError)
+    assert result[0].resources_released
     assert context.was_closed is True
     token = await stages.begin_user_data_reset("user")
     await stages.end_user_data_reset("user", token)

@@ -1,13 +1,13 @@
-"""歌曲知识的类型化技能。"""
+"""歌曲知识的具名资源接口。"""
 
 from src.agent.skills.knowledge.song_acceptance import (
     SongAcceptanceResult,
     SongAcceptanceStatus,
-    SongKnowledgeAcceptanceSkill,
+    SongKnowledgeStore,
 )
 
 __all__ = [
     "SongAcceptanceResult",
     "SongAcceptanceStatus",
-    "SongKnowledgeAcceptanceSkill",
+    "SongKnowledgeStore",
 ]

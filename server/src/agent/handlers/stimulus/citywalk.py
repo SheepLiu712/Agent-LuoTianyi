@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from src.agent.skills.expression.dynamic import DynamicGenerationError, DynamicSkill, DynamicWritingRequest
 from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
 
@@ -25,7 +25,7 @@ CITYWALK_INSTRUCTION = (
 class CitywalkObservationHandler:
     """把散步摘要表达为角色动态，并交付一个 PublishDynamic 计划。"""
 
-    def __init__(self, publishing: DynamicPublishingSkill) -> None:
+    def __init__(self, publishing: DynamicSkill) -> None:
         self._publishing = publishing
         self._logger = get_logger(__name__)
 
@@ -34,12 +34,18 @@ class CitywalkObservationHandler:
         stimulus = request.stimulus
         if not isinstance(stimulus, d.WorldObservation):
             raise TypeError("CitywalkObservationHandler 只处理 WorldObservation")
-        body = await self._publishing.compose(
-            handling_invocation(request, plans.context),
-            dynamic_type=CITYWALK_SOURCE_TYPE,
-            instruction=CITYWALK_INSTRUCTION,
-            structured_context=stimulus.fact.summary,
-        )
+        try:
+            draft = await self._publishing.generate(
+                handling_invocation(request, plans.context),
+                request=DynamicWritingRequest(
+                    kind=CITYWALK_SOURCE_TYPE,
+                    instruction=CITYWALK_INSTRUCTION,
+                    materials=stimulus.fact.summary,
+                ),
+            )
+        except DynamicGenerationError:
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
+        body = draft.body
         if not body.strip():
             self._logger.error("citywalk 动态正文生成为空，未交付计划 fact=%s", stimulus.fact.fact_id)
             return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())

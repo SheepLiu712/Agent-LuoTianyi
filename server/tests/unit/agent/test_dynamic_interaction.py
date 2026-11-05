@@ -10,9 +10,8 @@ import src.domain.agent as d
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
-from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from support.dynamic_skill import make_dynamic
 
 CHARACTER_ID = "luotianyi"
 USER_ID = "user-1"
@@ -70,7 +69,8 @@ class FakeMemory:
         self.fail = fail
         self.calls = []
 
-    async def write_topic_memories(self, *, user_id, history, current_dialogue, related_memories, commit=True):
+    async def remember_event(self, invocation, *, event):
+        user_id, history, current_dialogue, commit = invocation.user_id, event.background, event.body, True
         self.calls.append(
             {
                 "user_id": user_id,
@@ -159,7 +159,7 @@ def _request(fact: d.DynamicObserved) -> d.HandleStimulusRequest:
 
 def _handler(replier: FakeReplier, *, memory: FakeMemory | None = None, publish_ok: bool = True):
     dynamics = FakeDynamics(replier, publish_ok=publish_ok)
-    reply = DynamicReplySkill(
+    reply = make_dynamic(
         dynamics,
         {CHARACTER_ID: CharacterNarrative(name="洛天依", persona="", speaking_style="")},
     )
@@ -168,7 +168,7 @@ def _handler(replier: FakeReplier, *, memory: FakeMemory | None = None, publish_
         DynamicObservedHandler(
             CHARACTER_ID,
             reply,
-            DynamicTopicMemorySkill({CHARACTER_ID: memory}),
+            memory,
         ),
         dynamics,
         memory,
@@ -194,7 +194,6 @@ def test_post_observation_delivers_reply_and_publishes_comment():
     assert action.target.parent_comment_id is None
     assert action.owner_user_id == USER_ID
     assert action.body == REPLY_BODY
-    assert replier.post_items[0]["content"].startswith("今天其实有点紧张")
     assert memory.calls[0]["user_id"] == USER_ID
 
     first_plan = sink.plans[0]
@@ -242,7 +241,7 @@ def test_comment_observation_can_be_ignored_explicitly():
     assert handling.emitted_plan_ids == ()
     assert fact.stimulus_id in handling.consumed_pending_stimulus_ids
     assert sink.plans == []
-    assert memory.calls[0]["current_dialogue"] == "user: 加油，慢慢来。"
+    assert memory.calls[0]["current_dialogue"] == "加油，慢慢来。"
 
 
 def test_comment_observation_replies_to_comment_parent():

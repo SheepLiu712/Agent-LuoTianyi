@@ -94,9 +94,12 @@ type LlmInterfaceConfig = {
   [key: string]: unknown;
 };
 
+type ModelKind = 'llm' | 'vlm' | 'audio';
+type InterfaceKind = 'available_llms' | 'available_vlms' | 'available_audio_models';
+
 type ModuleBinding = {
   path: string;
-  kind: 'llm' | 'vlm';
+  kind: ModelKind;
   interface_name: string;
   prompt_name?: string;
   enable_thinking?: boolean;
@@ -110,7 +113,7 @@ type ClientModelType = {
   id: string;
   name: string;
   description: string;
-  model_kind: 'llm' | 'vlm';
+  model_kind: ModelKind;
   requires_json: boolean;
   requires_thinking: boolean;
 };
@@ -118,6 +121,8 @@ type ClientModelType = {
 type LlmConfigInfo = {
   available_llms: Record<string, LlmInterfaceConfig>;
   available_vlms: Record<string, LlmInterfaceConfig>;
+  available_audio_models: Record<string, LlmInterfaceConfig>;
+  call_transport: { enabled?: boolean; realtime_speech?: Record<string, unknown>; [key: string]: unknown };
   client_model_types: ClientModelType[];
   module_bindings: ModuleBinding[];
 };
@@ -149,8 +154,8 @@ function validateClientModelTypes(
     if (!name) {
       errors.push(`类型「${typeId}」缺少显示名称`);
     }
-    if (typeItem.model_kind !== 'llm' && typeItem.model_kind !== 'vlm') {
-      errors.push(`类型「${typeId}」的模型类型必须是 LLM 或 VLM`);
+    if (typeItem.model_kind !== 'llm' && typeItem.model_kind !== 'vlm' && typeItem.model_kind !== 'audio') {
+      errors.push(`类型「${typeId}」的模型类型必须是 LLM、VLM 或音频模型`);
     }
   });
   (bindings || []).forEach((binding) => {
@@ -164,7 +169,7 @@ function validateClientModelTypes(
     }
     if (!requirement) return;
     if (requirement.model_kind !== binding.kind) {
-      errors.push(`模块绑定 ${binding.path} 与客户端类型 ${boundType} 的 LLM/VLM 类型不一致`);
+      errors.push(`模块绑定 ${binding.path} 与客户端类型 ${boundType} 的模型类型不一致`);
     }
     if (binding.use_json && !requirement.requires_json) {
       errors.push(`模块绑定 ${binding.path} 要求 JSON，但客户端类型 ${boundType} 未声明`);
@@ -884,7 +889,8 @@ function PipelinePage() {
 
   return (
     <>
-      <PageHeader title="链路耗时" subtitle="TopicPlanner、TopicReplier 和 TTS 首包延迟" />
+      <PageHeader title="链路耗时" subtitle="通话回复首包延迟与各处理阶段耗时" />
+      <CallReplyLatencyPanel />
       <StatusBar loading={loading} error={error} />
       <Panel title="7 日耗时分布">
         <table>
@@ -919,6 +925,76 @@ function PipelinePage() {
       </Panel>
     </>
   );
+}
+
+const CALL_REPLY_PHASES = [
+  ['total', '供应商判停至首个音频 ACK（听到首包代理）'],
+  ['legacy_first_generated', '历史口径：估算句末至生成首包'],
+  ['endpointing', '判断说话结束'],
+  ['scheduling', '等待开始检索'],
+  ['retrieval', '记忆检索'],
+  ['retrieval.authorization', '检索明细：授权编号查询'],
+  ['retrieval.queue', '检索明细：线程池排队'],
+  ['retrieval.embedding', '检索明细：远程向量化'],
+  ['retrieval.vector_search', '检索明细：本地向量搜索'],
+  ['retrieval.hydration', '检索明细：记忆正本回查'],
+  ['retrieval.materialization', '检索明细：结果整理'],
+
+  ['generation_queue', '准备生成回复'],
+  ['generation', '生成首段回复'],
+  ['submission', '提交首段回复'],
+  ['tts_first_packet', '提交至首个 TTS 包'],
+] as const;
+
+type CallReplyLatency = {
+  attempt_count: number;
+  completed_count: number;
+  summary: Record<string, LatencySummary & { failed_count: number }>;
+  recent: Array<{
+    trace_id: string; request_id: string; turn_seq: number; started_at: string;
+    speech_end_basis: string; outcome: string;
+    phases: Record<string, { duration_ms: number; status: string }>;
+  }>;
+};
+
+function CallReplyLatencyPanel() {
+  const { data, error, loading } = usePolling<CallReplyLatency>('/admin/api/pipeline/call-replies?days=7&limit=100');
+  const [selected, setSelected] = useState('');
+  const attempt = data?.recent.find(row => row.request_id === selected) || data?.recent[0];
+  const outcomes: Record<string, string> = {
+    completed: '已生成首包', interrupted: '已打断', failed: '失败', incomplete: '未完成或未收到结束记录',
+  };
+  return <Panel title="通话回复延迟（近 7 日）" className="scroll-panel">
+    <StatusBar loading={loading} error={error} />
+    <p>仅统计用户发言触发的回复，不含开场白、主动发言和预制致歉。实时链路从通话层收到供应商判停事件开始计时。</p>
+    <p>听到首包取服务端收到的首个音频 ACK，包含客户端处理和确认回传。未收到 ACK 的轮次不计入总延迟。生成回复指首段可提交文本就绪，不是整段回复生成结束。</p>
+    <p>回复尝试：{formatNumber(data?.attempt_count || 0)}；已生成首包：{formatNumber(data?.completed_count || 0)}。各阶段仅汇总成功样本，缺失值不按零计入。检索明细已包含在记忆检索总耗时中，同类操作按每轮累计。</p>
+    <table><thead><tr><th>阶段</th><th>成功样本</th><th>失败样本</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th><th>最大</th></tr></thead>
+      <tbody>{CALL_REPLY_PHASES.map(([key, label]) => {
+        const row = data?.summary[key];
+        return <tr key={key}><td>{label}</td><td>{row?.count || 0}</td><td>{row?.failed_count || 0}</td>
+          {(['avg_ms', 'p50_ms', 'p90_ms', 'p99_ms', 'max_ms'] as const).map(field =>
+            <td key={field}>{row?.count ? formatMs(row[field]) : '—'}</td>)}</tr>;
+      })}</tbody>
+    </table>
+    <h3>最近回复的阶段明细</h3>
+    <select aria-label="选择通话回复" value={attempt?.request_id || ''} onChange={event => setSelected(event.target.value)}>
+      {!data?.recent.length && <option value="">暂无通话回复样本</option>}
+      {data?.recent.map(row => <option key={row.request_id} value={row.request_id}>
+        {new Date(row.started_at).toLocaleString()} · 第 {row.turn_seq} 轮 · {outcomes[row.outcome] || row.outcome} · {row.request_id.slice(0, 8)}
+      </option>)}
+    </select>
+    {attempt && <>
+      <p>通话链路：<code>{attempt.trace_id}</code>；回复请求：<code>{attempt.request_id}</code></p>
+      <p>说完时间依据：{attempt.speech_end_basis === 'provider_speech_stopped_received' ? '供应商判停' : attempt.speech_end_basis === 'audio_ingress_estimate' ? '服务端音频接收时间估算' : '不可用；不计入总延迟'}；状态：{outcomes[attempt.outcome] || attempt.outcome}</p>
+      <table><thead><tr><th>阶段</th><th>耗时</th><th>结果</th></tr></thead><tbody>
+        {CALL_REPLY_PHASES.map(([key, label]) => {
+          const phase = attempt.phases[key];
+          return <tr key={key}><td>{label}</td><td>{phase ? formatMs(phase.duration_ms) : '—'}</td><td>{phase ? phase.status === 'success' ? '成功' : '失败' : '未采集'}</td></tr>;
+        })}
+      </tbody></table>
+    </>}
+  </Panel>;
 }
 
 function TracePage() {
@@ -1788,7 +1864,7 @@ function ConfigPage() {
 
   return (
     <>
-      <PageHeader title="服务配置" subtitle="运行时启停、环境变量、资源和 LLM/VLM 配置检查" />
+      <PageHeader title="服务配置" subtitle="运行时启停、环境变量、资源和模型配置检查" />
       <StatusBar loading={runtimeLoading || secretLoading || validationLoading || qqCredentialLoading || llmLoading} error={runtimeError || secretError || validationError || qqCredentialError || actionError} />
       {actionMessage && <div className="status">{actionMessage}</div>}
       <section className="metric-grid">
@@ -1826,7 +1902,7 @@ function ConfigPage() {
         <div className="secret-add-row">
           <input value={newSecretKey} onChange={(event) => setNewSecretKey(event.target.value.toUpperCase())} placeholder="NEW_LLM_API_KEY" />
           <input value={newSecretValue} onChange={(event) => setNewSecretValue(event.target.value)} placeholder="API key" type="password" />
-          <button onClick={() => void addSecret()}>新增 LLM API Key</button>
+          <button onClick={() => void addSecret()}>新增模型 API Key</button>
         </div>
         <div className="action-row">
           <button onClick={() => void saveSecrets()}>保存 Secrets</button>
@@ -1843,13 +1919,16 @@ function ConfigPage() {
           </div>
         )}
       </Panel>
-      <Panel title="LLM Interfaces">
+      <Panel title="模型 Interface（供应商接口）">
         <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
+      </Panel>
+      <Panel title="实时音频模型配置">
+        <RealtimeSpeechDraftEditor draft={llmDraft} onChange={setLlmDraft} />
       </Panel>
       <Panel title="客户端模型需求">
         <ClientModelTypesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
       </Panel>
-      <Panel title="LLMModule / VLMModule 绑定">
+      <Panel title="模型 module（调用模块）绑定">
         <LlmModuleBindingDraftEditor
           draft={llmDraft}
           onChange={setLlmDraft}
@@ -1878,7 +1957,7 @@ function LlmInterfacesDraftEditor({
   }
   const currentDraft = draft;
 
-  function updateInterfaces(kind: 'available_llms' | 'available_vlms', next: Record<string, LlmInterfaceConfig>) {
+  function updateInterfaces(kind: InterfaceKind, next: Record<string, LlmInterfaceConfig>) {
     onChange({ ...currentDraft, [kind]: next });
   }
 
@@ -1886,8 +1965,62 @@ function LlmInterfacesDraftEditor({
     <div className="llm-config-editor">
       <InterfaceEditor title="LLM Interfaces" kind="available_llms" rows={currentDraft.available_llms} onChange={updateInterfaces} />
       <InterfaceEditor title="VLM Interfaces" kind="available_vlms" rows={currentDraft.available_vlms} onChange={updateInterfaces} />
+      <InterfaceEditor title="音频模型 Interface" kind="available_audio_models" rows={currentDraft.available_audio_models} onChange={updateInterfaces} />
     </div>
   );
+}
+
+function RealtimeSpeechDraftEditor({ draft, onChange }: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+}) {
+  if (!draft) return <div className="empty-state">暂无实时音频配置</div>;
+  const currentDraft = draft;
+  const transport = draft.call_transport;
+  const speech = transport.realtime_speech || {};
+  function updateSpeech(field: string, value: unknown) {
+    onChange({ ...currentDraft, call_transport: { ...transport, realtime_speech: { ...speech, [field]: value } } });
+  }
+  const limits = [
+    ['connect_timeout_seconds', '连接超时（秒）', 10],
+    ['session_timeout_seconds', '会话初始化超时（秒）', 10],
+    ['close_timeout_seconds', '关闭超时（秒）', 5],
+    ['cleanup_timeout_seconds', '清理超时（秒）', 2],
+    ['write_queue_size', '发送队列容量', 32],
+    ['event_queue_size', '事件队列容量', 64],
+    ['max_audio_frame_bytes', '单帧音频上限（字节）', 65536],
+  ] as const;
+  return <div className="llm-config-editor">
+    <div className="interface-editor">
+      <h3>实时音频模型 Interface（阿里云）</h3>
+      <div className="interface-card realtime-fields">
+        {[
+          ['model', '模型名称'], ['api_key', 'API Key 或 $环境变量名'],
+          ['endpoint', 'WebSocket 地址（wss://）'], ['workspace_id', '工作空间 ID'],
+        ].map(([key, label]) => <label key={key}>{label}
+          <input value={String(speech[key] || '')} onChange={(event) => updateSpeech(key, event.target.value)} />
+        </label>)}
+      </div>
+      <p>连接地址与工作空间 ID 至少填写一项；填写连接地址时优先使用该地址。</p>
+    </div>
+    <div className="interface-editor">
+      <h3>实时音频模型 module（通话会话）</h3>
+      <div className="interface-flags">
+        <label><input type="checkbox" checked={Boolean(transport.enabled)} onChange={(event) =>
+          onChange({ ...currentDraft, call_transport: { ...transport, enabled: event.target.checked } })} />启用通话</label>
+        <label><input type="checkbox" checked={Boolean(speech.enabled)} onChange={(event) =>
+          updateSpeech('enabled', event.target.checked)} />启用实时音频模型</label>
+      </div>
+      <p>通话使用上方实时音频接口，需要同时启用两个开关。当前实时音频由服务端执行。</p>
+      <div className="interface-card realtime-fields">
+        {limits.map(([key, label, defaultValue]) => <label key={key}>{label}
+          <input type="number" min={key.endsWith('_seconds') ? 0.001 : 1}
+            step={key.endsWith('_seconds') ? 'any' : 1}
+            value={Number(speech[key] ?? defaultValue)} onChange={(event) => updateSpeech(key, event.target.valueAsNumber)} />
+        </label>)}
+      </div>
+    </div>
+  </div>;
 }
 
 function ClientModelTypesDraftEditor({
@@ -1965,11 +2098,12 @@ function ClientModelTypesDraftEditor({
               <select
                 value={typeItem.model_kind}
                 onChange={(event) =>
-                  updateType(tIndex, { model_kind: event.target.value as 'llm' | 'vlm' })
+                  updateType(tIndex, { model_kind: event.target.value as ModelKind })
                 }
               >
                 <option value="llm">LLM</option>
                 <option value="vlm">VLM</option>
+                <option value="audio">音频模型</option>
               </select>
             </label>
             <label>
@@ -2021,9 +2155,7 @@ function LlmModuleBindingDraftEditor({
   const currentDraft = draft;
   const llmNames = Object.keys(currentDraft.available_llms);
   const vlmNames = Object.keys(currentDraft.available_vlms);
-  const clientTypeNames = (currentDraft.client_model_types || []).map(
-    (item) => item.id,
-  );
+  const audioNames = Object.keys(currentDraft.available_audio_models);
 
   function updateBindings(next: ModuleBinding[]) {
     onChange({ ...currentDraft, module_bindings: next });
@@ -2035,7 +2167,8 @@ function LlmModuleBindingDraftEditor({
         bindings={currentDraft.module_bindings}
         llmNames={llmNames}
         vlmNames={vlmNames}
-        clientTypeNames={clientTypeNames}
+        audioNames={audioNames}
+        clientTypes={currentDraft.client_model_types}
         onChange={updateBindings}
       />
       <div className="action-row">
@@ -2054,9 +2187,9 @@ function InterfaceEditor({
   onChange,
 }: {
   title: string;
-  kind: 'available_llms' | 'available_vlms';
+  kind: InterfaceKind;
   rows: Record<string, LlmInterfaceConfig>;
-  onChange: (kind: 'available_llms' | 'available_vlms', next: Record<string, LlmInterfaceConfig>) => void;
+  onChange: (kind: InterfaceKind, next: Record<string, LlmInterfaceConfig>) => void;
 }) {
   function updateName(oldName: string, newName: string) {
     const trimmed = newName.trim();
@@ -2083,10 +2216,10 @@ function InterfaceEditor({
 
   function addInterface() {
     let index = Object.keys(rows).length + 1;
-    let name = `${kind === 'available_llms' ? 'llm' : 'vlm'}_${index}`;
+    let name = `${kind === 'available_llms' ? 'llm' : kind === 'available_vlms' ? 'vlm' : 'audio'}_${index}`;
     while (rows[name]) {
       index += 1;
-      name = `${kind === 'available_llms' ? 'llm' : 'vlm'}_${index}`;
+      name = `${kind === 'available_llms' ? 'llm' : kind === 'available_vlms' ? 'vlm' : 'audio'}_${index}`;
     }
     onChange(kind, {
       ...rows,
@@ -2121,15 +2254,18 @@ function InterfaceEditor({
           <input className="interface-model-input" value={String(item.model || '')} onChange={(event) => updateField(name, 'model', event.target.value)} placeholder="model" />
           <input className="interface-key-input" value={String(item.api_key || '')} onChange={(event) => updateField(name, 'api_key', event.target.value)} placeholder="$API_KEY" />
           <input className="interface-url-input" value={String(item.base_url || '')} onChange={(event) => updateField(name, 'base_url', event.target.value)} placeholder="base_url" />
-          <div className="interface-flags">
+          {kind !== 'available_audio_models' && <div className="interface-flags">
             <label><input type="checkbox" checked={Boolean(item.can_enable_thinking)} onChange={(event) => updateField(name, 'can_enable_thinking', event.target.checked)} /> thinking</label>
             <label><input type="checkbox" checked={Boolean(item.can_use_json)} onChange={(event) => updateField(name, 'can_use_json', event.target.checked)} /> json</label>
-          </div>
-          <textarea
+          </div>}
+          {kind === 'available_audio_models' ? <>
+            <label>最大输出 token 数<input type="number" min="1" step="1" value={Number(item.max_tokens ?? 2048)} onChange={(event) => updateField(name, 'max_tokens', event.target.valueAsNumber)} /></label>
+            <label>温度<input type="number" step="any" value={Number(item.temperature ?? 0.1)} onChange={(event) => updateField(name, 'temperature', event.target.valueAsNumber)} /></label>
+          </> : <textarea
             value={String(item.default_params_text || JSON.stringify(item.default_params || {}, null, 2))}
             onChange={(event) => updateDefaultParams(name, event.target.value)}
             placeholder="default_params JSON"
-          />
+          />}
           <button className="danger-button" onClick={() => removeInterface(name)}>删除</button>
         </div>
       ))}
@@ -2142,13 +2278,15 @@ function ModuleBindingEditor({
   bindings,
   llmNames,
   vlmNames,
-  clientTypeNames,
+  audioNames,
+  clientTypes,
   onChange,
 }: {
   bindings: ModuleBinding[];
   llmNames: string[];
   vlmNames: string[];
-  clientTypeNames: string[];
+  audioNames: string[];
+  clientTypes: ClientModelType[];
   onChange: (bindings: ModuleBinding[]) => void;
 }) {
   function updateBinding(index: number, patch: Partial<ModuleBinding>) {
@@ -2165,7 +2303,7 @@ function ModuleBindingEditor({
 
   return (
     <div className="module-binding-editor">
-      <h3>LLMModule / VLMModule 绑定</h3>
+      <h3>文本、视觉与音频模型模块绑定</h3>
       <div className="module-binding-table">
       <table>
         <thead>
@@ -2182,7 +2320,8 @@ function ModuleBindingEditor({
         </thead>
         <tbody>
           {bindings.map((binding, index) => {
-            const names = binding.kind === 'llm' ? llmNames : vlmNames;
+            const names = { llm: llmNames, vlm: vlmNames, audio: audioNames }[binding.kind];
+            const clientTypeNames = clientTypes.filter((item) => item.model_kind === binding.kind).map((item) => item.id);
             const options = names.includes(binding.interface_name) ? names : [binding.interface_name, ...names].filter(Boolean);
             return (
               <tr key={`${binding.kind}-${binding.path}`}>
@@ -2197,6 +2336,7 @@ function ModuleBindingEditor({
                 <td className="module-check-cell">
                   <input
                     type="checkbox"
+                    disabled={binding.kind === 'audio'}
                     checked={Boolean(binding.enable_thinking)}
                     onChange={(event) => updateBinding(index, { enable_thinking: event.target.checked })}
                   />

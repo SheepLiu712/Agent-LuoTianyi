@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from traceback import walk_tb
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -46,13 +47,27 @@ async def _serve_call(websocket, runtime, adapter) -> None:
         logger.info("WebSocket client disconnected from /call_ws")
     except CallTransportError as error:
         logger.warning("Call WebSocket protocol failure code=%s", error.code)
+        if error.__cause__ is not None:
+            _log_failure_locations(error)
         await _reject_adapter_connection(websocket, error)
     except Exception as error:  # noqa: BLE001 - physical connection boundary normalizes unexpected failures
-        logger.error("Call WebSocket failed type=%s", type(error).__name__)
+        _log_failure_locations(error)
         await websocket.close(code=1011, reason="internal call transport error")
     finally:
         if call is not None:
             await adapter.disconnect(call)
+
+
+def _log_failure_locations(error: BaseException) -> None:
+    """记录异常链的类型和位置，不输出可能包含凭据的异常正文或源码。"""
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        locations = [
+            (frame.f_code.co_filename, line, frame.f_code.co_name) for frame, line in walk_tb(error.__traceback__)
+        ]
+        logger.error("Call WebSocket failure type=%s stack=%s", type(error).__name__, locations)
+        error = error.__cause__ or (None if error.__suppress_context__ else error.__context__)
 
 
 async def _authenticate_and_open(websocket, runtime, adapter, connection):

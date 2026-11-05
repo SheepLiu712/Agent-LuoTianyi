@@ -8,6 +8,7 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode, ConversationSnapshot, RecalledMemoryContext, UserContextSnapshot
+from src.domain.stage.lifecycle import StageEndReason
 from src.stage import ChatStage
 from support.chat_connection import StubChatConnection
 
@@ -179,5 +180,5 @@ async def setup(agent=None, config=None):
 
 
 async def cleanup(stage, adapter):
-    await stage.terminate(d.InteractionEndingReason.SHUTDOWN)
+    await stage.terminate(StageEndReason.SHUTDOWN)
     await adapter.detach_stage_binding(stage)

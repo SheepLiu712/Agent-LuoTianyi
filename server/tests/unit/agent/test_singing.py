@@ -31,15 +31,22 @@ class Singing:
 
 def sing_plan(expression=True, *, content="", message_id=None):
     plan, context = plan_and_context()
-    sing = d.Sing(action_id="a1", song_id="歌曲", segment_id="副歌",
-                  expression=d.ChangeExpression(expression_id="唱歌") if expression else None,
-                  content=content, message_id=message_id)
+    sing = d.Sing(
+        action_id="a1",
+        song_id="歌曲",
+        segment_id="副歌",
+        expression=d.ChangeExpression(expression_id="唱歌") if expression else None,
+        content=content,
+        message_id=message_id,
+    )
     return replace(plan, actions=(sing,)), context
 
 
 def agent(singing):
-    return Agent(character_id="luotianyi", action_router=ActionRouter([
-        (d.ActionKind.SING, SingHandler("luotianyi", SingingSkill({}, backend=singing)))]))
+    return Agent(
+        character_id="luotianyi",
+        action_router=ActionRouter([(d.ActionKind.SING, SingHandler("luotianyi", SingingSkill({}, backend=singing)))]),
+    )
 
 
 @pytest.mark.asyncio
@@ -50,8 +57,11 @@ async def test_sing_route_outputs_expression_audio_and_end():
     report = await agent(singing).realize_action_plan(plan, context, sink)
     assert report.status is d.ExecutionStatus.COMPLETED
     assert [o.kind for o in sink.values] == [
-        d.AgentOutputKind.TEXT_FINAL, d.AgentOutputKind.EXPRESSION,
-        d.AgentOutputKind.AUDIO_CHUNK, d.AgentOutputKind.MESSAGE_END]
+        d.AgentOutputKind.TEXT_FINAL,
+        d.AgentOutputKind.EXPRESSION,
+        d.AgentOutputKind.AUDIO_CHUNK,
+        d.AgentOutputKind.MESSAGE_END,
+    ]
     assert sink.values[0].text == "唱了《歌曲》\n歌词一行"
     assert sink.values[1].expression.expression_id == "唱歌"
     assert sink.values[2].data == b"\x00\x01wav"
@@ -101,3 +111,30 @@ async def test_singing_skill_raises_when_unavailable():
     skill = SingingSkill({}, backend=Singing(audio=None))
     with pytest.raises(EmptySongAudioError):
         await skill.render(invocation(), song_id="歌曲", segment_id="副歌")
+
+
+@pytest.mark.asyncio
+async def test_character_song_audio_and_learning_tasks_do_not_share_resources(monkeypatch):
+    class Manager:
+        def __init__(self, config):
+            self.audio = config["audio"]
+            self.requests = []
+
+        def get_song_segment(self, song, segment):
+            return segment, self.audio
+
+        def add_wished_song(self, song):
+            self.requests.append(song)
+            return True
+
+    monkeypatch.setattr("src.agent.skills.expression.singing.backend.SingingManager", Manager)
+    skill = SingingSkill({"characters": {"甲": {"audio": b"a"}, "乙": {"audio": b"b"}}})
+    assert await skill.render(invocation(character_id="甲"), song_id="歌", segment_id="副歌") == b"a"
+    assert await skill.render(invocation(character_id="乙"), song_id="歌", segment_id="副歌") == b"b"
+    with pytest.raises(ValueError, match="not found"):
+        await skill.render(invocation(character_id="缺失角色"), song_id="歌", segment_id="副歌")
+    tasks = skill.learning_tasks()
+    tasks.request(invocation(character_id="甲"), song_id="甲想学的歌")
+    managers = tasks.world_resources.singing_manager
+    assert managers["甲"].requests == ["甲想学的歌"]
+    assert managers["乙"].requests == []
