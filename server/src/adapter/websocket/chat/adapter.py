@@ -36,7 +36,7 @@ from ._protocol_translate import (
 from ._voice_upload_helper import VoiceUploadAck, VoiceUploadAssembler, VoiceUploadError
 
 if TYPE_CHECKING:
-    from src.stage.chat_stage import ChatStage
+    from src.stage.chat.chat_stage import ChatStage
     from src.stage.stage_manager import StageManager
 
 logger = get_logger(__name__)
@@ -100,7 +100,7 @@ class WebSocketAdapter:
             ttl_seconds=voice_config.get("ttl_seconds", 600.0),
         )
         self._routes: dict[str, Binding] = {}
-        self._binding_lock = asyncio.Lock()
+        self._binding_locks = WeakValueDictionary()
         self._recent_client_messages: OrderedDict[str, float] = OrderedDict()
         self._recent_client_msg_ttl_seconds = 600.0
         self._recent_client_msg_limit = 4096
@@ -151,13 +151,7 @@ class WebSocketAdapter:
         binding = Binding(user_id, connection_id, capabilities, self._config)
         self._bindings[handle] = binding
         try:
-            stage = await complete_owned(self._open(binding, character_id or self._default_character_id))
-            enqueue_event(
-                binding,
-                "chat.ready",
-                {"character_id": stage.character_id, "interaction_id": stage.interaction_id, "schema_version": 1},
-            )
-            binding.release_business_outputs()
+            await complete_owned(self._open(binding, character_id or self._default_character_id))
             if initial_message is not None:
                 await self.receive(handle, initial_message)
             return handle
@@ -271,10 +265,12 @@ class WebSocketAdapter:
 
     async def _close_connection(self, connection: Binding) -> None:
         connection.mark_disconnected()
-        if connection.stage is not None:
-            await self.detach_stage_binding(connection.stage, connection)
-        if self._stage_manager is not None:
-            await self._stage_manager.disconnect(connection)
+        try:
+            if connection.stage is not None:
+                await self.detach_stage_binding(connection.stage, connection)
+        finally:
+            if self._stage_manager is not None:
+                await self._stage_manager.disconnect(connection)
 
     async def _receive(
         self, connection: Binding, event: WSMessage
@@ -462,9 +458,9 @@ class WebSocketAdapter:
         await complete_owned(self._unbind(stage, connection))
 
     async def _bind(self, stage: ChatStage, connection: Binding) -> None:
-        async with self._binding_lock:
-            if connection.is_closed or not connection.user_uuid or connection.user_uuid != stage.user_id:
-                raise ValueError("connection user does not own stage")
+        await stage.start()
+        async with self._binding_lock(stage.interaction_id):
+            self._require_binding_candidate(stage, connection)
             if connection.stage is not None and (connection.stage is not stage or not connection.accepting):
                 raise ValueError("binding already assigned to a stage")
             old = self._routes.get(stage.interaction_id)
@@ -472,25 +468,57 @@ class WebSocketAdapter:
                 if old.stage is not stage:
                     raise ValueError("interaction already owned by another stage")
                 if old is connection:
-                    await stage.connection_changed(d.ConnectionState.CONNECTED)
+                    if not await stage.connection_changed(True, connection.generation):
+                        raise ValueError("stage is no longer connectable")
                     return
                 await self._disconnect(old)
-            if connection.is_closed:
-                raise ValueError("connection closed during binding")
-            connection.attach(stage)
+            self._require_binding_candidate(stage, connection)
+            connection.prepare(stage, stage.connection_generation + 1)
             self._routes[stage.interaction_id] = connection
             try:
-                await stage.connection_changed(d.ConnectionState.CONNECTED)
+                if not await stage.connection_changed(True, connection.generation):
+                    raise ValueError("stage is no longer connectable")
+                self._require_binding_candidate(stage, connection)
+                enqueue_event(
+                    connection,
+                    "chat.ready",
+                    {"character_id": stage.character_id, "interaction_id": stage.interaction_id, "schema_version": 1},
+                )
+                connection.activate()
             except BaseException:
-                await self._disconnect(self._routes[stage.interaction_id])
+                # 失败候选不会再交付网络层，先唤醒等待就绪或发送完成的任务。
+                connection.mark_disconnected()
+                try:
+                    await self._disconnect(connection)
+                except BaseException:
+                    logger.exception("Chat binding cleanup failed interaction=%s", stage.interaction_id)
                 raise
 
+    def _require_binding_candidate(self, stage: ChatStage, connection: Binding) -> None:
+        if self._closed or connection.is_closed or not connection.user_uuid or connection.user_uuid != stage.user_id:
+            raise ValueError("authenticated live connection must own stage")
+
+    def _binding_lock(self, interaction_id: str) -> asyncio.Lock:
+        lock = self._binding_locks.get(interaction_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._binding_locks[interaction_id] = lock
+        return lock
+
     async def _unbind(self, stage: ChatStage, connection: Binding | None) -> None:
-        async with self._binding_lock:
+        async with self._binding_lock(stage.interaction_id):
             binding = self._routes.get(stage.interaction_id)
             if binding is not None and binding.stage is stage and (connection is None or binding is connection):
                 await self._disconnect(binding)
 
     async def _disconnect(self, binding) -> None:
-        await binding.detach()
-        self._routes.pop(binding.stage.interaction_id, None)
+        binding.revoke()
+        try:
+            # 通知期间保留路由，让 Stage 的取消输出仍能完成。
+            await binding.stage.connection_changed(False, binding.generation)
+        finally:
+            try:
+                await binding.detach()
+            finally:
+                if self._routes.get(binding.stage.interaction_id) is binding:
+                    self._routes.pop(binding.stage.interaction_id)

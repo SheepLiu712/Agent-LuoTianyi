@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, replace
 
 import src.domain.agent as d
 from src.domain.call import CallEndingResult, CallSummarySource
+from src.domain.call.omni import MemoryLookupHit, MemoryLookupResult
 
 COMPLETED = (d.ActionExecutionStatus.COMPLETED, d.ActionExecutionStatus.ALREADY_COMPLETED)
 
@@ -34,8 +35,8 @@ class ActionFact:
 def encode_facts(facts):
     values = [asdict(item) for item in facts]
     for value in values:
-        if value["result"] is not None and value["result"]["call_ending"] is None:
-            value["result"].pop("call_ending")
+        if value["result"] is not None and value["result"]["value"] is None:
+            value["result"].pop("value")
     return json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -58,7 +59,7 @@ def decode_facts(payload, plan):
             if result["effect_ref"] is not None:
                 effect = result["effect_ref"]
                 result["effect_ref"] = d.EffectRef(kind=d.EffectKind(effect["kind"]), effect_id=effect["effect_id"])
-            _decode_call_ending(result)
+            _decode_value(result, action)
             result = d.ActionResult(**result)
             if result.action_id != action.action_id or result.status is d.ActionExecutionStatus.NOT_STARTED:
                 raise ValueError("invalid action settlement")
@@ -82,9 +83,15 @@ def completed_prefix(facts):
     return results
 
 
-def _decode_call_ending(result):
-    ending = result.get("call_ending")
-    if ending is not None:
-        result["call_ending"] = CallEndingResult(
-            **{**ending, "summary_source": CallSummarySource(ending["summary_source"])}
+def _decode_value(result, action):
+    value = result.get("value")
+    if value is None:
+        return
+    if isinstance(action, d.FinalizeCall):
+        result["value"] = CallEndingResult(**{**value, "summary_source": CallSummarySource(value["summary_source"])})
+    elif isinstance(action, d.LookupCallMemory):
+        result["value"] = MemoryLookupResult(
+            **{**value, "hits": tuple(MemoryLookupHit(**hit) for hit in value["hits"])}
         )
+    else:
+        raise ValueError("action does not support a return value")

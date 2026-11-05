@@ -41,13 +41,22 @@ async def run_server(
         await lifecycle.stop()
 
 
-if __name__ == "__main__":
-    is_debug = config.get("is_debug", False)
-    if is_debug:
-        logger.info("服务器正在以调试模式运行")
+def main() -> None:
+    """仅从配置读取启动模式和端口；SERVER_HOST 可覆盖监听主机地址。"""
+    try:
+        is_debug = config["is_debug"]
+        if type(is_debug) is not bool:
+            raise ValueError("is_debug 必须为布尔值")
+        port_key = "debug_port" if is_debug else "production_port"
+        port = config["server"][port_key]
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise ValueError(f"server.{port_key} 必须为 1 到 65535 之间的整数")
+    except (KeyError, TypeError, ValueError):
+        logger.exception("服务器启动配置无效")
+        raise
+    logger.info("服务器正在以%s模式运行，监听端口：%s", "调试" if is_debug else "生产", port)
     logger.info("启用 HTTP 模式")
     host = os.environ.get("SERVER_HOST", "127.0.0.1")
-    port = int(os.environ.get("SERVER_PORT", "60030"))
     display_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     admin_url = f"http://{display_host}:{port}/admin"
     logger.info("控制台地址: %s", admin_url)
@@ -56,3 +65,7 @@ if __name__ == "__main__":
         asyncio.run(run_server(host, port))
     except KeyboardInterrupt:
         pass
+
+
+if __name__ == "__main__":
+    main()

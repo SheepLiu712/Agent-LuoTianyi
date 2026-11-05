@@ -23,7 +23,7 @@ dependencies = [
     "mutagen==1.48.1",
     "mwparserfromhell",
     "networkx",
-    "numpy>=1.24,<2",
+    "numpy>=2",
     "openai",
     "pillow",
     "playwright",
@@ -37,6 +37,7 @@ dependencies = [
     "typing-extensions",
     "tzdata; platform_system == 'Windows'",
     "uvicorn[standard]>=0.30",
+    "websockets>=14",
     "zhconv",
 ]
 

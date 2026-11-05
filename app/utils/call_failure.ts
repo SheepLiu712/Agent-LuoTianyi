@@ -7,7 +7,9 @@ export interface CallFailureNotice {
 
 const FAILURE_NOTICES: Record<string, CallFailureNotice> = {
   SERVER_CALL_UNAVAILABLE: { title: '通话暂不可用', message: '服务暂未准备好，请稍后再试。' },
-  NATIVE_CALL_UNAVAILABLE: { title: '无法使用麦克风', message: '请检查设备音频权限和通话能力后重试。' },
+  NATIVE_CALL_UNAVAILABLE: { title: '设备通话音频不可用', message: '设备音频初始化失败，请重试；若持续失败，请导出调试日志反馈。' },
+  MICROPHONE_PERMISSION_DENIED: { title: '未获得麦克风权限', message: '请在系统设置中允许麦克风权限后重试。' },
+  permission_denied: { title: '未获得麦克风权限', message: '请在系统设置中允许麦克风权限后重试。' },
   CALL_AUTH_REQUIRED: { title: '通话需要重新登录', message: '登录状态已失效，请重新登录后再试。' },
   AUTH_REJECTED: { title: '通话需要重新登录', message: '登录状态已失效，请重新登录后再试。' },
   CALL_CONNECTION_LOST: { title: '通话连接失败', message: '未能建立通话连接，请检查网络后重试。' },

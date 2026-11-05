@@ -42,7 +42,9 @@ export interface AppTheme {
   voicePressed: string;
   voiceCancel: string;
   voiceOverlay: string;
-  voiceRipple: string;
+  voiceRecordingText: string;
+  voiceRecordingCancel: string;
+  voiceRecordingCancelText: string;
 }
 
 export const COLOR_MODE_LABELS: Record<ColorMode, string> = {
@@ -77,7 +79,7 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     accentText: '#1674a3',
     menuButton: 'rgba(255, 255, 255, 0.72)',
     userBubble: '#ffffff',
-    botBubble: '#66CCFF',
+    botBubble: '#88EDFF',
     bubbleText: '#000000',
     userBubbleText: '#000000',
     systemMessageText: '#555555',
@@ -92,7 +94,8 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     dim: '#000000',
     live2dOverlay: 'rgba(0, 0, 0, 0)',
     voiceSurface: '#e7e9ed', voicePressed: '#d9dde2', voiceCancel: '#c9ced4',
-    voiceOverlay: 'rgba(0, 0, 0, 0.55)', voiceRipple: '#66CCFF',
+    voiceOverlay: 'rgba(0, 0, 0, 0.75)',
+    voiceRecordingText: '#17384D', voiceRecordingCancel: '#F04464', voiceRecordingCancelText: '#FFFFFF',
   },
   dark: {
     name: 'dark',
@@ -132,7 +135,8 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     dim: '#000000',
     live2dOverlay: 'rgba(19, 24, 30, 0.42)',
     voiceSurface: '#202A34', voicePressed: '#2c3642', voiceCancel: '#39434e',
-    voiceOverlay: 'rgba(0, 0, 0, 0.55)', voiceRipple: '#66CCFF',
+    voiceOverlay: 'rgba(0, 0, 0, 0.75)',
+    voiceRecordingText: '#17384D', voiceRecordingCancel: '#F04464', voiceRecordingCancelText: '#FFFFFF',
   },
 };
 

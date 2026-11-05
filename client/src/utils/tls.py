@@ -6,6 +6,8 @@ import os
 import ssl
 from pathlib import Path
 
+import certifi
+
 
 _CA_FILE_ENV_VARS = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE")
 _CA_DIR_ENV_VARS = ("SSL_CERT_DIR",)
@@ -31,6 +33,7 @@ def sanitize_tls_certificate_environment() -> None:
 
 
 def create_default_ssl_context() -> ssl.SSLContext:
-    """Create a default SSL context after dropping stale CA env paths."""
-    sanitize_tls_certificate_environment()
-    return ssl.create_default_context()
+    """使用随客户端更新的 CA 包，保留证书链和域名校验。"""
+    context = ssl.create_default_context(cafile=certifi.where())
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context

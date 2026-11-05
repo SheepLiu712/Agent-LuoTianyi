@@ -6,6 +6,7 @@ import type {
   NativePlaybackStopped,
 } from '../modules/call-audio/src/CallAudio.types';
 import { AndroidCallAudio, CAPTURE_FORMAT, PLAYBACK_FORMAT } from '../utils/call_audio/native_call_audio';
+import { clearDebugTrace, getDebugTraceSnapshot } from '../utils/debug_trace';
 
 jest.mock('expo-modules-core', () => ({
   requireOptionalNativeModule: jest.fn(() => null),
@@ -53,6 +54,57 @@ class FakeNativeCallAudio implements CallAudioNativeModule {
 }
 
 describe('AndroidCallAudio adapter', () => {
+  it.each(['noise_suppressor_unavailable', 'noise_suppressor_create_failed', 'noise_suppressor_enable_failed'])('continues capture and recovery without optional suppression: %s', async (error) => {
+    clearDebugTrace();
+    const native = new FakeNativeCallAudio();
+    native.capability.noiseSuppressor = { available: error !== 'noise_suppressor_unavailable', enabled: false, error };
+    const audio = new AndroidCallAudio({}, native, 'android');
+    await expect(audio.initialize()).resolves.toBe('available');
+    await expect(audio.getCapability()).resolves.toBe('available');
+    await expect(audio.startCapture(CAPTURE_FORMAT, jest.fn())).resolves.toBeUndefined();
+    await audio.pauseCapture();
+    await expect(audio.resumeCapture()).resolves.toBeUndefined();
+    const trace = getDebugTraceSnapshot().find((entry) => entry.message === 'initialization without noise suppression');
+    expect(JSON.parse(trace!.detail!)).toMatchObject({ noiseSuppressor: { enabled: false, error } });
+    await audio.close();
+  });
+
+  it.each(['aec_unavailable', 'aec_create_failed', 'aec_enable_failed'])('allows capture without echo cancellation: %s', async (error) => {
+    clearDebugTrace();
+    const native = new FakeNativeCallAudio();
+    native.capability.aec = { available: error !== 'aec_unavailable', enabled: false, error };
+    const audio = new AndroidCallAudio({}, native, 'android');
+    await expect(audio.initialize()).resolves.toBe('available');
+    await expect(audio.getCapability()).resolves.toBe('available');
+    await expect(audio.startCapture(CAPTURE_FORMAT, jest.fn())).resolves.toBeUndefined();
+    const trace = getDebugTraceSnapshot().find((entry) => entry.message === 'initialization without echo cancellation');
+    expect(JSON.parse(trace!.detail!)).toMatchObject({ aec: { enabled: false, error } });
+    await audio.close();
+  });
+
+  it('preserves permission failure for the user-facing notice', async () => {
+    const native = new FakeNativeCallAudio();
+    native.capability = { ...native.capability, available: false, reason: 'permission_denied' };
+    await expect(new AndroidCallAudio({}, native, 'android').initialize()).rejects.toThrow('MICROPHONE_PERMISSION_DENIED');
+  });
+
+  it('exposes the native initialization failure reason in the device debug panel', async () => {
+    clearDebugTrace();
+    const native = new FakeNativeCallAudio();
+    native.capability = {
+      ...native.capability,
+      available: false,
+      reason: 'aec_create_failed',
+      aec: { available: true, enabled: false, error: 'aec_create_failed' },
+    };
+    const audio = new AndroidCallAudio({}, native, 'android');
+    await expect(audio.initialize()).resolves.toBe('unavailable');
+    const trace = getDebugTraceSnapshot().find((entry) => entry.scope === 'call-audio');
+    expect(JSON.parse(trace!.detail!)).toMatchObject({
+      reason: 'aec_create_failed', aec: { available: true, enabled: false },
+    });
+  });
+
   it.each(['resolve', 'reject'])('old session enqueue %s cannot reset a reused key in the new visual session', async (outcome) => {
     const native = new FakeNativeCallAudio();
     const pending: { resolve(generation: number): void; reject(error: Error): void }[] = [];
@@ -128,15 +180,9 @@ describe('AndroidCallAudio adapter', () => {
     await expect(audio.initialize()).resolves.toBe('unavailable');
   });
 
-  it.each([
-    ['aec', { aec: { available: false, enabled: false, error: 'aec_unavailable' } }],
-    ['noise suppression', {
-      noiseSuppressor: { available: false, enabled: false, error: 'noise_suppressor_unavailable' },
-    }],
-    ['audio focus', { audioFocus: { granted: false, error: 'audio_focus_denied' } }],
-  ])('fails closed when %s is not initialized', async (_name, override) => {
+  it('fails closed when audio focus is denied', async () => {
     const native = new FakeNativeCallAudio();
-    native.capability = { ...native.capability, ...override };
+    native.capability.audioFocus = { granted: false, error: 'audio_focus_denied' };
     const audio = new AndroidCallAudio({}, native, 'android');
 
     await expect(audio.initialize()).resolves.toBe('unavailable');
@@ -374,7 +420,7 @@ describe('AndroidCallAudio adapter', () => {
     expect(start).toHaveBeenCalledTimes(2);
   });
 
-  it('does not restart capture when focus is denied and still checks recreated effects', async () => {
+  it('does not restart capture when focus is denied and resumes without AEC once focus returns', async () => {
     const native = new FakeNativeCallAudio();
     const audio = new AndroidCallAudio({}, native, 'android');
     await audio.initialize();
@@ -393,11 +439,11 @@ describe('AndroidCallAudio adapter', () => {
     native.capability = {
       ...native.capability,
       available: true,
-      reason: 'aec_unavailable',
+      reason: undefined,
       audioFocus: { granted: true },
       aec: { available: false, enabled: false },
     };
-    await expect(audio.resumeCapture()).rejects.toThrow('aec_unavailable');
+    await expect(audio.resumeCapture()).resolves.toBeUndefined();
     expect(start).toHaveBeenCalledTimes(1);
   });
 

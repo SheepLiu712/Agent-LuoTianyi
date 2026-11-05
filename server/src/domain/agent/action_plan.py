@@ -228,3 +228,14 @@ class ActionPlan(_Value):
         self._require(len(set(self.source_stimulus_ids)) == len(self.source_stimulus_ids), "Duplicate source identity")
         if any(isinstance(action, StartThinking) for action in self.actions):
             self._require(len(self.actions) == 1 and self.plan_ordinal == 0, "Invalid thinking plan")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LookupCallMemory(Action):
+    """使用执行上下文身份执行唯一的通话记忆工具。"""
+
+    kind: ClassVar[ActionKind] = ActionKind.LOOKUP_CALL_MEMORY
+    response_id: str
+    tool_call_id: str
+    query: str
+    turn_seq: int | None = None

@@ -1,9 +1,12 @@
 import asyncio
 import base64
+import json
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
 from support.aliyun_realtime_speech import FakeAliyunConnector, FakeAliyunWebSocket
+from websockets.asyncio.server import serve
 
 from src.infrastructure.models.realtime_speech import (
     AliyunRealtimeSpeechConfig,
@@ -16,7 +19,90 @@ from src.infrastructure.models.realtime_speech import (
     SpeechStopped,
     TurnCompleted,
     TurnInvalid,
+    aliyun,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["provider_error", "close", "decode", "write"])
+async def test_failure_log_identifies_cause_without_payload_or_credentials(monkeypatch, failure_kind):
+    log = Mock()
+    monkeypatch.setattr(aliyun, "logger", log)
+    socket = FakeAliyunWebSocket(fail_send_type="input_audio_buffer.append" if failure_kind == "write" else None)
+    session, _ = await started_session(socket)
+    try:
+        if failure_kind == "provider_error":
+            await socket.server_event(
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "code": "invalid_audio",
+                        "message": "secret-transcript",
+                        "audio": "secret-pcm",
+                    },
+                }
+            )
+        elif failure_kind == "close":
+            await socket.abnormal_close()
+        elif failure_kind == "decode":
+            await socket.incoming.put("secret-transcript invalid JSON")
+        else:
+            with pytest.raises(RuntimeError):
+                await session.push_audio(AudioFrame(b"\x00\x00", "pcm_s16le", 16_000, 1))
+        failure = await asyncio.wait_for(session.wait_failure(), 1)
+        assert failure is not None
+        log.error.assert_called_once()
+        template, *args = log.error.call_args.args
+        rendered = template % tuple(args)
+        assert f"call_id={session._call_id}" in rendered
+        assert f"error_code={failure.error_code}" in rendered
+        if failure_kind == "provider_error":
+            assert "provider_error_code=invalid_audio" in rendered
+            assert "provider_error_type=invalid_request_error" in rendered
+            assert "_handle_provider_output" in rendered
+        elif failure_kind == "close":
+            assert "received_close_code=1011" in rendered
+            assert "ConnectionClosedError" in rendered
+            assert "_read_loop" in rendered
+        elif failure_kind == "decode":
+            assert "JSONDecodeError" in rendered
+            assert "_decode_message" in rendered
+        else:
+            assert "RuntimeError" in rendered
+            assert "_write_loop" in rendered
+        for private_value in (
+            "secret-transcript",
+            "secret-pcm",
+            "test-only-key",
+            "offline fake failure",
+            "offline fake send failure",
+        ):
+            assert private_value not in rendered
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_handshake_failure_logs_exception_chain_without_messages(monkeypatch):
+    log = Mock()
+    monkeypatch.setattr(aliyun, "logger", log)
+
+    async def fail_connect(*args, **kwargs):
+        try:
+            raise OSError("secret-key")
+        except OSError as cause:
+            raise RuntimeError("secret-provider-body") from cause
+
+    session = await AliyunRealtimeSpeechSessionFactory(provider_config(), connector=fail_connect).create(uuid4())
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        await session.start(RealtimeSpeechConfig())
+    template, *args = log.error.call_args.args
+    rendered = template % tuple(args)
+    assert "provider_start_failed" in rendered
+    assert "OSError" in rendered and "RuntimeError" in rendered
+    assert "fail_connect" in rendered
+    assert "secret-key" not in rendered and "secret-provider-body" not in rendered
 
 
 def provider_config(**overrides):
@@ -42,6 +128,66 @@ async def started_session(socket=None, **config_overrides):
     session = await factory.create(uuid4())
     await session.start(RealtimeSpeechConfig(language="zh"))
     return session, socket
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_client_id", [True, False])
+async def test_provider_error_correlates_only_explicit_client_event_id(monkeypatch, include_client_id):
+    log = Mock()
+    monkeypatch.setattr(aliyun, "logger", log)
+    session, socket = await started_session()
+    try:
+        client_id = socket.sent[0]["event_id"]
+        error = {
+            "type": "invalid_request_error",
+            "code": "invalid_value",
+            "param": "session.modalities",
+            "message": "private-transcript",
+        }
+        if include_client_id:
+            error["event_id"] = client_id
+        await socket.server_event({"type": "error", "event_id": "server-error-1", "error": error})
+        await asyncio.wait_for(session.wait_failure(), 1)
+        template, *args = log.error.call_args.args
+        rendered = template % tuple(args)
+        assert "provider_error_param=session.modalities" in rendered
+        assert "server_event_id=server-error-1" in rendered
+        assert f"related_client_event_id={client_id if include_client_id else None}" in rendered
+        assert f"related_client_event_type={'session.update' if include_client_id else None}" in rendered
+        assert "recent_control_events=" in rendered
+        assert "private-transcript" not in rendered
+        assert "test-only-key" not in rendered
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_default_connector_authenticates_and_completes_session_handshake(monkeypatch):
+    received = []
+
+    async def provider(socket):
+        received.append(socket.request.headers.get("Authorization"))
+        received.append(json.loads(await socket.recv()))
+        await socket.send(json.dumps({"type": "session.updated"}))
+        await socket.wait_closed()
+
+    async with serve(provider, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        # 仅将测试地址替换为本地明文连接，保留真实默认连接器及其参数。
+        monkeypatch.setattr(
+            AliyunRealtimeSpeechConfig,
+            "websocket_url",
+            property(lambda self: f"ws://127.0.0.1:{port}/realtime"),
+        )
+        session = await AliyunRealtimeSpeechSessionFactory(provider_config(session_timeout_seconds=2)).create(uuid4())
+        try:
+            await session.start(RealtimeSpeechConfig(language="zh", instructions="术语：洛天依、乐正绫、言和、天钿"))
+            assert received[0] == "Bearer test-only-key"
+            assert received[1]["type"] == "session.update"
+            assert received[1]["session"]["instructions"] == "术语：洛天依、乐正绫、言和、天钿"
+            assert received[1]["session"]["turn_detection"] == {"type": "smart_turn"}
+        finally:
+            await session.close()
 
 
 @pytest.mark.asyncio
@@ -80,7 +226,7 @@ async def test_real_adapter_handshake_and_pcm_base64_schema():
     await session.push_audio(AudioFrame(payload, "pcm_s16le", 16_000, 1, sequence=99))
     await wait_for_sent_type(socket, "input_audio_buffer.append")
 
-    assert socket.sent[0] == {
+    assert {key: value for key, value in socket.sent[0].items() if key != "event_id"} == {
         "type": "session.update",
         "session": {
             "modalities": ["text", "audio"],
@@ -90,11 +236,12 @@ async def test_real_adapter_handshake_and_pcm_base64_schema():
             "input_audio_transcription": {"language": "zh"},
         },
     }
-    assert socket.sent[1] == {
+    assert {key: value for key, value in socket.sent[1].items() if key != "event_id"} == {
         "type": "input_audio_buffer.append",
         "audio": base64.b64encode(payload).decode("ascii"),
     }
     assert "sequence" not in socket.sent[1]
+    assert socket.sent[0]["event_id"] != socket.sent[1]["event_id"]
 
     with pytest.raises(ValueError, match="16 kHz mono PCM16"):
         await session.push_audio(AudioFrame(b"\x00\x00", "pcm_s16le", 48_000, 1))
@@ -225,10 +372,16 @@ async def test_assistant_output_is_cancelled_once_deleted_and_never_emitted():
     )
     await wait_for_condition(lambda: session.usage_totals.get("total_tokens") == 7)
 
-    assert [message for message in socket.sent if message["type"] == "response.cancel"] == [{"type": "response.cancel"}]
-    assert [message for message in socket.sent if message["type"] == "conversation.item.delete"] == [
-        {"type": "conversation.item.delete", "item_id": "assistant-1"}
-    ]
+    assert [
+        {k: v for k, v in message.items() if k != "event_id"}
+        for message in socket.sent
+        if message["type"] == "response.cancel"
+    ] == [{"type": "response.cancel"}]
+    assert [
+        {k: v for k, v in message.items() if k != "event_id"}
+        for message in socket.sent
+        if message["type"] == "conversation.item.delete"
+    ] == [{"type": "conversation.item.delete", "item_id": "assistant-1"}]
     assert session.usage_totals == {"total_tokens": 7, "input_tokens": 5, "output_tokens": 2}
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(anext(events), 0.02)

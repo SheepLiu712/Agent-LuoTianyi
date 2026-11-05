@@ -1,5 +1,6 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 
+from contextlib import aclosing
 from dataclasses import replace
 from datetime import timedelta
 from typing import Final
@@ -16,17 +17,20 @@ from src.agent.context.models import (
     SongContent,
     TextContent,
 )
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.processing.reply_delivery import build_reply_delivery, render_conversation_history
+from src.agent.processing.reply_delivery import render_conversation_history
+from src.agent.processing.reply_dispatch import ReplyDelivery
+from src.agent.processing.reply_materials import ReplyGenerationResult, enrich_reply_drafts, resolve_song_selection
 from src.agent.skills.cognitive import (
     AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
-    ResponseCompositionSkill,
-    TextPreprocessingSkill,
+    JargonRecognitionSkill,
 )
 from src.agent.skills.invocation import handling_invocation
-from src.agent.skills.mutation import IntentionalMemoryCommit
+from src.agent.skills.memory_retrieval import MemoryQuery
+from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill
 from src.utils.enum_type import ConversationSource
 
 _MEMORY_ACK_REPLY_TOPIC_PREFIX: Final = "刚刚已经把这条用户长期记忆提交完成，请用角色口吻简短确认"
@@ -56,7 +60,7 @@ class ChatPreprocessingHandler:
 
     def __init__(
         self,
-        text_understanding: TextPreprocessingSkill,
+        text_understanding: JargonRecognitionSkill,
         image_understanding: ImageUnderstandingSkill | None = None,
         audio_understanding: AudioUnderstandingSkill | None = None,
     ) -> None:
@@ -75,7 +79,7 @@ class ChatPreprocessingHandler:
         )
         match stimulus:
             case d.TextMessage():
-                terms = self._text_understanding.extract_terms(stimulus.text)
+                terms = self._text_understanding.recognize(stimulus.text)
                 entry = ConversationEntry(
                     entry_id=str(uuid4()),
                     timestamp=fact_time,
@@ -99,7 +103,7 @@ class ChatPreprocessingHandler:
                     owner_user_id=owner_user_id,
                 )
                 machine_text = f"[图片理解]: {description}"
-                terms = self._text_understanding.extract_terms(machine_text)
+                terms = self._text_understanding.recognize(machine_text)
                 media_entry = ConversationEntry(
                     entry_id=str(uuid4()),
                     timestamp=fact_time,
@@ -178,11 +182,6 @@ def _attach_recall(plans: PlanEmitter, request: d.HandleStimulusRequest, hits) -
         plans.context.recalled_memory.append(entries)
 
 
-def _may_emit_formal(request: d.HandleStimulusRequest, basis: int) -> bool:
-    """正式计划只在未取消且依据修订未变时交付。"""
-    return not request.cancellation.is_cancelled and request.interaction.interaction_revision == basis
-
-
 def _failed_memory_report(request: d.HandleStimulusRequest) -> d.HandlingReport:
     return replace(
         _report(request),
@@ -196,14 +195,79 @@ class ChatReplyHandler:
 
     def __init__(
         self,
-        composition: ResponseCompositionSkill,
+        skills: ReplySkills,
         memory_intent: ExplicitMemoryIntentSkill | None = None,
-        memory_commit: IntentionalMemoryCommit | None = None,
+        memory_commit: MemoryWriteSkill | None = None,
+        reply: ReplyDelivery | None = None,
     ) -> None:
-        """注入统一回复编排以及可选的明确记忆识别与提交技能。"""
-        self._composition = composition
+        """注入具名回复能力以及可选的明确记忆识别与提交能力。"""
+        self._skills = skills
+        self._reply = reply or ReplyDelivery()
         self._memory_intent = memory_intent
         self._memory_commit = memory_commit
+
+    async def _generate_reply(
+        self, invocation, *, user_context, reply_topic, conversation_history, excluded_segments=None, on_drafts=None
+    ) -> ReplyGenerationResult:
+        invocation.require_user_id()
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        decision = await self._skills.topic_extraction.extract(reply_topic, conversation_history=conversation_history)
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        recalled = (
+            await self._skills.retrieval.search(invocation, query=MemoryQuery(decision.memory_queries))
+            if decision.memory_queries
+            else None
+        )
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        candidate = (
+            await self._skills.singing.select(
+                invocation,
+                attempts=decision.sing_attempts,
+                excluded_segments=excluded_segments,
+                emotion_context="\n".join(part for part in (conversation_history, f"当前话题：{reply_topic}") if part),
+            )
+            if decision.sing_attempts
+            else None
+        )
+        sing_plan, learning_requests = resolve_song_selection(candidate)
+        lyrics = ""
+        if sing_plan is not None:
+            information = self._skills.singing.song_information(
+                invocation, song_id=sing_plan[0], segment_id=sing_plan[1]
+            )
+            if information is None:
+                sing_plan = None
+            else:
+                lyrics = information[2] or ""
+        if invocation.cancellation.is_cancelled:
+            return ReplyGenerationResult()
+        drafts = []
+        async with aclosing(
+            self._skills.reply.generate(
+                invocation.character_id,
+                scene="chat",
+                user_context=user_context,
+                reply_topic=reply_topic,
+                conversation_history=conversation_history,
+                memory_hits=recalled.render_for_prompt() if recalled is not None else [],
+                fact_hits=[],
+                sing_plan=sing_plan,
+            )
+        ) as stream:
+            async for draft in stream:
+                if invocation.cancellation.is_cancelled:
+                    return ReplyGenerationResult()
+                drafts.append(draft)
+                if on_drafts is not None and sing_plan is None and draft.sing is None:
+                    await on_drafts((draft,))
+        return ReplyGenerationResult(
+            drafts=enrich_reply_drafts(drafts, sing_plan=sing_plan, lyrics=lyrics),
+            memory_hits=tuple(recalled.hits) if recalled is not None else (),
+            learning_requests=learning_requests,
+        )
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """按接收顺序把整批输入作为一次回复：召回→生成→落库→交付计划，并按 ID 消费。"""
@@ -272,26 +336,46 @@ class ChatReplyHandler:
         if identity.user_id is None or self._memory_commit is None:
             return _failed_memory_report(request)
         committed_contents: list[str] = []
-        for _, memory_content in memory_items:
-            revision = await self._memory_commit.commit(
-                handling_invocation(request, plans.context),
-                content=memory_content,
+        for item, memory_content in memory_items:
+            source = next(
+                value for value in request.interaction.pending_stimuli if value.stimulus_id == item.stimulus_id
             )
-            if not revision.identifier.strip():
+            revision = await self._memory_commit.commit_fact(
+                handling_invocation(request, plans.context),
+                fact=MemoryFact(
+                    source="explicit_memory",
+                    source_id=item.stimulus_id,
+                    occurred_at=source.occurred_at,
+                    content=memory_content,
+                    scope=MemoryScope.USER,
+                    basis=MemoryBasis.USER_REQUEST,
+                ),
+            )
+            if not revision.memory_ids or any(not value.strip() for value in revision.memory_ids):
                 return _failed_memory_report(request)
             committed_contents.append(memory_content)
         reply_topic = f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{'；'.join(committed_contents)}"
         normal_topic = "\n".join(reply_parts)
         if normal_topic:
             reply_topic = f"{reply_topic}\n{normal_topic}"
-        drafts = await self._composition.compose(
-            handling_invocation(request, plans.context),
-            user_context=plans.context.user.read(),
-            reply_topic=reply_topic,
-            conversation_history=render_conversation_history(plans.context.conversation.read()),
-            excluded_segments=_recent_sung_segments(plans.context.conversation.read()),
-        )
-        await self._deliver(plans, request, pending, drafts, prefix="r")
+
+        learning_requests = ()
+
+        async def generate(on_drafts):
+            nonlocal learning_requests
+            result = await self._generate_reply(
+                handling_invocation(request, plans.context),
+                user_context=plans.context.user.read(),
+                reply_topic=reply_topic,
+                conversation_history=render_conversation_history(plans.context.conversation.read()),
+                excluded_segments=_recent_sung_segments(plans.context.conversation.read()),
+                on_drafts=on_drafts,
+            )
+            learning_requests = result.learning_requests
+            return result.drafts
+
+        await self._reply.deliver(request, plans, generate, prefix="r", sources=pending)
+        await self._reply.request_learning(request, plans, learning_requests, sources=pending)
         return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
 
     async def _handle_conversation_reply(
@@ -312,32 +396,22 @@ class ChatReplyHandler:
             )
         )
         snapshot = plans.context.conversation.read()
-        basis = request.interaction.interaction_revision
-        staged = await self._composition.compose_staged(
-            handling_invocation(request, plans.context),
-            user_context=plans.context.user.read(),
-            reply_topic=reply_topic,
-            conversation_history=render_conversation_history(snapshot),
-            excluded_segments=_recent_sung_segments(snapshot),
-        )
-        if not staged.awaits_formal:
-            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
-        formal = await staged.formal()
-        if not _may_emit_formal(request, basis):
-            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
-        _attach_recall(plans, request, formal.memory_hits)
-        await self._deliver(plans, request, pending, formal.drafts, prefix="r")
-        return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+        learning_requests = ()
 
-    @staticmethod
-    async def _deliver(
-        plans: PlanEmitter, request: d.HandleStimulusRequest, pending: tuple[str, ...], drafts, *, prefix: str
-    ) -> None:
-        """把一组草稿落库并作为一份独立完整计划交付；无可交付行动时不产生计划。"""
-        entries, actions = build_reply_delivery(request, tuple(drafts), prefix=prefix)
-        if not actions:
-            return
-        plans.set_interruptible(False)
-        if entries:
-            await plans.context.conversation.append(entries)
-        await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))
+        async def generate(on_drafts):
+            nonlocal learning_requests
+            formal = await self._generate_reply(
+                handling_invocation(request, plans.context),
+                user_context=plans.context.user.read(),
+                reply_topic=reply_topic,
+                conversation_history=render_conversation_history(snapshot),
+                excluded_segments=_recent_sung_segments(snapshot),
+                on_drafts=on_drafts,
+            )
+            learning_requests = formal.learning_requests
+            _attach_recall(plans, request, formal.memory_hits)
+            return formal.drafts
+
+        await self._reply.deliver(request, plans, generate, prefix="r", sources=pending)
+        await self._reply.request_learning(request, plans, learning_requests, sources=pending)
+        return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))

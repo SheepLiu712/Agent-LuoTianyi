@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import create_engine
@@ -18,6 +19,28 @@ from src.infrastructure.persistence.database.sql_database import Base
 from src.web.websocket import call_endpoint
 from tests.integration.stage.test_call_stage import _ContextDatabase
 from tests.integration.stage.test_chat_stage import RecordingAgent
+
+
+@pytest.mark.asyncio
+async def test_start_failure_logs_cause_location_without_sensitive_message(monkeypatch):
+    async def fail_start(*_args):
+        try:
+            raise TypeError("secret-provider-token")
+        except TypeError as cause:
+            raise CallTransportError("CALL_START_FAILED") from cause
+
+    log = Mock()
+    monkeypatch.setattr(call_endpoint, "logger", log)
+    monkeypatch.setattr(call_endpoint, "_authenticate_and_open", fail_start)
+    socket = _PhysicalSendFailureSocket()
+    await call_endpoint._serve_call(socket, object(), object())
+
+    assert socket.closed[1] == "CALL_START_FAILED"
+    output = str(log.error.call_args_list)
+    assert "TypeError" in output
+    assert "fail_start" in output
+    assert "test_call_endpoint_failure_lifecycle.py" in output
+    assert "secret-provider-token" not in output
 
 
 def _start_message() -> str:

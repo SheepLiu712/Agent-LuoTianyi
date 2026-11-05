@@ -1,7 +1,7 @@
 import pytest
 
 from src.domain.call import CallState
-from src.stage._call_playback import CallPlaybackCoordinator, PlaybackSettlementError
+from src.stage.call._call_playback import CallPlaybackCoordinator, PlaybackSettlementError
 
 
 class Clock:
@@ -68,6 +68,30 @@ def test_empty_or_cancel_only_call_never_creates_completion_qualification():
     final_stream(playback)
     playback.settle_stopped_stream("response", 1)
     assert playback.silence_started_at is None
+
+
+@pytest.mark.parametrize("new_work", ["none", "speech", "generation", "stream"])
+def test_maintenance_preserves_only_existing_completion_without_overriding_new_work(new_work):
+    playback, clock = coordinator()
+    playback.set_maintenance_count(1)
+    playback.set_maintenance_count(0)
+    assert playback.silence_started_at is None
+    final_stream(playback)
+    playback.complete_playback("response", 1)
+    playback.set_maintenance_count(1)
+    assert playback.silence_started_at is None
+    if new_work == "speech":
+        playback.set_user_speaking(True)
+        playback.set_user_speaking(False)
+    elif new_work == "generation":
+        playback.set_generation_count(1)
+        playback.set_generation_count(0)
+    elif new_work == "stream":
+        final_stream(playback, "new", 2)
+        playback.settle_stopped_stream("new", 2)
+    clock.now = 120.0
+    playback.set_maintenance_count(0)
+    assert playback.silence_started_at == (120.0 if new_work == "none" else None)
 
 
 @pytest.mark.parametrize("busy", ["pending_send", "generation", "speech", "unfinished_turn"])

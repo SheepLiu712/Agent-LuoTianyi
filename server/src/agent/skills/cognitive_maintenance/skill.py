@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.agent.context import (
@@ -22,10 +23,15 @@ from src.domain.agent.maintenance import (
     MaintenanceReport,
     MaintenanceStatus,
 )
+from src.domain.call import CallFinalSnapshot
+from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.persistence.cognitive_maintenance import (
     CognitiveMaintenanceBatch,
     CognitiveMaintenanceBatchDraft,
 )
+
+from ._call import _CallMaintenance
+from ._compaction import _ConversationCompaction
 
 
 class _Conversation(Protocol):
@@ -84,37 +90,75 @@ class _BoundedConversation:
         return self._snapshot
 
 
-class CognitiveMaintenanceSkill:
-    """Freeze model output once per predecessor, then converge projections at-least-once."""
+@dataclass(frozen=True)
+class MaintenanceRequest:
+    reason: MaintenanceReason
+    context: _Context
+    call_snapshot: CallFinalSnapshot | CallMaintenanceSnapshot | None = None
+    through_entry_id: str | None = None
 
-    def __init__(self, *, memories: Mapping[str, _Memory], compaction: _Compaction, call_maintenance=None) -> None:
+
+MaintenanceResult = MaintenanceReport
+
+
+class CognitiveMaintenanceSkill:
+    """统一选择维护策略；冻结输出后收敛长期记忆、画像与进度。"""
+
+    def __init__(self, config: dict, *, llm_service, memories: Mapping[str, _Memory], batches=None) -> None:
         if not memories:
             raise ValueError("认知维护至少需要一个角色记忆适配器")
         self._memories = dict(memories)
-        self._compaction = compaction
-        self._call_maintenance = call_maintenance
+        self._compaction = _ConversationCompaction(config.get("conversation_compaction", {}), llm_service)
+        self._call_maintenance = _CallMaintenance(dict(memories), batches)
 
-    async def maintain_if_compaction_needed(
-        self, invocation: SkillInvocation, context: _Context, *, call_snapshot=None
-    ) -> MaintenanceReport | None:
-        if call_snapshot is not None:
-            if self._call_maintenance is None:
-                raise RuntimeError("call maintenance is not configured")
-            await self._call_maintenance.maintain_window(
-                invocation, context, call_snapshot, compaction=self._compaction
-            )
-            return None
-        if not self._compaction.requires_compaction(context.conversation):
-            return MaintenanceReport(MaintenanceStatus.SKIPPED, MaintenanceReason.COMPACTION_THRESHOLD, None, None)
-        return await self.maintain(invocation, context, reason=MaintenanceReason.COMPACTION_THRESHOLD)
-
-    async def maintain(
-        self, invocation: SkillInvocation, context: _Context, *, reason: MaintenanceReason
-    ) -> MaintenanceReport:
-        """Run no lifecycle lock around models; the persisted predecessor is the arbiter."""
+    async def maintain(self, invocation: SkillInvocation, *, request: MaintenanceRequest) -> MaintenanceResult:
         self._check_cancelled(invocation)
+        context, reason = request.context, request.reason
+        if request.call_snapshot is not None:
+            return await self._maintain_call(invocation, request)
+        if reason is MaintenanceReason.COMPACTION_THRESHOLD and not self._compaction.requires_compaction(
+            context.conversation
+        ):
+            return MaintenanceReport(MaintenanceStatus.SKIPPED, reason, None, None)
+        return await self._maintain_chat(invocation, context, reason=reason, boundary=request.through_entry_id)
+
+    async def _maintain_call(self, invocation, request):
+        context, snapshot, reason = request.context, request.call_snapshot, request.reason
+        previous = context.conversation.read_call_maintenance_progress()
+        before = context.conversation.read_working()
+        profile_before = context.user.read().profile.description
+        if reason is MaintenanceReason.COMPACTION_THRESHOLD:
+            if not isinstance(snapshot, CallMaintenanceSnapshot):
+                raise TypeError("通话阈值维护需要 CallMaintenanceSnapshot")
+            await self._call_maintenance.maintain_window(invocation, context, snapshot, compaction=self._compaction)
+        else:
+            if not isinstance(snapshot, CallFinalSnapshot):
+                raise TypeError("通话结束维护需要 CallFinalSnapshot")
+            await self._call_maintenance.maintain_ending(invocation, context, snapshot)
+        progress = context.conversation.read_call_maintenance_progress()
+        after_ids = {entry.entry_id for entry in context.conversation.read_working().entries}
+        covered = tuple(entry.entry_id for entry in before.entries if entry.entry_id not in after_ids)
+        return MaintenanceReport(
+            MaintenanceStatus.COMPLETED if progress > previous or covered else MaintenanceStatus.SKIPPED,
+            reason,
+            previous,
+            progress,
+            covered_entry_ids=covered,
+            maintained_entry_ids=tuple(
+                f"call-turn-{turn.turn_seq}-user"
+                for turn in snapshot.completed_turns
+                if previous < turn.turn_seq <= progress
+            ),
+            profile_updated=profile_before != context.user.read().profile.description,
+            compacted=bool(covered),
+        )
+
+    async def _maintain_chat(
+        self, invocation: SkillInvocation, context: _Context, *, reason: MaintenanceReason, boundary: str | None
+    ) -> MaintenanceReport:
+        """模型调用不占用生命周期锁，持久化前驱决定批次胜者。"""
         initial_snapshot = context.conversation.read()
-        ending_boundary = initial_snapshot.entries[-1].entry_id if initial_snapshot.entries else None
+        ending_boundary = boundary or (initial_snapshot.entries[-1].entry_id if initial_snapshot.entries else None)
         memory = self._memory_for(invocation.character_id)
         reports = []
         while True:
@@ -124,7 +168,7 @@ class CognitiveMaintenanceSkill:
                 reason=reason,
                 memory=memory,
                 ending_boundary=ending_boundary,
-                bounded=reason is MaintenanceReason.INTERACTION_ENDING,
+                bounded=boundary is not None or reason is MaintenanceReason.INTERACTION_ENDING,
             )
             reports.append(report)
             if reason is not MaintenanceReason.INTERACTION_ENDING:

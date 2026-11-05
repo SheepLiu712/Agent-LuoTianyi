@@ -92,6 +92,22 @@ def test_multiframe_formats_persist_only_primary(tmp_path, format_name):
         assert primary.convert("RGB").getpixel((0, 0))[0] > 240
 
 
+@pytest.mark.parametrize("mime_type", [None, "image/tiff"])
+def test_single_frame_tiff_is_accepted_and_normalized(tmp_path, mime_type):
+    """单帧 TIFF 也是受支持的输入：入库前统一转成 JPEG，_FORMAT_MIME 描述的是规范化输出。"""
+    output = BytesIO()
+    Image.new("RGB", (16, 16), "red").save(output, format="TIFF")
+    store = PermanentMediaStore({"root": str(tmp_path)})
+    ref = store.mint_ref(user_id="owner", client_msg_id=f"single-tiff-{mime_type}")
+    store.persist_image(media_ref=ref, owner_user_id="owner", data=output.getvalue(), mime_type=mime_type)
+
+    result = FilesystemMediaResolver({"root": str(tmp_path)}).resolve(ref, owner_user_id="owner")
+    assert result.mime_type == "image/jpeg"
+    with Image.open(BytesIO(result.data)) as primary:
+        assert primary.format == "JPEG"
+        assert primary.convert("RGB").getpixel((0, 0))[0] > 240
+
+
 def test_animated_transparency_is_preserved():
     output = BytesIO()
     Image.new("RGBA", (8, 8), (255, 0, 0, 0)).save(

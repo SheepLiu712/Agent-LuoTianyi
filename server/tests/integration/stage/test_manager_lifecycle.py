@@ -7,6 +7,7 @@ from support.call_output import output_sink
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.chat_connection import StubChatConnection
 from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.stage_lifecycle import finish_call, wait_interaction_end
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
@@ -15,7 +16,7 @@ from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
 from src.domain.call import CallAnswerDecision, CallEndReason, CallState
 
-from .test_call_stage import _Clock, _ContextDatabase, _Transport, _TurnHandler, _agent, _eventually
+from .test_call_stage import _agent, _Clock, _ContextDatabase, _eventually, _Transport, _TurnHandler
 from .test_chat_stage import RecordingAgent, Socket, StageContextFactory
 
 
@@ -79,9 +80,11 @@ async def test_same_identity_shares_creation_and_failed_creation_can_retry(fail)
     manager, adapter = _chat_manager(factory)
 
     async def acquire():
-        return await manager.try_to_get_stage(
+        stage = await manager.try_to_get_stage(
             user_id="slow", character_id="luotianyi", connection=StubChatConnection(Socket(), "slow", "device")
         )
+        await stage.start()
+        return stage
 
     first = asyncio.create_task(acquire())
     second = asyncio.create_task(acquire())
@@ -93,6 +96,7 @@ async def test_same_identity_shares_creation_and_failed_creation_can_retry(fail)
         results = await asyncio.wait_for(asyncio.gather(first, second, return_exceptions=True), 1)
         if fail:
             assert all(isinstance(result, RuntimeError) for result in results)
+            await manager._finalizations.close()
             assert not manager._chat_creations and not manager._stages
             token = await manager.begin_user_data_reset("slow")
             await manager.end_user_data_reset("slow", token)
@@ -149,6 +153,7 @@ async def test_chat_creation_invalidated_by_reset_generation_closes_unpublished_
         factory.release.set()
         with pytest.raises(RuntimeError, match="USER_DATA_RESET_INVALIDATED_OPERATION"):
             await opening
+        await manager._finalizations.close()
         assert factory.created[0].closed
         assert not manager._stages and not manager._chat_creations
         assert not adapter._bindings
@@ -176,6 +181,7 @@ async def test_call_retention_timer_is_manager_owned_and_old_deadline_cannot_end
         stage = await manager.try_to_get_stage(
             user_id="user", character_id="luotianyi", stage_type="call", client_request_id="retention"
         )
+        await stage.connection_changed(True, 1)
         await stage.start()
         await stage.apply_answer(
             d.AnswerCall(action_id="answer", call_id=stage._record.call_id, decision=CallAnswerDecision.ACCEPT)
@@ -192,14 +198,55 @@ async def test_call_retention_timer_is_manager_owned_and_old_deadline_cannot_end
         assert old_timer.cancelled()
         await stage.disconnect()
         clock.monotonic += 2
-        await stage.expire_retention(old_deadline)
+        await stage.expire_retention(old_deadline, 1)
         assert stage.state is CallState.RECONNECTING
         # 新计时尚未获得运行机会；推进到其期限后由 Manager 实际回收。
         clock.monotonic += 1
-        await asyncio.wait_for(stage.wait_realtime_stopped(), 1)
-        await stage.terminate()
+        await asyncio.wait_for(wait_interaction_end(stage), 1)
+        await finish_call(stage)
         assert stage.snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
         assert stage not in manager._expiry
         assert stage.call_id not in manager._call_stages
     finally:
         await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["chat", "call"])
+async def test_resource_close_failure_keeps_scope_and_fails_repeated_shutdown(kind):
+    from src.domain.stage.lifecycle import StageEndReason, StageLifecycleState, StageShutdownFailed
+
+    if kind == "chat":
+        stages, adapter = _chat_manager(StageContextFactory())
+        stage = await adapter._open(StubChatConnection(Socket(), "user", "device"), "luotianyi")
+        resource = stage.context
+    else:
+        stages = make_stage_manager(
+            adapter=WebSocketAdapter(),
+            get_agent=lambda _: RecordingAgent(),
+            get_context_factory=lambda _: ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+            call_sessions=InMemoryCallSessionRepository(),
+            call_output_sink=output_sink(_Transport()),
+            realtime_speech_factory=FakeRealtimeSpeechSessionFactory(),
+        )
+        stage = await stages.try_to_get_stage(
+            stage_type="call", user_id="user", character_id="luotianyi", client_request_id="unsafe"
+        )
+        await stage.start()
+        resource = stage._provider
+    closes = []
+
+    async def failed_close():
+        closes.append(True)
+        raise OSError("resource close failed")
+
+    resource.close = failed_close
+    result = await stage.terminate(StageEndReason.SHUTDOWN)
+    assert not result.resources_released and result.cleanup_error == "OSError"
+    assert stage.lifecycle_state is StageLifecycleState.TERMINATING
+    with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
+        await stages.begin_user_data_reset("user")
+    for _ in range(2):
+        with pytest.raises(StageShutdownFailed):
+            await stages.close()
+    assert len(closes) == 1

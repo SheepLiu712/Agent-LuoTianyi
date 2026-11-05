@@ -5,12 +5,14 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from support.reply_capabilities import scripted_reply_skills
 
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.handlers.stimulus import proactive as proactive_module
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.processing.reply_materials import ReplyGenerationResult
 from src.agent.skills.cognitive import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent_runtime import agent_runtime as runtime_module
@@ -33,14 +35,14 @@ class Composer:
         self.drafts = tuple(drafts)
         self.calls = []
 
-    async def compose(self, invocation, **kwargs):
+    async def generate_drafts(self, invocation, **kwargs):
         self.calls.append({"invocation": invocation, **kwargs})
-        return self.drafts
+        return ReplyGenerationResult(drafts=self.drafts)
 
 
 class CancellingComposer(Composer):
-    async def compose(self, invocation, **kwargs):
-        result = await super().compose(invocation, **kwargs)
+    async def generate_drafts(self, invocation, **kwargs):
+        result = await super().generate_drafts(invocation, **kwargs)
         invocation.cancellation.cancel(d.CancellationReason.SUPERSEDED)
         return result
 
@@ -69,6 +71,19 @@ def first_login_request(reason: str = "first_login") -> d.HandleStimulusRequest:
         due_at=datetime.now(timezone.utc),
         dedup_key="first-login:user:luotianyi",
         fact_refs=(),
+        events=(
+            ()
+            if reason == "first_login"
+            else (
+                d.EventReminder(
+                    event_id="event",
+                    event_type=reason,
+                    title="中秋节",
+                    description="赏月团圆",
+                    trigger_key="day_of_event",
+                ),
+            )
+        ),
     )
     return d.HandleStimulusRequest(
         request_id="request",
@@ -106,7 +121,7 @@ async def test_missing_prepared_name_fails_without_silent_skip(monkeypatch):
     handler = FirstLoginHandler(
         prepared_names=("missing",),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=Composer(),
+        skills=scripted_reply_skills(Composer()),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -150,7 +165,7 @@ async def test_runtime_injects_configured_names_into_real_handler(runtime_depend
         # Then: the placeholder is replaced and configured order is retained.
         assert isinstance(handler, FirstLoginHandler)
         assert handler._prepared_names == ("welcome_1", "welcome_2")
-        assert handler._composition is runtime.skills.response_composition
+        assert handler._skills.reply is runtime.skills.reply
     finally:
         await runtime.shutdown()
 
@@ -171,7 +186,7 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
     handler = FirstLoginHandler(
         prepared_names=(),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=composer,
+        skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -198,7 +213,7 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
 
     # Then: the prompt stays internal; only the generated reply is persisted and realized.
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
-    assert composer.calls[0]["reply_topic"] == "有一项到期提醒（节日），请自然地告诉用户并关心用户的安排。"
+    assert composer.calls[0]["reply_topic"] == "今天是中秋节，请结合这一天的具体意义送上祝福，并关心用户的安排。"
     assert composer.calls[0]["conversation_history"] == "已有总结"
     assert composer.calls[0]["invocation"].user_id == "user"
     assert [entry.content.text for entry in conversation.entries] == ["今天好像有个特别的日子，你有什么安排吗？"]
@@ -219,7 +234,7 @@ async def test_due_reminder_with_no_deliverable_generation_does_not_persist_prom
     handler = FirstLoginHandler(
         prepared_names=(),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=composer,
+        skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -249,7 +264,7 @@ async def test_cancelled_due_reminder_does_not_persist_or_emit_late_generation()
     handler = FirstLoginHandler(
         prepared_names=(),
         prepared_speech=PreparedSpeechCatalog({}),
-        composition=composer,
+        skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",

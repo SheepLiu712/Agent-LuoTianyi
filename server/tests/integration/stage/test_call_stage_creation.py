@@ -1,5 +1,6 @@
 """创建只装配本次通话；耗时初始化与共享资源缺失有明确的接入边界。"""
 
+import asyncio
 from dataclasses import replace
 from uuid import uuid4
 
@@ -11,9 +12,10 @@ from support.realtime_speech import FakeRealtimeSpeechSessionFactory
 
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.domain.call import CallState
+from src.domain.stage.lifecycle import StageEndReason
 from src.stage import StageManager
-from src.stage._call_records import PreparedCall
-from src.stage.call_stage import bind_call_stage_creator
+from src.stage.call._call_records import PreparedCall
+from support.call_session import bind_call_test_creator as bind_call_stage_creator
 
 from . import test_call_stage
 from .test_call_stage import _Transport
@@ -21,14 +23,14 @@ from .test_chat_stage import RecordingAgent, Socket, StageContextFactory
 
 
 @pytest.mark.asyncio
-async def test_bound_creator_returns_preparing_without_starting_resources_and_owns_each_settlement(tmp_path):
+async def test_bound_creator_starts_initialization_without_waiting_and_owns_each_settlement(tmp_path):
     repository, record, ownership, clock = test_call_stage.call_setup.__wrapped__(tmp_path)
     agent = RecordingAgent()
     resolutions = []
 
     class Factory:
         async def create(self, *args, **kwargs):
-            pytest.fail("creating a Stage must not initialize Context or Provider")
+            await asyncio.Event().wait()
 
     factory = Factory()
 
@@ -56,11 +58,12 @@ async def test_bound_creator_returns_preparing_without_starting_resources_and_ow
 
     assert first.state is second.state is CallState.PREPARING
     assert first.context is second.context is None
-    assert first._initialization is second._initialization is None
+    assert first._lifetime.initialization is not second._lifetime.initialization
     assert resolutions == ["luotianyi", "luotianyi"]
     assert first._save_history.__self__ is not second._save_history.__self__
     assert first._agent is second._agent is agent
-    # No initialization has run, so there are no tasks or external resources to close.
+    await first.terminate(StageEndReason.SHUTDOWN)
+    await second.terminate(StageEndReason.SHUTDOWN)
 
 
 @pytest.mark.asyncio

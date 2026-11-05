@@ -256,7 +256,7 @@ export const useChatLogic = (
       onError: (errorText) => {
         binder.emitErrorText(errorText);
       },
-      onLlmRequest: (payload) => processor.processLlmRequest(payload),
+      onLlmRequest: (payload, onDelta, signal) => processor.processLlmRequest(payload, onDelta, signal),
       getLlmMode: () => processor.getLlmMode(),
     };
     chatCallbacksRef.current = callbacks;

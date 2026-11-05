@@ -113,9 +113,12 @@ interface CallProviderOptions {
   apiKey: string;
   body: Record<string, unknown>;
   timeoutMs?: number;
+  onDelta?: (text: string) => void | Promise<void>;
+  signal?: AbortSignal;
 }
 
 export async function callLlmProvider(options: CallProviderOptions): Promise<LlmResult> {
+  if (options.body.stream === true) return callLlmStream(options);
   const { url, apiKey, body, timeoutMs = 120000 } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -156,5 +159,62 @@ export async function callLlmProvider(options: CallProviderOptions): Promise<Llm
     return { content, usage: data?.usage ?? null };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function callLlmStream(options: CallProviderOptions): Promise<LlmResult> {
+  const { fetch: streamingFetch } = await import('expo/fetch');
+  const { url, apiKey, body, onDelta, signal, timeoutMs = 120000 } = options;
+  if (!onDelta) throw new Error('流式模型请求缺少增量接收器');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort);
+  if (signal?.aborted) abort();
+  const timer = setTimeout(abort, timeoutMs);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    const response = await streamingFetch(url, {
+      method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`LLM provider returned HTTP ${response.status}`);
+    if (!response.body) throw new Error('模型接口没有返回响应流');
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', content = '', finished = false, ended = false;
+    let usage: unknown = null;
+    const consume = async (line: string) => {
+      if (!line.startsWith('data:')) return;
+      const data = line.slice(5).trim();
+      if (!data) return;
+      if (data === '[DONE]') { ended = true; return; }
+      const event = JSON.parse(data);
+      if (event.error) throw new Error('模型流返回错误事件');
+      for (const choice of event.choices ?? []) {
+        if (choice.finish_reason != null) {
+          if (choice.finish_reason !== 'stop') throw new Error(`模型流未正常完成：${choice.finish_reason}`);
+          finished = true;
+        }
+        const delta = choice.delta?.content;
+        if (delta) { content += delta; await onDelta(delta); }
+      }
+      usage = event.usage ?? usage;
+    };
+    while (!ended) {
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+      let newline: number;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        await consume(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+      }
+      if (chunk.done) { if (buffer) await consume(buffer); break; }
+    }
+    if (!finished) throw new Error('模型流意外断开');
+    return { content, usage };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    if (reader) { await reader.cancel(); reader.releaseLock(); }
   }
 }

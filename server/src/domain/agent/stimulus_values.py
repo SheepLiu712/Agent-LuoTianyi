@@ -70,6 +70,23 @@ class ProactiveReason(metaclass=_ContractValueMeta):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class EventReminder(metaclass=_ContractValueMeta):
+    """已授权的事件提醒正文；触发条件保留事件与提醒当天的时间关系。"""
+
+    event_id: str
+    event_type: str
+    title: str
+    description: str
+    trigger_key: str
+
+    def __post_init__(self) -> None:
+        for value in (self.event_id, self.event_type, self.title, self.trigger_key):
+            _require_nonblank_string(value)
+        if not isinstance(self.description, str):
+            _raise_invalid()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class WorldObservationKind(metaclass=_ContractValueMeta):
     """规范化的世界观察类别代码，value 为非空白字符串。"""
 

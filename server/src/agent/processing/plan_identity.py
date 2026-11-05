@@ -9,6 +9,7 @@ from uuid import UUID
 
 import src.domain.agent as d
 import src.domain.call as c
+from src.domain.call.contracts import CallConfirmedSegment
 
 _types = {
     cls.__name__: cls
@@ -27,6 +28,8 @@ _types = {
         d.EndCall,
         d.AnswerCall,
         d.FinalizeCall,
+        d.LookupCallMemory,
+        CallConfirmedSegment,
         d.MaintenanceReason,
         d.PreprocessedInput,
         d.MediaRef,

@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AppTheme } from '../../utils/theme';
@@ -21,30 +21,30 @@ function clock(ms: number) { const seconds = Math.floor(ms / 1000); return `${St
 export function CallScreen({ state, theme, onHangup, onBack, now = callMonotonicNowMs }: Props) {
   useCallKeepAwake(state.phase);
   const insets = useSafeAreaInsets();
-  const [, refreshClock] = useReducer((tick: number) => tick + 1, 0);
+  const [clockSample, setClockSample] = useState(() => now());
   useEffect(() => {
     if (state.phase !== 'ACTIVE' && state.phase !== 'RECONNECTING') return;
     let mounted = true;
     const id = setInterval(() => {
-      if (mounted) refreshClock();
+      if (mounted) setClockSample(now());
     }, 1000);
     return () => {
       mounted = false;
       clearInterval(id);
     };
-  }, [state.phase]);
+  }, [state.phase, now]);
   const active = state.phase === 'ACTIVE' || state.phase === 'RECONNECTING';
   const ended = ['ENDED', 'FAILED', 'DECLINED'].includes(state.phase);
   return <View style={[styles.root, { backgroundColor: active ? 'transparent' : theme.name === 'dark' ? '#111820' : '#27363d', paddingTop: Math.max(insets.top, 48), paddingBottom: Math.max(insets.bottom, 24) }]}>
     {/* ACTIVE/RECONNECTING reuses the parent-owned chat Live2D WebView. */}
     <View style={[styles.scrim, state.phase === 'ACTIVE' && styles.activeScrim]} />
     <Pressable accessibilityLabel="返回聊天" onPress={onBack} style={styles.back}><Text style={styles.backText}>‹</Text></Pressable>
-    <View style={styles.center}>
-      <Image source={require('../../assets/images/tianyi_icon.png')} style={styles.avatar} />
-      <Text style={styles.name}>洛天依</Text>
+    <View style={[styles.center, active && { marginTop: 16 }]}>
+      {!active ? <Image source={require('../../assets/images/tianyi_icon.png')} style={styles.avatar} /> : null}
+      {!active ? <Text style={styles.name}>洛天依</Text> : null}
       <Text style={styles.status}>{labels[state.phase] ?? '通话'}</Text>
       {/* Sample on render so entering ACTIVE never reuses the dialing-time sample. */}
-      {active ? <Text style={styles.timer}>{clock(getCallActiveDurationMs(state, now()))}</Text> : null}
+      {active ? <Text style={styles.timer}>{clock(getCallActiveDurationMs(state, Math.max(clockSample, now())))}</Text> : null}
       {state.phase === 'RECONNECTING' ? <View style={styles.reconnect}><Text style={styles.reconnectText}>连接中断，正在恢复。不会重复播放开场语音</Text></View> : null}
       {ended ? <Text style={styles.outcome}>{state.endReason === 'failed' ? '请稍后重试' : '本次通话已结束'}</Text> : null}
     </View>

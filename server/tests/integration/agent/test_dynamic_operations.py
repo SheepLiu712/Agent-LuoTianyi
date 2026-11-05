@@ -21,7 +21,7 @@ from src.web.http.types import (
 )
 
 
-def test_dynamic_operations_accept_nested_module_config_and_degrade_on_invalid_llm():
+def test_dynamic_operations_accept_nested_module_config_and_fail_on_invalid_llm():
     registered = []
 
     class FakeLLMService:
@@ -29,7 +29,7 @@ def test_dynamic_operations_accept_nested_module_config_and_degrade_on_invalid_l
 
         def register_llm_module(self, name, config):
             registered.append((name, config))
-            if name == "dynamic_composer":
+            if name == "skill.dynamic.generate":
                 return SimpleNamespace(module_name=name)
             raise ValueError("reply llm unavailable")
 
@@ -50,16 +50,17 @@ def test_dynamic_operations_accept_nested_module_config_and_degrade_on_invalid_l
         }
     )
 
-    capability.create_llm_module(FakeLLMService())
+    with pytest.raises(ValueError, match="reply llm unavailable"):
+        capability.create_llm_module(FakeLLMService())
 
     assert registered[0] == (
-        "dynamic_composer",
+        "skill.dynamic.generate",
         {
             "llm": {"name": "qwen3.5-plus"},
             "prompt_name": "dynamic_post_prompt",
         },
     )
-    assert registered[1][0] == "dynamic_reply"
+    assert registered[1][0] == "skill.dynamic.generate_reply"
 
     bad_capability = DynamicOperations(
         {
@@ -78,8 +79,8 @@ def test_dynamic_operations_accept_nested_module_config_and_degrade_on_invalid_l
         def register_llm_module(self, name, config):
             raise ValueError("LLM接口未找到")
 
-    bad_capability.create_llm_module(RejectingLLMService())
-    assert bad_capability._dynamic_composer is None
+    with pytest.raises(ValueError, match="LLM接口未找到"):
+        bad_capability.create_llm_module(RejectingLLMService())
 
 
 @pytest.fixture(scope="function")

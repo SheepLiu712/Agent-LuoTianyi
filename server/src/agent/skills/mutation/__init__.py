@@ -1,5 +1,1 @@
-"""Agent 私有长期状态变更技能。"""
-
-from .intentional_memory import IntentionalMemoryCommit, MemoryCommitRevision
-
-__all__ = ["IntentionalMemoryCommit", "MemoryCommitRevision"]
+"""记忆提交已统一至 MemoryWriteSkill。"""

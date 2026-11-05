@@ -1,10 +1,10 @@
-import ssl
 from typing import Dict, Tuple
 
+import certifi
 import requests
 from requests.adapters import HTTPAdapter
 
-from .tls import sanitize_tls_certificate_environment
+from .tls import create_default_ssl_context
 
 
 class TLS12HttpAdapter(HTTPAdapter):
@@ -13,12 +13,14 @@ class TLS12HttpAdapter(HTTPAdapter):
         super().__init__(*args, **kwargs)
 
     def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
-        sanitize_tls_certificate_environment()
-        ctx = ssl.create_default_context()
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx = create_default_ssl_context()
 
         pool_kwargs["ssl_context"] = ctx
         return super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+    def cert_verify(self, conn, url, verify, cert):
+        # HTTP 与 WebSocket 使用同一信任来源，不接受环境变量或 verify=False 降级。
+        return super().cert_verify(conn, url, certifi.where(), cert)
 
 
 class HttpClientFactory:
@@ -26,7 +28,6 @@ class HttpClientFactory:
 
     @classmethod
     def get_session(cls, verify_ssl: bool) -> requests.Session:
-        sanitize_tls_certificate_environment()
         verify_ssl = True
         key = (verify_ssl,)
         if key in cls._session_cache:

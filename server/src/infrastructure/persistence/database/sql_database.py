@@ -24,6 +24,15 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 Base = declarative_base()
 
 
+class MemoryEventBatch(Base):
+    __tablename__ = "memory_event_batches"
+
+    identity = Column(String, primary_key=True)
+    subject_user_id = Column(String, nullable=True, index=True)
+    envelope = Column(Text, nullable=False)
+    candidates = Column(Text, nullable=False)
+
+
 # ————————————
 # 基本表：用户、注册码和对话记录
 # ————————————
@@ -559,6 +568,13 @@ def _table_columns(connection, table_name: str) -> set[str]:
 
 def _migrate_call_session_schema(connection) -> None:
     columns = _table_columns(connection, "call_sessions")
+    if "status" in columns and "state" not in columns:
+        if connection.exec_driver_sql("SELECT 1 FROM call_sessions LIMIT 1").first() is not None:
+            raise RuntimeError("Legacy call_sessions contains records; explicit data migration is required")
+        # 旧版通话表没有可可靠换算的生命周期语义；仅自动升级空表。
+        connection.exec_driver_sql("DROP TABLE call_sessions")
+        CallSession.__table__.create(connection)
+        return
     if columns and "settlement_input_digest" not in columns:
         connection.exec_driver_sql("ALTER TABLE call_sessions ADD COLUMN settlement_input_digest VARCHAR")
 

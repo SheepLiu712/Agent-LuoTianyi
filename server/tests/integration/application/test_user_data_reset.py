@@ -280,7 +280,7 @@ def test_authenticated_http_reset_preserves_credentials_and_isolates_other_owner
         database_manager=database,
         user_reset_service=reset_service,
         user_interface=UserInterface(database, _Resolver()),
-        call_capability_status=CallCapabilityStatus(False, False, False, False, False, False, False, False, ()),
+        call_capability_status=CallCapabilityStatus(False, False, False, False, False, False, False, ()),
         supports_call_character=lambda _character_id: False,
     )
     app.dependency_overrides[routes.get_runtime] = lambda: runtime

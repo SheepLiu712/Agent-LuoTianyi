@@ -140,6 +140,32 @@ class EventStore:
         finally:
             db.close()
 
+    def get_citywalk_events(self, character: str, day: date) -> List[Dict[str, Any]]:
+        """按角色和北京时间自然日读取仍有效的公开漫步事实。"""
+        start = datetime.combine(day, datetime.min.time())
+        db = self._get_session()
+        try:
+            rows = (
+                db.query(Event)
+                .filter(
+                    Event.character == character,
+                    Event.event_type == UnifiedEventType.TRAVEL.value,
+                    Event.source == "world_citywalk",
+                    Event.is_active.is_(True),
+                    Event.is_personal.is_(False),
+                    Event.start_datetime >= start,
+                    Event.start_datetime < start + timedelta(days=1),
+                )
+                .order_by(Event.start_datetime, Event.id)
+                .all()
+            )
+            return [db_event_to_dict(row) for row in rows]
+        except Exception:
+            self.logger.exception("读取城市漫步事实失败 character=%s day=%s", character, day)
+            raise
+        finally:
+            db.close()
+
     def get_events_for_user(self, user_id: str) -> List[Dict[str, Any]]:
         """获取对特定用户有意义的所有事件（公开事件 + personal事件）。"""
         db = self._get_session()

@@ -82,8 +82,8 @@ export class CallTransportSession {
   private capturePaused = false;
   private playbackGeneration = 0;
   private closed = false;
-  private nativeAccepting = false;
-  private inflightNativeAccept: Promise<void> | null = null;
+  private nativeAccepting: number | null = null;
+  private readonly inflightNativeAccept = new Set<Promise<void>>();
   private requestedResumeServerCursor: number | null = null;
   private lastAckSent = 0;
   private readonly completedStreams = new Set<string>();
@@ -277,6 +277,7 @@ export class CallTransportSession {
       const stopping = this.applyStop(actions.immediateStop);
       this.stopping.set(actions.immediateStop.seq, stopping);
       await stopping;
+      if (actions.retiredActiveSeq === this.nativeAccepting) this.nativeAccepting = null;
     }
     if (actions.missingSeq !== undefined && this.snapshot.callId) this.sendFeedback('nack', actions.missingSeq);
     if (actions.ackSeq > 0 && this.snapshot.callId) this.sendFeedback('ack', actions.ackSeq);
@@ -284,16 +285,16 @@ export class CallTransportSession {
   }
 
   private startNativeAcceptance(epoch: number): void {
-    if (this.nativeAccepting) return;
+    if (this.closed || this.nativeAccepting !== null) return;
     const frame = this.incoming.claimReady();
     if (!frame) return;
-    this.nativeAccepting = true;
+    this.nativeAccepting = frame.seq;
     const operation = this.commitIncoming(frame, epoch).then(() => {
-      if (this.closed) return;
+      if (this.closed || this.nativeAccepting !== frame.seq) return;
       if (this.incoming.isRetired(frame.seq)) throw new Error('FRAME_RETIRED');
       const ack = this.incoming.commitClaimed(frame.seq);
       this.sendFeedback('ack', ack);
-      this.nativeAccepting = false;
+      this.nativeAccepting = null;
       if (this.pendingEnded) {
         const ended = this.pendingEnded;
         this.pendingEnded = null;
@@ -302,14 +303,15 @@ export class CallTransportSession {
       }
       this.startNativeAcceptance(this.socketEpoch);
     }).catch((error) => {
-      this.nativeAccepting = false;
+      if (this.nativeAccepting !== frame.seq) return;
+      this.nativeAccepting = null;
       if (errorCode(error) !== 'FRAME_RETIRED') this.fail(errorCode(error));
       else if (!this.closed) this.startNativeAcceptance(this.socketEpoch);
     });
     const tracked = operation.finally(() => {
-      if (this.inflightNativeAccept === tracked) this.inflightNativeAccept = null;
+      this.inflightNativeAccept.delete(tracked);
     });
-    this.inflightNativeAccept = tracked;
+    this.inflightNativeAccept.add(tracked);
   }
 
   private async commitIncoming(frame: IncomingFrame, epoch: number): Promise<void> {
@@ -730,13 +732,13 @@ export class CallTransportSession {
       this.options.nativeAudio.stop(),
     ];
     await this.settleBounded(invalidation);
-    if (this.inflightNativeAccept) await this.settleBounded([this.inflightNativeAccept]);
+    await this.settleBounded([...this.inflightNativeAccept]);
     await this.settleBounded([
       ...[...this.streams.values()].map((stream) => this.options.nativeAudio.tombstone(stream.identity)),
       this.options.nativeAudio.stopCapture(),
       this.options.nativeAudio.stop(),
     ]);
-    this.nativeAccepting = false;
+    this.nativeAccepting = null;
     this.outbox.clear();
     this.incoming.clear();
     this.streams.clear();

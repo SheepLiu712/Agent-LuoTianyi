@@ -30,8 +30,8 @@
 
 ## 能力与清理
 
-- `available` 仅在固定 capture/playback 格式、通信 AudioFocus、AEC 与 NoiseSuppressor 均成功初始化后返回；不支持时 fail closed 并给稳定 reason
-- `available` 只证明 Android API 初始化与启用结果，不证明 AEC/降噪实际效果
+- 通话启动需要麦克风权限、约定的录放音格式和通信音频焦点。声学回声消除（AEC）和系统降噪按设备能力启用。设备缺少任一能力，或音效创建、启用失败时，客户端记录原因并继续通话。
+- 未启用 AEC 时，免提外放的角色语音可能被麦克风重新采集，造成误打断。可分别在外放和耳机下检查。
 - 初始化失败统一撤销焦点、路由回调、通信 mode、生命周期回调并释放已创建对象
 - capture/playback 线程先请求停止并有限等待；若 250 ms 内仍存活，报告稳定 timeout，且不在线程仍可能访问对象时 release
 - 任一 worker 停止超时后，模块进入实例级 `session_termination_failed` fail-closed；`startSession`、`startCapture`、enqueue 和 stop 均拒绝重新取得所有权，后续 close 只允许收束原 worker，不创建新 generation 或复用共享队列/设备
@@ -54,7 +54,7 @@
 - 真实模块任务 `compileDebugKotlin` 与 `testDebugUnitTest` 成功；`PlaybackAccountingTest` 9 passed，`CallAudioModule` 与 `reacquireAudioFocus` 已编译。
 - 完整 New Architecture Debug APK：`ca8acf965a126d8824620f6659394dfad9d3bd0ee2ad3586ce0c0ce8aa0e2179`，四 ABI、minSdk 24、targetSdk 36、Debug v2 签名。`CallAudioModule` 与 `reacquireAudioFocus` 位于 APK DEX。APK 不含 JS bundle，单独 `am start` 只能证明原生壳启动。
 - 隔离 Windows build 使用短 source/cache 和 `CMAKE_OBJECT_PATH_MAX=200`；生成路径实际 hash，完整 `.o` 最大 241 字符。APK、SDK、cache、debug keystore 和代理设置不进入 Git。
-- AOSP ATD API 36 x86_64 + WHPX headless 设备完成安装和真实 Metro（1289 modules）启动；Expo JSI、Fabric 和 Native Module presence 成功。权限拒绝 fail-closed；授权后因模拟器无 AEC 返回 `aec_unavailable`，焦点 API 返回 `session_not_ready`，cleanup 成功且无 FATAL。
+- 历史验证：Android API 36 模拟器完成安装和启动。旧版在授权后因缺少 AEC 返回 `aec_unavailable`。当前版本允许在缺少 AEC 时继续通话，真机验收步骤见 [Android 验证记录](docs/android-validation.md)。
 - N9 stop operation registry 已用于生产 stop command path；重复与 global/per-stream 重叠 waiter、termination drain 和迟到 settle-once 同时具有 Kotlin 9 tests 与 TS mock 证据。
 - 历史 Oracle 第三轮 `CHANGES_REQUESTED` 是早期候选记录；本次归档不将其重写为通过，也不把它当作当前实现审核结论。真机效果和长期稳定性仍待 #362 验收
 

@@ -33,13 +33,16 @@ export interface WsCallbacks {
   onAgentStateChanged: (state: string) => void;
   onError: (errorText: string) => void;
 
-  onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
-  getLlmMode?: () => Promise<{ types: string[] }>;
+  onLlmRequest?: (
+    payload: Record<string, unknown>, onDelta?: (text: string) => void | Promise<void>, signal?: AbortSignal,
+  ) => Promise<Record<string, unknown> | null>;
+  getLlmMode?: () => Promise<{ types: string[]; stream?: boolean }>;
   onChatReady?: (payload: { characterId: string; interactionId: string }) => void;
 }
 
 export class WebSocketTransport {
   private ws: WebSocket | null = null;
+  private llmControllers = new Map<string, AbortController>();
   private readonly username: string;
   private readonly token: string;
   private readonly callbacks: WsCallbacks;
@@ -711,6 +714,10 @@ export class WebSocketTransport {
         return;
       }
 
+      if (eventType === WSEventType.LLM_CANCEL) {
+        this.llmControllers.get(String(payload.request_id))?.abort();
+        return;
+      }
       if (eventType === WSEventType.LLM_REQUEST) {
         void this.handleLlmRequest(payload);
         return;
@@ -760,24 +767,32 @@ export class WebSocketTransport {
     if (!this.callbacks.onLlmRequest) {
       return;
     }
+    const requestId = String(payload.request_id);
+    if (this.llmControllers.has(requestId)) throw new Error('重复的模型委托请求');
+    const controller = new AbortController();
+    this.llmControllers.set(requestId, controller);
+    const socket = this.ws;
+    let sequence = 0;
+    const send = (result: Record<string, unknown>) => {
+      if (controller.signal.aborted || !socket || socket !== this.ws || socket.readyState !== 1) {
+        throw new Error('模型委托连接已失效');
+      }
+      socket.send(JSON.stringify({ type: WSEventType.LLM_RESPONSE, ts: Date.now(), payload: result }));
+    };
     try {
-      const result = await this.callbacks.onLlmRequest(payload);
-      if (!result) return;
-      this.sendRaw({
-        type: WSEventType.LLM_RESPONSE,
-        ts: Date.now(),
-        payload: result,
-      });
+      const onDelta = async (delta: string) => {
+        send({ request_id: requestId, sequence: sequence++, delta });
+      };
+      const result = await this.callbacks.onLlmRequest(payload, onDelta, controller.signal);
+      if (!result || controller.signal.aborted) return;
+      send(payload.stream === true ? { ...result, sequence, done: true } : result);
     } catch (error) {
-      addDebugTrace('llm', 'llm_request handler failed', { error: String(error) });
-      this.sendRaw({
-        type: WSEventType.LLM_RESPONSE,
-        ts: Date.now(),
-        payload: {
-          request_id: payload.request_id,
-          error: String(error),
-        },
-      });
+      if (!controller.signal.aborted && socket === this.ws && socket?.readyState === 1) {
+        addDebugTrace('llm', 'llm_request handler failed', { error: String(error) });
+        send({ request_id: requestId, error: String(error) });
+      }
+    } finally {
+      if (this.llmControllers.get(requestId) === controller) this.llmControllers.delete(requestId);
     }
   }
 
@@ -785,6 +800,8 @@ export class WebSocketTransport {
     errorText: string,
     options: Pick<AckResult, 'code' | 'retryable' | 'drop'> = {},
   ) {
+    for (const controller of this.llmControllers.values()) controller.abort();
+    this.llmControllers.clear();
     addDebugTrace('ack', 'reject all waiters', { count: this.ackWaiters.size, errorText });
     for (const [requestId, waiter] of this.ackWaiters.entries()) {
       clearTimeout(waiter.timer);

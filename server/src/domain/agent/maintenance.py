@@ -38,8 +38,8 @@ class MaintenanceCandidate:
 class MaintenanceReport:
     status: MaintenanceStatus
     reason: MaintenanceReason
-    previous_progress: str | None
-    new_progress: str | None
+    previous_progress: str | int | None
+    new_progress: str | int | None
     covered_entry_ids: tuple[str, ...] = ()
     maintained_entry_ids: tuple[str, ...] = ()
     memory_candidate_count: int = 0

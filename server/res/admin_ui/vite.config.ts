@@ -12,7 +12,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/admin/api': {
-        target: 'http://127.0.0.1:60030',
+        target: 'http://127.0.0.1:15673',
         changeOrigin: true,
       },
     },

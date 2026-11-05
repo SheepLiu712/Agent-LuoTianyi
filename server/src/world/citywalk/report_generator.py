@@ -8,7 +8,9 @@ from src.world.citywalk.types import CitywalkSessionResult
 
 
 class CitywalkReportGenerator:
-    def __init__(self, title_prefix: str = "逛街小洛", history_file: str = "data/citywalk_reports/citywalk_history.json"):
+    def __init__(
+        self, title_prefix: str = "逛街小洛", history_file: str = "data/citywalk_reports/citywalk_history.json"
+    ):
         self.title_prefix = title_prefix
         self.history_file = history_file
 
@@ -32,6 +34,7 @@ class CitywalkReportGenerator:
                     "reason": event.llm_reason,
                     "moving_activity": event.moving_activity,
                     "poi_activity": event.poi_activity,
+                    "environment_feedback": event.environment_feedback,
                     "state": {
                         "energy": [event.energy_before, event.energy_after],
                         "fullness": [event.fullness_before, event.fullness_after],

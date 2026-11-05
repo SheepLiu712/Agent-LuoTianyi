@@ -1,4 +1,5 @@
 import time
+from contextlib import aclosing
 from typing import Any, Dict, List
 
 from src.infrastructure.models.client_execution import ClientLLMExecutionError, ClientModelExecutor, notify_fallback
@@ -16,6 +17,8 @@ class LLMModule:
         prompt_template: PromptTemplate,
         interface: LLMAPIInterface,
         client_llm_executor: ClientModelExecutor | None = None,
+        *,
+        stream: bool = False,
     ) -> None:
         self.name = module_name
         self.logger = get_logger(f"LLMModule:{module_name}")
@@ -23,6 +26,9 @@ class LLMModule:
         self.config = llm_config
         self.enable_thinking = llm_config.get("enable_thinking", False)
         self.use_json = llm_config.get("use_json", False)
+        self.stream = llm_config.get("stream", stream)
+        if type(self.stream) is not bool:
+            raise TypeError("llm.stream 必须为布尔值")
         self.llm_client: LLMAPIInterface = interface
         self.prompt_template: PromptTemplate = prompt_template
         self.client_llm_executor = client_llm_executor
@@ -33,7 +39,9 @@ class LLMModule:
 
         self._recent_response = None  # 存储最近一次的响应结果
 
-    async def generate_response(self, **kwargs) -> str:
+    async def generate_response(self, *, on_delta=None, **kwargs) -> str:
+        if on_delta is not None and not self.stream:
+            raise ValueError("增量回调要求在创建 LLMModule 时启用 stream")
         prompt = self.prompt_template.render(**kwargs)
         observability = get_observability_service()
         trace_context = get_trace_context()
@@ -42,7 +50,7 @@ class LLMModule:
         model_name = interface_info.get("model")
         started = time.perf_counter()
         try:
-            response = await self._generate(prompt)
+            response = await self._generate_stream(prompt, on_delta) if self.stream else await self._generate(prompt)
             latency_ms = (time.perf_counter() - started) * 1000.0
             self._recent_response = response  # 存储最近一次的响应结果
             token_usage = response.get("usage", {}) or {}
@@ -70,6 +78,7 @@ class LLMModule:
                 )
             return response["content"]
         except Exception as exc:
+            self.logger.error("模型调用失败 module={} error_type={}", self.name, type(exc).__name__)
             if observability is not None:
                 observability.record_llm_call(
                     module_name=self.name,
@@ -83,6 +92,41 @@ class LLMModule:
                     user_id=trace_context.get("user_id"),
                 )
             raise
+
+    async def _generate_stream(self, prompt: str, on_delta) -> Dict[str, Any]:
+        if self.client_model_type and self.client_llm_executor is not None:
+            response = await self.client_llm_executor.delegate(
+                get_trace_context().get("user_id"),
+                module=self.name,
+                model_type=self.client_model_type,
+                model_kind="llm",
+                prompt=prompt,
+                params=self.params,
+                enable_thinking=self.enable_thinking,
+                use_json=self.use_json,
+                stream=True,
+                on_delta=on_delta,
+            )
+            if response is not None:
+                return response
+        started = time.perf_counter()
+        parts, usage = [], {}
+        async with aclosing(
+            self.llm_client.stream_response(
+                prompt, params=self.params, enable_thinking=self.enable_thinking, use_json=self.use_json
+            )
+        ) as events:
+            async for event in events:
+                content = event.get("content", "")
+                if content:
+                    parts.append(content)
+                    if on_delta is not None:
+                        await on_delta(content)
+                if "usage" in event:
+                    usage = event["usage"]
+        if not parts:
+            raise RuntimeError("模型流未返回正文")
+        return {"content": "".join(parts), "usage": usage, "response_time_s": time.perf_counter() - started}
 
     async def _generate(self, prompt: str) -> Dict[str, Any]:
         """优先按客户端模型类型委托；未配置/未启用时用服务端接口直连。"""

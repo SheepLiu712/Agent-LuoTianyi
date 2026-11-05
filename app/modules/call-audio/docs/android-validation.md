@@ -78,7 +78,7 @@ APK 不包含 `assets/index.android.bundle`。因此单独 `adb shell am start` 
 
 test-only smoke 只存在于隔离 build copy，不进入生产 UI 或 Git。
 
-权限拒绝时 `startSession` 返回 `permission_denied`；ADB 授权后，模拟器返回 `aec_unavailable`，`reacquireAudioFocus` 返回 `session_not_ready`，随后 `stopCapture`、`stopPlayback`、`stopSession` cleanup 成功且无 FATAL。该证据说明模块加载和 fail-closed 行为正确，不说明模拟器或真机上的 AEC、降噪和音频焦点效果。
+当时的版本要求设备具备声学回声消除（AEC）能力。模拟器拒绝录音权限时返回 `permission_denied`，授权后因缺少 AEC 返回 `aec_unavailable`，随后音频资源清理成功。当前版本已将 AEC 改为可选，以下清单列出对应的真机验收步骤。
 
 ## 未验证
 
@@ -115,7 +115,7 @@ versionName: 0.5.0
    - 预期：拒绝时 `permission_denied` 且无设备所有权残留；允许后才尝试初始化
 3. **固定音频格式与系统处理**
    - 验证 capture 为 PCM16 / 16 kHz / mono，playback 为 PCM16 / 24 kHz / mono
-   - 检查 AEC 与 NoiseSuppressor API 初始化和 enabled 状态；另以实际回声/环境噪声录音判断效果
+   - 在缺少 AEC 的设备上发起通话，确认调试日志记录 AEC 未启用及原因，验证双方能听到声音。分别用外放和耳机让角色连续说话，用户保持安静，记录是否误触发打断。另在支持 AEC 或系统降噪的设备上核对相应音效的启用状态及实际效果。
    - API enabled 只证明初始化，不等于实际效果通过
 4. **AudioFocus**
    - 通话中用其他媒体/电话场景抢占焦点，再恢复

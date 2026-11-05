@@ -18,6 +18,7 @@ from src.agent.context import ConversationMode
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.domain.stage import StageState
+from src.domain.stage.lifecycle import StageEndReason
 from src.stage import ChatStage
 
 
@@ -215,7 +216,7 @@ async def setup(agent=None, config=None):
 
 
 async def cleanup(stage, adapter):
-    await stage.terminate(d.InteractionEndingReason.SHUTDOWN)
+    await stage.terminate(StageEndReason.SHUTDOWN)
     await adapter.detach_stage_binding(stage)
 
 
@@ -260,15 +261,15 @@ async def test_ending_fresh_token_and_rejection_after_termination():
     stage, agent, adapter, _, _ = await setup()
     stage.stimulus_input_sink.submit(stimulus())
     await take(agent.requests)
-    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
+    result = await stage.terminate(StageEndReason.IDLE_TIMEOUT)
     ending = await take(agent.requests)
     assert isinstance(ending.stimulus, d.InteractionEnding)
     assert ending.stimulus.reason is d.InteractionEndingReason.USER_LEFT
-    assert not ending.cancellation.is_cancelled and result.error is None
+    assert not ending.cancellation.is_cancelled and result.finalization_error is None
     assert ending.interaction.connection_state is d.ConnectionState.CONNECTED
     with pytest.raises(d.InvalidHandleInputError):
         replace(ending.interaction, pending_stimuli=(ending.stimulus,))
-    assert await stage.terminate(d.InteractionEndingReason.SHUTDOWN) is result
+    assert await stage.terminate(StageEndReason.SHUTDOWN) is result
     assert not stage.stimulus_input_sink.submit(stimulus())
     with pytest.raises(ValueError):
         await adapter._bind(stage, StubChatConnection(Socket(), "user", "用户"))
@@ -281,8 +282,8 @@ async def test_ending_timeout_releases_stage():
         await asyncio.Event().wait()
 
     stage, _, adapter, _, _ = await setup(RecordingAgent(handle), {"termination_timeout": 0.01})
-    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
-    assert result.error == "interaction ending timed out"
+    result = await stage.terminate(StageEndReason.IDLE_TIMEOUT)
+    assert result.finalization_error == "interaction ending timed out"
     assert stage.state is StageState.TERMINATED and stage.context.closed
     await adapter.detach_stage_binding(stage)
 
@@ -293,9 +294,9 @@ async def test_ending_maintenance_failure_is_reported_and_context_closes():
         return SimpleNamespace(status=d.ExecutionStatus.FAILED, error_code=d.ExecutionErrorCode.INTERNAL_ERROR)
 
     stage, _, adapter, _, _ = await setup(RecordingAgent(realize=realize))
-    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
+    result = await stage.terminate(StageEndReason.IDLE_TIMEOUT)
 
-    assert result.error == "interaction ending maintenance failed"
+    assert result.finalization_error == "interaction ending maintenance failed"
     assert stage.state is StageState.TERMINATED
     assert stage.context.closed
     await adapter.detach_stage_binding(stage)
@@ -325,8 +326,8 @@ async def test_termination_drops_old_plan_and_realizes_only_ending_maintenance()
     stage.stimulus_input_sink.submit(stimulus())
     await asyncio.wait_for(old_started.wait(), 1)
 
-    result = await stage.terminate(d.InteractionEndingReason.USER_LEFT)
-    assert result.error is None
+    result = await stage.terminate(StageEndReason.IDLE_TIMEOUT)
+    assert result.finalization_error is None
     assert old_cancelled.is_set()
     executed = []
     while not agent.executions.empty():
@@ -460,12 +461,12 @@ async def test_stage_releases_context_after_ending_handler():
     stage = await ChatStage.create(
         user_id="user", character_id="luotianyi", agent=agent, output_sink=adapter.output_sink, context_factory=factory
     )
-    termination = asyncio.create_task(stage.terminate(d.InteractionEndingReason.USER_LEFT))
+    termination = asyncio.create_task(stage.terminate(StageEndReason.IDLE_TIMEOUT))
     await entered.wait()
     assert not stage.context.closed
     proceed.set()
     result = await termination
-    assert result.error is None and stage.context.closed
+    assert result.finalization_error is None and stage.context.closed
     assert len(factory.created) == 1
 
 
@@ -604,4 +605,4 @@ async def test_stage_construction_failure_closes_created_context():
             context_factory=factory,
             config={"max_stimuli": 0},
         )
-    assert len(factory.created) == 1 and factory.created[0].closed
+    assert factory.created == []

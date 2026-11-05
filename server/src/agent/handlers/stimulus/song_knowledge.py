@@ -6,7 +6,7 @@ import src.domain.agent as d
 from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.knowledge.song_acceptance import (
     SongAcceptanceStatus,
-    SongKnowledgeAcceptanceSkill,
+    SongKnowledgeStore,
 )
 from src.utils.logger import get_logger
 
@@ -18,7 +18,7 @@ class SongKnowledgeHandler:
     因此世界链路不会因它产生实时输出。
     """
 
-    def __init__(self, skill: SongKnowledgeAcceptanceSkill) -> None:
+    def __init__(self, skill: SongKnowledgeStore) -> None:
         self._skill = skill
         self._logger = get_logger(__name__)
 

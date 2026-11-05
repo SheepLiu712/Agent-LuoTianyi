@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.domain import MemoryContext, MemoryHit
 from src.domain.agent.maintenance import MaintenanceCandidate
+from src.domain.memory_record import MemoryType, MemoryVisibility
+from src.infrastructure.observability.retrieval_timing import measure_retrieval, retrieval_phase
 from src.infrastructure.persistence.database.vector_store import VectorStore
 
 from .profile_updater import UserProfileUpdater
@@ -25,7 +28,7 @@ class AgentMemory:
     def __init__(
         self,
         config: Dict[str, Any],
-        llm_modules: Dict[str, Any],
+        llm_service,
         *,
         database_manager: "DatabaseManager",
         vector_store: VectorStore,
@@ -35,10 +38,17 @@ class AgentMemory:
         self.owner_character_id = owner_character_id
         self.database_manager = database_manager
         self.vector_store = vector_store
-        self.memory_writer = MemoryWriter(config["memory_writer"], llm_modules["memory_writer"])
+        self.memory_writer = MemoryWriter(
+            config["memory_writer"],
+            llm_service.register_llm_module(
+                f"skill.cognitive_maintenance.extract.{owner_character_id}", config["memory_writer"]["llm_module"]
+            ),
+        )
         self.user_profile_updater = UserProfileUpdater(
             config["user_profile"],
-            llm_modules["user_profile_updater"],
+            llm_service.register_llm_module(
+                f"skill.cognitive_maintenance.profile.{owner_character_id}", config["user_profile"]["llm_module"]
+            ),
         )
 
     def ensure_dependencies(self) -> None:
@@ -63,12 +73,34 @@ class AgentMemory:
             raise RuntimeError("MemoryStore has not been initialized.")
         return memory_store
 
+    async def citywalk_memory_on(self, day: date) -> MemoryContext:
+        """从角色的漫步事件正本读取完整经历，不依赖向量相似度或虚拟用户身份。"""
+        events = await asyncio.to_thread(
+            self.database_manager.event_store.get_citywalk_events, self.owner_character_id, day
+        )
+        return MemoryContext(
+            tuple(
+                MemoryHit(
+                    rendered_text=f"{day:%Y-%m-%d} {event['title']}：{event['description']}",
+                    score=1.0,
+                    query="/YesterdayCityWalk",
+                    source="citywalk_event",
+                    source_record_id=event["id"],
+                )
+                for event in events
+            )
+        )
+
+    @measure_retrieval
     async def search_memory_context_for_topic(
         self,
         user_id: str,
         queries: List[str],
         similarity_threshold: float = 0.8,
         k: int = 3,
+        *,
+        include_user: bool = True,
+        include_character: bool = True,
     ) -> MemoryContext:
         """按话题线索召回结构化记忆上下文。
 
@@ -78,14 +110,31 @@ class AgentMemory:
         if not queries:
             return MemoryContext()
 
-        candidate_hits = await self._search_candidates(user_id, queries, similarity_threshold, k)
-        vector_ids = [vector_id for _, _, vector_id, _, _ in candidate_hits if vector_id]
-        records_by_vector_id = await asyncio.to_thread(
-            self.memory_store.get_agent_memory_records_by_embedding_ids,
-            vector_ids,
+        with retrieval_phase("authorization"):
+            allowed_ids = await asyncio.to_thread(
+                self.memory_store.get_scoped_embedding_ids,
+                self.owner_character_id,
+                user_id,
+                include_user=include_user,
+                include_character=include_character,
+                legacy_ids=self._legacy_character_ids(),
+            )
+
+        candidate_hits = await self._search_candidates(
+            user_id, queries, similarity_threshold, k, allowed_ids, include_user
         )
-        scored_hits = self._materialize_hits(candidate_hits, records_by_vector_id)
-        return MemoryContext(self._top_distinct_hits(scored_hits, k))
+        vector_ids = [vector_id for _, _, vector_id, _, _ in candidate_hits if vector_id]
+        with retrieval_phase("hydration"):
+            records_by_vector_id = await asyncio.to_thread(
+                self.memory_store.get_agent_memory_records_by_embedding_ids,
+                vector_ids,
+            )
+
+        with retrieval_phase("materialization"):
+            scored_hits = self._materialize_hits(
+                candidate_hits, records_by_vector_id, user_id, include_user, include_character
+            )
+            return MemoryContext(self._top_distinct_hits(scored_hits, k))
 
     async def _search_candidates(
         self,
@@ -93,13 +142,26 @@ class AgentMemory:
         queries: List[str],
         similarity_threshold: float,
         k: int,
+        allowed_ids: list[str],
+        include_user: bool,
     ) -> List[Tuple[float, str, str, Any, str]]:
         candidates: List[Tuple[float, str, str, Any, str]] = []
         for query in queries:
             q = (query or "").strip()
             if not q:
                 continue
-            results = await self.vector_store.search(user_id, q, k=max(1, k))
+            if not include_user and not allowed_ids:
+                continue
+            embedding = await self.vector_store.embed_query(q)
+            results = (
+                await self.vector_store.search(user_id, q, k=max(1, k), query_embedding=embedding)
+                if include_user
+                else []
+            )
+            if allowed_ids:
+                results += await self.vector_store.search(
+                    user_id, q, k=max(1, k), ids=allowed_ids, where=None, query_embedding=embedding
+                )
             for doc, score in results:
                 if score < similarity_threshold:
                     continue
@@ -114,10 +176,16 @@ class AgentMemory:
         self,
         candidates: List[Tuple[float, str, str, Any, str]],
         records_by_vector_id: dict[str, Any],
+        user_id: str,
+        include_user: bool,
+        include_character: bool,
     ) -> List[Tuple[float, str, MemoryHit]]:
         scored_hits: List[Tuple[float, str, MemoryHit]] = []
         for score, query, vector_id, doc, content in candidates:
             record = records_by_vector_id.get(vector_id) if vector_id else None
+            metadata = doc.get_metadata()
+            if not self._can_read(record, metadata, user_id, include_user, include_character):
+                continue
             rendered = self._render_memory_hit(record, content, doc)
             dedup_key = record.id if record else vector_id or rendered
             scored_hits.append(
@@ -135,6 +203,26 @@ class AgentMemory:
                 )
             )
         return scored_hits
+
+    def _legacy_character_ids(self) -> set[str]:
+        """受控旧格式适配：仅信任部署者明确列出的旧角色事件正本 ID。"""
+        return set(self.config.get("legacy_character_memory_ids", {}).get(self.owner_character_id, ()))
+
+    def _can_read(self, record, metadata, user_id, include_user, include_character) -> bool:
+        if record is None:
+            return (
+                "memory_scope" not in metadata
+                and include_user
+                and metadata.get("user_id") == user_id
+                and metadata.get("owner_character_id", "luotianyi") == self.owner_character_id
+            )
+        if record.owner_character_id != self.owner_character_id:
+            return False
+        if record.subject_user_id is None:
+            return include_character and record.visibility is MemoryVisibility.CHARACTER_PRIVATE
+        if record.id in self._legacy_character_ids() and record.memory_type is MemoryType.INTERACTION_EVENT:
+            return include_character and record.subject_user_id == self.owner_character_id
+        return include_user and record.subject_user_id == user_id
 
     @staticmethod
     def _top_distinct_hits(scored_hits: List[Tuple[float, str, MemoryHit]], k: int) -> tuple[MemoryHit, ...]:
