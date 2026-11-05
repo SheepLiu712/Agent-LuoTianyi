@@ -190,7 +190,19 @@
         }
     },
     "agent_runtime": {
+        "omni_prompt_file": "res/agent/prompts/realtime_call_prompt.json",
         "skills": {
+            "call_summary": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
+                    },
+                    "prompt_name": "call_summary_prompt"
+                }
+            },
             "speaking": {
                 "characters": {
                     "luotianyi": {

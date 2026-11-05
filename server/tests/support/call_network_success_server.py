@@ -111,7 +111,8 @@ class _AddressPublishingLifecycle(ServerLifecycle):
 
 
 def _runtime_config(root: Path) -> Path:
-    source = Path(server_main.current_dir) / "config" / "config.json"
+    # 与持续集成使用同一份公开配置，避免依赖开发者本机的私有配置。
+    source = Path(server_main.current_dir) / "config" / "config.json.template"
     config = json.loads(source.read_text(encoding="utf-8"))
     config["call_transport"] = {
         "enabled": True,
