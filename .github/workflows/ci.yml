@@ -1,0 +1,238 @@
+name: PR 离线检查
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  PYTHONUTF8: '1'
+  # 仅满足配置解析，不授予任何真实服务权限。
+  QWEN_API_KEY: offline-test-key
+  SILICONFLOW_API_KEY: offline-test-key
+  AMAP_KEY: offline-test-key
+  JWT_SECRET: offline-ci-secret-not-for-production
+  RUN_EXTERNAL_TESTS: '0'
+  RUN_REAL_LLM_TESTS: '0'
+
+jobs:
+  server-lint:
+    name: server-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: python -m pip install ruff==0.14.10 black==26.5.1
+      - name: 检查静态规则
+        run: python -m ruff check . --output-format=github
+      - name: 检查代码格式
+        run: python -m black --check .
+      - name: 检查测试报告校验脚本
+        run: |
+          python -m ruff check ../.github/scripts/check_pytest_results.py
+          python -m black --check --include '.*\.py$' ../.github/scripts/check_pytest_results.py
+
+  server-tests:
+    name: server-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+      - run: python -m pip install -e '.[dev]' httpx
+      - name: 从公开模板创建测试配置
+        run: cp config/config.json.template config/config.json
+      - name: 运行全部离线测试
+        run: >-
+          python -m pytest tests
+          -m 'not external and not real_llm'
+          --ignore=tests/e2e/external
+          -q --tb=short --junitxml=test-results.xml
+      - name: 确认选定测试没有被跳过
+        run: python ../.github/scripts/check_pytest_results.py test-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-test-results
+          path: server/test-results.xml
+
+  desktop-tests:
+    name: desktop-tests
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: client
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: client/setup/requirements.txt
+      - run: >-
+          python -m pip install -r setup/requirements.txt
+          PySide6==6.9.2 live2d-py==0.6.0 PyOpenGL==3.1.10
+          pytest==9.0.3 pytest-asyncio==1.4.0
+      - name: 运行全部桌面端离线测试
+        # login、communication、ws_concurrent 连接真实服务器；audio_base64 播放真实音频。
+        # 保留这些手动脚本，不将其计入离线验收。
+        run: >-
+          python -m pytest tests
+          --ignore=tests/test_login.py
+          --ignore=tests/test_communication.py
+          --ignore=tests/test_ws_concurrent.py
+          --ignore=tests/test_audio_base64.py
+          -q --tb=short --junitxml=test-results.xml
+      - name: 确认选定测试没有被跳过
+        run: python ../.github/scripts/check_pytest_results.py test-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-test-results
+          path: client/test-results.xml
+
+  cli-tests:
+    name: cli-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cli-client
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: cli-client/requirements*.txt
+      - run: python -m pip install -r requirements-dev.txt pytest==9.0.3
+      - run: python -m pytest tests -q --tb=short --junitxml=test-results.xml
+      - name: 确认选定测试没有被跳过
+        run: python ../.github/scripts/check_pytest_results.py test-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cli-test-results
+          path: cli-client/test-results.xml
+
+  app-checks:
+    name: app-checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-python@v5
+        id: server_python
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+      - name: 安装本机回环网络测试所需的服务端依赖
+        run: python -m pip install -e '../server[dev]' httpx
+      - name: 准备本机回环网络测试配置
+        run: cp ../server/config/config.json.template ../server/config/config.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx --no-install tsc --noEmit
+      - name: 运行全部移动端离线测试，包含本机服务端集成
+        env:
+          CALL_E2E_PYTHON: ${{ steps.server_python.outputs.python-path }}
+        run: npx --no-install jest --runInBand --json --outputFile=test-results.json
+      - name: 确认没有因缺少服务端环境而跳过测试
+        run: |
+          node - <<'JS'
+          const results = require('./test-results.json');
+          if (!results.success || results.numTotalTests === 0 || results.numPendingTests > 0 || results.numPendingTestSuites > 0) {
+            throw new Error('移动端离线测试未全部执行并通过');
+          }
+          JS
+      - name: 检查 Live2D 页面交互
+        run: node --test scripts/test-live2d-blink.cjs scripts/test-live2d-touch.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-test-results
+          path: app/test-results.json
+
+  admin-build:
+    name: admin-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server/res/admin_ui
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/res/admin_ui/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  offline-ci:
+    name: offline-ci
+    if: always()
+    needs: [server-lint, server-tests, desktop-tests, cli-tests, app-checks, admin-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: 所有必要任务必须实际成功
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          results = json.loads(os.environ['RESULTS'])
+          failed = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          if failed:
+              raise SystemExit(f'离线检查未全部通过：{failed}')
+          print('全部离线检查通过')
+          PY
