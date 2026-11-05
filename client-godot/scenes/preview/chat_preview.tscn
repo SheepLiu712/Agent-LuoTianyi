@@ -1,0 +1,220 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/geometry.tres" id="isolation_geometry_store"]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+
+[ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
+
+[ext_resource type="Resource" path="res://resources/platform/preview.tres" id="isolation_settings"]
+
+[ext_resource type="Script" path="res://src/preview/chat_preview.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="3_avatar"]
+[ext_resource type="Script" path="res://src/ui/composer_input.gd" id="4_composer"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
+[ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
+
+
+[sub_resource type="StyleBoxFlat" id="SendStyle"]
+content_margin_left = 10.0
+content_margin_top = 10.0
+content_margin_right = 10.0
+content_margin_bottom = 10.0
+bg_color = Color(0.7411765, 0.8980392, 0.9294118, 1)
+corner_radius_top_left = 9
+corner_radius_top_right = 9
+corner_radius_bottom_right = 9
+corner_radius_bottom_left = 9
+
+
+
+[node name="ChatPreview" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+files = ExtResource("isolation_files")
+
+settings = ExtResource("isolation_settings")
+
+runtime = ExtResource("isolation_runtime")
+
+window_system = ExtResource("isolation_window_system")
+
+geometry_store = ExtResource("isolation_geometry_store")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.9607843, 0.972549, 0.9803922, 1)
+
+[node name="Split" type="HSplitContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 6
+
+[node name="AvatarPanel" parent="Split" instance=ExtResource("3_avatar")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(290, 0)
+layout_mode = 2
+
+[node name="Header" type="VBoxContainer" parent="Split/AvatarPanel"]
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 24.0
+offset_bottom = 24.0
+mouse_filter = 2
+
+[node name="Name" type="Label" parent="Split/AvatarPanel/Header"]
+theme_override_font_sizes/font_size = 25
+theme_override_colors/font_color = Color(0.1882353, 0.3019608, 0.3764706, 1)
+text = "洛天依"
+
+[node name="Subtitle" type="Label" parent="Split/AvatarPanel/Header"]
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.3215686, 0.4196078, 0.4901961, 1)
+text = "把平凡的日子，慢慢说给我听。"
+
+[node name="Expressions" type="OptionButton" parent="Split/AvatarPanel/Header"]
+unique_name_in_owner = true
+item_count = 7
+selected = 0
+popup/item_0/text = "微笑脸"
+popup/item_0/id = 0
+popup/item_1/text = "温柔脸"
+popup/item_1/id = 1
+popup/item_2/text = "喜欢脸"
+popup/item_2/id = 2
+popup/item_3/text = "卖萌"
+popup/item_3/id = 3
+popup/item_4/text = "生气脸"
+popup/item_4/id = 4
+popup/item_5/text = "难过脸"
+popup/item_5/id = 5
+popup/item_6/text = "唱歌"
+popup/item_6/id = 6
+
+[node name="Margin" type="MarginContainer" parent="Split"]
+custom_minimum_size = Vector2(410, 0)
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_bottom = 22
+
+[node name="Column" type="VBoxContainer" parent="Split/Margin"]
+theme_override_constants/separation = 12
+
+[node name="Heading" type="HBoxContainer" parent="Split/Margin/Column"]
+
+[node name="Title" type="Label" parent="Split/Margin/Column/Heading"]
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 23
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+text = "和天依聊聊"
+
+[node name="Scenarios" type="OptionButton" parent="Split/Margin/Column/Heading"]
+unique_name_in_owner = true
+item_count = 5
+selected = 0
+popup/item_0/text = "日常聊天"
+popup/item_0/id = 0
+popup/item_1/text = "空白会话"
+popup/item_1/id = 1
+popup/item_2/text = "网络断开"
+popup/item_2/id = 2
+popup/item_3/text = "加载失败"
+popup/item_3/id = 3
+popup/item_4/text = "正在思考"
+popup/item_4/id = 4
+
+[node name="Offline" type="Label" parent="Split/Margin/Column"]
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.5019608, 0.60784316, 0.654902, 1)
+text = "离线样板 · 未连接服务器"
+
+[node name="Scroll" type="ScrollContainer" parent="Split/Margin/Column"]
+unique_name_in_owner = true
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Messages" type="VBoxContainer" parent="Split/Margin/Column/Scroll"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_constants/separation = 17
+
+[node name="Empty" type="Label" parent="Split/Margin/Column/Scroll/Messages"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 240)
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.5137255, 0.6117647, 0.65882355, 1)
+text = "从一句问候开始"
+horizontal_alignment = 1
+
+[node name="Latest" type="Button" parent="Split/Margin/Column"]
+unique_name_in_owner = true
+visible = false
+text = "回到最新 ↓"
+
+[node name="Status" type="Label" parent="Split/Margin/Column"]
+unique_name_in_owner = true
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.4862745, 0.5882353, 0.62352943, 1)
+
+[node name="Tools" type="HBoxContainer" parent="Split/Margin/Column"]
+theme_override_constants/separation = 10
+
+[node name="PickImage" type="Button" parent="Split/Margin/Column/Tools"]
+unique_name_in_owner = true
+text = "＋ 图片"
+
+[node name="TogglePlay" type="Button" parent="Split/Margin/Column/Tools"]
+unique_name_in_owner = true
+text = "▷ 模拟口型 / 停止"
+
+[node name="Input" type="TextEdit" parent="Split/Margin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 92)
+placeholder_text = "想说些什么？"
+wrap_mode = 1
+script = ExtResource("4_composer")
+
+input_service = ExtResource("isolation_input_service")
+
+[node name="Footer" type="HBoxContainer" parent="Split/Margin/Column"]
+
+[node name="Hint" type="Label" parent="Split/Margin/Column/Footer"]
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.5803922, 0.64705884, 0.6862745, 1)
+text = "Enter 发送 · Shift + Enter 换行"
+
+[node name="Send" type="Button" parent="Split/Margin/Column/Footer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 0)
+theme_override_styles/normal = SubResource("SendStyle")
+text = "发送  ↑"
+
+[node name="ImagePicker" type="FileDialog" parent="."]
+unique_name_in_owner = true
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.png, *.jpg, *.jpeg, *.webp ; 图片")
+use_native_dialog = true

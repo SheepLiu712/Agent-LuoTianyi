@@ -1,0 +1,120 @@
+extends SceneTree
+const Outbox = preload("res://src/network/reliable_outbox.gd")
+var failures: Array[String] = []
+var states: Dictionary = {}
+func check(ok: bool, description: String) -> void:
+	if not ok:
+		failures.append(description)
+		print("FAIL: ", description)
+func observe(outbox):
+	outbox.delivery_changed.connect(func(id, state, code): states[id] = [state, code])
+func _initialize() -> void:
+	var queue = Outbox.new()
+	observe(queue)
+	var typing: String = queue.enqueue("user_typing", {"text_length":1}, false, 0)
+	var first: String = queue.enqueue("user_text", {"message":"first"}, true, 0)
+	check(not first.is_empty(), "stable ID allocated")
+	var packets: Array[Dictionary] = queue.take_ready(0, true)
+	check(packets.size() == 2, "transient and durable send independently")
+	queue.acknowledge(typing, {"ok":false, "retryable":true}, 0)
+	queue.acknowledge(first, {"ok":false, "code":"OVERLOADED", "retryable":true}, 0)
+	check(queue.take_ready(999, true).is_empty(), "backoff respected")
+	packets = queue.take_ready(1000, true)
+	check(packets.size() == 1, "transient does not retry or block durable")
+	if packets.size() == 1:
+		check(packets[0].client_msg_id == first and packets[0].payload.message == "first", "retry preserves original ID and payload")
+	queue.acknowledge(first, {"received_event_type":"user_text"}, 1001)
+	queue.acknowledge(first, {"ok":false, "retryable":false}, 1002)
+	check(states.get(first) == ["sent", "OK"], "legacy and duplicate ACK handled")
+	var rejected: String = queue.enqueue("user_text", {}, true, 2000)
+	queue.take_ready(2000, true)
+	queue.acknowledge(rejected, {"ok":false, "code":"INVALID", "retryable":false}, 2001)
+	check(states.get(rejected) == ["failed", "INVALID"], "terminal NACK is visible")
+	var aging: String = queue.enqueue("user_text", {}, true, 0)
+	queue.take_ready(240000, false)
+	check(states.get(aging) == ["uncertain", "DELIVERY_UNCERTAIN"], "total age capped while disconnected")
+	var retried: String = queue.enqueue("user_text", {}, true, 0)
+	var clock := 0
+	for delay in [1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]:
+		packets = queue.take_ready(clock, true)
+		check(packets.size() == 1, "retry attempt exists")
+		queue.acknowledge(retried, {"ok":false, "retryable":true}, clock)
+		clock += delay
+	queue.take_ready(clock, true)
+	queue.acknowledge(retried, {"ok":false, "retryable":true}, clock)
+	check(states.get(retried) == ["uncertain", "DELIVERY_UNCERTAIN"], "eight retries maximum")
+	var lost: String = queue.enqueue("user_text", {}, true, 0)
+	queue.take_ready(0, true)
+	check(queue.take_ready(10000, true).is_empty(), "ACK timeout starts backoff")
+	packets = queue.take_ready(11000, true)
+	check(packets.size() == 1, "lost ACK retried")
+	queue.disconnected(11001)
+	queue.stop()
+	check(states.get(lost) == ["failed", "TRANSPORT_STOPPED"], "stop terminates old-account queue")
+	check(queue.take_ready(20000, true).is_empty(), "stopped payloads released")
+	_check_order_and_late_ack()
+	_check_transients_and_limits()
+	print("Reliable outbox: ", "PASS" if failures.is_empty() else "FAIL")
+	quit(0 if failures.is_empty() else 1)
+
+func _check_order_and_late_ack() -> void:
+	var queue = Outbox.new()
+	observe(queue)
+	var source := {"message":"original", "llm_mode":{"types":[]}}
+	var first: String = queue.enqueue("user_text", source, true, 0)
+	source.message = "modified"
+	var second: String = queue.enqueue("user_image", {}, true, 1)
+	var packets: Array[Dictionary] = queue.take_ready(1, true)
+	check(packets.size() == 1, "only first durable message can await ACK")
+	if packets.size() == 1:
+		check(packets[0].payload.message == "original", "enqueue copies caller payload")
+		check(packets[0].has("ts") and packets[0].get("reply_to") == null, "wire envelope contains timestamp and reply_to")
+		packets[0].payload.message = "mutated packet"
+	queue.disconnected(2)
+	check(queue.take_ready(1001, true).is_empty(), "second durable cannot overtake first backoff")
+	packets = queue.take_ready(1002, true)
+	if packets.size() == 1:
+		check(packets[0].payload.message == "original", "returned packet cannot mutate retry payload")
+	queue.acknowledge(first, {"ok":false, "retryable":true}, 1003)
+	queue.acknowledge(first, {"ok":false, "retryable":true}, 1003)
+	queue.acknowledge(first, {"ok":true}, 1004)
+	queue.acknowledge(first, {"ok":true}, 1004)
+	queue.acknowledge("unknown", {"ok":true}, 1004)
+	packets = queue.take_ready(1004, true)
+	check(packets.size() == 1 and packets[0].client_msg_id == second, "late ACK during backoff releases next durable")
+	queue.acknowledge(second, {"ok":false, "retryable":"true", "code":42}, 1005)
+	check(states.get(second) == ["failed", "REJECTED"], "NACK retryable must be boolean and invalid code sanitized")
+	var aging: String = queue.enqueue("user_text", {}, true, 0)
+	queue.take_ready(239000, true)
+	queue.acknowledge(aging, {"ok":false, "retryable":true}, 239000)
+	check(states.get(aging) == ["uncertain", "DELIVERY_UNCERTAIN"], "retry at exact age limit is forbidden")
+	var late: String = queue.enqueue("user_text", {}, true, 0)
+	queue.take_ready(239999, true)
+	queue.acknowledge(late, {"ok":true}, 240000)
+	check(states.get(late) == ["uncertain", "DELIVERY_UNCERTAIN"], "ACK cannot extend total age limit")
+
+func _check_transients_and_limits() -> void:
+	var queue = Outbox.new()
+	observe(queue)
+	var selection: String = queue.enqueue("user_image_selecting", {}, false, 0)
+	queue.take_ready(0, true)
+	queue.take_ready(4999, true)
+	check(states.get(selection, [""])[0] == "sending", "selection waits five seconds for ACK")
+	queue.take_ready(5000, true)
+	check(states.get(selection, [""])[0] == "failed", "selection ACK timeout terminates transient")
+	var cancel_id: String = queue.enqueue("user_image_selecting_cancel", {}, false, 0)
+	queue.take_ready(0, true)
+	queue.take_ready(5000, true)
+	check(states.get(cancel_id, [""])[0] == "failed", "wire cancel event also has five second timeout")
+	var typing: String = queue.enqueue("user_typing", {}, false, 0)
+	queue.take_ready(0, false)
+	check(states.get(typing, [""])[0] == "failed" and queue.take_ready(1, true).is_empty(), "offline transient is dropped")
+	check(queue.enqueue("user_image", {"image_base64":"x".repeat(8 * 1024 * 1024)}, true, 0).is_empty(), "oversized UTF8 packet rejected")
+	var ids: Dictionary = {}
+	for index in range(128):
+		var id: String = queue.enqueue("user_text", {}, true, 0)
+		ids[id] = true
+	check(ids.size() == 128 and not ids.has(""), "queue accepts 128 unique pending IDs")
+	check(queue.enqueue("user_text", {}, true, 0).is_empty(), "pending queue has bounded capacity")
+	queue.stop()
+	check(not queue.enqueue("user_text", {}, true, 0).is_empty(), "stop restores queue capacity")

@@ -1,0 +1,236 @@
+[gd_scene format=3 uid="uid://djn5wf7dsf7sb"]
+
+[ext_resource type="Script" uid="uid://rmw8x3ftxi1" path="res://src/application.gd" id="1_app"]
+[ext_resource type="Theme" uid="uid://dxbfy2n125n1p" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/account_view.tscn" id="3_account"]
+[ext_resource type="Script" uid="uid://bjg42nfn7ocje" path="res://src/platform/desktop_window_host.gd" id="13_a8y0u"]
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+[ext_resource type="Resource" path="res://resources/platform/decoder.tres" id="isolation_decoder"]
+[ext_resource type="Resource" path="res://resources/platform/encryption.tres" id="isolation_password_encryption"]
+[ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
+[ext_resource type="Resource" path="res://resources/platform/secrets.tres" id="isolation_secret_protection"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_chat.svg" id="icon_nav_chat"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_at.svg" id="icon_nav_at"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_settings.svg" id="icon_nav_settings"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_scroll.svg" id="icon_nav_scroll"]
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
+
+[sub_resource type="StyleBoxFlat" id="NavigationRail"]
+resource_local_to_scene = true
+content_margin_left = 8.0
+content_margin_right = 8.0
+content_margin_top = 24.0
+content_margin_bottom = 16.0
+bg_color = Color(0.941, 0.965, 0.98, 1)
+border_width_right = 1
+border_color = Color(0.878, 0.914, 0.941, 1)
+
+[sub_resource type="StyleBoxFlat" id="UnreadDot"]
+bg_color = Color(0.259, 0.725, 0.929, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_left = 3
+corner_radius_bottom_right = 3
+
+[sub_resource type="Gradient" id="WorkspaceGradient"]
+colors = PackedColorArray(0.965, 0.976, 0.988, 1, 0.965, 0.976, 0.988, 1)
+
+[sub_resource type="GradientTexture2D" id="WorkspaceBackdrop"]
+resource_local_to_scene = true
+gradient = SubResource("WorkspaceGradient")
+width = 64
+height = 64
+fill_from = Vector2(0, 0)
+fill_to = Vector2(1, 1)
+
+[sub_resource type="Resource" id="Resource_a8y0u"]
+resource_local_to_scene = true
+script = ExtResource("13_a8y0u")
+
+[node name="AgentLuo" type="Control" unique_id=553571457]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_app")
+decoder_factory = ExtResource("isolation_decoder")
+secret_protection = ExtResource("isolation_secret_protection")
+password_encryption = ExtResource("isolation_password_encryption")
+window_system = ExtResource("isolation_window_system")
+runtime = ExtResource("isolation_runtime")
+
+[node name="Background" type="TextureRect" parent="." unique_id=1865948660]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = SubResource("WorkspaceBackdrop")
+expand_mode = 1
+
+[node name="Workspace" type="Control" parent="." unique_id=1149884569]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Navigation" type="PanelContainer" parent="Workspace" unique_id=737013320]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 1
+anchor_bottom = 1.0
+offset_right = 80.0
+theme_override_styles/panel = SubResource("NavigationRail")
+
+[node name="Items" type="VBoxContainer" parent="Workspace/Navigation" unique_id=841908827]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="NavChat" type="Button" parent="Workspace/Navigation/Items" unique_id=285933914]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+toggle_mode = true
+button_pressed = true
+icon = ExtResource("icon_nav_chat")
+expand_icon = false
+text = "聊天"
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="ActiveMark" type="ColorRect" parent="Workspace/Navigation/Items/NavChat"]
+layout_mode = 1
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = -8.0
+offset_top = -11.0
+offset_right = -5.0
+offset_bottom = 11.0
+mouse_filter = 2
+color = Color(0.4, 0.8, 1, 1)
+
+[node name="NavDynamics" type="Button" parent="Workspace/Navigation/Items" unique_id=452102207]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+clip_text = true
+icon = ExtResource("icon_nav_at")
+expand_icon = false
+text = "动态"
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="DynamicsUnread" type="Panel" parent="Workspace/Navigation/Items/NavDynamics"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -15.0
+offset_top = 9.0
+offset_right = -9.0
+offset_bottom = 15.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("UnreadDot")
+
+[node name="NavSettings" type="Button" parent="Workspace/Navigation/Items" unique_id=485844229]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+icon = ExtResource("icon_nav_settings")
+expand_icon = false
+text = "设置"
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="Spacer" type="Control" parent="Workspace/Navigation/Items" unique_id=1242541680]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="NavLogs" type="Button" parent="Workspace/Navigation/Items" unique_id=1825679116]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(62, 68)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+icon = ExtResource("icon_nav_scroll")
+expand_icon = false
+text = "日志"
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="Split" type="HSplitContainer" parent="Workspace" unique_id=1485704318]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 96.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+size_flags_horizontal = 3
+size_flags_vertical = 3
+dragger_visibility = 2
+theme_override_constants/separation = 8
+
+[node name="Center" type="MarginContainer" parent="." unique_id=89554627]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="AccountForm" parent="Center" unique_id=1827944903 instance=ExtResource("3_account")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="LogProblem" type="Label" parent="." unique_id=1100606634]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 23.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.7176471, 0.16470589, 0.16470589, 1)
+autowrap_mode = 3
+
+[node name="ExitDialog" parent="." unique_id=769923390 instance=ExtResource("Decision")]
+unique_name_in_owner = true
+title = "放弃未保存的内容？"
+dialog_text = "退出将关闭所有窗口；尚未提交的内容不会保留。"
+ok_button_text = "放弃并继续"
+cancel_button_text = "返回继续编辑"
+
+[node name="SecurityError" type="Label" parent="." unique_id=1675096938]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+text = "凭据保护组件缺失，请重新解压完整程序。"
+
+[node name="AccountStorageWarning" type="Label" parent="." unique_id=2088089257]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+anchor_right = 1.0
+offset_left = 120.0
+offset_top = 3.0
+offset_right = -24.0
+theme_type_variation = &"AccountNotice"
+text = "本次登录有效，但本地登录状态未能保存或清除。下次可能需要输入密码，请查看日志。"
+autowrap_mode = 3
+
+[node name="Chrome" parent="." unique_id=582216013 instance=ExtResource("WindowChrome")]
+unique_name_in_owner = true
+anchors_preset = 0
+login_mode = true
+host = SubResource("Resource_a8y0u")

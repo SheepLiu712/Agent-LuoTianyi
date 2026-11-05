@@ -1,0 +1,226 @@
+[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" path="res://src/ui/message_waveform.gd" id="script"]
+[node name="WaveformStrip" type="HBoxContainer"]
+custom_minimum_size = Vector2(96,26)
+mouse_filter = 2
+clip_contents = true
+theme_override_constants/separation = 0
+script = ExtResource("script")
+played_color = Color(0.4,0.8,1,1)
+remaining_color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample00" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample00"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample01" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample01"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample02" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample02"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample03" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample03"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample04" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample04"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample05" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample05"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample06" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample06"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample07" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample07"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample08" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample08"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample09" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample09"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample10" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample10"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample11" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample11"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample12" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample12"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample13" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample13"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample14" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample14"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample15" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample15"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample16" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample16"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample17" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample17"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample18" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample18"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample19" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample19"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample20" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample20"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample21" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample21"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample22" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample22"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)
+
+[node name="Sample23" type="CenterContainer" parent="."]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Bar" type="ColorRect" parent="Sample23"]
+custom_minimum_size = Vector2(2,2)
+mouse_filter = 2
+color = Color(0.619607866,0.713725507,0.768627465,1)

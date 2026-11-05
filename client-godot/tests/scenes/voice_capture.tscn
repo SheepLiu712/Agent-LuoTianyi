@@ -1,0 +1,18 @@
+[gd_scene load_steps=4 format=3]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="avatar"]
+[ext_resource type="PackedScene" path="res://scenes/ui/chat_view.tscn" id="chat"]
+[node name="VoiceCapture" type="HSplitContainer"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("theme")
+split_offset = 540
+
+[node name="AvatarPanel" parent="." instance=ExtResource("avatar")]
+custom_minimum_size = Vector2(290,0)
+
+[node name="ChatView" parent="." instance=ExtResource("chat")]
+custom_minimum_size = Vector2(440,0)
+size_flags_horizontal = 3
