@@ -629,12 +629,13 @@ class CallStage:
             for turn in self._turns.values():
                 if not turn.first_audio_recorded:
                     turn.first_audio_disqualified = True
+            # 状态转换会先发布内存状态，再等待账本写入；此时新连接已能申请恢复。
+            self._recovery_deadline = disconnected_monotonic + 3.0
             await self._transition_or_close(CallState.RECONNECTING, ledger_facts={"disconnected_at": disconnected_at})
             self._time_limit_changed.set()
             if self._first_disconnect_monotonic is None:
                 self._first_disconnect_monotonic = disconnected_monotonic
             self._reconnect_count += 1
-            self._recovery_deadline = disconnected_monotonic + 3.0
             self._cancel_task(self._silence_task)
             if self._retention_changed is not None:
                 self._report_retention(self._recovery_deadline)
