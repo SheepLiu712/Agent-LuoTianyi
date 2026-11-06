@@ -466,6 +466,21 @@ describe('reliable call transport', () => {
     expect(native.replyFailureToneCount).toBe(0);
   });
 
+  test('keeps the call alive on retryable OVERLOADED and leaves the outbox intact', async () => {
+    const { session, socket, native } = await establish();
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'OVERLOADED',
+      message: 'pcm queue is full', retryable: true, call_id: CALL_ID, request_seq: 2,
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(socket.readyState).toBe(1);
+    expect(native.stopCaptureCount).toBe(0);
+    expect(session.state.errorCode).toBeUndefined();
+  });
+
   test('does not terminate the call when the local reply failure tone cannot play', async () => {
     const { session, socket, native } = await establish();
     native.playReplyFailureTone = async () => { throw new Error('local_tone_failed'); };
