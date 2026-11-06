@@ -144,10 +144,15 @@ def _control(ws, message: dict) -> None:
 def _receive_until(ws, expected_type: str, timeout: float = 5.0) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        raw = ws.recv()
-        if isinstance(raw, bytes):
+        opcode, raw = ws.recv_data()
+        if opcode == websocket.ABNF.OPCODE_CLOSE:
+            code = int.from_bytes(raw[:2], "big") if len(raw) >= 2 else None
+            pytest.fail(f"connection closed while waiting for {expected_type}: {code} {raw[2:].decode()}")
+        if opcode == websocket.ABNF.OPCODE_BINARY:
             continue
         event = json.loads(raw)
+        if event.get("type") == "error" and expected_type != "error":
+            pytest.fail(f"received {event.get('code')} while waiting for {expected_type}")
         if event.get("type") == expected_type:
             return event
     raise AssertionError(f"did not receive {expected_type}")
