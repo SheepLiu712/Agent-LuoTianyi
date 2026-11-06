@@ -466,6 +466,34 @@ describe('reliable call transport', () => {
     expect(native.replyFailureToneCount).toBe(0);
   });
 
+  test('keeps the call connected on a retryable server error and still accepts the next response', async () => {
+    const { session, socket, native } = await establish();
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'OVERLOADED',
+      message: 'pcm queue full, retry after backoff', retryable: true,
+      request_type: 'audio', request_seq: 7,
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(socket.readyState).toBe(1);
+    expect(native.stopCaptureCount).toBe(0);
+    expect(native.replyFailureToneCount).toBe(0);
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'after-overload', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([2, 0]),
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(native.enqueued).toEqual([new Uint8Array([2, 0])]);
+  });
+
   test('does not terminate the call when the local reply failure tone cannot play', async () => {
     const { session, socket, native } = await establish();
     native.playReplyFailureTone = async () => { throw new Error('local_tone_failed'); };
