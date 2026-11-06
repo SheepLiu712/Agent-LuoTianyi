@@ -5,11 +5,11 @@
   - [x] 端到端测试CLI 客户端；
 - [ ] v0.5.0 实现发语音消息和电话功能
   - [ ] 语音消息功能；
-    - [x] Android 手机端录音、发送、历史与回放（含服务端接收、理解与下载；2026-10 合入 `feat/voice`，待集成 `dev`）；
+    - [x] Android 手机端录音、发送、历史与回放（含服务端接收、理解与下载；已由 [PR #244](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/244) 集成至 `dev`，随 `v0.5.0` 合入 `master`，[Release v0.5.0](https://github.com/SheepLiu712/Agent-LuoTianyi/releases/tag/v0.5.0) 于 2026-10-16 发布）；
     - [ ] CLI支持发送音频文件，并下载自己发送的音频文件（测试用 CLI 驱动已随 F1 交付，不计入本产品待办）；
     - [ ] 桌面端支持发送音频文件，并下载、重放自己发送的音频文件；
     - [ ] 桌面端支持录制并发送语音消息；
-  - [ ] Android 实时语音通话功能（实现已由 PR #361 集成到 dev，剩余验收由 [#362](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/362) 跟踪）；
+  - [ ] Android 实时语音通话功能（实现已由 [PR #361](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/361) 集成至 `dev`，尚未进入 `master`/发布；[#362](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/362) 已于 2026-11-05 按 completed 关闭，验收口径以其关闭说明与 `dev` 当前实现为准）；
     - [x] 实现独立 `call_ws`、CallStage、实时语音适配器和 Android 通话界面；
     - [x] 实现聊天/通话严格互斥、三秒恢复、用户打断和通话记录结算；
     - [x] 将现有 Reflection 重构为压缩点与 Stage 销毁时触发的 Cognitive Maintenance；
