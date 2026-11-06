@@ -474,18 +474,32 @@ class MessageProcessor:
 
     def _listen_ws_events(self): # 处理线程
         while self._running:
-            payload = self._event_queue.get()
-            if payload is None:
-                self._playback_queue.put(None)
-                break
-            self._playback_queue.put(self._prepare_agent_message(payload))
+            try:
+                payload = self._event_queue.get()
+                if payload is None:
+                    self._playback_queue.put(None)
+                    break
+                self._playback_queue.put(self._prepare_agent_message(payload))
+            except Exception as exc:
+                # 单条消息处理失败不能杀死常驻线程，否则之后所有消息都会静默丢失
+                self.logger.error(
+                    f"消息预处理线程异常，已跳过该条消息: {type(exc).__name__}: {exc}"
+                )
+                continue
 
     def _process_playback_events(self):
         while self._running:
-            prepared = self._playback_queue.get()
-            if prepared is None:
-                break
-            self.process_transport_message(prepared.response, audio_saved=prepared.audio_saved)
+            try:
+                prepared = self._playback_queue.get()
+                if prepared is None:
+                    break
+                self.process_transport_message(prepared.response, audio_saved=prepared.audio_saved)
+            except Exception as exc:
+                # 展示/播放失败同样只跳过当前消息，保持线程存活以便后续消息继续处理
+                self.logger.error(
+                    f"消息展示/播放线程异常，已跳过该条消息: {type(exc).__name__}: {exc}"
+                )
+                continue
 
     def _next_local_id(self, prefix: str) -> str:
         self._reply_counter += 1
