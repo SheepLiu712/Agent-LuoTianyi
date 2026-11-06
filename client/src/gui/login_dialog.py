@@ -46,6 +46,13 @@ class LoginDialog(QDialog):
             if saved_url:
                 self.custom_base_url = saved_url
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            # 取消登录会结束客户端启动，仅显式关闭窗口才走该路径。
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def try_auto_login(self) -> bool:
         try:
             if self.l_auto_login.isChecked() and self.saved_token and self.l_username.text():
