@@ -66,10 +66,7 @@ jobs:
           cache: pip
           cache-dependency-path: server/pyproject.toml
       - name: 安装离线歌曲测试使用的音频解码工具
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffprobe -version
+        uses: ./.github/actions/setup-ffmpeg
       - run: python -m pip install -e '.[dev]' httpx
       - name: 从公开模板创建测试配置
         run: cp config/config.json.template config/config.json
