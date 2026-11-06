@@ -36,6 +36,42 @@ def test_local_replay_is_blocked_while_server_audio_is_active(monkeypatch):
     assert stream._local_play_thread is None
 
 
+def test_failed_terminal_audio_releases_real_stream_reservation(monkeypatch):
+    import base64
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+    stream = _bare_stream()
+    stream._close_audio_stream = Mock()
+    stream.local_audio_properties = stream_module.AudioProperties()
+    stream._open_audio_stream_if_needed = Mock()
+    processor = MessageProcessor.__new__(MessageProcessor)
+    processor.multimedia_stream = stream
+    processor.response_signal = Mock()
+    processor.expression_signal = None
+    processor.update_bubble_signal = None
+    response = AgentMessage(
+        uuid="empty-terminal", text="", expression="",
+        audio=base64.b64encode(buffer.getvalue()).decode("ascii"),
+        is_final_package=True, reply_to=None, is_ephemeral=True,
+    )
+    stream.reserve_server_audio()
+    with pytest.raises(ValueError):
+        processor.process_transport_message(response)
+    assert not stream.is_server_audio_active()
+    stream._close_audio_stream.assert_called_once_with(wait_audio_finish=True)
+    processor.process_transport_message(AgentMessage(
+        uuid="next", text="still available", expression="", audio="",
+        is_final_package=False, reply_to=None,
+    ))
+    processor.response_signal.assert_called_once_with("next", "still available")
+
+
 def test_server_audio_stops_local_replay_before_streaming(monkeypatch):
     stream = _bare_stream()
     events = []
