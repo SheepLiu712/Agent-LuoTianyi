@@ -195,6 +195,66 @@ async def test_gap_nacks_first_missing_and_drains_only_after_sink_accepts() -> N
 
 
 @pytest.mark.asyncio
+async def test_cached_audio_drains_on_capacity_without_new_client_message() -> None:
+    from src.adapter.websocket.call_v1._binding import Binding
+
+    sink = AcceptanceSink(accept=False)
+    transport = session(sink)
+    capacity = asyncio.Event()
+
+    async def wait_capacity():
+        await capacity.wait()
+
+    transport.session._stage.wait_pcm_capacity = wait_capacity
+    binding = Binding(transport.session, connection_id=object())
+    binding.prepare(1)
+    binding.activate()
+    transport.session._binding = binding
+    first = await transport.receive_binary(audio(1))
+    assert message(first[0])["code"] == "OVERLOADED"
+    second = await transport.receive_binary(audio(2))
+    assert all(message(output)["type"] != "nack" for output in second)
+    assert transport.client_cursor == 0
+
+    sink.accept_result = True
+    capacity.set()
+    await asyncio.wait_for(transport.session._capacity_drain_task, timeout=1)
+    assert [frame.seq for frame in sink.frames] == [1, 2]
+    assert transport.client_cursor == 2
+    item = await asyncio.wait_for(binding.next_output(), timeout=1)
+    assert json.loads(item.message)["ack_seq"] == 2
+    binding.complete_output(item.delivery_id)
+    await transport.session.close()
+
+
+@pytest.mark.asyncio
+async def test_stage_pcm_consumption_wakes_capacity_waiter() -> None:
+    from types import SimpleNamespace
+    from src.domain.call import CallState
+    from src.stage.call.call_stage import CallStage
+
+    stage = CallStage.__new__(CallStage)
+    stage._pcm = asyncio.Queue(1)
+    stage._pcm_capacity_changed = asyncio.Event()
+    stage._pcm_buffered_bytes = 2
+    stage._termination_reason = None
+    stage._record = SimpleNamespace(state=CallState.ACTIVE)
+    stage._provider = None
+    stage._schedule_output = lambda: None
+    stage._pcm.put_nowait(SimpleNamespace(payload=b"\0\0"))
+    waiter = asyncio.create_task(stage.wait_pcm_capacity())
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    consumer = asyncio.create_task(stage._drain_pcm())
+    try:
+        await asyncio.wait_for(waiter, timeout=1)
+        assert stage._pcm.empty()
+    finally:
+        consumer.cancel()
+        await asyncio.gather(consumer, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_same_bytes_duplicate_is_idempotent_but_seq_conflict_closes() -> None:
     sink = AcceptanceSink()
     transport = session(sink)
