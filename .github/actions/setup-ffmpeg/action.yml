@@ -1,0 +1,37 @@
+name: 安装并缓存 FFmpeg
+description: 缓存 Ubuntu 官方安装包，仍由包管理器解析和安装音频解码工具。
+runs:
+  using: composite
+  steps:
+    - name: 更新索引并确定待安装包
+      id: packages
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get --print-uris --yes --download-only --no-install-recommends install ffmpeg \
+          | sed -n "/^'/p" | LC_ALL=C sort > "$RUNNER_TEMP/ffmpeg-packages.txt"
+        cat "$RUNNER_TEMP/ffmpeg-packages.txt"
+        echo "digest=$(sha256sum "$RUNNER_TEMP/ffmpeg-packages.txt" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+        echo "count=$(wc -l < "$RUNNER_TEMP/ffmpeg-packages.txt")" >> "$GITHUB_OUTPUT"
+    - name: 恢复音频工具安装包
+      if: steps.packages.outputs.count != '0'
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/ffmpeg-debs/*.deb
+        key: ffmpeg-debs-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ steps.packages.outputs.digest }}
+    - name: 安装并验证音频工具
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/ffmpeg-debs"
+        sudo apt-get --yes --no-install-recommends \
+          -o Dir::Cache::archives="$RUNNER_TEMP/ffmpeg-debs" \
+          -o APT::Keep-Downloaded-Packages=true install ffmpeg
+        ffmpeg -version
+        ffprobe -version
+    - name: 保存音频工具安装包
+      if: steps.packages.outputs.count != '0' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/ffmpeg-debs/*.deb
+        key: ${{ steps.cache.outputs.cache-primary-key }}
