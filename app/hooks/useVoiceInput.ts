@@ -101,10 +101,12 @@ export function useVoiceInput(options: Options) {
       if (!valid()) return;
       if (permission !== 'granted') {
         transition('PermissionPrompt');
-        if (permission === 'blocked' || permissionRequest.current) {
+        if (permissionRequest.current) {
           showMicrophoneSettings(callbacks.current.onNotice);
           return;
         }
+        // 状态检查里的 canAskAgain=false 无法区分“永久拒绝”与“一次性授权已被系统回收”，
+        // 因此即使初始结果是 blocked，也要真正发起一次权限请求，再按请求结果决定是否引导去系统设置。
         // 授权结果从不开始录音（授权框已打断手势，授权后需重新按住），所以不必等它返回才释放输入栏。
         // 迟到的结果只在“这次尝试仍是当前尝试”时才有意义：更晚的按住或已卸载都不该被它打扰。
         const request = recorder.requestPermission().then((result) => {

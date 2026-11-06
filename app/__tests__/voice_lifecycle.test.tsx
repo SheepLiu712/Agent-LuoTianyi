@@ -64,11 +64,13 @@ it.each(['native', 'background', 'navigation', 'unmount'])('cancels active recor
   expect(options.recorder.cancel).toHaveBeenCalledTimes(1);
   expect(options.onRecordingCommitted).not.toHaveBeenCalled();
 });
-it.each(['blocked', 'denied'])('handles %s permission without starting, and rechecks on next press', async (permission) => {
+it.each(['blocked', 'denied'])('attempts the real permission request for %s and rechecks on next press', async (permission) => {
   options.recorder.getPermission.mockResolvedValueOnce(permission);
+  options.recorder.requestPermission.mockResolvedValueOnce('granted');
   await mount(); await act(async () => { await state.pressIn(event); });
-  if (permission === 'blocked') expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
-  else expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  // 初始状态为 blocked 时也不能直接判定永久拒绝：必须实际请求一次。
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).not.toHaveBeenCalled();
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(options.onRecordingStarted).not.toHaveBeenCalled();
   expect(options.onStopAllAudio).not.toHaveBeenCalled();
@@ -76,6 +78,17 @@ it.each(['blocked', 'denied'])('handles %s permission without starting, and rech
   await act(async () => { await state.pressIn(event); });
   expect(options.recorder.getPermission).toHaveBeenCalledTimes(2);
   expect(state.captureState).toBe('Recording');
+});
+
+it('offers the settings entry only after an actual request confirms blocked', async () => {
+  options.recorder.getPermission.mockResolvedValueOnce('blocked');
+  options.recorder.requestPermission.mockResolvedValueOnce('blocked');
+  await mount(); await act(async () => { await state.pressIn(event); });
+
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
 });
 
 it.each(['granted', 'blocked'])('releases the input bar while the system permission request is pending (late %s)', async (late) => {
