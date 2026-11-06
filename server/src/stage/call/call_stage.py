@@ -306,6 +306,7 @@ class CallStage:
         self._context: InteractionContext | None = None
         self._provider: OmniSession | None = None
         self._pcm: asyncio.Queue[AudioFrame] = asyncio.Queue(self._pcm_capacity)
+        self._pcm_capacity_changed = asyncio.Event()
         self._pcm_buffered_bytes = 0
         self._receipts: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         self._item_turns: dict[str, int] = {}
@@ -534,6 +535,12 @@ class CallStage:
             labels={"result": CallMetricResult.SUCCEEDED.value},
         )
         return True
+
+    async def wait_pcm_capacity(self) -> None:
+        """协议层在队列满后等待业务容量变化，不依赖客户端再发送一帧。"""
+        while self._pcm.full() and not self.termination_requested:
+            self._pcm_capacity_changed.clear()
+            await self._pcm_capacity_changed.wait()
 
     async def apply_answer(self, action: d.AnswerCall) -> bool:
         """Consume the Stage-owned answer action once it has been produced by Agent integration."""
@@ -1492,6 +1499,7 @@ class CallStage:
             finally:
                 self._pcm_buffered_bytes = max(0, self._pcm_buffered_bytes - len(frame.payload))
                 self._pcm.task_done()
+                self._pcm_capacity_changed.set()
                 self._schedule_output()
 
     def _report_retention(self, deadline):
