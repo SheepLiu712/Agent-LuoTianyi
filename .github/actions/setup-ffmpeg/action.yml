@@ -7,6 +7,8 @@ runs:
       id: packages
       shell: bash
       run: |
+        . /etc/os-release
+        echo "platform=$ID-$VERSION_ID-$(dpkg --print-architecture)" >> "$GITHUB_OUTPUT"
         sudo apt-get update -qq
         sudo apt-get --print-uris --yes --download-only --no-install-recommends install ffmpeg \
           | sed -n "/^'/p" | LC_ALL=C sort > "$RUNNER_TEMP/ffmpeg-packages.txt"
@@ -19,7 +21,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ runner.temp }}/ffmpeg-debs/*.deb
-        key: ffmpeg-debs-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ steps.packages.outputs.digest }}
+        key: ffmpeg-debs-v1-${{ steps.packages.outputs.platform }}-${{ steps.packages.outputs.digest }}
     - name: 安装并验证音频工具
       shell: bash
       run: |
