@@ -1,12 +1,12 @@
 import asyncio
-from datetime import date, datetime
+from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-import src.domain.agent as d
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import src.domain.agent as d
 from src.infrastructure.persistence.database.sql_database import Base, Conversation, DynamicPost, User
 from src.world.diary.task import DiaryTask
 from src.world.world_settlements import WorldSettlementRouter
@@ -110,25 +110,30 @@ def test_diary_task_defaults_and_no_character_runtime_dependency():
 
 
 def test_run_once_randomly_samples_and_submits_one_world_fact_per_user(monkeypatch):
+    shanghai = ZoneInfo("Asia/Shanghai")
     users = [f"user-{index}" for index in range(25)]
     sink = FactSink()
     task = _task(users, sink, limit=20)
     monkeypatch.setattr("src.world.diary.task.random.sample", lambda population, count: population[-count:])
 
+    start_date = datetime.now(shanghai).date()
     result = asyncio.run(task.run_once())
+    end_date = datetime.now(shanghai).date()
 
     assert [fact.owner_user_id for fact in sink.facts] == users[-20:]
     assert result.data["selected_users_count"] == 20
     assert result.data["diaries_pending"] == 20
-    assert {fact.trigger_id for fact in sink.facts} == {
-        f"diary:luotianyi:{date.today().isoformat()}"
-    }
+    # 若任务恰好跨过零点，以本批记录的触发时刻确定所属的上海日期。
+    expected_date = sink.facts[0].occurred_at.astimezone(shanghai).date()
+    assert start_date <= expected_date <= end_date
+    assert {fact.trigger_id for fact in sink.facts} == {f"diary:luotianyi:{expected_date.isoformat()}"}
     for fact in sink.facts:
+        assert fact.local_date == expected_date
         assert fact.source is d.StimulusSource.WORLD
         assert fact.user_id is None
         assert fact.target_character_ids == ("luotianyi",)
         assert fact.occurred_at.tzinfo is not None
-        assert fact.timezone == ZoneInfo("Asia/Shanghai")
+        assert fact.timezone == shanghai
 
 
 def test_rejected_fact_is_not_retried_and_remains_pending():

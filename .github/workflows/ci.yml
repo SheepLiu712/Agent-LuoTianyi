@@ -25,7 +25,36 @@ env:
   RUN_REAL_LLM_TESTS: '0'
 
 jobs:
+  changes:
+    name: 检查改动范围与文档引用
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # PR 的合并提交包含目标分支父提交；合并队列可能包含多个 PR。
+          fetch-depth: ${{ github.event_name == 'merge_group' && '0' || '2' }}
+      - id: scope
+        run: python .github/scripts/docs_ci.py classify "$BASE_SHA" >> "$GITHUB_OUTPUT"
+      - name: 检查 Markdown 链接和锚点
+        if: steps.scope.outputs.docs_only == 'true'
+        run: |
+          archive="$RUNNER_TEMP/lychee.tar.gz"
+          curl --fail --silent --show-error --location --output "$archive" \
+            https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz
+          echo "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a  $archive" | sha256sum --check
+          mkdir "$RUNNER_TEMP/link-checker"
+          tar -xzf "$archive" --directory "$RUNNER_TEMP/link-checker" --wildcards --no-anchored 'lychee' --strip-components=1
+          PATH="$RUNNER_TEMP/link-checker:$PATH" python .github/scripts/docs_ci.py check "$BASE_SHA"
+
   server-lint:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'false'
     name: server-lint
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -50,6 +79,8 @@ jobs:
           python -m black --check --include '.*\.py$' ../.github/scripts/check_pytest_results.py
 
   server-tests:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'false'
     name: server-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -66,10 +97,7 @@ jobs:
           cache: pip
           cache-dependency-path: server/pyproject.toml
       - name: 安装离线歌曲测试使用的音频解码工具
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffprobe -version
+        uses: ./.github/actions/setup-ffmpeg
       - run: python -m pip install -e '.[dev]' httpx
       - name: 从公开模板创建测试配置
         run: cp config/config.json.template config/config.json
@@ -88,6 +116,8 @@ jobs:
           path: server/test-results.xml
 
   desktop-tests:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'false'
     name: desktop-tests
     runs-on: windows-2022
     timeout-minutes: 20
@@ -128,6 +158,8 @@ jobs:
           path: client/test-results.xml
 
   cli-tests:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'false'
     name: cli-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -154,6 +186,8 @@ jobs:
           path: cli-client/test-results.xml
 
   app-checks:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'false'
     name: app-checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -203,6 +237,8 @@ jobs:
           path: app/test-results.json
 
   admin-build:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'false'
     name: admin-build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -224,7 +260,7 @@ jobs:
   offline-ci:
     name: offline-ci
     if: always()
-    needs: [server-lint, server-tests, desktop-tests, cli-tests, app-checks, admin-build]
+    needs: [changes, server-lint, server-tests, desktop-tests, cli-tests, app-checks, admin-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -236,8 +272,13 @@ jobs:
           import json
           import os
           results = json.loads(os.environ['RESULTS'])
-          failed = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          changes = results.pop('changes')
+          route = changes['outputs'].get('docs_only')
+          if changes['result'] != 'success' or route not in ('true', 'false'):
+              raise SystemExit('改动范围或文档引用检查失败')
+          expected = 'skipped' if route == 'true' else 'success'
+          failed = {name: job['result'] for name, job in results.items() if job['result'] != expected}
           if failed:
               raise SystemExit(f'离线检查未全部通过：{failed}')
-          print('全部离线检查通过')
+          print('文档引用检查通过' if route == 'true' else '全部离线检查通过')
           PY

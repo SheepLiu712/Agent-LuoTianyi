@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -512,6 +513,40 @@ async def test_concurrent_resume_has_one_winner_without_cursor_side_effect():
     assert adapter._sessions[call_id]._delivery.server_ack_cursor == 0
     await adapter.close()
     await stages.close()
+
+
+@pytest.mark.asyncio
+async def test_resume_admitted_while_disconnect_is_being_persisted(monkeypatch):
+    stages, repository = manager(speech_factory=FakeRealtimeSpeechSessionFactory())
+    adapter = call_adapter(stages)
+    old, call_id = await _opened(adapter)
+    await _activate(stages, call_id)
+    loop = asyncio.get_running_loop()
+    writing, release = asyncio.Event(), threading.Event()
+    update = repository.update_if_state
+
+    def persist(call_id, *, expected_state, record):
+        if record.state is CallState.RECONNECTING:
+            loop.call_soon_threadsafe(writing.set)
+            assert release.wait(timeout=5), "disconnect write was not released"
+        return update(call_id, expected_state=expected_state, record=record)
+
+    monkeypatch.setattr(repository, "update_if_state", persist)
+    disconnect = asyncio.create_task(adapter.disconnect(old))
+    try:
+        await asyncio.wait_for(writing.wait(), 2)
+        # 新连接在旧连接的写入尚未返回时申请恢复同一通话。
+        await stages.try_to_get_stage(stage_type="call", user_id="user", character_id="luotianyi", call_id=call_id)
+        release.set()
+        await disconnect
+        new = await adapter.open(initial_message=resume_message(call_id), user_id="user", connection_id=object())
+        resumed = json.loads((await adapter.next_output(new)).message)
+        assert (resumed["type"], resumed["call_id"]) == ("call.resumed", call_id)
+    finally:
+        release.set()
+        await disconnect
+        await adapter.close()
+        await stages.close()
 
 
 @pytest.mark.asyncio
