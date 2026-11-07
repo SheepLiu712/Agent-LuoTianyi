@@ -4,16 +4,19 @@ import asyncio
 from dataclasses import replace
 
 import pytest
+from support.call_protocol import bind_protocol_connection
 
 from src.adapter.websocket.call_v1 import CallWebSocketAdapter
 from src.adapter.websocket.call_v1._binding import Binding
 from src.adapter.websocket.call_v1._session import Session
 from src.adapter.websocket.connection import AdapterConnection
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.observability.call_metrics import CallMetricName
-from src.stage.call_stage import CallPCM, CallStage
+from src.stage.call.call_stage import CallPCM, CallStage
 from src.web.websocket._adapter_io import _send_pump
 from tests.integration.stage import test_call_stage as b
 from tests.integration.stage import test_call_stage_review as r
+from tests.integration.websocket.test_call_websocket_adapter import resume_message, start_message
 
 call_setup = b.call_setup
 
@@ -46,10 +49,12 @@ async def network_call(call_setup):
     session = Session(stage)
     handle = AdapterConnection()
     binding = Binding(session, connection_id=object())
-    await session.attach(binding)
-    binding.is_ready = True
     adapter._sessions[stage.call_id] = session
     adapter._bindings[handle] = binding
+    await bind_protocol_connection(session, binding, start_message(stage.client_request_id))
+    from support.call_session import bind_test_omni
+
+    bind_test_omni(stage._agent, stage._speech_factory)
     await stage.start()
     await stage.apply_answer(
         b.d.AnswerCall(action_id="answer", call_id=record.call_id, decision=b.CallAnswerDecision.ACCEPT)
@@ -59,7 +64,7 @@ async def network_call(call_setup):
     try:
         yield stage, adapter, handle, binding, clock, captured
     finally:
-        await stage.terminate(b.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
         await session.close()
 
 
@@ -118,7 +123,7 @@ async def test_first_audio_waits_for_actual_websocket_completion(network_call, r
             assert first_audio(captured) == [875.0]
             for response_id, stream_id in stage._playback.pending_streams:
                 stage.playback_completed(response_id, stream_id)
-            await b._eventually(lambda: not stage._inputs.pending)
+            await b._eventually(lambda: not stage._fact_tasks)
             await produce_turn(stage)
             await b._eventually(lambda: len(first_audio(captured)) == 2)
             assert first_audio(captured) == [875.0, 250.0]
@@ -164,14 +169,14 @@ async def test_late_network_success_does_not_record_retired_audio(network_call, 
         # 同一个 session 上新连接的投递不能由旧连接回执完成。
         new = AdapterConnection()
         replacement = Binding(binding.session, connection_id=object())
-        await binding.session.attach(replacement, resume_cursor=0)
+        await bind_protocol_connection(binding.session, replacement, resume_message(stage.call_id))
         adapter._bindings[new] = replacement
         replay = await next_audio(adapter, new)
         adapter.complete_output(handle, replay.delivery_id)
         assert replay.delivery_id in replacement._outbox._pending
         adapter.complete_output(new, replay.delivery_id)
     else:
-        await stage.terminate(b.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
     adapter.complete_output(handle, first.delivery_id)
     assert first_audio(captured) == []
 

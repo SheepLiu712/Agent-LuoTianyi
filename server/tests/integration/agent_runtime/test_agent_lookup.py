@@ -32,7 +32,8 @@ def test_runtime_reuses_stateless_handlers_within_each_agent(runtime):
 
     song_learned = stimulus_handlers[d.StimulusKind.SONG_LEARNED]
     request_learning = agent._action_router._handlers[d.ActionKind.REQUEST_SONG_LEARNING]
-    assert song_learned._dispatch is request_learning._dispatch
+    assert song_learned._retrieval is runtime.skills.memory_retrieval
+    assert request_learning._dispatch is runtime.skills.song_learning_tasks
 
 
 @pytest.mark.parametrize("character_id", ["missing", "disabled", "", " "])

@@ -7,16 +7,32 @@
 import asyncio
 import os
 import threading
+import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
 from chromadb.config import Settings
 
 from src.infrastructure.models.llm.embedding import SiliconFlowEmbeddings
+from src.infrastructure.observability.retrieval_timing import record_retrieval_phase, retrieval_phase
 from src.utils.logger import get_logger
+
+# 单用户记录删除的分页大小：避免 n_results 上限造成的静默截断。
+_USER_RECORD_PAGE_SIZE = 1000
+
+
+def _reported_delete_count(result: Any) -> Optional[int]:
+    """读取删除接口报告的计数；不保证它代表实际移除的唯一记录数。"""
+    if isinstance(result, Mapping):
+        deleted = result.get("deleted")
+        if isinstance(deleted, int):
+            return deleted
+    return None
 
 
 class BaseDocument(ABC):
@@ -70,6 +86,10 @@ class VectorStore(ABC):
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档"""
         pass
+
+    async def embed_query(self, query: str) -> list[float]:
+        """生成可在本次召回的多个授权范围内复用的查询向量。"""
+        raise NotImplementedError("vector store does not support query embeddings")
 
     @abstractmethod
     def delete_documents(self, doc_ids: List[str]) -> bool:
@@ -156,6 +176,8 @@ class ChromaVectorStore(VectorStore):
                 ),
             )
 
+            self._embedding_function = embedding_function
+
             # 创建客户端
             self.client = chromadb.PersistentClient(
                 path=self.persist_directory, settings=Settings(anonymized_telemetry=False)
@@ -216,20 +238,46 @@ class ChromaVectorStore(VectorStore):
         )
         return list(ids)
 
+    async def embed_query(self, query: str) -> list[float]:
+        if self._closed:
+            raise RuntimeError("Vector store is closed")
+
+        def embed():
+            with retrieval_phase("embedding"):
+                return self._embedding_function.embed_query(query)
+
+        return await self._run_search_work(embed)
+
+    async def _run_search_work(self, work):
+        context = copy_context()
+        queued_at = time.perf_counter()
+
+        def run():
+            record_retrieval_phase("queue", queued_at)
+            return work()
+
+        return await asyncio.get_running_loop().run_in_executor(self._executor, context.run, run)
+
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档 (异步)"""
         try:
             if self._closed:
                 raise RuntimeError("Vector store is closed")
 
-            def _do_query():
-                return self.collection.query(
-                    query_texts=[query],
-                    n_results=k,
-                    where={"user_id": user_id} if "where" not in kwargs else kwargs.get("where"),
-                )
+            embedding = kwargs.get("query_embedding")
+            if embedding is None:
+                embedding = await self.embed_query(query)
 
-            results = await asyncio.get_event_loop().run_in_executor(self._executor, _do_query)
+            def _do_query():
+                with retrieval_phase("vector_search"):
+                    return self.collection.query(
+                        query_embeddings=[embedding],
+                        n_results=k,
+                        where={"user_id": user_id} if "where" not in kwargs else kwargs.get("where"),
+                        **({"ids": kwargs["ids"]} if "ids" in kwargs else {}),
+                    )
+
+            results = await self._run_search_work(_do_query)
 
             search_results = []
 
@@ -262,7 +310,7 @@ class ChromaVectorStore(VectorStore):
 
             traceback.print_exc()
             self.logger.error(f"文档搜索失败: {e}")
-            return []
+            raise
 
     def close(self) -> None:
         """Wait for all owned search work and release the dedicated executor."""
@@ -283,30 +331,47 @@ class ChromaVectorStore(VectorStore):
             return False
 
     def delete_user_records(self, user_id: str) -> int:
-        """删除指定用户的所有记录，返回删除的记录数"""
-        try:
-            # 先查询出该用户的所有文档ID
-            results = self.collection.query(
-                query_texts=[" "],  # 空查询，获取所有文档
-                where={"user_id": user_id},
-                n_results=10000,  # 假设单用户不会超过1万条记录
-            )
-            if results["ids"]:
-                doc_ids = results["ids"][0]
-                if len(doc_ids) > 0:
-                    self.collection.delete(ids=doc_ids)
-                deleted_count = len(doc_ids)
-                self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
-                return deleted_count
-            else:
-                self.logger.info(f"用户 {user_id} 没有记录需要删除")
-                return 0
-        except Exception as e:
-            import traceback
+        """删除指定用户的所有记录并返回条数。
 
-            print(traceback.format_exc())
-            self.logger.error(f"删除用户记录失败: {e}")
-            return 0
+        分页删除以避免单次查询上限造成的静默截断。循环只在**再查一次返回空**时才结束——
+        最后一页也必须由一次新的查询证实已删干净，否则这一页删除失败会被当成成功。
+        若重新查询仍得到同一批 id，或删除接口报告 0，则抛出无进展错误。
+        两页只部分重叠不判失败，继续删除剩余记录；计数不承诺并发写删下的事务快照语义。
+
+        **循环没有绝对轮次上限**：保证的是"没有进展就失败"，不是"轮次一定有界"。
+        无计数后端会记录已见页面；有计数后端只依赖删除返回值为 0 或相邻页面无变化。
+        因此持续产生陈旧页面、持续并发写入或有计数页面交替等异常模型可能不会自行中止；
+        这类情况应由调用方在上层设置超时，而不是在这里按固定轮次截断——正常删除的轮次与记录数成正比，
+        固定上限会把记录较多的用户误判成失败。
+        """
+        deleted_count = 0
+        previous_ids: Optional[frozenset[str]] = None
+        # 仅用于不报告删除计数的后端：相邻页比较挡不住 A→B→A 这类交替陈旧页面。
+        seen_pages: set[frozenset[str]] = set()
+        # 仅用于不报告删除计数的后端：记录已计入的 id，避免非相邻重现的陈旧 id 被重复计数。
+        counted_ids: set[str] = set()
+        while True:
+            # include=[] 只取 id：删除路径不需要 document/metadata/embedding，避免整页载荷进入内存。
+            results = self.collection.get(where={"user_id": user_id}, limit=_USER_RECORD_PAGE_SIZE, include=[])
+            doc_ids = [str(value) for value in (results.get("ids") or [])]
+            if not doc_ids:
+                break
+            current_ids = frozenset(doc_ids)
+            if current_ids == previous_ids or current_ids in seen_pages:
+                raise RuntimeError(f"vector delete made no progress for user {user_id}")
+            reported = _reported_delete_count(self.collection.delete(ids=doc_ids))
+            if reported == 0:
+                raise RuntimeError(f"vector delete made no progress for user {user_id}")
+            if reported is None:
+                seen_pages.add(current_ids)
+                # 只累计从未计入过的 id：与上一页比较挡不住更早页面的 id 再次出现。
+                deleted_count += len(current_ids - counted_ids)
+                counted_ids.update(current_ids)
+            else:
+                deleted_count += reported
+            previous_ids = current_ids
+        self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
+        return deleted_count
 
     def delete_user_records_strict(self, user_id: str) -> int:
         results = self.collection.get(where={"user_id": user_id}, include=[])

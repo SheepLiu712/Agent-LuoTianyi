@@ -34,5 +34,3 @@ class CallRecallDecision:
             return
         if not queries:
             raise ValueError("RECALL requires at least one memory query")
-        if self.ack_style is AckStyle.NONE:
-            raise ValueError("RECALL requires a provisional acknowledgement style")

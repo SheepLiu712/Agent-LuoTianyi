@@ -234,13 +234,14 @@ export class ProductionCallResolver {
             if (closed && available) await nativeAudio.close();
             else initialized = available;
             return !closed && available;
-          }).catch(async () => {
+          }).catch(async (error) => {
             if (!closed) {
               closed = true;
               this.attempts.delete(attempt);
               await nativeAudio.close().catch(() => undefined);
             }
             cleanupMouth();
+            if (error instanceof Error && error.message === 'MICROPHONE_PERMISSION_DENIED') throw error;
             return false;
           }).finally(() => {
             if (!initialized && !closed) {
@@ -298,7 +299,7 @@ export class ProductionCallResolver {
 }
 
 function settleInitialize(operation: Promise<boolean>, timeoutMs: number): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
+  return new Promise<boolean>((resolve, reject) => {
     let reported = false;
     const timeout = setTimeout(() => {
       reported = true;
@@ -307,11 +308,17 @@ function settleInitialize(operation: Promise<boolean>, timeoutMs: number): Promi
     void operation.then((value) => {
       clearTimeout(timeout);
       if (!reported) resolve(value);
+    }, (error) => {
+      clearTimeout(timeout);
+      if (!reported) reject(error);
     });
   });
 }
 
 export async function requestCallMicrophonePermission(): Promise<'granted' | 'denied' | 'permanently_denied'> {
+  const current = await Audio.getPermissionsAsync();
+  if (current.granted) return 'granted';
+  if (current.canAskAgain === false) return 'permanently_denied';
   const result = await Audio.requestPermissionsAsync();
   if (result.granted) return 'granted';
   return result.canAskAgain === false ? 'permanently_denied' : 'denied';

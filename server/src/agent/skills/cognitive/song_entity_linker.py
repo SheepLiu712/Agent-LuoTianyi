@@ -58,9 +58,7 @@ class SongEntityLinker:
         # 带歌曲触发词的书名号内容是比词库子串更强的候选。最终能否演唱仍由
         # SingingBackend 校验；这里保留完整标题，避免“《死别》”被链接成“《别》”。
         quoted_titles = (
-            [title.strip() for title in re.findall(r"《([^》]+)》", user_input) if title.strip()]
-            if triggered
-            else []
+            [title.strip() for title in re.findall(r"《([^》]+)》", user_input) if title.strip()] if triggered else []
         )
 
         results = []

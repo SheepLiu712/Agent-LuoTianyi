@@ -66,7 +66,7 @@ def _extract_env_name(value: Any) -> str | None:
 def _collect_llm_api_key_names(config: dict[str, Any]) -> set[str]:
     llm_service = config.get("llm_service", {}) or {}
     names: set[str] = set()
-    for collection_name in ("available_llms", "available_vlms"):
+    for collection_name in ("available_llms", "available_vlms", "available_audio_models"):
         collection = llm_service.get(collection_name, {}) or {}
         for item in collection.values():
             if not isinstance(item, dict):
@@ -74,6 +74,10 @@ def _collect_llm_api_key_names(config: dict[str, Any]) -> set[str]:
             env_name = _extract_env_name(item.get("api_key"))
             if env_name:
                 names.add(env_name)
+    speech = (config.get("call_transport", {}) or {}).get("realtime_speech", {}) or {}
+    env_name = _extract_env_name(speech.get("api_key"))
+    if env_name:
+        names.add(env_name)
     return names
 
 
@@ -383,6 +387,14 @@ async def pipeline_spans(
         trace_id=trace_id,
         order_by_slow=slow,
     )
+
+
+@protected_router.get("/pipeline/call-replies")
+async def call_reply_latency(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=100, ge=1, le=200),
+) -> dict[str, Any]:
+    return get_admin_shell().observability.get_call_reply_latency(days=days, limit=limit)
 
 
 @protected_router.get("/traces")

@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import src.domain.agent as d
-from src.domain.call import CallEndReason, CallFinalSnapshot
+from src.domain.call import CallEndReason
+from src.domain.call.terminal import CallTerminated
+from src.infrastructure.observability.call_latency import call_latency
 from src.infrastructure.observability.call_metrics import CallMetric, CallMetricName, CallMetricResult, CallMetricStatus
 
 from ._audio_codec import CALL_ROUTE, FINAL_FLAG, HEADER_SIZE, VERSION, WireAudioFrame
@@ -67,9 +69,10 @@ class _StopMetadata:
 class Delivery:
     """维护一个呼叫的下行状态，网络断线不清除未确认消息。"""
 
-    def __init__(self, call_id, emit, *, config=None, call_metrics=None):
+    def __init__(self, call_id, emit, *, config=None, call_metrics=None, on_audio_ack=None):
         self.call_id = call_id
         self._deliver = emit
+        self._on_audio_ack = on_audio_ack
         self._config = config or TransportConfig()
         self._call_metrics = call_metrics
         self._server_next_seq = 1
@@ -165,7 +168,11 @@ class Delivery:
         if registration.final_seen:
             raise CallTransportError("STREAM_ALREADY_FINAL")
         raw = encode_audio(frame).binary
-        output = WireOutput(binary=raw, audio_response_id=registration.response_id if frame.payload else None)
+        output = WireOutput(
+            binary=raw,
+            audio_response_id=registration.response_id if frame.payload else None,
+            audio_seq=frame.seq if frame.payload else None,
+        )
         self._require_response_audio_capacity(registration, len(frame.payload))
         self._store_replay(
             frame.seq,
@@ -173,6 +180,14 @@ class Delivery:
             response_id=registration.response_id,
             stream_id=registration.stream_id,
             audio_payload_bytes=len(frame.payload),
+        )
+        call_latency(
+            "audio.enqueued",
+            self.call_id,
+            response_id=registration.response_id,
+            stream_id=frame.stream_id,
+            seq=frame.seq,
+            bytes=len(frame.payload),
         )
         registration.contiguous = registration.contiguous and frame.seq == registration.last_seq + 1
         registration.last_seq = frame.seq
@@ -290,6 +305,13 @@ class Delivery:
             response_id=str(message["response_id"]),
             stream_id=int(message["stream_id"]),
         )
+        call_latency(
+            "audio.stop_requested",
+            self.call_id,
+            response_id=message["response_id"],
+            stream_id=message["stream_id"],
+            stop_seq=stop_seq,
+        )
         self._apply_retirement(message)
         self._server_next_seq += 1
         return output
@@ -343,6 +365,18 @@ class Delivery:
         self._server_ack_cursor = ack_seq
         while self._replay and next(iter(self._replay)) <= ack_seq:
             _, entry = self._replay.popitem(last=False)
+            if entry.audio_payload_bytes and entry.retired_by is None:
+                call_latency(
+                    "audio.ack",
+                    self.call_id,
+                    response_id=entry.response_id,
+                    stream_id=entry.stream_id,
+                    seq=entry.seq,
+                    ack_seq=ack_seq,
+                    measurement="client_ack_not_playback",
+                )
+                if self._on_audio_ack is not None:
+                    self._on_audio_ack(entry.response_id)
             self._replay_bytes -= entry.byte_size
             self._release_response_audio(entry)
         self._replay_capacity_event.set()
@@ -423,7 +457,7 @@ class Delivery:
         if message is not None:
             await self._deliver(self._send_control(message))
 
-    async def send_ended(self, snapshot: CallFinalSnapshot) -> None:
+    async def send_ended(self, snapshot: CallTerminated) -> None:
         """幂等排入通话终止消息，标记终态输出已接纳。"""
         if self._terminal_sent:
             return

@@ -16,7 +16,7 @@ from ._delivery import ConnectionDelivery, create_completion
 from ._protocol_translate import encode_event
 
 if TYPE_CHECKING:
-    from src.stage.chat_stage import ChatStage
+    from src.stage.chat.chat_stage import ChatStage
 
 
 class Binding:
@@ -24,8 +24,9 @@ class Binding:
 
     def __init__(self, user_id: str, connection_id: object, capabilities, config) -> None:
         self._config = config
-        self.stage: ChatStage | None = None
-        self.accepting = False
+        self._stage: ChatStage | None = None
+        self._generation: int | None = None
+        self._accepting = False
         self._bound = False
         self._controls: set[asyncio.Task[None]] = set()
         self._delivery = ConnectionDelivery(self, config)
@@ -41,12 +42,34 @@ class Binding:
     def mark_disconnected(self) -> None:
         """标记连接失效并关闭 Outbox，唤醒等待业务就绪的发送者。"""
         self.is_closed = True
+        self.revoke()
         self._outbox._close()
         self._business_ready.set()
 
-    def release_business_outputs(self) -> None:
-        """在 chat.ready 已入队后放行业务输出，保持就绪消息的发送顺序。"""
+    @property
+    def stage(self) -> ChatStage | None:
+        return self._stage
+
+    @property
+    def generation(self) -> int:
+        if self._generation is None:
+            raise RuntimeError("binding is not prepared")
+        return self._generation
+
+    @property
+    def accepting(self) -> bool:
+        return self._accepting
+
+    def activate(self) -> None:
+        """所有者已排入 chat.ready 后，原子开放本连接的业务输入与输出。"""
+        if not self._bound or self.is_closed:
+            raise ConnectionError("binding is unavailable")
+        self._accepting = True
         self._business_ready.set()
+
+    def revoke(self) -> None:
+        """关闭业务输入，保留所有者通知离线时使用的取消输出路径。"""
+        self._accepting = False
 
     async def send(self, message: str | bytes) -> None:
         """等待业务就绪，将已编码报文入队并等待网络完成；取消等待不撤回已入队报文。"""
@@ -67,14 +90,15 @@ class Binding:
         if error is not None:
             self.mark_disconnected()
 
-    def attach(self, stage: ChatStage) -> None:
-        """首次绑定唯一 Stage；解绑后的 Binding 不复用，避免旧异步输入重新获得权限。"""
+    def prepare(self, stage: ChatStage, generation: int) -> None:
+        """固定唯一 Stage 和代次并接收暂存输出；准入由所有者提交后开放。"""
         if self.is_closed or self.user_uuid != stage.user_id:
             raise ValueError("connection user does not own stage")
         if self.stage is not None:
             raise ValueError("binding already assigned to a stage")
-        self.stage = stage
-        self.accepting = self._bound = True
+        self._stage = stage
+        self._generation = generation
+        self._bound = True
 
     def can_accept(self, stimulus: d.Stimulus) -> bool:
         """检查绑定仍有效且唯一 Stage 允许接纳刺激。"""
@@ -90,12 +114,10 @@ class Binding:
         return self.can_accept(stimulus) and self.stage.stimulus_input_sink.submit(stimulus)
 
     async def detach(self) -> None:
-        """永久撤销业务投递权限并完成输出收尾，保留连接发送协议控制响应的能力。"""
+        """释放本绑定的业务投递资源；连接事实由 adapter 通知 Stage。"""
         if not self._bound:
             return
-        self.accepting = False
-        # Stage 在断开通知中仍可经原路由提交输出取消命令。
-        await self.stage.connection_changed(d.ConnectionState.DISCONNECTED)
+        self.revoke()
         self._bound = False
         if self.is_closed:
             self._delivery.disconnect()

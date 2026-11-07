@@ -141,6 +141,8 @@ describe('call clock production composition', () => {
       expect(result.state).toMatchObject({ phase: 'ACTIVE', activeStartedAtMs: anchor, connectedAtServerMs: SERVER_EPOCH });
       expect(transport.state.activeDurationMs).toBe(elapsedMs);
       expect(visibleTimer()).toEqual([`00:0${elapsedMs / 1000}`]);
+      expect(tree.root.findAllByType('Image' as any)).toHaveLength(0);
+      expect(tree.root.findAllByType('Text' as any).map(textOf)).not.toContain('洛天依');
 
       // Changing the wall clock after connection must not change the duration.
       jest.spyOn(Date, 'now').mockReturnValue(SERVER_EPOCH - 3_600_000);

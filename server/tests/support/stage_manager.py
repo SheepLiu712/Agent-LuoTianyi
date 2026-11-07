@@ -15,6 +15,12 @@ def make_stage_manager(*, adapter, **kwargs):
         kwargs.setdefault("conversation_service", CallConversationStore())
         kwargs.setdefault("call_maintenance_batches", object())
         kwargs.setdefault("realtime_speech_factory", FakeRealtimeSpeechSessionFactory())
+    if kwargs.get("call_sessions") is not None:
+        from support.call_session import bind_test_omni
+
+        get_agent = kwargs["get_agent"]
+        speech = kwargs["realtime_speech_factory"]
+        kwargs["get_agent"] = lambda character_id: bind_test_omni(get_agent(character_id), speech)
     manager = StageManager(
         chat_output_sink=adapter.output_sink,
         detach_stage_binding=adapter.detach_stage_binding,
@@ -52,21 +58,32 @@ def make_call_adapter(*, manager, **kwargs):
 
 async def create_call_stage(manager, claim, *, transport, speech_factory, call_metrics=None, **kwargs):
     """底层交接测试装配真实通话服务；生产接入不接受逐次资源注入。"""
-    from src.stage.call_stage import bind_call_stage_creator
+    from support.call_session import bind_call_test_creator as bind_call_stage_creator
     from support.call_output import output_sink
 
     resources = dict(manager._test_call_resources)
     resources.update(output_sink=output_sink(transport), speech_factory=speech_factory, call_metrics=call_metrics)
     manager._call_stage_creator = bind_call_stage_creator(**resources)
-    return await manager._create_call_stage(claim, **kwargs)
+    stage = await manager._create_call_stage(claim, **kwargs)
+    await stage.start()
+    return stage
 
 
 async def start_call_stage(**kwargs):
     """仅测试底层实时生命周期；生产创建还须装配持久化结算。"""
-    from src.stage.call_stage import CallStage
+    from src.stage.call.call_stage import CallStage
 
+    from support.call_session import bind_test_omni
+
+    bind_test_omni(kwargs["agent"], kwargs["speech_factory"])
     stage = CallStage(**kwargs)
-    await stage.start()
+    try:
+        await stage.start()
+    except Exception:
+        from src.domain.stage.lifecycle import StageEndReason
+
+        await stage.terminate(StageEndReason.INITIALIZATION_FAILED)
+        raise
     return stage
 
 

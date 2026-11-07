@@ -5,15 +5,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
+from traceback import extract_stack, walk_tb
 from typing import Any, Protocol, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
-import websockets
+from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from src.domain.call import CallAudioSemantic
@@ -25,6 +27,7 @@ from src.infrastructure.observability.call_metrics import (
     CallMetricStatus,
     CallProvider,
 )
+from src.utils.logger import get_logger
 
 from .config import AliyunRealtimeSpeechConfig
 from .contracts import (
@@ -40,10 +43,36 @@ from .contracts import (
 )
 
 _STOP = object()
+logger = get_logger(__name__)
+
+
+def _diagnostic_token(value: object) -> str | None:
+    """仅接纳有限长度的错误标识，不记录供应商正文或关闭原因文本。"""
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,96}", value):
+        return value
+    return None
+
+
+def _exception_locations(error: BaseException | None) -> list[dict[str, Any]]:
+    details = []
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        details.append(
+            {
+                "type": type(error).__name__,
+                "stack": [
+                    (frame.f_code.co_filename, line, frame.f_code.co_name)
+                    for frame, line in walk_tb(error.__traceback__)
+                ],
+            }
+        )
+        error = error.__cause__ or (None if error.__suppress_context__ else error.__context__)
+    return details
 
 
 class _WebSocket(Protocol):
-    async def send(self, message: str) -> None: ...
+    async def send(self, message: str | bytes) -> None: ...
 
     async def recv(self) -> str | bytes: ...
 
@@ -76,9 +105,11 @@ class AliyunRealtimeSpeechSession:
         call_metrics=None,
     ) -> None:
         self._config = config
-        self._connector = connector or websockets.connect
+        self._connector = connector or connect
         self._socket: _WebSocket | None = None
         self._writes: asyncio.Queue[dict[str, object] | object] = asyncio.Queue(maxsize=config.write_queue_size)
+        self._sent_events: deque[tuple[str, str]] = deque(maxlen=256)
+        self._recent_control_events: deque[tuple[str, str]] = deque(maxlen=8)
         self._event_buffer: deque[RealtimeSpeechEvent] = deque()
         self._event_condition = asyncio.Condition()
         self._event_consumer_active = False
@@ -114,7 +145,7 @@ class AliyunRealtimeSpeechSession:
         try:
             self._socket = await self._connector(
                 self._config.websocket_url,
-                extra_headers={"Authorization": f"Bearer {self._config.api_key}"},
+                additional_headers={"Authorization": f"Bearer {self._config.api_key}"},
                 open_timeout=self._config.connect_timeout_seconds,
                 close_timeout=self._config.close_timeout_seconds,
                 max_size=1024 * 1024,
@@ -135,7 +166,7 @@ class AliyunRealtimeSpeechSession:
                 status=CallMetricStatus.ERROR,
                 error_code="PROVIDER_START_FAILED",
             )
-            await self._fail("provider_start_failed", retryable=True)
+            await self._fail("provider_start_failed", retryable=True, exception=exc)
             raise RuntimeError("realtime speech provider initialization failed") from exc
         self._record_metric(CallMetricName.PROVIDER_ENDPOINT, started)
 
@@ -249,6 +280,8 @@ class AliyunRealtimeSpeechSession:
             "output_audio_format": "pcm",
             "turn_detection": {"type": "smart_turn"},
         }
+        if config.instructions:
+            session["instructions"] = config.instructions
         if config.language:
             session["input_audio_transcription"] = {"language": config.language}
         return {"type": "session.update", "session": session}
@@ -262,11 +295,19 @@ class AliyunRealtimeSpeechSession:
                 socket = self._socket
                 if socket is None:
                     return
-                await socket.send(json.dumps(message, separators=(",", ":")))
+                outgoing = dict(cast(dict[str, object], message))
+                event_id = uuid4().hex
+                outgoing["event_id"] = event_id
+                event_type = str(outgoing["type"])
+                # 在 send 前登记，避免供应商响应先于 send 恢复；仅保留标识，不保存载荷。
+                self._sent_events.append((event_id, event_type))
+                if event_type != "input_audio_buffer.append":
+                    self._recent_control_events.append((event_id, event_type))
+                await socket.send(json.dumps(outgoing, separators=(",", ":")))
         except asyncio.CancelledError:
             raise
-        except Exception:
-            await self._fail("provider_write_failed", retryable=True)
+        except Exception as exc:
+            await self._fail("provider_write_failed", retryable=True, exception=exc)
 
     async def _read_loop(self) -> None:
         try:
@@ -279,9 +320,11 @@ class AliyunRealtimeSpeechSession:
             raise
         except ConnectionClosed as exc:
             if not self._closed and not self._failed:
-                await self._fail("provider_connection_closed", retryable=exc.code != 1008)
-        except Exception:
-            await self._fail("provider_receive_failed", retryable=True)
+                await self._fail(
+                    "provider_connection_closed", retryable=exc.rcvd is None or exc.rcvd.code != 1008, exception=exc
+                )
+        except Exception as exc:
+            await self._fail("provider_receive_failed", retryable=True, exception=exc)
 
     @staticmethod
     def _decode_message(raw: str | bytes) -> dict[str, Any]:
@@ -327,8 +370,14 @@ class AliyunRealtimeSpeechSession:
         elif event_type == "response.done":
             await self._handle_response_done(message)
         elif event_type == "error":
-            error_type = _clean_string(_mapping(message.get("error")).get("type"))
-            await self._fail("provider_server_error" if error_type == "server_error" else "provider_error", True)
+            provider_error = _mapping(message.get("error"))
+            error_type = _clean_string(provider_error.get("type"))
+            await self._fail(
+                "provider_server_error" if error_type == "server_error" else "provider_error",
+                True,
+                provider_error=provider_error,
+                server_event_id=_diagnostic_token(message.get("event_id")),
+            )
 
     async def _handle_speech_stopped(self, message: dict[str, Any]) -> None:
         item_id = _clean_string(message.get("item_id"))
@@ -516,10 +565,46 @@ class AliyunRealtimeSpeechSession:
         except Exception:
             pass
 
-    async def _fail(self, error_code: str, retryable: bool) -> None:
+    async def _fail(
+        self,
+        error_code: str,
+        retryable: bool,
+        *,
+        exception: BaseException | None = None,
+        provider_error: dict[str, Any] | None = None,
+        server_event_id: str | None = None,
+    ) -> None:
         if self._failed or self._closed:
             return
         self._failed = True
+        provider_error = provider_error or {}
+        related_event_id = _diagnostic_token(provider_error.get("event_id"))
+        related_event_type = next(
+            (kind for identity, kind in reversed(self._sent_events) if identity == related_event_id), None
+        )
+        closed = exception if isinstance(exception, ConnectionClosed) else None
+        logger.error(
+            "Realtime speech provider failed call_id=%s error_code=%s retryable=%s "
+            "provider_error_type=%s provider_error_code=%s received_close_code=%s sent_close_code=%s "
+            "provider_error_param=%s server_event_id=%s related_client_event_id=%s related_client_event_type=%s "
+            "last_outbound_event=%s recent_control_events=%s "
+            "exceptions=%s origin=%s",
+            self._call_id,
+            error_code,
+            retryable,
+            _diagnostic_token(provider_error.get("type")),
+            _diagnostic_token(provider_error.get("code")),
+            (closed.rcvd.code if closed.rcvd else 1006) if closed is not None else None,
+            closed.sent.code if closed is not None and closed.sent else None,
+            _diagnostic_token(provider_error.get("param")),
+            server_event_id,
+            related_event_id,
+            related_event_type,
+            self._sent_events[-1] if self._sent_events else None,
+            list(self._recent_control_events),
+            _exception_locations(exception),
+            [(frame.filename, frame.lineno, frame.name) for frame in extract_stack(limit=8)[:-1]],
+        )
         if self._session_updated is not None and not self._session_updated.done():
             self._session_updated.set_exception(RuntimeError("realtime speech provider failed"))
         await self._set_terminal(ProviderFailed(error_code=error_code, retryable=retryable))

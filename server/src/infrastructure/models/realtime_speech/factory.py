@@ -7,6 +7,7 @@ from uuid import UUID
 from .aliyun import AliyunRealtimeSpeechSession, Connector
 from .config import AliyunRealtimeSpeechConfig, RealtimeSpeechConfigError, RealtimeSpeechUnavailable
 from .contracts import RealtimeSpeechSession
+from .fun_asr import FunAsrRealtimeSpeechSession
 
 
 class AliyunRealtimeSpeechSessionFactory:
@@ -37,9 +38,8 @@ class AliyunRealtimeSpeechSessionFactory:
     async def create(self, call_id: UUID) -> RealtimeSpeechSession:
         if self._config is None:
             raise RealtimeSpeechUnavailable("realtime speech capability is unavailable")
-        return AliyunRealtimeSpeechSession(
-            self._config, connector=self._connector, call_id=call_id, call_metrics=self._call_metrics
-        )
+        session_type = FunAsrRealtimeSpeechSession if self._config.is_fun_asr else AliyunRealtimeSpeechSession
+        return session_type(self._config, connector=self._connector, call_id=call_id, call_metrics=self._call_metrics)
 
     @property
     def is_configured(self) -> bool:

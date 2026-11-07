@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import src.domain.agent as d
 from src.agent.processing.output_emitter import OutputEmitter
-from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
+from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill, MaintenanceRequest
 from src.agent.skills.invocation import execution_invocation
 
 
@@ -35,14 +35,18 @@ class CognitiveMaintenanceActionHandler:
                 execution_context,
                 user_id=context.identity.user_id,
             )
-            if execution_context.call_maintenance_snapshot is not None:
-                await self._skill.maintain_if_compaction_needed(
-                    invocation, context, call_snapshot=execution_context.call_maintenance_snapshot
-                )
-            elif action.reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
-                await self._skill.maintain_if_compaction_needed(invocation, context)
-            else:
-                await self._skill.maintain(invocation, context, reason=action.reason)
+            entries = context.conversation.read().entries
+            report = await self._skill.maintain(
+                invocation,
+                request=MaintenanceRequest(
+                    reason=action.reason,
+                    context=context,
+                    call_snapshot=execution_context.call_maintenance_snapshot,
+                    through_entry_id=entries[-1].entry_id if entries else None,
+                ),
+            )
+            if report.status is d.MaintenanceStatus.CONFLICT:
+                raise RuntimeError("COGNITIVE_MAINTENANCE_CONFLICT")
             return self._result(action)
         finally:
             # 旧 Reflection 的每轮召回清理语义保留在行动结束边界。

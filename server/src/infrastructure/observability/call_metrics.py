@@ -61,7 +61,7 @@ class CallProvider(str, Enum):
 _STATES = frozenset({"preparing", "ringing", "active", "reconnecting", "ending", "declined", "ended", "failed"})
 _COUNT_FIELDS = frozenset({"seq", "buffered_bytes", "reconnect_count", "interrupt_count", "ack_retry_count"})
 _NUMERIC_FIELDS = _COUNT_FIELDS | frozenset({"latency_ms", "state_duration_ms", "usage_units", "cost_microunits"})
-_LABEL_FIELDS = frozenset({"state", "result", "error_code", "provider", "cost_status"})
+_LABEL_FIELDS = frozenset({"state", "result", "error_code", "provider", "cost_status", "measurement"})
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_.-]{0,31}$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
@@ -133,6 +133,24 @@ class CallMetric:
 class CallMetrics:
     def __init__(self, sink: PipelineMetricSink | None) -> None:
         self._sink = sink
+
+    def record_reply_span(self, *, call_id, phase, start_ts, end_ts, duration_ms, status, metadata):
+        if self._sink is None:
+            return
+        try:
+            self._sink.record_pipeline_span(
+                trace_id=f"call:{call_id}",
+                span_name=f"call.reply.{phase}",
+                start_ts=start_ts,
+                end_ts=end_ts,
+                duration_ms=duration_ms,
+                status=status,
+                metadata=metadata,
+            )
+        except Exception as error:
+            from src.utils.logger import get_logger
+
+            get_logger(__name__).warning("Call reply metric failed call_id=%s type=%s", call_id, type(error).__name__)
 
     def record(self, metric: CallMetric) -> bool:
         if self._sink is None:

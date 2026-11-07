@@ -58,6 +58,22 @@ class CallStarted(Stimulus):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CallTranscriptUpdated(Stimulus):
+    """未确认的临时转写，只能用于候选召回，不能写入对话。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.CALL_TRANSCRIPT_UPDATED
+    call_id: UUID
+    turn_seq: int
+    text: str
+
+    def __post_init__(self):
+        Stimulus.__post_init__(self)
+        _require_instance(self.call_id, UUID)
+        _require(type(self.turn_seq) is int and self.turn_seq > 0, "turn_seq")
+        _require(isinstance(self.text, str) and bool(self.text.strip()), "text")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CallTurnCompleted(Stimulus):
     kind: ClassVar[StimulusKind] = StimulusKind.CALL_TURN_COMPLETED
     call_id: UUID
@@ -149,13 +165,39 @@ class CallEnding(Stimulus):
             raise ValueError("call ending reason mismatch")
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallReplySegmentReady(Stimulus):
+    """实时模型已完成的短句；处理时不再调用回复模型。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.CALL_REPLY_SEGMENT_READY
+    call_id: UUID
+    response_id: str
+    segment_index: int
+    turn_seq: int | None
+    text: str
+    tone: str = "中性"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallMemoryLookupRequested(Stimulus):
+    kind: ClassVar[StimulusKind] = StimulusKind.CALL_MEMORY_LOOKUP_REQUESTED
+    call_id: UUID
+    response_id: str
+    tool_call_id: str
+    query: str
+    turn_seq: int | None = None
+
+
 CallStimulus = (
     CallTimeLimitWarning
     | CallAnswerRequested
     | CallStarted
+    | CallTranscriptUpdated
     | CallTurnCompleted
     | CallReplyRequested
     | CallReplyConfirmed
     | CallSilenceElapsed
     | CallEnding
+    | CallReplySegmentReady
+    | CallMemoryLookupRequested
 )

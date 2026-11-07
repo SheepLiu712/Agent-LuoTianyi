@@ -19,6 +19,11 @@ os.chdir(cwd)
 if cwd not in sys.path:
     sys.path.append(cwd)
 
+if __name__ == "__main__" and "--diagnose-tls" in sys.argv:
+    from src.utils.tls_diagnostics import main as diagnose_tls
+
+    sys.exit(diagnose_tls())
+
 from PySide6.QtWidgets import QDialog
 
 from src.utils.helpers import load_config

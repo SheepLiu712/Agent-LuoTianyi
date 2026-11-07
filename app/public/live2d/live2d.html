@@ -48,7 +48,13 @@
     let model;
     let autoEyeBlink;
     let app;
-    const MODEL_SCALE_MULTIPLIER = 1.2;
+    let presentationMode = 'chat';
+    let resizePresentation = () => {};
+    window.setPresentationMode = (mode) => {
+      if (mode !== 'chat' && mode !== 'call') throw new Error('invalid_presentation_mode');
+      presentationMode = mode;
+      resizePresentation();
+    };
     const FOCUS_Y_OFFSET_RATIO = 0.0;
     const MODEL_SETTINGS_URL = './models/luo/model.model3.json';
 
@@ -153,13 +159,21 @@
         model.interactiveChildren = false;
 
         // 响应式缩放与居中
+        const naturalWidth = model.width;
+        const naturalHeight = model.height;
         const resizeModel = () => {
-          const scaleX = (window.innerWidth * MODEL_SCALE_MULTIPLIER) / model.width;
-          const scaleY = (window.innerHeight * MODEL_SCALE_MULTIPLIER) / model.height;
+          const inCall = presentationMode === 'call';
+          // 模型画布左右有透明留白；通话按可见轮廓校准至屏幕宽度。
+          const scaleX = (window.innerWidth * (inCall ? 1.75 : 1.2)) / naturalWidth;
+          const scaleY = (window.innerHeight * (inCall ? 0.9 : 1.2)) / naturalHeight;
           model.scale.set(Math.min(scaleX, scaleY));
           model.x = window.innerWidth * 0.5 - (model.width / 2);
-          model.y = window.innerHeight * 0.5 - (model.height / 2) ;
+          // 当前模型的脚底位于画布高度约 93%，与两种背景构图中的地毯对齐。
+          model.y = inCall
+            ? window.innerHeight * 0.84 - model.height * 0.93
+            : window.innerHeight * 0.5 - model.height / 2;
         };
+        resizePresentation = resizeModel;
         resizeModel();
         model.expression('normal')
         window.addEventListener('resize', resizeModel);

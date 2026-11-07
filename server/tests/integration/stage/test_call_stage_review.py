@@ -7,8 +7,9 @@ from datetime import datetime
 import pytest
 
 from src.domain.call import CallReplyStatus
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.observability.call_metrics import CallMetricName
-from src.stage.call_stage import CallPCM
+from src.stage.call.call_stage import CallPCM
 from tests.integration.stage import test_call_stage as baseline
 
 call_setup = baseline.call_setup
@@ -284,12 +285,15 @@ async def test_first_audio_is_measured_once_per_turn_after_successful_pcm_send(c
 
         first_audio = [metric for metric in captured if metric.name is CallMetricName.FIRST_AUDIO]
         assert [metric.duration_ms for metric in first_audio] == [125.0, 250.0]
-        assert all(metric.labels == {"result": "succeeded"} for metric in first_audio)
+        assert all(
+            metric.labels == {"result": "succeeded", "measurement": "provider_speech_stopped_to_first_sent"}
+            for metric in first_audio
+        )
         assert all(
             datetime.fromisoformat(metric.start_ts) < datetime.fromisoformat(metric.end_ts) for metric in first_audio
         )
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -330,7 +334,7 @@ async def test_first_audio_is_not_recorded_when_pcm_send_fails(call_setup):
 
         assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured]
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -375,7 +379,7 @@ async def test_first_audio_is_not_recorded_for_interrupted_response(call_setup):
 
         assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured]
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -417,7 +421,7 @@ async def test_first_audio_excludes_turns_crossing_reconnect_and_accepts_new_tur
 
         handler.gate.clear()
         await provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="断线前轮次")))
-        await baseline._eventually(lambda: bool(stage._handle_tasks))
+        await baseline._eventually(lambda: bool(stage._request_tokens))
         await stage.disconnect()
         handler.gate.set()
         await _await_realized(stage)
@@ -430,7 +434,7 @@ async def test_first_audio_excludes_turns_crossing_reconnect_and_accepts_new_tur
         first_audio = [metric for metric in captured if metric.name is CallMetricName.FIRST_AUDIO]
         assert [metric.duration_ms for metric in first_audio] == [250.0]
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -485,11 +489,11 @@ async def test_first_audio_remains_excluded_when_inflight_pcm_returns_after_resu
         first_audio = [metric for metric in captured if metric.name is CallMetricName.FIRST_AUDIO]
         assert [metric.duration_ms for metric in first_audio] == [250.0]
         assert stage.state is baseline.CallState.ACTIVE
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
         assert not stage.tasks
     finally:
         transport.release.set()
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -531,11 +535,11 @@ async def test_successful_text_only_response_does_not_record_first_audio(call_se
 
         assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured]
         assert stage._turns[1].status is baseline.CallReplyStatus.NOT_STARTED
-        assert stage._unfinished_turns == {1}
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        assert stage._unfinished_turns == set()
+        await stage.terminate(StageEndReason.USER_REQUESTED)
         assert not stage.tasks
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -578,7 +582,7 @@ async def test_first_audio_uses_original_turn_start_when_say_retries(call_setup)
         first_audio = [metric for metric in captured if metric.name is CallMetricName.FIRST_AUDIO]
         assert [metric.duration_ms for metric in first_audio] == [250.0]
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -631,7 +635,7 @@ async def test_late_interrupted_generation_audio_is_excluded_and_new_provider_tu
         first_audio = [metric for metric in captured if metric.name is CallMetricName.FIRST_AUDIO]
         assert [metric.duration_ms for metric in first_audio] == [125.0]
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -641,18 +645,19 @@ async def test_all_formal_segments_are_preserved_and_wait_for_playback(call_setu
     handler.gate.set()
     stage._agent = baseline._agent(handler)
     try:
-        await stage._on_turn(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="用户发言")))
+        await stage._provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="用户发言")))
         await _await_realized(stage)
         streams = tuple(stage._playback.pending_streams)
         assert len(streams) == 2
         stage.playback_completed(*streams[0])
         assert stage._turns[1].status is not CallReplyStatus.COMPLETED
         stage.playback_completed(*streams[1])
-        snapshot = await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
+        snapshot = stage.snapshot
         assert snapshot.completed_turns[0].reply_status is CallReplyStatus.COMPLETED
         assert snapshot.completed_turns[0].formal_agent_text == "第一段\n第二段"
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)
 
 
 @pytest.mark.asyncio
@@ -661,18 +666,19 @@ async def test_failed_reply_then_success_can_settle_terminal_snapshot(call_setup
     handler.gate.set()
     stage._agent._action_router = baseline.ActionRouter(((baseline.d.ActionKind.SAY, _FailedSay()),))
     try:
-        await stage._on_turn(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="失败轮")))
+        await stage._provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="失败轮")))
         await _await_realized(stage)
         stage._agent._action_router = baseline.ActionRouter(((baseline.d.ActionKind.SAY, baseline._SayHandler()),))
-        await stage._on_turn(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="成功轮")))
+        await stage._provider.emit(baseline.TurnCompleted(baseline.CallAudioSemantic(transcript="成功轮")))
         await _await_realized(stage)
         for response_id, stream_id in tuple(stage._playback.pending_streams):
             stage.playback_completed(response_id, stream_id)
-        snapshot = await stage.terminate(baseline.CallEndReason.USER_HANGUP)
-        assert snapshot.completed_turns[0].reply_status is CallReplyStatus.COMPLETED
-        assert snapshot.completed_turns[0].reply_turn_seq == 2
+        await stage.terminate(StageEndReason.USER_REQUESTED)
+        snapshot = stage.snapshot
+        assert snapshot.completed_turns[0].reply_status is CallReplyStatus.FAILED
+        assert snapshot.completed_turns[0].reply_turn_seq is None
         assert snapshot.completed_turns[0].formal_agent_text is None
         assert snapshot.completed_turns[1].reply_status is CallReplyStatus.COMPLETED
         assert snapshot.completed_turns[1].formal_agent_text == "正式回答"
     finally:
-        await stage.terminate(baseline.CallEndReason.USER_HANGUP)
+        await stage.terminate(StageEndReason.USER_REQUESTED)

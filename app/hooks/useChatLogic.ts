@@ -23,7 +23,6 @@ export const useChatLogic = (
   username: string,
   messageToken: string,
   characterId: string,
-  active = true,
 ) => {
   const [inputText, setInputText] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -115,7 +114,6 @@ export const useChatLogic = (
   }, []);
 
   const voiceInput = useVoiceInput({
-    active,
     onRecordingStarted: (recordingId) => { void binderRef.current?.sendVoiceRecordingStarted(recordingId); },
     onRecordingCancelled: (recordingId) => { void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
     onRecordingCommitted: ({ uploadId, localUri, durationMs }) => {
@@ -256,7 +254,7 @@ export const useChatLogic = (
       onError: (errorText) => {
         binder.emitErrorText(errorText);
       },
-      onLlmRequest: (payload) => processor.processLlmRequest(payload),
+      onLlmRequest: (payload, onDelta, signal) => processor.processLlmRequest(payload, onDelta, signal),
       getLlmMode: () => processor.getLlmMode(),
     };
     chatCallbacksRef.current = callbacks;

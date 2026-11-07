@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from 'expo-asset';
 import Constants from 'expo-constants';
+import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,10 +29,11 @@ import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
 import { VoiceInputBar } from '../components/VoiceInputBar';
 import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
+import { VoicePermissionNotice } from '../components/VoicePermissionNotice';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from '../hooks/useHistoryLogic';
 import { getDynamicUnreadStatus } from '../utils/dynamics';
-import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import { addDebugTrace, clearDebugTrace, DebugTraceEntry, formatDebugTraceReport, subscribeDebugTrace } from '../utils/debug_trace';
 import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
 import DynamicsScreen from './dynamics';
 import PreferencesScreen from './preferences';
@@ -40,7 +42,7 @@ import { useCallSession } from '../hooks/useCallSession';
 import { CallScreen } from '../components/call/CallScreen';
 import { CallFailureBanner } from '../components/call/CallFailureBanner';
 import { requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
-import { ExpoCallRingtone } from '../utils/call_session/ringtone';
+import { NativeCallRingtone } from '../utils/call_session/ringtone';
 import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
 import { createCallMouthBridge } from '../utils/call_audio/playback_progress';
 
@@ -76,7 +78,6 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
   const callHangupRef = useRef<() => void>(() => {});
   const onLogoutRef = useRef(onLogout);
-  onLogoutRef.current = onLogout;
   const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
     { text: '继续通话', style: 'cancel' },
     { text: '结束', style: 'destructive', onPress: () => callHangupRef.current() },
@@ -88,7 +89,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const callSwitchRef = useRef<{ prepare(clientRequestId: string, characterId: string): Promise<void> }>({
     prepare: async () => { throw new Error('CHAT_TRANSPORT_UNAVAILABLE'); },
   });
-  const ringtone = useMemo(() => new ExpoCallRingtone(), []);
+  const ringtone = useMemo(() => new NativeCallRingtone(), []);
   const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
   const live2dAssetRoot = 'file:///android_asset/public/';
   const live2dRoot = __DEV__ ? `http://${debuggerHost}/` : live2dAssetRoot;
@@ -117,8 +118,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     voiceInput,
     callSwitch,
     resumeChat,
-  } = useChatLogic(webviewRef, username, message_token, 'luotianyi', !showPreferences && !showLlmSettings && !showDynamics);
+  } = useChatLogic(webviewRef, username, message_token, 'luotianyi');
   callSwitchRef.current = callSwitch;
+  onLogoutRef.current = () => {
+    voiceInput.leavePermissionPage();
+    onLogout?.();
+  };
 
   const callComposition = useProductionCallComposition({
     username,
@@ -143,6 +148,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     onCleanupError: handleCallCleanupError,
   });
   callHangupRef.current = call.hangup;
+  const isCallPresentation = call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING';
+  useEffect(() => {
+    if (live2dReady) webviewRef.current?.injectJavaScript(`window.setPresentationMode('${isCallPresentation ? 'call' : 'chat'}'); true;`);
+  }, [isCallPresentation, live2dReady]);
 
   useEffect(() => () => ringtone.stop(), [ringtone]);
 
@@ -286,7 +295,27 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     );
   };
 
-  const visibleDebugEntries = debugEntries.slice(-50).reverse();
+  const visibleDebugEntries = debugEntries.slice(-200).reverse();
+  const copyDebugLogs = async () => {
+    const report = formatDebugTraceReport({
+      appVersion: Constants.expoConfig?.version,
+      versionCode: Constants.expoConfig?.android?.versionCode,
+      platform: Platform.OS,
+      systemVersion: Platform.Version,
+      ...(Platform.OS === 'android' ? {
+        model: Platform.constants.Model,
+        manufacturer: Platform.constants.Manufacturer,
+        androidRelease: Platform.constants.Release,
+      } : {}),
+    });
+    try {
+      if (!await Clipboard.setStringAsync(report)) throw new Error('clipboard_write_failed');
+      Alert.alert('已复制日志', '已复制全部保留日志及设备信息，可直接粘贴反馈。');
+    } catch (error) {
+      addDebugTrace('debug', 'copy logs failed', { error: String(error) });
+      Alert.alert('复制失败', '无法写入剪贴板，请重试。');
+    }
+  };
 
   const formatDebugTs = (ts: number) => {
     const d = new Date(ts);
@@ -310,11 +339,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   };
 
   const handleOpenPreferences = () => {
+    voiceInput.leavePermissionPage();
     setShowPreferences(true);
     closeDrawer();
   };
 
   const handleOpenLlmSettings = () => {
+    voiceInput.leavePermissionPage();
     setShowLlmSettings(true);
     closeDrawer();
   };
@@ -346,6 +377,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   }, [message_token, refreshDynamicsUnread, username]);
 
   const handleOpenDynamics = () => {
+    voiceInput.leavePermissionPage();
     setShowDynamics(true);
     closeDrawer();
   };
@@ -363,7 +395,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const handleLogout = () => {
     closeDrawer();
     void callComposition.closeCurrent();
-    onLogout?.();
+    onLogoutRef.current?.();
   };
 
   const openCall = () => {
@@ -371,6 +403,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       Alert.alert('通话暂不可用', '服务端或设备音频能力尚未就绪。请完成后续配置后再试。');
       return;
     }
+    voiceInput.leavePermissionPage();
     closeDrawer();
     void call.start(true);
   };
@@ -387,12 +420,17 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
       {call.state.phase !== 'IDLE' ? <CallScreen state={call.state} theme={theme} onHangup={call.hangup} onBack={handleBackConfirmation} /> : null}
-      {call.failureNotice ? <CallFailureBanner notice={call.failureNotice} theme={theme} onDismiss={call.dismissFailure} /> : null}
+      {voiceInput.permissionNotice ? (
+        <VoicePermissionNotice notice={voiceInput.permissionNotice} theme={theme} top={insets.top + 8}
+          onDismiss={voiceInput.dismissPermissionNotice} onOpenSettings={voiceInput.openPermissionSettings} />
+      ) : call.failureNotice ? (
+        <CallFailureBanner notice={call.failureNotice} theme={theme} onDismiss={call.dismissFailure} />
+      ) : null}
 
       <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
         <Image
           source={require('../assets/live2d/backgrounds/bg2.jpg')}
-          style={[StyleSheet.absoluteFillObject, styles.backgroundImage]}
+          style={[StyleSheet.absoluteFillObject, styles.backgroundImage, isCallPresentation && styles.callBackgroundImage]}
           resizeMode="cover"
         />
         <WebView
@@ -429,9 +467,9 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         ) : null}
 
-        <TouchableOpacity style={[styles.menuButton, { backgroundColor: theme.menuButton }]} onPress={openDrawer} activeOpacity={0.75}>
+        {!isCallPresentation ? <TouchableOpacity style={[styles.menuButton, { backgroundColor: theme.menuButton }]} onPress={openDrawer} activeOpacity={0.75}>
           <Image source={require('../assets/images/menu.png')} style={[styles.menuIcon, { tintColor: theme.text }]} />
-        </TouchableOpacity>
+        </TouchableOpacity> : null}
 
         {thinking ? (
           <View style={styles.thinkingBubble}>
@@ -444,7 +482,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
         {debugOpen ? (
           <View style={[styles.debugPanel, { backgroundColor: theme.debugBackground, borderColor: theme.debugBorder }]}>
             <View style={styles.debugHeaderRow}>
-              <Text style={[styles.debugHeaderText, { color: theme.debugHeader }]}>发送调试日志（最近 {visibleDebugEntries.length} 条）</Text>
+              <Text style={[styles.debugHeaderText, { color: theme.debugHeader }]}>日志 {visibleDebugEntries.length}/{debugEntries.length}</Text>
+              <TouchableOpacity accessibilityLabel="复制全部日志" onPress={() => { void copyDebugLogs(); }}>
+                <Text style={[styles.debugClearText, { color: theme.debugAction }]}>复制全部日志</Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={clearDebugTrace}>
                 <Text style={[styles.debugClearText, { color: theme.debugAction }]}>清空</Text>
               </TouchableOpacity>
@@ -531,7 +572,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
         </View>
       </View>
 
-      {voiceInput.captureState === 'Recording' || voiceInput.captureState === 'CancelZone' ? <VoiceRecordingOverlay elapsedMs={voiceInput.elapsedMs} cancelZone={voiceInput.isCancelZone} meter={voiceInput.smoothedMeter} theme={theme} /> : null}
+      {voiceInput.captureState === 'Recording' || voiceInput.captureState === 'CancelZone' ? <VoiceRecordingOverlay elapsedMs={voiceInput.elapsedMs} cancelZone={voiceInput.isCancelZone} meter={voiceInput.smoothedMeter} theme={theme} topInset={insets.top} bottomInset={insets.bottom} /> : null}
 
       <Animated.View
         pointerEvents={drawerOpen ? 'auto' : 'none'}
@@ -583,12 +624,19 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         </TouchableOpacity>
 
-         {Platform.OS === 'android' ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={call.canStart ? '给天依打电话' : '语音通话，暂不可用'} accessibilityState={{ disabled: !call.canStart }} disabled={!call.canStart} style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt, opacity: call.canStart ? 1 : 0.58 }]} onPress={call.canStart ? openCall : undefined} activeOpacity={0.78}>
-          <View style={styles.drawerItemRow}>
-            <Text style={[styles.drawerItemText, { color: theme.text }]}>语音通话</Text>
-             {!call.canStart ? <Text style={[styles.callUnavailable, { color: theme.textMuted }]}>暂不可用</Text> : null}
-          </View>
-         </TouchableOpacity> : null}
+        {Platform.OS === 'android' ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="给天依打电话"
+            accessibilityState={{ disabled: !call.canStart }}
+            disabled={!call.canStart}
+            style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]}
+            onPress={call.canStart ? openCall : undefined}
+            activeOpacity={0.78}
+          >
+            <Text style={[styles.drawerItemText, { color: call.canStart ? theme.text : theme.textMuted }]}>语音通话</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.drawerSectionLabel, { color: theme.textMuted }]}>颜色模式</Text>
@@ -631,6 +679,9 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     transform: [{ scale: 1.1 }, { translateX: 0 }, { translateY: 0 }],
+  },
+  callBackgroundImage: {
+    transform: [{ scale: 1 }],
   },
   live2dFixedLayer: {
     position: 'absolute',
@@ -795,9 +846,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#243447',
-  },
-  callUnavailable: {
-    fontSize: 12,
   },
   drawerItemRow: {
     flexDirection: 'row',

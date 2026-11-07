@@ -122,7 +122,7 @@ async def test_skill_registers_real_module_with_its_resource_and_parses_the_resp
         assert field in prompt
     assert "逐字转写" in prompt
     assert model.generate_response.call_args.kwargs["response_format"] == {"type": "json_object"}
-    assert service.audio_model_modules["audio_understanding"].prompt_template.name == "audio_understanding_prompt"
+    assert service.audio_model_modules["skill.audio_understanding.describe"].prompt_template.name == "audio_understanding_prompt"
 
 
 @pytest.mark.asyncio

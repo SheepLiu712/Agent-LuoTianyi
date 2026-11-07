@@ -3,12 +3,15 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
+from support.stage_support import RecordingAgent, StageContextFactory, report
 
 import src.server_runtime as runtime_module
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.persistence.database import vector_store as vector_store_module
 from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
 
@@ -206,11 +209,6 @@ async def test_cancelled_runtime_rollback_drains_real_manager_termination_before
     entered = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
-    manager = make_stage_manager(
-        get_agent=lambda _character: object(),
-        adapter=WebSocketAdapter(),
-        get_context_factory=lambda _character: object(),
-    )
 
     class Termination:
         async def reconcile(self):
@@ -222,7 +220,7 @@ async def test_cancelled_runtime_rollback_drains_real_manager_termination_before
 
             return await asyncio.to_thread(blocking_termination)
 
-    initializing = manager._finalizations.start("call", ("user", "luotianyi"), Termination().reconcile)
+    manager, initializing = await _start_managed_chat_termination(Termination().reconcile)
     await entered.wait()
 
     runtime = SimpleNamespace(
@@ -275,11 +273,6 @@ async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_f
     entered = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
-    manager = make_stage_manager(
-        get_agent=lambda _character: object(),
-        adapter=WebSocketAdapter(),
-        get_context_factory=lambda _character: object(),
-    )
 
     class Termination:
         async def reconcile(self):
@@ -291,7 +284,7 @@ async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_f
 
             return await asyncio.to_thread(blocking_termination)
 
-    initializing = manager._finalizations.start("call", ("user", "luotianyi"), Termination().reconcile)
+    manager, initializing = await _start_managed_chat_termination(Termination().reconcile)
     await entered.wait()
 
     async def failing_world_stop():
@@ -325,8 +318,9 @@ async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_f
     release.set()
 
     result = await asyncio.gather(rollback, return_exceptions=True)
-    with pytest.raises(RuntimeError, match="termination internal detail"):
-        await initializing
+    termination_result = await initializing
+    assert termination_result.finalization_error == "RuntimeError"
+    assert termination_result.resources_released
     assert dependencies_closed_before_release is False
     assert done_before_release is False
     assert isinstance(result[0], asyncio.CancelledError)
@@ -337,6 +331,23 @@ async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_f
 
 async def _record(calls, value):
     calls.append(value)
+
+
+async def _start_managed_chat_termination(operation):
+    async def handle(request, sink):
+        await operation()
+        return report(request)
+
+    manager = make_stage_manager(
+        get_agent=lambda _: RecordingAgent(handle=handle),
+        adapter=WebSocketAdapter(),
+        get_context_factory=lambda _: StageContextFactory(),
+    )
+    stage = await manager.try_to_get_stage(
+        user_id="user", character_id="luotianyi", connection=StubChatConnection(None, "user", "user")
+    )
+    await stage.start()
+    return manager, asyncio.create_task(stage.terminate(StageEndReason.SHUTDOWN))
 
 
 async def _record_wait(calls, started, stopped, release):

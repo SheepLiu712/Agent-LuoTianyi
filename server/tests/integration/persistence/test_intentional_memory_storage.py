@@ -7,6 +7,9 @@ from src.infrastructure.persistence.database.vector_store import Document
 
 
 class _VectorStore:
+    async def embed_query(self, query):
+        return [1.0]
+
     def __init__(self):
         self.documents = []
         self.deleted = []
@@ -93,14 +96,21 @@ async def test_commit_user_memory_cleans_vector_and_fails_when_projection_link_f
 async def test_orphan_vector_redelivery_is_not_reported_as_committed():
     writer = MemoryWriter({"user_memory_dedup_threshold": 0.72}, object())
     vector_store = _VectorStore()
-    vector_store.add_documents([Document("我喜欢茶", {
-        "source": "memory_writer",
-        "timestamp": "2026-09-15",
-        "event_date": "2026-09-15",
-        "memory_type": "user_memory",
-        "user_id": "u",
-        "owner_character_id": "luotianyi",
-    })])
+    vector_store.add_documents(
+        [
+            Document(
+                "我喜欢茶",
+                {
+                    "source": "memory_writer",
+                    "timestamp": "2026-09-15",
+                    "event_date": "2026-09-15",
+                    "memory_type": "user_memory",
+                    "user_id": "u",
+                    "owner_character_id": "luotianyi",
+                },
+            )
+        ]
+    )
     memory_store = _MemoryStore()
 
     record_id, committed = await writer.commit_user_memory(vector_store, memory_store, "u", "我喜欢茶", "luotianyi")
@@ -117,8 +127,12 @@ async def test_duplicate_redelivery_returns_same_canonical_record_without_new_re
     vector_store = _VectorStore()
     memory_store = _MemoryStore()
 
-    first_id, first_committed = await writer.commit_user_memory(vector_store, memory_store, "u", "我喜欢茶", "luotianyi")
-    second_id, second_committed = await writer.commit_user_memory(vector_store, memory_store, "u", "我喜欢茶", "luotianyi")
+    first_id, first_committed = await writer.commit_user_memory(
+        vector_store, memory_store, "u", "我喜欢茶", "luotianyi"
+    )
+    second_id, second_committed = await writer.commit_user_memory(
+        vector_store, memory_store, "u", "我喜欢茶", "luotianyi"
+    )
 
     assert first_committed is True
     assert second_committed is False

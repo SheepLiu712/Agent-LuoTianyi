@@ -51,7 +51,21 @@ class Sink:
 
 
 @pytest.mark.asyncio
-async def test_real_say_handler_propagates_call_metadata_to_every_output():
+@pytest.mark.parametrize("packet_count", [1, 2])
+async def test_real_say_handler_propagates_call_metadata_to_every_output(monkeypatch, packet_count):
+    import src.agent.handlers.action.say as say_module
+
+    events = []
+    monkeypatch.setattr(say_module, "call_latency", lambda event, call_id, **fields: events.append((event, fields)))
+    monkeypatch.setattr(
+        Stream,
+        "__init__",
+        lambda self: setattr(
+            self,
+            "values",
+            iter(SimpleNamespace(data=b"pcm!", framing=d.AudioFraming.FILE_FRAGMENT) for _ in range(packet_count)),
+        ),
+    )
     delivery = CallSpeechDelivery(
         audio_route=CallAudioRoute.CALL,
         display_in_chat=False,
@@ -116,15 +130,22 @@ async def test_real_say_handler_propagates_call_metadata_to_every_output():
     assert [type(output) for output in sink.outputs] == [
         d.TextFinalOutput,
         d.ExpressionOutput,
-        d.AudioChunkOutput,
+        *([d.AudioChunkOutput] * packet_count),
         d.MessageEndOutput,
     ]
     assert all(output.call_delivery == delivery for output in sink.outputs)
     assert sink.outputs[0].text == "不显示"
-    audio = sink.outputs[2]
+    audio = sink.outputs[-2]
     assert audio.framing is d.AudioFraming.RAW_PCM
     assert audio.audio_format == d.CALL_PCM_FORMAT
     assert audio.final is True
+    assert [event for event, _ in events].count("audio.generated") == packet_count
+    assert [event for event, _ in events].count("audio.hold_released") == packet_count
+    if packet_count == 2:
+        assert [event for event, _ in events][:3] == ["audio.generated", "audio.generated", "audio.hold_released"]
+        assert events[2][1]["packet_index"] == 0
+    assert events[-1][0] == "audio.emit_completed"
+    assert events[-1][1]["final"] is True
 
 
 def test_chat_output_metadata_defaults_remain_unchanged():

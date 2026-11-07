@@ -60,6 +60,10 @@ class Socket:
 
 class Stage:
     input_suspended = False
+    connection_generation = 0
+
+    async def start(self):
+        pass
 
     def __init__(self, user_id="user-1"):
         self.interaction_id = str(uuid4())
@@ -78,8 +82,9 @@ class Stage:
         self.stimuli.append(stimulus)
         return True
 
-    async def connection_changed(self, state):
-        pass
+    async def connection_changed(self, available, generation):
+        self.connection_generation = generation
+        return True
 
 
 @pytest.mark.asyncio
@@ -90,9 +95,7 @@ async def test_voice_finalize_rechecks_original_binding_and_stage_admission(tmp_
     stage = Stage("user")
     await adapter._bind(stage, connection)
     _, events = upload_events(m4a_bytes())
-    messages = [
-        WSMessage(event_type=e["type"], client_msg_id=e["client_msg_id"], payload=e["payload"]) for e in events
-    ]
+    messages = [WSMessage(event_type=e["type"], client_msg_id=e["client_msg_id"], payload=e["payload"]) for e in events]
     for message in messages[:-1]:
         await adapter._receive(connection, message)
     entered, release = asyncio.Event(), asyncio.Event()

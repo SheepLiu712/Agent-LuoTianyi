@@ -1,4 +1,3 @@
-from support.call_protocol import ProtocolDriver
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -6,9 +5,9 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from support.call_protocol import ProtocolDriver, StageOutputDriver
 
 from src.adapter.websocket.call_v1._audio_codec import BinaryAudioFrameCodec, WireAudioFrame
-from support.call_protocol import StageOutputDriver
 from src.adapter.websocket.call_v1._messages import (
     TransportConfig,
 )
@@ -20,8 +19,9 @@ from src.domain.call import (
     CallState,
     CallTerminalFacts,
 )
-from src.stage._call_playback import CallPlaybackCoordinator
-from src.stage.call_stage import CallReplyFailed, CallStateChanged
+from src.domain.call.terminal import CallTerminated
+from src.stage.call._call_playback import CallPlaybackCoordinator
+from src.stage.call.call_stage import CallReplyFailed, CallStateChanged
 
 
 class _Stage:
@@ -273,8 +273,28 @@ async def test_binding_sends_frozen_terminal_facts_exactly_once(outcome, reason,
         0,
     )
 
-    await binding.send_ended(snapshot)
-    await binding.send_ended(snapshot)
+    await binding.send_ended(
+        CallTerminated(
+            str(snapshot.terminal.call_id),
+            "request",
+            "ENDED",
+            snapshot.terminal.outcome,
+            snapshot.terminal.end_reason,
+            snapshot.terminal.active_duration_ms,
+            snapshot.terminal.ended_at,
+        )
+    )
+    await binding.send_ended(
+        CallTerminated(
+            str(snapshot.terminal.call_id),
+            "request",
+            "ENDED",
+            snapshot.terminal.outcome,
+            snapshot.terminal.end_reason,
+            snapshot.terminal.active_duration_ms,
+            snapshot.terminal.ended_at,
+        )
+    )
 
     assert [_message["type"] for _message in map(lambda item: json.loads(item.text), delivered)] == ["call.ended"]
     terminal = json.loads(delivered[0].text)

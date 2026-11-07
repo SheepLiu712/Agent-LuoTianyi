@@ -1,17 +1,36 @@
-from src.stage.call_stage import CallIngressReceipt
-
 """驱动真实 Session/Delivery 的协议与 Stage 测试夹具，不复制协议算法。"""
+
 from types import SimpleNamespace
-from src.adapter.websocket.call_v1._session import Session
+
 from src.adapter.websocket.call_v1._binding import Binding
-from src.adapter.websocket.call_v1.errors import CallTransportError
 from src.adapter.websocket.call_v1._protocol_translate import parse_message
+from src.adapter.websocket.call_v1._session import Session
+from src.adapter.websocket.call_v1.errors import CallTransportError
+from src.stage.call.call_stage import CallIngressReceipt
+
+
+async def bind_protocol_connection(session, binding, message, *, publish=lambda binding: binding):
+    """无外部接入限制的协议测试装配，执行与 adapter 相同的绑定事务。"""
+
+    async def validate_admission():
+        pass
+
+    return await session.bind(binding, parse_message(message), validate_admission=validate_admission, publish=publish)
 
 
 class ProtocolDriver:
     def __init__(self, *, call_id, user_id, character_id, sink, config=None, call_metrics=None):
+        async def connection_changed(available, generation):
+            return True
+
+        self.audio_acks = []
         stage = SimpleNamespace(
-            call_id=call_id, user_id=user_id, character_id=character_id, client_request_id="request"
+            audio_acknowledged=self.audio_acks.append,
+            call_id=call_id,
+            user_id=user_id,
+            character_id=character_id,
+            client_request_id="request",
+            connection_changed=connection_changed,
         )
         self.session = Session(stage, config=config, call_metrics=call_metrics)
         self._sink = sink
@@ -53,7 +72,8 @@ class ProtocolDriver:
         if frame.control["type"] != "call.start":
             raise CallTransportError("INVALID_CALL_START")
         binding = Binding(self.session, connection_id=object())
-        binding.is_ready = True
+        binding.prepare(1)
+        binding.activate()
         self.session._binding = binding
         # This unit-level probe observes only the receipt, excluding initial state output.
         await self.session._receive_start(binding, frame)

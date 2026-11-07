@@ -99,7 +99,7 @@ def test_empty_display_name_and_invalid_kind_are_errors(tmp_path, monkeypatch):
 
 def test_binding_referencing_missing_type_is_error(tmp_path, monkeypatch):
     config = _base_config()
-    config["agent_runtime"]["agent"]["main_chat"]["llm_module"]["llm"]["client_model_type"] = "missing"
+    config["agent_runtime"]["skills"]["reply"]["llm_module"]["llm"]["client_model_type"] = "missing"
     messages = _type_errors(_validator(tmp_path, monkeypatch).validate(config)).values()
     assert any("missing" in message for message in messages)
 
@@ -115,7 +115,7 @@ def test_binding_capability_mismatch_is_error(tmp_path, monkeypatch):
     config = _base_config()
     main = config["llm_service"]["client_model_types"][0]
     main["requires_json"] = False
-    config["agent_runtime"]["agent"]["main_chat"]["llm_module"]["llm"]["use_json"] = True
+    config["agent_runtime"]["skills"]["reply"]["llm_module"]["llm"]["use_json"] = True
     messages = _type_errors(_validator(tmp_path, monkeypatch).validate(config)).values()
     assert any("要求 JSON" in message for message in messages)
 

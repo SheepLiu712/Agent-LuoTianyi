@@ -2,6 +2,7 @@
 
 import asyncio
 from traceback import walk_tb
+from uuid import UUID
 
 import src.domain.agent as d
 from src.agent.context import InteractionContext
@@ -10,18 +11,24 @@ from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
 from src.agent.processing.execution import Execution
 from src.agent.processing.handling import Handling
 from src.agent.processing.interruptibility import _InteractionInterruptibility
+from src.agent.processing.omni_background import CallSessionPrompt
 from src.agent.processing.plan_emitter import handling_error
+from src.agent.skills.contracts import CharacterNarrative
+from src.domain.call.omni import OmniSession, OmniSessionFactory
 from src.utils.logger import get_logger
 
 
 class Agent:
-    """角色的两接口业务门面，内部委托已注册处理器并结算接收与效果事实。
+    """角色业务门面，内部委托已注册处理器并结算接收与效果事实。
 
     AgentRuntime 装配角色私有路由并管理接受状态；生产行动路由已注册 SAY 的 TTS 和预制音频分支。
     每次调用独立处理；失败记录日志并结束，接收器只属于本次调用。
     """
 
     __slots__ = (
+        "_omni_factory",
+        "_omni_prompt",
+        "_narrative",
         "_character_id",
         "_accepting",
         "_logger",
@@ -35,12 +42,18 @@ class Agent:
         self,
         *,
         character_id: str,
+        omni_factory: OmniSessionFactory | None = None,
+        narrative: CharacterNarrative | None = None,
+        omni_prompt: CallSessionPrompt | None = None,
         stimulus_router: StimulusRouter[StimulusHandler] | None = None,
         action_router: ActionRouter[ActionHandler] | None = None,
     ) -> None:
         """绑定角色和内部路由；空白角色抛 ValueError，省略路由使用空注册表。"""
         if not isinstance(character_id, str) or not character_id.strip():
             raise ValueError("Agent requires a nonblank character_id")
+        self._omni_factory = omni_factory
+        self._omni_prompt = omni_prompt
+        self._narrative = narrative
         self._character_id = character_id
         self._accepting = True
         self._logger = get_logger(__name__)
@@ -48,6 +61,20 @@ class Agent:
         self._action_router = action_router if action_router is not None else ActionRouter(())
         self._inflight: set[asyncio.Future] = set()
         self._interruptibility = _InteractionInterruptibility()
+
+    async def open_omni_session(self, context: InteractionContext, call_id: UUID) -> OmniSession:
+        """读取一次背景并创建本次通话句柄；共享门面不保存连接。"""
+        identity = context.identity
+        if (
+            identity.character_id != self._character_id
+            or identity.interaction_id != str(call_id)
+            or identity.user_id is None
+            or not self._accepting
+        ):
+            raise ValueError("invalid omni interaction identity")
+        if self._omni_factory is None or self._narrative is None or self._omni_prompt is None:
+            raise RuntimeError("omni session factory is unavailable")
+        return await self._omni_factory.open(call_id, self._omni_prompt.render(context, self._narrative))
 
     async def handle_stimulus(
         self,

@@ -161,7 +161,7 @@ describe('call failure user-visible feedback', () => {
     act(() => root.unmount());
   });
 
-  it('shows a safe notice for synchronous create and initialization failures, while permission denial stays non-failure', async () => {
+  it('shows a safe notice for synchronous create and initialization failures, and distinguishes permission denial', async () => {
     const onReturnToChat = jest.fn();
     let result: any;
     let root!: ReturnType<typeof create>;
@@ -186,7 +186,9 @@ describe('call failure user-visible feedback', () => {
       root = create(<Probe session={port.session} requestPermission={async () => 'denied'} onResult={(value) => { result = value; }} />);
     });
     await act(async () => { expect(await result.start(false)).toBe(true); });
-    expect(result.failureNotice).toBeNull();
+    expect(result.failureNotice).toEqual(getCallFailureNotice('MICROPHONE_PERMISSION_DENIED'));
+    expect(result.failureNotice.title).toBe('未获得麦克风权限');
+    expect(getCallFailureNotice('NATIVE_CALL_UNAVAILABLE').title).toBe('设备通话音频不可用');
     act(() => root.unmount());
     expect(onReturnToChat).not.toHaveBeenCalled();
   });

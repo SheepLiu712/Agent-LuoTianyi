@@ -13,7 +13,6 @@ from src.domain.agent import MediaRef
 from src.infrastructure.media import MediaResolver, ResolvedMedia
 
 if TYPE_CHECKING:
-    from src.infrastructure.models.audio.module import AudioModelModule
     from src.infrastructure.models.service import LLMService
 
 
@@ -33,22 +32,17 @@ class AudioUnderstandingSkill:
         self,
         config: dict[str, Any],
         media_resolver: MediaResolver,
-        llm_service: LLMService | None = None,
+        llm_service: LLMService,
         *,
-        audio_module: AudioModelModule | None = None,
         timeout_seconds: float = 20.0,
         retry_delay_seconds: float = 1.0,
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("audio_understanding config must be a dictionary")
-        if audio_module is None:
-            if llm_service is None:
-                raise RuntimeError("audio understanding requires LLMService or AudioModelModule")
-            audio_module = llm_service.register_audio_model_module(
-                "audio_understanding", config.get("audio_model_module", {})
-            )
         self._media_resolver = media_resolver
-        self._audio_module = audio_module
+        self._audio_module = llm_service.register_audio_model_module(
+            "skill.audio_understanding.describe", config.get("audio_model_module", {})
+        )
         self._timeout_seconds = timeout_seconds
         self._retry_delay_seconds = retry_delay_seconds
 
