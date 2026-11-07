@@ -66,6 +66,34 @@ const deniedText = '未获得麦克风权限，可重新按住再试';
 const permissionErrorText = '无法获取麦克风权限状态，请重新按住再试。';
 const press = () => act(async () => { await state.pressIn(event); });
 
+it.each(['denied', 'error'])('松手后初始查询才返回 %s，仍在原界面处理权限且不录音', async result => {
+  let settle!: () => void;
+  options.recorder.getPermission.mockReturnValueOnce(new Promise((resolve, reject) => {
+    settle = () => result === 'denied' ? resolve('denied') : reject(new Error('query failed'));
+  }));
+  options.recorder.requestPermission.mockResolvedValue('denied');
+  await mount();
+  let pressing!: Promise<void>;
+  await act(async () => { pressing = state.pressIn(event); });
+  await act(async () => { await state.pressOut(); });
+  await act(async () => { settle(); await pressing; });
+  expect(state.permissionNotice?.message).toBe(result === 'denied' ? deniedText : permissionErrorText);
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(result === 'denied' ? 1 : 0);
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+});
+
+it('没有系统权限请求时切后台，返回前台不会恢复旧提示', async () => {
+  options.recorder.getPermission.mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockResolvedValueOnce('denied');
+  await mount();
+  await press();
+  expect(state.permissionNotice?.message).toBe(deniedText);
+  const onAppState = (AppState.addEventListener as jest.Mock).mock.calls[0][1];
+  await act(async () => { onAppState('background'); onAppState('active'); });
+  expect(state.permissionNotice).toBeNull();
+});
+
 function deferPermission() {
   let answer!: (result: 'blocked' | 'denied' | 'granted') => void;
   options.recorder.getPermission.mockResolvedValue('denied');

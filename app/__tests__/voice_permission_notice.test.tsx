@@ -29,7 +29,7 @@ it('lets the user dismiss a waiting notice, see it on another press and clears i
   }
   let tree!: ReturnType<typeof create>;
   act(() => { tree = create(<Probe />); });
-  const press = () => act(async () => { await permission.checkPermission(() => true); });
+  const press = () => act(async () => { await permission.checkPermission(); });
   await press();
   await press();
   expect(tree.root.findAllByType(Modal)).toHaveLength(0);

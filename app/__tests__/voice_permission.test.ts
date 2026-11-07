@@ -30,8 +30,8 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => { tree.unmount(); }); });
 
 async function showSettingsChoice() {
-  await act(async () => { await permission.checkPermission(() => true); });
-  await act(async () => { await permission.checkPermission(() => true); });
+  await act(async () => { await permission.checkPermission(); });
+  await act(async () => { await permission.checkPermission(); });
   const choice = permission.permissionNotice;
   if (!choice?.settings) throw new Error('重试后应展示去设置选择框');
   expect(Linking.openSettings).not.toHaveBeenCalled();

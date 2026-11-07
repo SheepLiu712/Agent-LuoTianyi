@@ -38,24 +38,26 @@ export function useMicrophonePermission(recorder: VoiceRecorderApi) {
 
   const setPermissionForeground = useCallback((active: boolean) => {
     foreground.current = active;
+    // 没有系统请求或待交付结果时，离开前台即结束当前提示和初始查询。
+    if (!active && !pending.current && !onResume.current) leavePermissionPage();
     if (active && onResume.current) {
       const deliver = onResume.current;
       onResume.current = null;
       deliver();
     }
-  }, []);
+  }, [leavePermissionPage]);
 
-  const checkPermission = useCallback(async (validPress: () => boolean, onPermissionPrompt?: () => void) => {
+  const checkPermission = useCallback(async (onPermissionPrompt?: () => void) => {
     const beforeQuery = generation.current;
     const existing = pending.current;
     let permission;
     try {
       permission = await recorder.getPermission();
     } catch {
-      if (generation.current === beforeQuery && validPress()) display(permissionMessages.error);
+      if (generation.current === beforeQuery && foreground.current) display(permissionMessages.error);
       return false;
     }
-    if (generation.current !== beforeQuery || !validPress()) return false;
+    if (generation.current !== beforeQuery || !foreground.current) return false;
     if (permission === 'granted') {
       generation.current += 1;
       onResume.current = null;

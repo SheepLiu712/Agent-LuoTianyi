@@ -101,7 +101,7 @@ export function useVoiceInput(options: Options) {
     initialY.current = event.nativeEvent.pageY;
     transition('Starting');
     try {
-      if (!(await checkPermission(valid, () => transition('PermissionPrompt'))) || !valid()) return;
+      if (!(await checkPermission(() => transition('PermissionPrompt'))) || !valid()) return;
       await callbacks.current.onStopAllAudio();
       if (!valid()) return;
       const started = await recorder.start({
