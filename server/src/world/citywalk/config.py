@@ -4,7 +4,7 @@ from src.utils.helpers import load_config
 
 
 DEFAULT_CITYWALK_CONFIG: Dict[str, Any] = {
-    "daily_run_probability": 0.1,
+    "daily_run_probability": 0.5,
     "amap": {
         "api_key": "$AMAP_KEY",
         "base_url": "https://restapi.amap.com/v3",

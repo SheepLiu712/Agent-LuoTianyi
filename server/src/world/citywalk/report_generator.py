@@ -47,6 +47,7 @@ class CitywalkReportGenerator:
             "title": self.title_prefix,
             "created_at": result.created_at.isoformat(),
             "overview": {
+                "province": result.province,
                 "city": result.city,
                 "selected_destination": result.selected_destination,
                 "destination_reason": result.destination_reason,
@@ -73,5 +74,5 @@ class CitywalkReportGenerator:
         output_path.write_text(self.render(result), encoding="utf-8")
 
         places = [e.poi.name for e in result.events if e.poi and e.poi.name]
-        append_citywalk_history(self.history_file, city=result.city, places=places)
+        append_citywalk_history(self.history_file, city=result.city, places=places, province=result.province)
         return str(output_path)
