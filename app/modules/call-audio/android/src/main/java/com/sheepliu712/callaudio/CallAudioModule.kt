@@ -124,20 +124,21 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private fun startRingtone() {
     check(sessionReady && audioFocusGranted) { "call_audio_unavailable" }
     if (ringtone != null) return
-    val player = try {
-      buildRingtonePlayer()
+    val player = MediaPlayer()
+    try {
+      applyRingtoneSource(player)
+      player.isLooping = true
+      player.setVolume(RINGTONE_VOLUME, RINGTONE_VOLUME)
+      player.start()
     } catch (error: Exception) {
-      throw IllegalStateException("ringtone_start_failed")
+      runCatching { player.release() }
+      throw IllegalStateException("ringtone_start_failed", error)
     }
-    player.isLooping = true
-    player.setVolume(RINGTONE_VOLUME, RINGTONE_VOLUME)
-    player.start()
     ringtone = player
   }
 
-  private fun buildRingtonePlayer(): MediaPlayer {
+  private fun applyRingtoneSource(player: MediaPlayer) {
     val context = requireContext()
-    val player = MediaPlayer()
     player.setAudioAttributes(
       AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
@@ -148,7 +149,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       player.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
     }
     player.prepare()
-    return player
   }
 
   @Synchronized
