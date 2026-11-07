@@ -11,6 +11,7 @@ import src.domain.agent as d
 from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from src.utils.asyncio_helpers import run_sync_owned
 from src.utils.logger import get_logger
+from src.world.citywalk.config import DEFAULT_CITYWALK_CONFIG
 from src.world.citywalk.errors import CitywalkError
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
@@ -321,11 +322,12 @@ class CitywalkTask(WorldTask):
             get_logger(__name__).warning(f"Failed to write citywalk dynamic content back to report: {exc}")
 
     def _sample_daily_run(self) -> tuple[bool, float, float]:
-        raw_probability = self.config.get("daily_run_probability", 0.1)
+        default_probability = DEFAULT_CITYWALK_CONFIG["daily_run_probability"]
+        raw_probability = self.config.get("daily_run_probability", default_probability)
         try:
             probability = float(raw_probability)
         except (TypeError, ValueError):
-            probability = 0.1
+            probability = default_probability
         probability = max(0.0, min(1.0, probability))
         sample = random.random()
         return sample < probability, probability, sample
