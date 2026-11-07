@@ -14,7 +14,6 @@ interface Options {
   onRecordingEnded?: () => void;
   onNotice: (text: string) => void;
   recorder?: VoiceRecorderApi;
-  active?: boolean;
 }
 
 export function useVoiceInput(options: Options) {
@@ -90,10 +89,10 @@ export function useVoiceInput(options: Options) {
 
   const pressIn = useCallback(async (event: GestureResponderEvent) => {
     if (state.current !== 'VoiceReady' || starting.current || cancelling.current || finishing.current ||
-      !mounted.current || callbacks.current.active === false) return;
+      !mounted.current) return;
     starting.current = true;
     const attempt = ++generation.current;
-    const valid = () => attempt === generation.current && mounted.current && callbacks.current.active !== false;
+    const valid = () => attempt === generation.current && mounted.current;
     initialY.current = event.nativeEvent.pageY;
     transition('Starting');
     try {
@@ -204,7 +203,6 @@ export function useVoiceInput(options: Options) {
     const sub = AppState.addEventListener('change', (next) => { if (next !== 'active') void cancel('background'); });
     return () => sub.remove();
   }, [cancel]);
-  useEffect(() => { if (options.active === false) void cancel('navigation'); }, [options.active, cancel]);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; void cancel('unmount'); };
