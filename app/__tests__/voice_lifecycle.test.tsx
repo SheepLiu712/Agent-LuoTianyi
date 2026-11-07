@@ -2,11 +2,11 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { AppState, GestureResponderEvent } from 'react-native';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { showMicrophoneSettings } from '../utils/voice_permission';
+import { subscribeVoiceHostStopped } from '../utils/voice_host_lifecycle';
 jest.mock('react-native', () => ({ AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {} }));
-jest.mock('../utils/voice_permission', () => ({ showMicrophoneSettings: jest.fn() }));
+jest.mock('../utils/voice_host_lifecycle', () => ({ subscribeVoiceHostStopped: jest.fn(() => ({ remove: jest.fn() })) }));
 const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
 let tree: ReactTestRenderer;
 let state: ReturnType<typeof useVoiceInput>;
@@ -62,74 +62,186 @@ it.each(['native', 'background', 'unmount'])('cancels active recording once on %
   expect(options.recorder.cancel).toHaveBeenCalledTimes(1);
   expect(options.onRecordingCommitted).not.toHaveBeenCalled();
 });
-it.each(['blocked', 'denied'])('handles %s permission without starting, and rechecks on next press', async (permission) => {
+const deniedText = '未获得麦克风权限，可重新按住再试';
+const permissionErrorText = '无法获取麦克风权限状态，请重新按住再试。';
+const press = () => act(async () => { await state.pressIn(event); });
+
+it.each(['denied', 'error'])('松手后初始查询才返回 %s，仍在原界面处理权限且不录音', async result => {
+  let settle!: () => void;
+  options.recorder.getPermission.mockReturnValueOnce(new Promise((resolve, reject) => {
+    settle = () => result === 'denied' ? resolve('denied') : reject(new Error('query failed'));
+  }));
+  options.recorder.requestPermission.mockResolvedValue('denied');
+  await mount();
+  let pressing!: Promise<void>;
+  await act(async () => { pressing = state.pressIn(event); });
+  await act(async () => { await state.pressOut(); });
+  await act(async () => { settle(); await pressing; });
+  expect(state.permissionNotice?.message).toBe(result === 'denied' ? deniedText : permissionErrorText);
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(result === 'denied' ? 1 : 0);
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(state.captureState).toBe('VoiceReady');
+});
+
+it('没有系统权限请求时切后台，返回前台不会恢复旧提示', async () => {
+  options.recorder.getPermission.mockResolvedValueOnce('denied');
+  options.recorder.requestPermission.mockResolvedValueOnce('denied');
+  await mount();
+  await press();
+  expect(state.permissionNotice?.message).toBe(deniedText);
+  const onAppState = (AppState.addEventListener as jest.Mock).mock.calls[0][1];
+  await act(async () => { onAppState('background'); onAppState('active'); });
+  expect(state.permissionNotice).toBeNull();
+});
+
+function deferPermission() {
+  let answer!: (result: 'blocked' | 'denied' | 'granted') => void;
+  options.recorder.getPermission.mockResolvedValue('denied');
+  options.recorder.requestPermission.mockReturnValueOnce(new Promise(resolve => { answer = resolve; }));
+  return (result: 'blocked' | 'denied' | 'granted') => act(async () => { answer(result); });
+}
+
+it.each(['blocked', 'denied'])('初始权限为 %s 仍向系统实际请求，授权后重新按住才开始录音', async (permission) => {
   options.recorder.getPermission.mockResolvedValueOnce(permission);
-  await mount(); await act(async () => { await state.pressIn(event); });
-  if (permission === 'blocked') expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
-  else expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  await mount();
+  await press();
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+  expect(state.captureState).toBe('VoiceReady');
+  expect(state.permissionNotice).toBeNull();
   expect(options.recorder.start).not.toHaveBeenCalled();
   expect(options.onRecordingStarted).not.toHaveBeenCalled();
   expect(options.onStopAllAudio).not.toHaveBeenCalled();
-  expect(state.captureState).toBe('VoiceReady');
-  await act(async () => { await state.pressIn(event); });
-  expect(options.recorder.getPermission).toHaveBeenCalledTimes(2);
+  await press();
   expect(state.captureState).toBe('Recording');
 });
 
-it.each(['granted', 'blocked'])('releases the input bar while the system permission request is pending (late %s)', async (late) => {
-  let answer!: (value: string) => void;
-  options.recorder.getPermission.mockResolvedValueOnce('denied').mockResolvedValueOnce('denied');
-  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+it.each(['denied', 'blocked'])('首次实际结果 %s 总是提示重新按住；重试 blocked 才显示去设置', async (first) => {
+  options.recorder.getPermission.mockResolvedValue('blocked');
+  options.recorder.requestPermission.mockResolvedValueOnce(first).mockResolvedValueOnce('blocked');
   await mount();
-  await act(async () => { await state.pressIn(event); await state.pressOut(); });
-  // 授权请求还没返回（授权框没弹出或被系统吞掉）时，输入栏不能一直停在禁用态。
-  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
-  expect(state.captureState).toBe('VoiceReady');
-  expect(options.onRecordingEnded).toHaveBeenCalledTimes(1);
-  // 请求仍在途时再按：不叠加第二个系统请求，改为给出去系统设置的出口。
-  await act(async () => { await state.pressIn(event); });
-  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
-  expect(state.captureState).toBe('VoiceReady');
-  // 迟到的授权结果不开始录音、不改状态；这次尝试已被更晚的按住取代，不再重复弹一次设置入口。
-  await act(async () => { answer(late); });
+  await press();
+  expect(state.permissionNotice).toMatchObject({ message: deniedText, settings: false });
+  await act(async () => { state.dismissPermissionNotice(state.permissionNotice); });
+  expect(state.permissionNotice).toBeNull();
+  await press();
+  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(2);
+  expect(state.permissionNotice?.settings).toBe(true);
   expect(options.recorder.start).not.toHaveBeenCalled();
-  expect(state.captureState).toBe('VoiceReady');
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
-  // 授权之后重新按住即可录音。
-  await act(async () => { await state.pressIn(event); });
-  expect(state.captureState).toBe('Recording');
+  expect(options.onNotice).not.toHaveBeenCalled();
 });
 
-it('reports a failed permission request instead of swallowing it', async () => {
+it('可再次询问时只提示重试；其后获得权限、再被回收时从首次未授权开始', async () => {
+  options.recorder.getPermission.mockResolvedValue('denied');
+  options.recorder.requestPermission.mockResolvedValueOnce('blocked').mockResolvedValueOnce('denied')
+    .mockResolvedValueOnce('granted').mockResolvedValueOnce('blocked');
+  await mount();
+  await press();
+  await press();
+  expect(state.permissionNotice).toMatchObject({ message: deniedText, settings: false });
+  await press();
+  expect(state.permissionNotice).toBeNull();
+  await press();
+  expect(state.permissionNotice).toMatchObject({ message: deniedText, settings: false });
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(options.onNotice).not.toHaveBeenCalled();
+});
+
+it.each(['granted', 'blocked'] as const)('重复按住保留同一系统请求，待返回 %s 时收起等待提示并处理结果', async (late) => {
+  jest.useFakeTimers();
+  try {
+    const answer = deferPermission();
+    await mount();
+    await press();
+    await act(async () => { await state.pressOut(); });
+    expect(state.captureState).toBe('VoiceReady');
+    expect(options.onRecordingEnded).toHaveBeenCalledTimes(1);
+    await act(async () => { await jest.advanceTimersByTimeAsync(9000); });
+    await press();
+    const first = state.permissionNotice;
+    expect(first?.message).toContain('权限');
+    expect(first?.settings).toBe(false);
+    await act(async () => { state.dismissPermissionNotice(first); });
+    expect(state.permissionNotice).toBeNull();
+    await press();
+    const second = state.permissionNotice;
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    await press();
+    expect(state.permissionNotice).toBe(second);
+    await act(async () => { state.dismissPermissionNotice(first); });
+    expect(state.permissionNotice).toBe(second);
+    expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
+    await answer(late);
+    if (late === 'granted') expect(state.permissionNotice).toBeNull();
+    else expect(state.permissionNotice).toMatchObject({ message: deniedText, settings: false });
+    expect(state.captureState).toBe('VoiceReady');
+    expect(options.recorder.start).not.toHaveBeenCalled();
+    expect(options.onNotice).not.toHaveBeenCalled();
+  } finally { jest.useRealTimers(); }
+});
+
+it.each(['getPermission', 'requestPermission'])('权限接口 %s 抛错时在当前界面提示，之后仍可重新按住录音', async (method) => {
   options.recorder.getPermission.mockResolvedValueOnce('denied');
-  options.recorder.requestPermission.mockRejectedValueOnce(new Error('native permission request failed'));
+  if (method === 'getPermission') options.recorder.getPermission.mockReset().mockRejectedValueOnce(new Error('error'));
+  else options.recorder.requestPermission.mockRejectedValueOnce(new Error('error'));
   await mount();
-  await act(async () => { await state.pressIn(event); });
-
-  // 请求失败必须给用户可行动提示，且不得开始录音、不得改动输入栏状态。
-  expect(options.recorder.start).not.toHaveBeenCalled();
-  expect(options.recorder.requestPermission).toHaveBeenCalledTimes(1);
-  expect(options.onNotice).toHaveBeenCalledWith('录音启动失败，请重试');
-  expect(showMicrophoneSettings).not.toHaveBeenCalled();
+  await press();
+  expect(state.permissionNotice).toMatchObject({ message: permissionErrorText, settings: false });
   expect(state.captureState).toBe('VoiceReady');
-  // 之后再按住仍可正常走授权/录音流程。
+  expect(options.onNotice).not.toHaveBeenCalled();
+  expect(options.recorder.start).not.toHaveBeenCalled();
   options.recorder.getPermission.mockResolvedValueOnce('granted');
-  await act(async () => { await state.pressIn(event); });
+  await press();
   expect(state.captureState).toBe('Recording');
+  expect(state.permissionNotice).toBeNull();
 });
 
-it('still offers the settings entry when a late blocked result is still the current attempt', async () => {
-  let answer!: (value: string) => void;
-  options.recorder.getPermission.mockResolvedValueOnce('denied');
-  options.recorder.requestPermission.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+it.each(['文字输入', '覆盖页', '主动后台'])('进入%s时关闭等待提示，回到原界面后旧结果不能补弹', async (destination) => {
+  const answer = deferPermission();
   await mount();
-  await act(async () => { await state.pressIn(event); await state.pressOut(); });
-  await act(async () => { answer('blocked'); });
-
-  expect(showMicrophoneSettings).toHaveBeenCalledTimes(1);
+  await press();
+  await press();
+  expect(state.permissionNotice).not.toBeNull();
+  await act(async () => {
+    if (destination === '文字输入') state.toggleMode();
+    else if (destination === '覆盖页') state.leavePermissionPage();
+    else {
+      const handler = (subscribeVoiceHostStopped as jest.Mock).mock.calls[0][0];
+      handler();
+      (AppState.addEventListener as jest.Mock).mock.calls[0][1]('background');
+    }
+  });
+  expect(state.permissionNotice).toBeNull();
+  await act(async () => {
+    if (destination === '文字输入') state.toggleMode();
+    if (destination === '主动后台') (AppState.addEventListener as jest.Mock).mock.calls[0][1]('active');
+  });
+  await answer('blocked');
+  expect(state.permissionNotice).toBeNull();
+  expect(options.onNotice).not.toHaveBeenCalled();
   expect(options.recorder.start).not.toHaveBeenCalled();
-  expect(state.captureState).toBe('VoiceReady');
+});
+
+it('权限框暂时遮住应用，处理结果等到返回原界面后显示', async () => {
+  const answer = deferPermission();
+  await mount();
+  await press();
+  const appStateChanged = (AppState.addEventListener as jest.Mock).mock.calls[0][1];
+  await act(async () => { appStateChanged('background'); });
+  await answer('blocked');
+  expect(state.permissionNotice).toBeNull();
+  await act(async () => { appStateChanged('active'); });
+  expect(state.permissionNotice).toMatchObject({ message: deniedText, settings: false });
+});
+
+it('卸载时还有权限请求，返回结果不会启动录音或向聊天追加消息', async () => {
+  const answer = deferPermission();
+  await mount();
+  await press();
+  await act(async () => { tree.unmount(); });
+  await answer('blocked');
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(options.onNotice).not.toHaveBeenCalled();
 });
 
 it('ignores a permission failure that arrives after a newer attempt', async () => {

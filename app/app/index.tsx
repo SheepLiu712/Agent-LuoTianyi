@@ -29,6 +29,7 @@ import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
 import { VoiceInputBar } from '../components/VoiceInputBar';
 import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
+import { VoicePermissionNotice } from '../components/VoicePermissionNotice';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from '../hooks/useHistoryLogic';
 import { getDynamicUnreadStatus } from '../utils/dynamics';
@@ -77,7 +78,6 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
   const callHangupRef = useRef<() => void>(() => {});
   const onLogoutRef = useRef(onLogout);
-  onLogoutRef.current = onLogout;
   const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
     { text: '继续通话', style: 'cancel' },
     { text: '结束', style: 'destructive', onPress: () => callHangupRef.current() },
@@ -120,6 +120,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     resumeChat,
   } = useChatLogic(webviewRef, username, message_token, 'luotianyi');
   callSwitchRef.current = callSwitch;
+  onLogoutRef.current = () => {
+    voiceInput.leavePermissionPage();
+    onLogout?.();
+  };
 
   const callComposition = useProductionCallComposition({
     username,
@@ -335,11 +339,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   };
 
   const handleOpenPreferences = () => {
+    voiceInput.leavePermissionPage();
     setShowPreferences(true);
     closeDrawer();
   };
 
   const handleOpenLlmSettings = () => {
+    voiceInput.leavePermissionPage();
     setShowLlmSettings(true);
     closeDrawer();
   };
@@ -371,6 +377,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   }, [message_token, refreshDynamicsUnread, username]);
 
   const handleOpenDynamics = () => {
+    voiceInput.leavePermissionPage();
     setShowDynamics(true);
     closeDrawer();
   };
@@ -388,7 +395,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const handleLogout = () => {
     closeDrawer();
     void callComposition.closeCurrent();
-    onLogout?.();
+    onLogoutRef.current?.();
   };
 
   const openCall = () => {
@@ -396,6 +403,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       Alert.alert('通话暂不可用', '服务端或设备音频能力尚未就绪。请完成后续配置后再试。');
       return;
     }
+    voiceInput.leavePermissionPage();
     closeDrawer();
     void call.start(true);
   };
@@ -412,7 +420,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
       {call.state.phase !== 'IDLE' ? <CallScreen state={call.state} theme={theme} onHangup={call.hangup} onBack={handleBackConfirmation} /> : null}
-      {call.failureNotice ? <CallFailureBanner notice={call.failureNotice} theme={theme} onDismiss={call.dismissFailure} /> : null}
+      {voiceInput.permissionNotice ? (
+        <VoicePermissionNotice notice={voiceInput.permissionNotice} theme={theme} top={insets.top + 8}
+          onDismiss={voiceInput.dismissPermissionNotice} onOpenSettings={voiceInput.openPermissionSettings} />
+      ) : call.failureNotice ? (
+        <CallFailureBanner notice={call.failureNotice} theme={theme} onDismiss={call.dismissFailure} />
+      ) : null}
 
       <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
         <Image
