@@ -20,6 +20,9 @@ import { THEMES } from '../utils/theme';
 
 jest.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
+  // RichAgreement 在非 Android 平台走 RN Text；OS 固定 'ios' 保持非 Android 路径。
+  // useWindowDimensions 供 AndroidJustifiedText 模块导入，Android 用例不在本文件覆盖。
+  Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios },
   ScrollView: 'ScrollView',
   StyleSheet: {
     create: (styles: unknown) => styles,
@@ -28,6 +31,7 @@ jest.mock('react-native', () => ({
   Text: 'Text',
   TouchableOpacity: 'TouchableOpacity',
   View: 'View',
+  useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
 }));
 
 jest.mock('react-native-safe-area-context', () => ({
