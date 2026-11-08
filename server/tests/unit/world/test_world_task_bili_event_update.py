@@ -121,7 +121,7 @@ def test_official_feed_fetcher_skips_cached_pinned_but_stops_at_cached_regular(t
         dynamic("cached", cached_tag),
         dynamic("new-regular"),
         dynamic("new-pinned", "置顶"),
-        dynamic("cached-regular"),
+        {"id_str": "cached-regular", "modules": {"module_tag": None}},
         dynamic("older-unseen"),
     ]
     response = SimpleNamespace(status_code=200, json=lambda: {"code": 0, "data": {"items": items}})

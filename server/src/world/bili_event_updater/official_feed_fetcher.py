@@ -198,7 +198,8 @@ class OfficialFeedFetcher:
                     if not dyn_id:
                         continue
                     if dyn_id in seen:
-                        if item.get("modules", {}).get("module_tag", {}).get("text") == "置顶":
+                        tag = item.get("modules", {}).get("module_tag")
+                        if tag is not None and tag.get("text") == "置顶":
                             continue
                         break
 
