@@ -26,9 +26,9 @@ func readonly_fields(window: Window, label: String) -> void:
 			var point := window.get_final_transform() * field.get_global_transform_with_canvas() * Vector2(field.size.x-24,field.size.y*.5)
 			point = point.clamp(Vector2.ZERO,Vector2(image.get_size())-Vector2.ONE)
 			check(image.get_pixelv(Vector2i(point)).get_luminance() > .99,label+" actually renders a white field: "+name)
-	for name in ["RelationshipPresets","SpeakingStylePresets","Reload"]:
+	for name in ["RelationshipPresets","SpeakingStylePresets"]:
 		var button: Button = window.get_node("%PreferencesPage").get_node("%"+name)
-		check(button.disabled == (name != "Reload" or label != "failed load"), label+" preserves action availability: "+name)
+		check(button.disabled, label+" keeps presets unavailable until the server answers: "+name)
 		check(button.get_theme_stylebox("disabled").bg_color.is_equal_approx(button.get_theme_stylebox("normal").bg_color), label+" does not gray the action background: "+name)
 func run() -> void:
 	DirAccess.make_dir_recursive_absolute(ARTIFACTS)
@@ -52,8 +52,8 @@ func run() -> void:
 	await capture(window,"settings-load-failed")
 	readonly_fields(window,"failed load")
 	var page = window.get_node("%PreferencesPage")
-	_check_failure_explains_how_to_retry(page)
-	page.get_node("%Reload").pressed.emit()
+	await _check_failure_explains_how_to_retry(page)
+	window.get_node("%PreferencesTab").pressed.emit()
 	check(await until(func(): return prefs.get_state().phase == "ready"),"retry restores editing")
 	check(page.get_node("%CustomContextField").editable,"loaded form becomes editable")
 	await _check_readonly_presets(page, window)
@@ -100,16 +100,16 @@ func check_minimum_preferences(window: Window, factor: float) -> void:
 	# original standalone layout check; scroll only after that layout is settled.
 	await create_timer(.2).timeout
 	var page: Control = window.get_node("%PreferencesPage")
-	var reload: Button = page.get_node("%Reload")
-	var scrolls := page.find_children("*", "ScrollContainer", true, false).filter(func(node): return node.is_ancestor_of(reload))
+	var last: Control = page.get_node("%CustomContextField")
+	var scrolls := page.find_children("*", "ScrollContainer", true, false).filter(func(node): return node.is_ancestor_of(last))
 	check(not scrolls.is_empty(), "minimum preferences has a scrollable form")
 	if not scrolls.is_empty():
 		var scroll: ScrollContainer = scrolls[0]
-		scroll.ensure_control_visible(reload)
+		scroll.ensure_control_visible(last)
 		await create_timer(.1).timeout
-		check(scroll.get_global_rect().encloses(reload.get_global_rect()), "reload is reachable at minimum size and scale %s" % factor)
+		check(scroll.get_global_rect().encloses(last.get_global_rect()), "the last field is reachable at minimum size and scale %s" % factor)
 	var actions: Control = window.get_node("%SaveAll").get_parent()
-	check(reload.get_global_rect().end.y <= actions.get_global_rect().position.y, "scrolled form does not overlap fixed actions at scale %s" % factor)
+	check(last.get_global_rect().end.y <= actions.get_global_rect().position.y, "scrolled form does not overlap fixed actions at scale %s" % factor)
 	check(Rect2(Vector2.ZERO, window.get_visible_rect().size).encloses(actions.get_global_rect()), "fixed actions fit minimum window at scale %s" % factor)
 	await capture(window, "settings-minimum-preferences-%s" % int(factor * 100))
 	window.select_page("models")
@@ -127,11 +127,16 @@ func _check_preset_choices_still_update_readonly_values_and_the_draft(page: Vari
 func _check_run_result(preset: Variant, pair: Variant) -> void:
 	check(preset.text.is_empty() and preset.icon != null, "preference current value is shown only in the input: " + pair[0])
 
+## 失败不再占版面：顶部浮层说完就淡出，且绝不挡住下面的表单。
 func _check_failure_explains_how_to_retry(page: Variant) -> void:
-	check(page.get_node("%Status").text.contains("加载失败") and not page.get_node("%Reload").disabled,"failure explains how to retry")
+	var toast: Control = page.get_node("%Toast")
+	check(toast.last_text().contains("相处偏好加载失败") and toast.last_text().contains("重新打开设置"), "failure explains how to retry")
+	check(toast.visible and toast.mouse_filter == Control.MOUSE_FILTER_IGNORE, "failure toast never blocks input")
+	check(await until(func(): return not toast.visible), "failure toast fades on its own")
 
 func _check_saving_retains_visible_progress(window: Variant) -> void:
-	check(window.is_saving() and window.get_node("%Result").visible,"saving retains visible progress")
+	var toast: Control = window.get_node("%SaveToast")
+	check(window.is_saving() and toast.visible and toast.last_text().contains("正在保存"),"saving retains visible progress")
 
 func _check_readonly_presets(page: Variant, window: Window) -> void:
 	for pair in [["RelationshipField","RelationshipPresets"],["SpeakingStyleField","SpeakingStylePresets"]]:

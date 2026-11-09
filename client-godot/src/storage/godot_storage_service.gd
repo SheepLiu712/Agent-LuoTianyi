@@ -1,5 +1,5 @@
 extends "res://src/storage/storage_service.gd"
-## Platform APIs stay in this implementation; callers use StorageService only.
+## 平台 API 只出现在本实现内，调用方只依赖 StorageService。
 var _volume: RefCounted
 var _profile_path: String
 var _credentials: RefCounted
@@ -23,15 +23,24 @@ func write_login_profile(data: Dictionary) -> Error:
 	var error := DirAccess.make_dir_recursive_absolute(_profile_path.get_base_dir())
 	if error != OK: return error
 	var temporary := _profile_path + ".tmp"
-	var file := FileAccess.open(temporary, FileAccess.WRITE)
-	if file == null: return FileAccess.get_open_error()
-	file.store_string(JSON.stringify(data))
-	file.flush()
-	error = file.get_error()
-	file.close()
-	if error == OK: error = DirAccess.rename_absolute(temporary, _profile_path)
+	error = _store_temporary(temporary, JSON.stringify(data))
+	if error == OK: error = _replace_file(temporary, _profile_path)
 	if error != OK: DirAccess.remove_absolute(temporary)
 	return error
+
+## 覆盖点：测试子类替换这两步来模拟写入中断与替换失败，
+## 生产实现保持「先写临时文件，再整体替换」。
+func _store_temporary(path: String, text: String) -> Error:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null: return FileAccess.get_open_error()
+	file.store_string(text)
+	file.flush()
+	var error := file.get_error()
+	file.close()
+	return error
+
+func _replace_file(temporary: String, target: String) -> Error:
+	return DirAccess.rename_absolute(temporary, target)
 
 func read_login_token(server: String, username: String) -> Dictionary:
 	return _credentials.read(server, username) if _credentials != null else super.read_login_token(server, username)
@@ -87,5 +96,5 @@ func _fill_free_bytes(result: Dictionary, absolute: String) -> void:
 		var directory := DirAccess.open(absolute)
 		if directory != null:
 			var available := directory.get_space_left()
-			# Godot cannot distinguish unsupported from a genuine zero without an adapter.
+			# Godot 无法区分「不支持」与「真的为 0」，只能按 >0 采信。
 			if available > 0: result.free_bytes = available

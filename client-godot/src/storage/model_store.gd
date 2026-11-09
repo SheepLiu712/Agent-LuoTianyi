@@ -1,4 +1,4 @@
-﻿extends RefCounted
+extends RefCounted
 const ServerAddress = preload("res://src/domain/server_address.gd")
 var _security: Object
 var _root: String

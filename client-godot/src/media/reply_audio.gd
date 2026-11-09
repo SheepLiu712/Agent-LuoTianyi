@@ -168,8 +168,7 @@ func set_scope(server: String, username: String) -> Error:
 	reset()
 	_metadata.clear()
 	_cache_errors.clear()
-	# A cache is optional for text chat.  Lack of the replay capability must
-	# not make the transport/account session fail to start.
+	# 缓存对纯文字聊天可选：缺少重放能力不得让 transport/账号会话启动失败。
 	return _cache.set_scope(server,username) if _cache != null else OK
 
 func get_message_audio(id: String) -> Dictionary:
@@ -180,6 +179,17 @@ func get_message_audio(id: String) -> Dictionary:
 		"waveform":data.get("waveform",PackedFloat32Array()), "blocked":_player.playing,
 		"status":_replay.status if _replay.id == id else "idle",
 		"position":_replay.position if _replay.id == id else 0.0, "code":_cache_errors.get(id,"")}
+
+## 缓存目录被外部写入（如语音迁移）后重新问一次磁盘；
+## 这里只丢内存缓存并通知界面，不做任何文件操作。
+func forget_audio(ids: Array) -> void:
+	for value in ids:
+		var id := str(value)
+		if id.is_empty():
+			continue
+		_metadata.erase(id)
+		_cache_errors.erase(id)
+		_notify_audio(id)
 
 func replay(id: String) -> Error:
 	if _player.playing:

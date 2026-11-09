@@ -1,5 +1,5 @@
 extends Node2D
-## Rendering capability. Implementations own all native model objects/resources.
+## 渲染能力接口：原生模型对象与资源由具体实现独占。
 func load_character(_descriptor_path: String) -> Error: return ERR_UNAVAILABLE
 func load_avatar(_model_path: String, _mapping_path: String = "") -> Error: return ERR_UNAVAILABLE
 func apply_expression(_command: String) -> bool: return false

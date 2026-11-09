@@ -144,7 +144,7 @@ sequenceDiagram
 
 ## 扩展点与已知坑
 
-本节保留历史分析；音频错误重复报告已在第四轮整改中修复，现行为与验证见 [客户端现行架构](../docs/architecture.md) 和 [整改证据](../docs/review-186.md)，旧快照的重复提示不是当前预期。
+本节保留历史分析；音频错误重复报告已在第四轮整改中修复，现行为与验证见 [客户端现行架构](../docs/architecture.md) 和 [整改证据](../../archive/worklog/pr-186/review-186-4th-round.md)，旧快照的重复提示不是当前预期。
 
 - **`replies` 字典在遍历中删除**：`_present_replies()` 用 `_replies.keys()` 取快照再删（`src/session/chat_session.gd:219`、`:239`），所以在 `play_reply` 期间新到的分片不会被漏掉；但反过来，同一次遍历里改到 `reply` 字典（`:227`、`:232`）是就地修改，`hidden/display` 语义依赖这一点。
 - **`expression` 只在 `_present_replies()` 里被消费一次**：读走后立即清空（`:230` 到 `:232`），因此界面错过这一帧就丢了这次表情指令；没有重发表。

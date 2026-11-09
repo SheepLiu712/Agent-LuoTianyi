@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://src/ui/preferences_page.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
 [ext_resource type="Texture2D" path="res://assets/ui/login_chevron.svg" id="chevron"]
+[ext_resource type="PackedScene" path="res://scenes/ui/toast_overlay.tscn" id="4_toast"]
 
 
 
@@ -113,13 +114,5 @@ custom_minimum_size = Vector2(0, 120)
 placeholder_text = "想让天依了解的相处背景"
 wrap_mode = 1
 
-[node name="Status" type="Label" parent="Margin/Scroll/Column"]
+[node name="Toast" parent="." instance=ExtResource("4_toast")]
 unique_name_in_owner = true
-autowrap_mode = 3
-
-[node name="Actions" type="HBoxContainer" parent="Margin/Scroll/Column"]
-
-[node name="Reload" type="Button" parent="Margin/Scroll/Column/Actions"]
-unique_name_in_owner = true
-theme_type_variation = &"PreferenceButton"
-text = "重新加载"

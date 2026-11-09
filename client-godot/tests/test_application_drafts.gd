@@ -122,7 +122,8 @@ func _check_logout_closes_business_windows_but_preserves_logs(window: Variant, l
 	check(not is_instance_valid(window) and logs.visible,"logout closes business windows but preserves logs")
 
 func _check_save_exposes_processing_feedback(window: Variant) -> void:
-	check(window.is_saving() and window.get_node("%Result").visible,"save exposes processing feedback")
+	var toast: Control = window.get_node("%SaveToast")
+	check(window.is_saving() and toast.visible and toast.last_text().contains("正在保存"),"save exposes processing feedback")
 
 func _check_navigation_unread(dynamics: Button, unread: Control) -> void:
 	var deadline := Time.get_ticks_msec() + 5000

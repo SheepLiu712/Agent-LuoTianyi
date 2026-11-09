@@ -9,8 +9,6 @@ func focus(window: Window) -> void:
 	window.grab_focus()
 func focused(window: Window) -> bool:
 	return window.has_focus() and not minimized(window)
-func drag(window: Window) -> void:
-	window.start_drag()
 func reparent_image(window: Window, source: Window) -> void:
 	window.hide()
 	window.transient = false

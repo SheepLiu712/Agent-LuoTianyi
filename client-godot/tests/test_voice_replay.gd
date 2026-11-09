@@ -1,4 +1,4 @@
-﻿extends SceneTree
+extends SceneTree
 var Audio = load("res://tests/support/native_reply_audio.gd")
 const Cache = preload("res://src/storage/audio_cache.gd")
 const Samples = preload("res://tests/support/audio_samples.gd")

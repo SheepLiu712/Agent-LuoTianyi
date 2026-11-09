@@ -1,4 +1,4 @@
-﻿extends SceneTree
+extends SceneTree
 var failures: Array[String] = []
 func check(value: bool,text: String) -> void:
 	if not value:

@@ -1,5 +1,5 @@
 extends Resource
-## Cross-platform system input. TextEdit's own IME state is checked by the view.
+## 跨平台系统输入；TextEdit 自身的 IME 状态由视图判定。
 func is_composing() -> bool:
 	return false
 func has_clipboard_image() -> bool:

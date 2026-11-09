@@ -1,4 +1,4 @@
-﻿extends SceneTree
+extends SceneTree
 class BrokenSecurity extends RefCounted:
 	func protect_secret(_plain: PackedByteArray,_scope: PackedByteArray) -> Dictionary:
 		return {"ok":false,"data":PackedByteArray(),"error":"PROTECT_FAILED"}

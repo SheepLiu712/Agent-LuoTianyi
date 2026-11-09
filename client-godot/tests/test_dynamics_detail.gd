@@ -9,6 +9,7 @@ func _initialize() -> void:
 func _run() -> void:
 	await test_details()
 	await test_publish_failure()
+	await test_pruning_and_states()
 	print("Dynamics detail: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -107,6 +108,73 @@ func test_details() -> void:
 	controller.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(layout_path)
+## 服务端删除动态后刷新：行、详情与选中一起消失；四种状态互斥。
+func test_pruning_and_states() -> void:
+	var controller = load("res://src/session/dynamics_controller.gd").new()
+	root.add_child(controller)
+	await controller.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"shrinking","message_token":"fixture-token"})
+	await controller.refresh()
+	var window = _open_dynamics_window(controller)
+	await process_frame
+	check(window.select_post("d5"),"select the post that will be deleted")
+	await process_frame
+	var before := _detail_count(window)
+	await controller.refresh()
+	await process_frame
+	check(_row_ids(window) == ["Post_d0"],"refresh removes rows the server no longer returns")
+	check(_detail_count(window) < before,"refresh releases the removed detail")
+	check(window.get_selected_id().is_empty(),"refresh clears a removed selection")
+	check(window.get_node("%Empty").visible,"empty selection shows guidance instead of a stale detail")
+	window.queue_free()
+	await process_frame
+	await _check_empty_and_failure_placeholders()
+	controller.queue_free()
+	await process_frame
+
+
+func _check_empty_and_failure_placeholders() -> void:
+	var empty_feed = load("res://src/session/dynamics_controller.gd").new()
+	root.add_child(empty_feed)
+	await empty_feed.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"empty-feed","message_token":"fixture-token"})
+	await empty_feed.refresh()
+	var empty_window = _open_dynamics_window(empty_feed)
+	await process_frame
+	check(empty_window.get_node("%Empty").text.contains("还没有动态"),"empty feed states are not disguised as an error")
+	check(not empty_window.get_node("%Refresh").disabled,"empty feed keeps retry available")
+	empty_window.queue_free()
+	empty_feed.queue_free()
+	await process_frame
+	var failing = load("res://src/session/dynamics_controller.gd").new()
+	root.add_child(failing)
+	await failing.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"fail-first-page","message_token":"fixture-token"})
+	await failing.refresh()
+	check(failing.get_state().phase == "failed","first page failure is reported as failed")
+	var failing_window = _open_dynamics_window(failing)
+	await process_frame
+	check(failing_window.get_node("%Empty").text.contains("失败"),"failure placeholder explains the state")
+	check(not failing_window.get_node("%Refresh").disabled,"failure keeps an explicit retry action")
+	failing_window.queue_free()
+	failing.queue_free()
+	await process_frame
+
+
+func _open_dynamics_window(controller: Node) -> Node:
+	var layout_path := "user://dynamics-states-%s.cfg" % Time.get_ticks_usec()
+	var window = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	window.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(layout_path))
+	root.add_child(window)
+	window.open()
+	return window
+
+
+func _row_ids(window: Node) -> Array:
+	return window.get_node("%List").get_children().map(func(row): return str(row.name))
+
+
+func _detail_count(window: Node) -> int:
+	return window.get_node("%Right").get_children().size()
+
+
 func _wait_until(condition: Callable, label: String) -> void:
 	var deadline := Time.get_ticks_msec() + 5000
 	while not condition.call() and Time.get_ticks_msec() < deadline:

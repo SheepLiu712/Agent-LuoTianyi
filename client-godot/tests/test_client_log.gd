@@ -1,4 +1,4 @@
-﻿extends SceneTree
+extends SceneTree
 const Log = preload("res://src/storage/client_log.gd")
 var failures: Array[String] = []
 func check(value: bool, description: String) -> void:

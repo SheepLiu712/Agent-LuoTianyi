@@ -5,8 +5,14 @@ const SCENES := {
 	"res://scenes/ui/publish_overlay.tscn": {
 		"root":"PublishOverlay","type":"Control","setup":"setup","unique":["PublishDraft","PublishButton","PublishStatus","CancelPublish","DiscardDialog"]
 	},
+	"res://scenes/ui/profile_page.tscn": {
+		"root":"ProfilePage","type":"Control","setup":"set_avatar_source","unique":["Preview","Account","Hint","PickButton","ResetButton","Result","FileDialog"]
+	},
 	"res://scenes/ui/preferences_page.tscn": {
-		"root":"PreferencesPage","type":"Control","setup":"setup","unique":["RelationshipField","RelationshipPresets","SpeakingStyleField","SpeakingStylePresets","PersonalityField","CustomContextField","Status","Reload"]
+		"root":"PreferencesPage","type":"Control","setup":"setup","unique":["RelationshipField","RelationshipPresets","SpeakingStyleField","SpeakingStylePresets","PersonalityField","CustomContextField","Toast"]
+	},
+	"res://scenes/ui/toast_overlay.tscn": {
+		"root":"Toast","type":"Control","setup":"","unique":["Panel","Text"]
 	},
 	"res://scenes/ui/model_page.tscn": {
 		"root":"ModelPage","type":"Control","setup":"setup","unique":["Scroll","Cards","RefreshTypes","Status","PlainDialog","TestDialog"]
@@ -15,7 +21,7 @@ const SCENES := {
 		"root":"ModelPurposeCard","type":"PanelContainer","setup":"setup","unique":["PurposeTitle","Enabled","Requirements","Description","Fields","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","CardStatus"]
 	},
 	"res://scenes/ui/account_view.tscn": {
-		"root":"AccountForm","type":"PanelContainer","setup":"setup","unique":["Form","Server","Username","Password","Confirm","Invite","Remember","AutoLogin","Submit","Cancel","Status","Logs","MenuButton","CloseLogin","RegisterLink","ResetLink","HistoryButton","ServerDialog","SavedLogin","UsePassword"]
+		"root":"AccountForm","type":"PanelContainer","setup":"setup","unique":["Form","Server","Username","Password","Confirm","Invite","Remember","AutoLogin","Submit","Cancel","Status","Logs","MenuButton","RegisterLink","ResetLink","HistoryButton","ServerDialog","SavedLogin","UsePassword"]
 	},
 	"res://scenes/main.tscn": {
 		"root":"AgentLuo","type":"Control","setup":"setup","unique":["Split","Center","AccountForm","LogProblem","ExitDialog"],
@@ -40,7 +46,7 @@ const SCENES := {
 		"root":"VirtualMessageList","type":"ScrollContainer","setup":"","unique":["Canvas"]
 	},
 	"res://scenes/ui/chat_view.tscn": {
-		"root":"ChatView","type":"MarginContainer","setup":"setup","unique":["Margin","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","VolumeButton","VolumePopup","ImageButton","Input","Send"]
+		"root":"ChatView","type":"MarginContainer","setup":"setup","unique":["Margin","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","VolumeButton","VolumePopup","ImageButton","Input","Send","ComposerSurface"]
 	},
 	"res://scenes/ui/image_window.tscn": {
 		"root":"ImageWindow","type":"Window","setup":"","unique":["ImageScroll","Picture","ImageError","RetryImage","ZoomIn","ZoomOut","FitImage","OriginalSize","CloseImage","ConfirmImage","Chrome"]
@@ -49,7 +55,7 @@ const SCENES := {
 		"root":"DynamicsWindow","type":"Window","setup":"setup","unique":["Unread","Publish","Refresh","ReadAll","Notice","Split","ListScroll","List","Right","Empty"]
 	},
 	"res://scenes/ui/dynamics_post_row.tscn": {
-		"root":"DynamicsPostRow","type":"Button","setup":"setup","unique":["Avatar","Author","Meta","Excerpt"]
+		"root":"DynamicsPostRow","type":"Button","setup":"setup","unique":["Avatar","Author","Meta","Excerpt","UnreadDot"]
 	},
 	"res://scenes/ui/dynamic_comment_row.tscn": {
 		"root":"DynamicCommentRow","type":"VBoxContainer","setup":"setup","unique":["Avatar","Author","Body","Time","Reply"]
@@ -68,17 +74,19 @@ const SCENES := {
 const PROPERTIES := {
 	"account_view": {"%Username":{"secret":false},"%Password":{"secret":true},"%Confirm":{"secret":true},"%Invite":{"secret":true},"%Submit":{"text":"登录"},"%Cancel":{"text":"取消请求"},"%RegisterLink":{"text":"注册账号"},"%ResetLink":{"text":"忘记密码"},"%Logs":{"text":"日志"}},
 	"model_purpose_card": {"%api_key":{"secret":true},"%Enabled":{"text":"使用自己的 API Key"}},
-	"preferences_page": {"%PersonalityField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CustomContextField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Reload":{"text":"重新加载"}},
+	"preferences_page": {"%PersonalityField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CustomContextField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Toast":{"mouse_filter":Control.MOUSE_FILTER_IGNORE}},
 	"log_window": {"%Text":{"selection_enabled":true},"%Picker":{"file_mode":FileDialog.FILE_MODE_SAVE_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
 	"message_bubble": {"%Text":{"fit_content":true,"selection_enabled":true,"scroll_active":false,"autowrap_mode":TextServer.AUTOWRAP_WORD_SMART}},
-	"chat_view": {"%HistoryRetry":{"text":"重试历史"},"%HistorySkip":{"text":"跳过本次"},"%ImageButton":{"text":""},"%VolumeButton":{"text":"","tooltip_text":"语音音量"},"%Input":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Send":{"text":"","tooltip_text":"发送消息"}},
+	"chat_view": {"%HistoryRetry":{"text":"重试历史"},"%HistorySkip":{"text":"跳过本次"},"%ImageButton":{"text":""},"%VolumeButton":{"text":"","tooltip_text":"语音音量"},"%Input":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Send":{"text":"","tooltip_text":"发送消息"},"%ComposerSurface":{"mouse_filter":Control.MOUSE_FILTER_PASS}},
 	"dynamics_window": {"%Publish":{"text":"发布动态"},"%Refresh":{"text":"刷新"},"%ReadAll":{"text":"全部已读"}},
+	"dynamics_post_row": {"%UnreadDot":{"visible":false}},
 	"dynamic_comment_row": {"%Body":{"selection_enabled":true,"fit_content":true,"scroll_active":false},"%Reply":{"text":"回复"}},
 	"dynamic_detail": {"%Body":{"selection_enabled":true,"fit_content":true,"scroll_active":false},"%Notice":{"text":"此动态不可评论。"},"%CommentDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%ReplyDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CancelReply":{"text":"取消回复对象"},"%Send":{"text":"发送评论"},"%ReplySend":{"text":"发送回复"}},
 	"publish_overlay": {"%PublishDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY}},
 	"unified_dropdown": {"%Menu":{"visible":false,"force_native":false,"transparent_bg":true}},
 	"main": {"%ExitDialog":{"ok_button_text":"放弃并继续","cancel_button_text":"返回继续编辑"},"%SecurityError":{"visible":false,"text":"凭据保护组件缺失，请重新解压完整程序。"}},
 	"message_audio": {"%Stop":{"text":"停止"},"%Error":{"text":"语音未能保存"}},
+	"profile_page": {"%PickButton":{"text":"选择本地图片"},"%ResetButton":{"text":"恢复默认头像"},"%FileDialog":{"file_mode":FileDialog.FILE_MODE_OPEN_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
 }
 const DROPDOWNS := {"preferences_page":["RelationshipPresets","SpeakingStylePresets"],"model_purpose_card":["CopySlot"]}
 const INPUT_HINTS := {
@@ -103,6 +111,7 @@ func run() -> void:
 	_temp = "user://ui-scenes-test-%s" % Time.get_ticks_usec()
 	for path: String in SCENES:
 		await check_scene(path, SCENES[path])
+	await check_settings_nav()
 	var separator: PackedScene = load("res://scenes/ui/dropdown_separator.tscn")
 	check(separator != null, "dropdown separator scene loads")
 	if separator != null:
@@ -112,6 +121,33 @@ func run() -> void:
 	remove_folder(_temp)
 	print("UI scenes: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+## 分组标题是「父」，导航项是「子」：缩进、引导线与更小字号一起表达从属关系。
+func check_settings_nav() -> void:
+	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var heading: Label = window.get_node("%Heading")
+	check(heading.text == "偏好与配置", "sidebar heading is a plain group title")
+	check(heading.get_theme_type_variation() == &"SettingsNavHeading", "sidebar heading no longer looks like a nav item")
+	var column: Control = window.get_node("%PreferencesTab").get_parent()
+	check(column.name == "NavColumn", "nav items share one sub-column")
+	var margin: Control = column.get_parent().get_parent()
+	check(margin.get_theme_constant("margin_left") == 12, "nav items are indented under the group title")
+	for name in ["ProfileTab", "PreferencesTab", "ModelsTab", "AudioTab", "StyleTab"]:
+		var tab: Button = window.get_node("%" + name)
+		check(tab.get_theme_type_variation() == &"SettingsNavItem", "nav item uses the child styling: " + name)
+	check(column.get_child(0).name == "ProfileTab", "profile page is the first nav item")
+	var toast: Control = window.get_node_or_null("%SaveToast")
+	check(toast != null and toast.mouse_filter == Control.MOUSE_FILTER_IGNORE, "save feedback floats above the window without blocking input")
+	_check_toast_shape(toast)
+	check(window.get_node_or_null("Body/Column/Footer/ResultScroll") == null, "the fixed result line is gone from the footer")
+	window.free()
+
+## 提示必须是一条横向矩形停在画面中央，不能退化成逐字换行的竖条。
+func _check_toast_shape(toast: Control) -> void:
+	var panel: Control = toast.get_node("%Panel")
+	var size := panel.get_combined_minimum_size()
+	check(toast.anchor_right == 1.0 and toast.anchor_bottom == 1.0, "the toast stage fills the frame instead of hugging a corner")
+	check(size.x > 200.0 and size.y < 60.0, "the toast bubble is a horizontal rectangle: " + str(size))
 
 func check_scene(path: String, spec: Dictionary) -> void:
 	var scene: PackedScene = load(path)

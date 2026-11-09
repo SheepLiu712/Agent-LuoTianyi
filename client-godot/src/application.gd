@@ -1,6 +1,5 @@
 extends Control
-
-# ---------- 导出的服务依赖 ----------
+## 应用根视图：持有账户会话与窗口协调器，负责登录/展开两种窗口形态与子窗口装配。
 
 @export var appearance: Resource = preload("res://src/extensions/appearance_service.gd").new()
 @export var world: Resource = preload("res://src/extensions/world_service.gd").new()
@@ -12,24 +11,18 @@ extends Control
 @export var runtime: Resource = preload("res://src/platform/runtime_environment.gd").new()
 
 const Services = preload("res://src/composition/application_services.gd")
-
-# ---------- 运行时服务引用 ----------
+const AccountScope = preload("res://src/domain/account_scope.gd")
+## 导航节点 → 图标名。按图标语义而非节点名映射：NavDynamics 用 @（动态/提及），NavLogs 用卷宗（日志归档）。
+const NAV_ICONS := {"NavChat":"nav_chat", "NavDynamics":"nav_at", "NavSettings":"nav_settings", "NavLogs":"nav_scroll"}
+const Avatar = preload("res://scenes/avatar/avatar_panel.tscn")
+const ChatView = preload("res://scenes/ui/chat_view.tscn")
 
 var _services: RefCounted
 var _lifecycle: RefCounted
 var _coordinator: RefCounted
-
-# ---------- 预加载场景 ----------
-
-## Application view: 拥有账户服务，并将离线预览图
-const Avatar = preload("res://scenes/avatar/avatar_panel.tscn")
-const ChatView = preload("res://scenes/ui/chat_view.tscn")
-
 var _session: Node
 var _chat: Node
 var _chat_view: Control
-
-# ---------- 视图节点 ----------
 
 @onready var _chrome = %Chrome
 @onready var _split: HSplitContainer = %Split
@@ -40,8 +33,7 @@ var _chat_view: Control
 
 var _avatar: Control
 
-# ---------- 窗口与布局状态 ----------
-
+var _closing := false
 var _ratio := 1.0 / 3.0
 var _layout_ready := false
 var _geometry: Resource
@@ -49,16 +41,12 @@ var _layout_path := "user://window_layout.cfg"
 var _expanded := false
 var _expanded_size := Vector2i(1280, 800)
 
-# ---------- 日志相关 ----------
-
 var _log: RefCounted
 var _log_window: Window
 var _engine_log: Logger
 
 @onready var _log_problem: Label = %LogProblem
 @onready var _exit_dialog: Window = %ExitDialog
-
-# ---------- 业务模型与辅助对象 ----------
 
 var _models: Node
 var _images_presenter: Node
@@ -97,7 +85,7 @@ func _ready() -> void:
 	add_child(_images_presenter)
 
 	_services = Services.new(_layout_path,runtime)
-	_services.ui_style.apply_view(self, {"NavChat":"nav_chat", "NavDynamics":"nav_at", "NavSettings":"nav_settings", "NavLogs":"nav_scroll"})
+	_services.ui_style.apply_view(self, NAV_ICONS)
 	_services.ui_style.style_changed.connect(_apply_workspace_style)
 	_apply_workspace_style()
 	_images_presenter.set_ui_style(_services.ui_style)
@@ -118,13 +106,10 @@ func _ready() -> void:
 	get_window().close_requested.connect(func(): _request_close("exit"))
 
 	_coordinator = preload("res://src/application/window_coordinator.gd").new(self,_exit_dialog,_images_presenter,_geometry,_services.create_settings,_services.create_dynamics,func(): return is_instance_valid(_chat_view) and _chat_view.is_dirty())
-	_coordinator.exit_requested.connect(func():
-		if is_instance_valid(_session): _session.cancel()
-		get_tree().quit())
-	_coordinator.logout_requested.connect(func(): _session.logout())
+	_coordinator.exit_requested.connect(func(): _request_persisted_close("exit"))
+	_coordinator.logout_requested.connect(func(): _request_persisted_close("logout"))
 
 	_account_form.log_requested.connect(_log_window.open)
-	_account_form.exit_requested.connect(func(): _request_close("exit"))
 
 	if _external_links == null: _external_links = Services.external_links()
 	_account_form.feedback_requested.connect(func(): _account_form.report_feedback_result(_external_links.open_project()))
@@ -140,7 +125,7 @@ func _ready() -> void:
 	_dynamics = _services.dynamics
 	_chat = _services.chat
 
-	_lifecycle = preload("res://src/application/account_lifecycle.gd").new(_chat,_models,_dynamics,appearance,world,devices)
+	_lifecycle = preload("res://src/application/account_lifecycle.gd").new(_chat,_models,_dynamics,appearance,world,devices,_services.avatar)
 
 	_dynamics.unread_changed.connect(func(count):
 		if is_instance_valid(_nav_dynamics) and is_instance_valid(_dynamics_unread):
@@ -223,6 +208,7 @@ func _account_changed(state: Dictionary) -> void:
 			_chat_view.image_requested.connect(func(provider): _images_presenter.open_image(get_window(),provider))
 			_chat_view.attachment_requested.connect(func(provider,confirm): _images_presenter.open_image(get_window(),provider,confirm))
 			_chat_view.attachment_cleared.connect(func(): _images_presenter.close_confirmation(get_window()))
+			_bind_composer_height(_chat_view)
 
 		if not _expanded:
 			_expanded = true
@@ -282,6 +268,29 @@ func _open_settings(kind: String) -> void:
 func _request_close(action: String) -> void:
 	if _coordinator != null: _coordinator.request_close(action)
 
+
+## 退出或登出前先把本地记录收口：写不进去就静默忽略，不提示、不拦截、不改变退出流程。
+func _request_persisted_close(action: String) -> void:
+	if _closing or not is_instance_valid(_chat):
+		_finish_close(action)
+		return
+	_closing = true
+	_chat.prepare_close()
+	await _chat.close_persistence()
+	_closing = false
+	_finish_close(action)
+
+
+func _finish_close(action: String) -> void:
+	if action == "logout":
+		if is_instance_valid(_session):
+			_session.logout()
+		return
+	if is_instance_valid(_session):
+		_session.cancel()
+	get_tree().quit()
+
+
 func _restore_settings(settings: Resource) -> void:
 	if settings.load_settings() == OK:
 		var ratio: Variant = settings.get_value("layout", "ratio", 1.0 / 3.0)
@@ -290,6 +299,31 @@ func _restore_settings(settings: Resource) -> void:
 		var volume: Variant = settings.get_value("audio", "volume", 1.0)
 		if (volume is float or volume is int) and is_finite(float(volume)) and volume >= 0 and volume <= 1:
 			_chat.set_volume(float(volume))
+
+## 输入框高度按账号记：设置文件是全局的，用账号散列做 key 才互不干扰。
+func _bind_composer_height(view: Control) -> void:
+	var key := _composer_height_key(_session.get_session())
+	_restore_composer_height(view, key)
+	view.composer_height_changed.connect(func(height): _persist_composer_height(height, key))
+
+func _composer_height_key(scope: Dictionary) -> String:
+	var scope_key := AccountScope.key(str(scope.get("server", "")), str(scope.get("username", "")))
+	return "composer_height" if scope_key.is_empty() else "composer_height." + scope_key
+
+func _restore_composer_height(view: Control, key: String) -> void:
+	var stored: Variant = _services.settings.get_value("layout", key, 0.0)
+	if not (stored is float or stored is int):
+		return
+	if not is_finite(float(stored)):
+		return
+	view.set_composer_height(float(stored))
+
+func _persist_composer_height(height: float, key: String) -> void:
+	if height <= 0.0:
+		return
+	_services.settings.set_value("layout", key, height)
+	if _services.settings.save_settings() != OK:
+		push_warning("Composer height save failed")
 
 func _capture_or_resume() -> void:
 	var capture := ""

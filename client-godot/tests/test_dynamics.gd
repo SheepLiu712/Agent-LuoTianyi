@@ -43,6 +43,11 @@ func test_reads() -> void:
 	_check_refresh_reaches_replies_beyond_first_page(controller)
 	await controller.load_comments("d0",true)
 	check(controller.get_comments("d0").items.size()==22,"comments page merge")
+	_check_unread_semantics(controller)
+	await _check_opening_one_post_advances_read(controller)
+	var read_scope := {"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"read","message_token":"fixture-token"}
+	await controller.start(read_scope)
+	await controller.refresh()
 	await controller.mark_read()
 	check(controller.get_state().unread==0,"explicit mark read clears unread")
 	check(controller.get_latest_unread().is_empty(), "explicit mark read clears the preview")
@@ -132,3 +137,19 @@ func _check_opaque_cursor_paging_deduplicates_posts(controller: Variant) -> void
 
 func _check_refresh_reaches_replies_beyond_first_page(controller: Variant) -> void:
 	check(controller.get_comments("d0").items.size()==22 and not controller.get_comments("d0").has_more,"refresh reaches replies beyond first page")
+
+## 未读只看发布时间：自己发的不算，早于已读时间戳的也不算。
+func _check_unread_semantics(controller: Variant) -> void:
+	check(controller.is_unread({"author_type":"agent","created_at":"2026-09-19 10:00:00"}),"posts after the read mark are unread")
+	check(not controller.is_unread({"author_type":"agent","created_at":"2026-09-18 09:00:00"}),"posts before the read mark are read")
+	check(not controller.is_unread({"author_type":"user","created_at":"2026-09-19 10:00:00"}),"own posts are never unread")
+
+## 点开一条动态：服务端只有「全部已读」，所以只在本机推进已读位置，徽标仍报服务端那份数字。
+func _check_opening_one_post_advances_read(controller: Variant) -> void:
+	var scope := {"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"mark-one","message_token":"fixture-token"}
+	await controller.start(scope)
+	await controller.refresh()
+	check(controller.is_unread(controller.get_posts()[0]),"a fresh feed starts unread")
+	await controller.mark_read(controller.get_posts()[0].created_at)
+	check(not controller.is_unread(controller.get_posts()[0]),"the opened post stops being unread")
+	check(controller.get_state().unread==123,"opening one post leaves the server unread badge untouched")

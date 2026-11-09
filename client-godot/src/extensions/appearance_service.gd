@@ -1,5 +1,5 @@
 extends Resource
-## Reserved appearance capability, not an AI policy or a renderer.
+## 预留外观能力：既不是 AI 策略，也不是渲染器。
 signal completed(request_id: String, result: Dictionary)
 signal state_changed(state: Dictionary)
 func get_capabilities() -> Dictionary:

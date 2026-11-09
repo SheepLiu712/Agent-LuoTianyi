@@ -1,6 +1,6 @@
 # AgentLuo · Godot Windows 客户端
 
-当前源码版本：`0.1.5`（以 `release.json` 为准）。这是独立 Windows 客户端工程；现行行为与阅读入口见 [客户端说明](docs/README.md)，最新整改验证见 [PR #186 整改记录](docs/review-186.md)。尚未替换旧端，不读取旧端凭据。
+当前源码版本：`0.1.5.3`（以 `release.json` 为准）。这是独立 Windows 客户端工程；现行行为与阅读入口见 [客户端说明](docs/README.md)，开发过程记录见 [WORKLOG](docs/WORKLOG.md)，最新整改验证见 [PR #186 整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。尚未替换旧端，不读取旧端凭据。
 
 现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；脚本清单与覆盖迁移以该入口和测试契约为准。
 
@@ -89,7 +89,7 @@ release.json 是版本单一来源，界面/诊断/目录/ZIP 使用同一版本
 
 历史、相处模式、模型配置/委托及动态回归：`scripts/check_features.ps1 -Godot <exe> -Python <python.exe>`。测试依赖另包括 aiohttp；所有默认 fixture 仅监听 loopback，无公共服务写入或收费供应商。新增界面 GPU 截图：`tests/run_feature_tests.py --godot <exe> --script res://tests/capture_release_ui.gd --gpu`。
 
-应用持有聊天/模型/动态控制器，Window 仅展示和编辑；未来页面切换不重连。角色入口 `assets/live2d/character.json` 分离身份与模型资源，加载失败保留原模型；实际平台能力仍是 Windows。详细使用说明见 [PREVIEW](PREVIEW.md)，实际验收记录见 [客户端整改证据](docs/review-186.md)，不将预留移动端/换装/箱庭视为已交付。
+应用持有聊天/模型/动态控制器，Window 仅展示和编辑；未来页面切换不重连。角色入口 `assets/live2d/character.json` 分离身份与模型资源，加载失败保留原模型；实际平台能力仍是 Windows。详细使用说明见 [PREVIEW](PREVIEW.md)，实际验收记录见 [客户端整改证据](../archive/worklog/pr-186/review-186-4th-round.md)，不将预留移动端/换装/箱庭视为已交付。
 
 当前开发版的动态为独立任务栏窗口，35:65列表/详情分区，完整正文、平铺私人评论、行内回复和内嵌发布浮层；关闭聚合检查所有草稿。正式下拉共享稳定ID组件。原生验收：`tests/run_dynamics_tests.py --godot <exe> --gpu --script res://tests/capture_dynamics_ui.gd`；菜单GPU验收：Godot `--path client-godot --script res://tests/capture_dropdown_ui.gd`。这些测试验证真实HWND、缩放截图和本地接口，不验证公共服务或系统DPI切换。
 
@@ -129,4 +129,4 @@ GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及�
 
 [现行架构与接口说明](docs/architecture.md) 区分现行行为与历史迁移快照。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
 
-三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.1.5，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。本轮不生成包、不覆盖任何历史包；验证边界见 [整改记录](docs/review-186.md)。
+三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.1.5.3，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。本轮不生成包、不覆盖任何历史包；验证边界见 [整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。

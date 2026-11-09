@@ -41,5 +41,13 @@
     "scons": "4.7.0",
     "msvc_family": "14.3",
     "configuration": "platform=windows arch=x86_64 target=template_release"
+  },
+  "godot_sqlite": {
+    "version": "4.9",
+    "compatibility_minimum": "4.7",
+    "url": "https://github.com/2shady4u/godot-sqlite/releases/tag/v4.9",
+    "windows_debug_sha256": "e3ae3b46b59eadcd513f8d7d6e7c0c15e173696e145594094d7f4f3cc96c7fe7",
+    "windows_release_sha256": "ba79b9bbf916c4ed2eb22ac719051c4a4258e460c4a354590b071beb9a87fedb",
+    "committed_platforms": ["windows.x86_64"]
   }
 }

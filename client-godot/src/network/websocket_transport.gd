@@ -149,8 +149,7 @@ func _poll_socket(now: int) -> void:
 			_set_state("authenticating", "")
 			_send_control("user_auth", {"username":_session.username, "token":_session.message_token,
 				"capabilities":["negative_ack_v1"]}, now)
-	# A close frame can arrive in the same poll as auth_error or a final reply.
-	# Consume those queued packets before deciding to reconnect.
+	# 关闭帧可能与 auth_error 或最终回复同批到达：先消费队列再决定是否重连。
 	_receive_packets(now)
 	if _peer != null and ready in [WebSocketPeer.STATE_CLOSED, WebSocketPeer.STATE_CLOSING]:
 		if _state.phase == "authenticating" and _peer.get_close_code() == 1008:

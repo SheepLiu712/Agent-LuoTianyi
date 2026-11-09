@@ -5,7 +5,7 @@ from urllib.parse import urlparse,parse_qs
 from pathlib import Path
 PROJECT=Path(__file__).resolve().parents[1]
 def run(godot,script,gpu=False):
-    errors=[]; reads={}; writes=[]; unread_calls={}; comment_calls={}; post_calls={}
+    errors=[]; reads={}; writes=[]; unread_calls={}; comment_calls={}; post_calls={}; marks={}
     def post(i):
         return dict(id=f'd{i}',author_type='agent',author_name='洛天依',content='合成动态\n第二行\n第三行\n第四行\n第五行\n第六行\n第七行',created_at='2026-09-19 10:00:00',allow_comment=i!=1,comment_count=22,visibility='private')
     def comment(i):
@@ -19,17 +19,28 @@ def run(godot,script,gpu=False):
         def reply_unread(self, user):
             unread_calls[user]=unread_calls.get(user,0)+1
             if user=='fail-unread' and unread_calls[user]>1: self.reply(503,{}); return
-            dynamic_count = 0 if user in reads or user=='comments-only' else 12
+            dynamic_count = 0 if user in reads or user in ('comments-only','empty-feed','fail-first-page') else 12
             self.reply(200,{'unread_count':0 if user in reads else 123,'has_unread':user not in reads,'unread_dynamic_count':dynamic_count,'unread_comment_count':0 if user in reads else 123-dynamic_count,'last_read_dynamic_at':'2026-09-18 10:00:00','last_read_comment_at':None}); return
 
         def reply_posts(self, user, query, cursor):
             post_calls[user]=post_calls.get(user,0)+1
-            if user=='preview-fail' and post_calls[user]>1: self.reply(503,{}); return
+            if self.reject_posts(user, query, cursor): return
+            items=self.post_variant(user, cursor)
+            self.adjust_posts(user, cursor, items)
+            more=bool(items) and not cursor
+            self.reply(200,{'items':items,'has_more':more,'next_cursor':'older | page' if more else None})
+
+        def reject_posts(self, user, query, cursor):
+            if user=='preview-fail' and post_calls[user]>1: self.reply(503,{}); return True
             if query.get('limit')!=['10']: errors.append('post page limit')
             if cursor and cursor!='older | page': errors.append('cursor not preserved')
-            items=[post(i) for i in (range(10) if not cursor else range(9,12))]
-            self.adjust_posts(user, cursor, items)
-            self.reply(200,{'items':items,'has_more':not cursor,'next_cursor':'older | page' if not cursor else None}); return
+            if user=='fail-first-page' and post_calls[user]==1: self.reply(503,{}); return True
+            return False
+
+        def post_variant(self, user, cursor):
+            items=[post(i) for i in (range(9,12) if cursor else range(10))]
+            if user=='shrinking' and post_calls[user]>2: return [post(0)]
+            return [] if user=='empty-feed' else items
 
         def comment_items(self, cursor):
             return [comment(i) for i in (range(20) if not cursor else range(19,22))]
@@ -57,7 +68,7 @@ def run(godot,script,gpu=False):
 
         def do_GET(self):
             path=urlparse(self.path); query=parse_qs(path.query); user=query.get('username',[''])[0]
-            if path.path=='/stats': self.reply(200,{'writes':writes}); return
+            if path.path=='/stats': self.reply(200,{'writes':writes,'marks':marks}); return
             if self.headers.get('Authorization')!='Bearer fixture-token': errors.append('invalid bearer')
             if user=='slow': time.sleep(.5)
             if path.path=='/dynamics/unread': self.reply_unread(user); return
@@ -67,13 +78,19 @@ def run(godot,script,gpu=False):
             if path.path.startswith('/dynamics/') and path.path.endswith('/comments'):
                 self.reply(200,{'items':[],'has_more':False,'next_cursor':None}); return
             self.reply(404,{})
+        def reply_read(self, user, data):
+            # 真实服务端只认 username/token：body 里多带的字段一律忽略，只做一次「全部已读」。
+            reads[user]=True
+            marks[user]=None
+            self.reply(200,{'ok':True,'last_read_dynamic_at':'2026-09-19 10:00:00','last_read_comment_at':'2026-09-19 10:00:00'})
+
         def do_POST(self):
             data=json.loads(self.rfile.read(int(self.headers['Content-Length']))); user=data.get('username')
             if data.get('token')!='fixture-token': errors.append('invalid write token')
             writes.append({'path':self.path,**data})
             if user=='fail-write': self.reply(503,{}); return
             if user=='uncertain-write': self.connection.shutdown(2); self.connection.close(); return
-            if self.path=='/dynamics/read': reads[user]=True; self.reply(200,{'ok':True}); return
+            if self.path=='/dynamics/read': self.reply_read(user, data); return
             if self.path=='/dynamics': self.reply(200,{'item':{**post(99),'content':data['content']}}); return
             if self.path=='/dynamics/d0/comments': self.reply(200,{'item':{**comment(99),'content':data['content'],'parent_comment_id':data.get('parent_comment_id')}}); return
             self.reply(400,{})

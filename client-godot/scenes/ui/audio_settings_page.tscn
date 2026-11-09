@@ -146,6 +146,26 @@ text = "重新扫描"
 [node name="CacheStatus" type="Label" parent="Scroll/Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
+[node name="MigrationTitle" type="Label" parent="Scroll/Column"]
+text = "从 Python 客户端迁移"
+theme_override_font_sizes/font_size = 16
+[node name="MigrationDescription" type="Label" parent="Scroll/Column"]
+text = "此前用 Python 客户端聊过的话，可以把它留在这台电脑上的语音一次性带过来。\n未执行一键迁移时，向上翻看历史消息会按需把对应语音逐步迁入。"
+autowrap_mode = 3
+[node name="MigrationActions" type="HBoxContainer" parent="Scroll/Column"]
+theme_override_constants/separation = 8
+[node name="MigrateAudio" type="Button" parent="Scroll/Column/MigrationActions"]
+unique_name_in_owner = true
+text = "一键迁移语音…"
+size_flags_horizontal = 0
+custom_minimum_size = Vector2(0, 40)
+[node name="MigrationStatus" type="Label" parent="Scroll/Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+[node name="MigrationHint" type="Label" parent="Scroll/Column"]
+text = "只新增不覆盖：已有缓存保持不变，Python 端的源文件也不会被移动或删除。"
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
 [node name="Spacer" type="Control" parent="Scroll/Column"]
 size_flags_vertical = 3
 mouse_filter = 2
@@ -157,4 +177,10 @@ unique_name_in_owner = true
 title = "清理语音缓存"
 dialog_text = "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。"
 ok_button_text = "清理"
+cancel_button_text = "取消"
+[node name="MigrationDialog" parent="." instance=ExtResource("decision")]
+unique_name_in_owner = true
+title = "迁移语音"
+dialog_text = "把本机 Python 客户端保存的语音迁入当前账号？"
+ok_button_text = "开始迁移"
 cancel_button_text = "取消"

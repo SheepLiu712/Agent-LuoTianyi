@@ -1,6 +1,6 @@
 extends "res://src/avatar/avatar_panel.gd"
 @export var runtime: Resource = preload("res://src/platform/runtime_environment.gd").new()
-## Isolated graphical smoke scene, usable from the exported executable.
+## 独立图形冒烟场景，导出包内可直接运行。
 
 
 func _ready() -> void:

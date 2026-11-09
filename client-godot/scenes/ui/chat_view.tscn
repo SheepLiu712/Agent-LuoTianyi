@@ -7,6 +7,7 @@
 [ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
 [ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
 [ext_resource type="Script" path="res://src/ui/composer_input.gd" id="5_composer"]
+[ext_resource type="Script" path="res://src/ui/composer_resize_handle.gd" id="6_resize"]
 [ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
 [ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
 [ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
@@ -18,27 +19,6 @@
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
 shader = ExtResource("3_shader")
-
-[sub_resource type="StyleBoxFlat" id="ChatCard"]
-resource_local_to_scene = true
-bg_color = Color(1, 1, 1, 1)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.89, 0.922, 0.945, 1)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_left = 8
-corner_radius_bottom_right = 8
-
-[sub_resource type="StyleBoxFlat" id="ComposerSurface"]
-resource_local_to_scene = true
-bg_color = Color(1, 1, 1, 1)
-border_width_top = 1
-border_color = Color(0.89, 0.922, 0.945, 1)
-corner_radius_bottom_left = 8
-corner_radius_bottom_right = 8
 
 
 
@@ -52,7 +32,7 @@ window_system = ExtResource("isolation_window_system")
 
 [node name="Background" type="Panel" parent="."]
 mouse_filter = 2
-theme_override_styles/panel = SubResource("ChatCard")
+theme_type_variation = &"ChatSurface"
 
 [node name="Margin" type="MarginContainer" parent="."]
 unique_name_in_owner = true
@@ -138,7 +118,10 @@ text = "从一句问候开始"
 horizontal_alignment = 1
 
 [node name="ComposerSurface" type="PanelContainer" parent="Margin/Column"]
-theme_override_styles/panel = SubResource("ComposerSurface")
+unique_name_in_owner = true
+mouse_filter = 1
+theme_type_variation = &"ChatComposer"
+script = ExtResource("6_resize")
 
 [node name="ComposerMargin" type="MarginContainer" parent="Margin/Column/ComposerSurface"]
 theme_override_constants/margin_left = 24

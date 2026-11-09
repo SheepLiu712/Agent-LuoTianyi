@@ -42,9 +42,54 @@ func run() -> void:
 	check(not theme.get_color("delivery_failed", "MessageBubble").is_equal_approx(theme.get_color("delivery_status", "MessageBubble")), "delivery errors differ from ordinary status")
 	_check_log_severity_remains_distinguishable(theme)
 	_check_slider_icons(theme)
+	_check_shared_control_states(theme)
+	_check_surface_variations(theme)
+	_check_styles_are_centralised()
 	check(load("res://assets/ui/round_avatar.gdshader") is Shader, "avatar material resource loads")
+	_check_tianyi_avatar_keeps_transparent_padding()
 	print("Theme contract: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+
+## 聊天头像是圆形遮罩：满幅不透明图会被裁成方头，必须留透明边。
+func _check_tianyi_avatar_keeps_transparent_padding() -> void:
+	var icon := load("res://assets/ui/tianyi_icon.png") as Texture2D
+	check(icon != null, "Tianyi avatar loads")
+	if icon == null:
+		return
+	check(icon.get_size() == Vector2(256, 256), "Tianyi avatar keeps the 256px canvas")
+	var pixels := icon.get_image()
+	check(pixels != null and pixels.get_pixel(0, 0).a < .01, "Tianyi avatar leaves a transparent corner for the round mask")
+
+
+## 同类控件同一状态共用一份样式：改一处即全生效，避免品牌色各自漂移。
+func _check_shared_control_states(theme: Theme) -> void:
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		var shared := theme.get_stylebox(state, "Button")
+		for kind in ["MenuButton", "OptionButton"]:
+			check(theme.get_stylebox(state, kind) == shared, "shared control state: " + kind + "/" + state)
+
+
+## 界面底板统一由主题类型提供；场景只保留确有局部语义的样式。
+func _check_surface_variations(theme: Theme) -> void:
+	for entry in [["ChatSurface", "panel", 8], ["ChatComposer", "panel", 8], ["DynamicsSurface", "panel", 8],
+			["DynamicsDetailSurface", "panel", 8], ["DropdownItem", "normal", 6], ["DropdownItem", "hover", 6],
+			["DynamicInput", "normal", 8], ["MessageBubbleOwn", "panel", 8], ["MessageBubbleOther", "panel", 8],
+			["MessageTimeChip", "panel", 8], ["TerminalPanel", "panel", 0], ["ImageEntry", "focus", 8]]:
+		var style := flat_style(theme, entry[0], entry[1])
+		if style != null:
+			check(maxi(style.corner_radius_top_left, style.corner_radius_bottom_left) == entry[2], "surface radius: " + entry[0])
+		check(theme.get_type_variation_base(entry[0]) != &"", "surface keeps a base control: " + entry[0])
+
+
+func _check_styles_are_centralised() -> void:
+	var source := FileAccess.get_file_as_string(THEME_PATH)
+	check(not source.is_empty(), "theme source readable")
+	check(not source.contains('id="StyleBoxFlat_'), "no anonymous stylebox in the theme")
+	for path in ["res://scenes/ui/message_bubble.tscn", "res://scenes/ui/chat_view.tscn", "res://scenes/ui/dynamics_window.tscn",
+			"res://scenes/ui/dynamic_detail.tscn", "res://scenes/ui/dropdown_item.tscn", "res://scenes/ui/log_window.tscn"]:
+		check(not FileAccess.get_file_as_string(path).contains("StyleBoxFlat"), "shared surfaces come from the theme: " + path)
+
 func flat_style(theme: Theme, kind: String, state: String) -> StyleBoxFlat:
 	if not theme.has_stylebox(state, kind):
 		check(false, "authored style: " + kind + "/" + state)

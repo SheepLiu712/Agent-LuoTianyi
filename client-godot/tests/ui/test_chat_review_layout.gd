@@ -119,7 +119,7 @@ func capture(app: Control, chat: Control, label: String) -> void:
 	check(chat.get_node("%Hint").horizontal_alignment == HORIZONTAL_ALIGNMENT_RIGHT, label + ": shortcut hint aligned right")
 	for bubble in chat.get_node("%Scroll").get_node("%Canvas").get_children():
 		if bubble._own and not bubble.get_node("%Caption").text.is_empty():
-			check(bubble.get_node("%Caption").text in ["发送失败", "无法确认送达，请勿重复发送"], label + ": only exceptional delivery captions")
+			check(bubble.get_node("%Caption").text == "发送失败", label + ": only failed delivery keeps a caption")
 	var composer: Control = chat.get_node("Margin/Column/ComposerSurface")
 	check(chat.get_node("%Scroll").get_global_rect().end.y <= composer.get_global_rect().position.y + 1, label + ": composer does not cover messages")
 	check(chat.get_node("%Scroll").size.y >= 160, label + ": message area remains usable")

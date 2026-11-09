@@ -37,7 +37,16 @@ func present(source: Window, provider: Callable, confirm: Callable = Callable())
 	%CloseImage.text = "取消" if confirm.is_valid() else "关闭"
 	_load_image()
 	_reveal()
+	_focus_action.call_deferred()
 	_resize_image.call_deferred()
+
+
+## 打开后键盘焦点必须落在可用动作上：失败时是重试，正常时是关闭。
+func _focus_action() -> void:
+	if %RetryImage.visible:
+		%RetryImage.grab_focus()
+	else:
+		%CloseImage.grab_focus()
 
 func _reveal() -> void:
 	%Chrome.open_window()
@@ -50,6 +59,8 @@ func _load_image() -> void:
 	%RetryImage.visible = texture == null
 	for button in [%ZoomIn,%ZoomOut,%FitImage,%OriginalSize,%ConfirmImage]: button.disabled = texture == null
 	if texture != null: _resize_image()
+	# 重试成功后按钮会消失，焦点不能跟着消失，否则键盘用户就断了出口。
+	if not %RetryImage.visible and %RetryImage.has_focus(): %CloseImage.grab_focus()
 
 func _resize_image() -> void:
 	var texture: Texture2D = %Picture.texture

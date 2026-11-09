@@ -1,5 +1,5 @@
 extends HBoxContainer
-## Data drives scene-authored controls; no drawing or node construction happens here.
+## 数据驱动场景里的控件；这里不绘图、不建节点。
 @export var played_color := Color("66ccff")
 @export var remaining_color := Color("9eb6c4")
 var values := PackedFloat32Array():

@@ -1,5 +1,5 @@
 extends Resource
-## Reserved bidirectional world boundary; payloads do not define a world format.
+## 预留双向世界边界：payload 不定义世界格式。
 signal interaction_received(event: Dictionary)
 signal completed(request_id: String, result: Dictionary)
 func get_capabilities() -> Dictionary:

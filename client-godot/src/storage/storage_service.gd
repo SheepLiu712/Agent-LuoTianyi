@@ -1,5 +1,5 @@
 extends RefCounted
-## Platform-neutral disk query contract. Unknown quantities are always -1 bytes.
+## 平台无关的磁盘查询契约：未知量一律返回 -1 字节。
 
 func query_directory(_path: String) -> Dictionary:
 	return {"directory_bytes":-1,"total_bytes":-1,"free_bytes":-1,"file_count":-1,"code":"STORAGE_UNAVAILABLE"}

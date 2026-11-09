@@ -1,11 +1,14 @@
 extends ScrollContainer
 signal visible_messages(ids: Array[String])
+signal older_requested
 signal interacted
 signal audio_action(id: String, action: String)
 signal image_opened(texture: Texture2D)
 signal image_action(id: String, action: String)
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
 const ChatTime = preload("res://src/ui/chat_time.gd")
+## 送达结果不确定的消息按「没发生过」处理：不建气泡、不占高度、退出也不会因此拦人。
+const HIDDEN_STATUS := "uncertain"
 @onready var _canvas: Control = %Canvas
 var _messages: Array[Dictionary] = []
 var _offsets: Array[float] = []
@@ -22,6 +25,13 @@ var _restore_queued := false
 var _pending_anchor: Dictionary = {}
 var _pending_follow := false
 var _ui_style: RefCounted
+var _older_state := "idle"
+var _older_armed := false
+var _user_avatar: Texture2D
+
+func set_user_avatar(texture: Texture2D) -> void:
+	_user_avatar = texture
+	for bubble in _nodes.values(): bubble.set_user_avatar(texture)
 
 func set_ui_style(style: RefCounted) -> void:
 	_ui_style = style
@@ -30,7 +40,8 @@ func set_ui_style(style: RefCounted) -> void:
 func _ready() -> void:
 	get_v_scroll_bar().value_changed.connect(func(_value):
 		if not _laying and not _restore_pending:
-			_render())
+			_render()
+			_request_older())
 	get_v_scroll_bar().gui_input.connect(_user_input)
 	gui_input.connect(_user_input)
 	resized.connect(_resized)
@@ -38,21 +49,47 @@ func _ready() -> void:
 func set_messages(messages: Array[Dictionary]) -> void:
 	var follow := is_at_latest()
 	var anchor := get_reading_anchor()
-	_messages = messages
-	var next_markers := ChatTime.markers(messages)
+	_messages = _renderable(messages)
+	var next_markers := ChatTime.markers(_messages)
 	for id in _heights.keys():
 		if _time_markers.get(id, "") != next_markers.get(id, ""): _heights.erase(id)
 	_time_markers = next_markers
 	_indices.clear()
-	for index in messages.size():
-		_indices[messages[index].id] = index
+	for index in _messages.size():
+		_indices[_messages[index].id] = index
 	for id in _nodes.keys():
 		if not _indices.has(id):
 			_remove(id)
 	for id in _heights.keys():
 		if not _indices.has(id):
 			_heights.erase(id)
+	_older_armed = false
 	_layout(anchor,follow)
+
+## 不可见状态在入口就剔掉，后面的索引、偏移、可见集合才和屏幕上真正有的气泡一致。
+func _renderable(messages: Array[Dictionary]) -> Array[Dictionary]:
+	var kept: Array[Dictionary] = []
+	for message in messages:
+		if str(message.get("status", "")) != HIDDEN_STATUS:
+			kept.append(message)
+	return kept
+
+## 上翻到顶部一屏内才请求；同一批没回来之前不重复触发。
+func _request_older() -> void:
+	if not _can_request_older():
+		return
+	_older_armed = true
+	older_requested.emit()
+
+func _can_request_older() -> bool:
+	if _older_armed or _older_state == "exhausted" or _messages.is_empty():
+		return false
+	return float(scroll_vertical) <= size.y * 0.5
+
+func set_older_state(state: String) -> void:
+	_older_state = state
+	if state != "loading":
+		_older_armed = false
 
 func scroll_to_message(id: String) -> bool:
 	if not _indices.has(id):
@@ -154,8 +191,7 @@ func _layout(anchor: Dictionary, follow: bool) -> void:
 		_defer_scroll_restore.call_deferred()
 
 func _defer_scroll_restore() -> void:
-	# A changed canvas minimum queues a parent ScrollContainer sort. Restore
-	# after that sort, which can otherwise clamp to the old scroll range.
+	# 画布最小尺寸变化会让父 ScrollContainer 排队重排；必须在重排之后恢复，否则会被夹到旧滚动范围。
 	_finish_scroll_restore.call_deferred()
 
 func _finish_scroll_restore() -> void:
@@ -220,6 +256,7 @@ func _at(position_y: float) -> int:
 func _create_bubble(id: String, message: Dictionary) -> void:
 	var bubble = Bubble.instantiate()
 	if _ui_style != null: bubble.set_ui_style(_ui_style)
+	bubble.set_user_avatar(_user_avatar)
 	_canvas.add_child(bubble)
 	bubble.configure(message)
 	bubble.audio_action.connect(func(action): audio_action.emit(id,action))

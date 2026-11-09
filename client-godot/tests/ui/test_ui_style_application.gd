@@ -105,7 +105,7 @@ func run() -> void:
 	print("Application UI style: ", "PASS" if failures.is_empty() else "FAIL: " + str(failures))
 	quit(0 if failures.is_empty() else 1)
 func _check_compact_transparent_login_geometry_unchanged() -> void:
-	check(root.size == Vector2i(480,690) and root.unresizable and root.borderless and root.transparent_bg, "compact transparent login geometry unchanged")
+	check(root.size == Vector2i(480,690) and root.unresizable and not root.borderless and not root.transparent_bg, "compact login keeps the system frame and fixed geometry")
 
 func _check_scene_roots_retain_the_single_shared_theme(app: Variant, theme: Variant, settings: Variant, dynamics: Variant) -> void:
 	check(app.theme == theme and settings.theme == theme and dynamics.theme == theme, "scene roots retain the single shared theme")

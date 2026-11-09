@@ -145,8 +145,8 @@ def run(godot, script="res://tests/test_websocket_transport.gd", gpu=False):
             send("hb_pong", packet["payload"], packet["client_msg_id"])
             send("heartbeat_seen", packet["payload"])
         elif packet["type"] == "user_touch" and username == "touch":
-            assert set(packet["payload"]) == {"touchArea", "touchCount", "timeSinceLastSentTouch"}
-            assert set(packet["payload"]["touchArea"]) <= {"头", "手", "身体"}
+            assert set(packet["payload"]) == {"touch_area", "touch_count", "time_since_last_sent_touch"}
+            assert set(packet["payload"]["touch_area"]) <= {"头", "手", "身体"}
             send("server_ack", {"ok": True}, packet["client_msg_id"])
             send("touch_seen", packet["payload"])
         elif packet["type"] == "user_typing":

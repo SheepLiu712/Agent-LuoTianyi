@@ -1,11 +1,13 @@
 extends Control
+## 相处偏好页：成功与草稿状态都不再占用版面，只有失败才用顶部浮层说一句话。
+const NOTICES := {"error": "相处偏好加载失败，重新打开设置可重试。"}
 var _controller: Node
 var _fields: Dictionary = {}
-@onready var _status: Label = %Status
-@onready var _reload: Button = %Reload
+@onready var _toast = %Toast
 var _initialized := false
 var _refreshing := false
 var _presets: Array[Button] = []
+
 func setup(controller: Node) -> void:
 	_controller = controller
 	if is_node_ready() and _controller != null: _initialize()
@@ -40,11 +42,17 @@ func _initialize() -> void:
 			var input: TextEdit = blocks[pair[0]]
 			_fields[pair[0]] = input
 			input.text_changed.connect(_edit)
-	_reload.pressed.connect(_controller.reload)
 	_controller.changed.connect(_update)
 	_update(_controller.get_state())
+
 func is_dirty() -> bool:
 	return _controller != null and _controller.get_state().dirty
+
+## 页面重新可见时给加载失败一次机会，浮层文案里的「重新打开设置可重试」才成立。
+func retry_if_failed() -> void:
+	if _controller != null and _controller.get_state().phase == "error":
+		_controller.reload()
+
 func _edit() -> void:
 	if _refreshing:
 		return
@@ -52,19 +60,29 @@ func _edit() -> void:
 	for key in _fields:
 		fields[key] = _fields[key].text
 	_controller.edit(fields)
+
 func _update(state: Dictionary) -> void:
 	_refreshing = true
-	for key in _fields:
-		var value: String = state.fields.get(key,"")
-		if _fields[key].text != value:
-			_fields[key].text = value
-		_fields[key].editable = state.phase == "ready" and key not in ["relationship","speaking_style"]
+	for key in _fields: _apply_field(key, state)
 	_refreshing = false
 	_update_presets(state)
-	_reload.disabled = state.phase in ["loading","saving"] or state.dirty
-	_status.text = {"idle":"", "loading":"正在读取相处偏好…", "saving":"正在合并服务器最新设置并保存…", "error":"加载失败，请重试。加载成功前不能保存。", "ready":"有未保存的修改。" if state.dirty else "已从服务器读取。"}.get(state.phase,"")
+	_update_notice(state)
+
+func _apply_field(key: String, state: Dictionary) -> void:
+	var value: String = state.fields.get(key,"")
+	if _fields[key].text != value:
+		_fields[key].text = value
+	_fields[key].editable = state.phase == "ready" and key not in ["relationship","speaking_style"]
+
+func _update_notice(state: Dictionary) -> void:
+	var text: String = NOTICES.get(state.phase,"")
 	if state.phase == "ready" and state.code != "OK":
-		_status.text = "保存失败，输入已保留（%s）。"%state.code
+		text = "相处偏好保存失败（%s），修改已保留。" % state.code
+	if text.is_empty():
+		_toast.clear()
+		return
+	_toast.show_message(text)
+
 func save_changes() -> Dictionary:
 	if not is_dirty(): return {"ok":true,"results":[]}
 	await _controller.save()

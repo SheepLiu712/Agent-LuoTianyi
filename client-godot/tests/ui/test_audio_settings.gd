@@ -23,6 +23,7 @@ func run() -> void:
 	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
 	check(window.get_node_or_null("%AudioTab") is Button, "settings includes voice cache management")
 	check(window.get_node("%AudioPage").get_node_or_null("%OlderThanDays") is SpinBox, "user can choose cache age in days")
+	check(window.get_node("%AudioPage").get_node_or_null("%MigrateAudio") is Button, "voice cache page owns a one-click migration entry")
 	if failures.is_empty():
 		window.setup(null, null, null, session.clear_cache)
 		root.add_child(window)
@@ -30,6 +31,8 @@ func run() -> void:
 		window.get_node("%AudioTab").pressed.emit()
 		var page = window.get_node("%AudioPage")
 		check(page.visible and not window.is_dirty(), "cache page is independent of unsaved preferences")
+		check(page.get_node("%MigrateAudio").disabled, "migration entry stays disabled until a service is wired")
+		check(page.get_node("%MigrationStatus").text.is_empty(), "no migration status without a service")
 		page.get_node("%ClearCache").pressed.emit()
 		await create_timer(0.3).timeout
 		var dialog: Window = page.get_node("%ClearDialog")

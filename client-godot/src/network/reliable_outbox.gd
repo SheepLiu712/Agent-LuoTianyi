@@ -19,7 +19,7 @@ func enqueue(type: String, payload: Dictionary, durable: bool, now_ms: int) -> S
 	return id
 
 func take_ready(now_ms: int, connected: bool) -> Array[Dictionary]:
-	# Expiry runs even without a connection, so queued work cannot live forever.
+	# 过期判断不看连接状态，断线时排队项也不能永久滞留。
 	_expire_pending(now_ms, connected)
 	var packets: Array[Dictionary] = []
 	if not connected:
@@ -46,7 +46,7 @@ func acknowledge(reply_to: String, payload: Dictionary, now_ms: int) -> void:
 	if _pending[reply_to].durable and now_ms - _pending[reply_to].created >= MAX_AGE_MS:
 		_finish(reply_to, "uncertain", "DELIVERY_UNCERTAIN")
 		return
-	# Legacy ACKs omit ok. Only a JSON boolean false is a negative ACK.
+	# 旧服务端 ACK 不带 ok：只有 JSON 布尔 false 才算否定 ACK。
 	if typeof(payload.get("ok")) != TYPE_BOOL or payload.ok:
 		_finish(reply_to, "sent", "OK")
 		return
@@ -101,7 +101,7 @@ func _reject_delivery(reply_to: String, payload: Dictionary, now_ms: int) -> voi
 	if code.is_empty():
 		code = "REJECTED"
 	if typeof(payload.get("retryable")) == TYPE_BOOL and payload.retryable:
-		# Duplicate NACKs during backoff must not consume retry attempts.
+		# 退避期间重复的 NACK 不能重复扣减重试次数。
 		if _pending[reply_to].waiting:
 			_retry_or_finish(reply_to, now_ms, code)
 	else:

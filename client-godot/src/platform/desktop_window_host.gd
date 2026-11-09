@@ -26,10 +26,12 @@ func set_login_mode(enabled: bool) -> void:
 
 func _apply_presentation() -> void:
 	if _window == null: return
-	_window.borderless = login_mode
+	# 两个形态都交给系统窗框：拖动、最小化、最大化、关闭都由平台处理，
+	# 登录态只额外锁定尺寸，不再自绘圆角或标题栏按钮。
+	_window.borderless = false
 	_window.unresizable = login_mode
-	_window.transparent_bg = login_mode
-	if DisplayServer.get_name() != "headless": _window.transparent = login_mode
+	_window.transparent_bg = false
+	if DisplayServer.get_name() != "headless": _window.transparent = false
 func _expanded_mode() -> bool:
 	return _window.mode in [Window.MODE_MAXIMIZED,Window.MODE_FULLSCREEN,Window.MODE_EXCLUSIVE_FULLSCREEN]
 
@@ -71,7 +73,7 @@ func _restore(default_size: Vector2i, minimum: Vector2i) -> void:
 
 func open_window() -> void:
 	if _window.mode == Window.MODE_MINIMIZED:
-		# Recreate the visible native surface: mode alone can leave a borderless HWND hidden.
+		# 只改 mode 会让无边框 HWND 保持隐藏，必须重建原生可见表面。
 		if _window != _window.get_tree().root: _window.hide()
 		_window.mode = Window.MODE_MAXIMIZED if _maximized else Window.MODE_WINDOWED
 	_window.show()

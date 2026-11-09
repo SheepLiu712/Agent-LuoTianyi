@@ -1,6 +1,6 @@
 extends Button
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
-## Shared stable-ID selector / action menu. Popup details remain private.
+## 共享的稳定 ID 选择器/动作菜单；弹层细节不对外暴露。
 signal activated(id: String)
 const Item = preload("res://scenes/ui/dropdown_item.tscn")
 const SeparatorScene = preload("res://scenes/ui/dropdown_separator.tscn")
@@ -92,7 +92,7 @@ func open_menu() -> void:
 	if disabled or not is_node_ready() or _buttons.is_empty(): return
 	var owner := get_window()
 	_owner_geometry = window_system.geometry(owner)
-	# Embedded popups use their owning viewport's logical coordinates on desktop and mobile.
+	# 嵌入式弹层在桌面与移动端都使用所属视口的逻辑坐标。
 	var available: Vector2 = owner.get_visible_rect().size
 	var transform := get_global_transform_with_canvas()
 	var origin := Vector2i(transform * Vector2.ZERO)

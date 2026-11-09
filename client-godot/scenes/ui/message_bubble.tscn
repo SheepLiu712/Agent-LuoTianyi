@@ -4,49 +4,16 @@
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
 [ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
+[ext_resource type="Script" path="res://src/ui/image_thumb_button.gd" id="5_image_entry"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
 shader = ExtResource("3_shader")
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_own"]
-content_margin_left = 16.0
-content_margin_top = 16.0
-content_margin_right = 16.0
-content_margin_bottom = 16.0
-bg_color = Color(0.80, 0.92, 1.0, 1)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_other"]
-content_margin_left = 16.0
-content_margin_top = 16.0
-content_margin_right = 16.0
-content_margin_bottom = 16.0
-bg_color = Color(0.945, 0.969, 0.984, 1)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_time"]
-content_margin_left = 10.0
-content_margin_top = 4.0
-content_margin_right = 10.0
-content_margin_bottom = 4.0
-bg_color = Color(0.93, 0.95, 0.97, 1)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
 
 [node name="MessageBubble" type="VBoxContainer"]
 size_flags_horizontal = 3
 theme = ExtResource("2_theme")
 theme_override_constants/separation = 10
 script = ExtResource("1_script")
-own_style = SubResource("StyleBoxFlat_own")
 
 [node name="TimeMarker" type="CenterContainer" parent="."]
 unique_name_in_owner = true
@@ -56,7 +23,7 @@ mouse_filter = 2
 [node name="TimePanel" type="PanelContainer" parent="TimeMarker"]
 unique_name_in_owner = true
 mouse_filter = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_time")
+theme_type_variation = &"MessageTimeChip"
 
 [node name="TimeText" type="Label" parent="TimeMarker/TimePanel"]
 unique_name_in_owner = true
@@ -99,7 +66,7 @@ mouse_filter = 2
 
 [node name="Bubble" type="PanelContainer" parent="Row/Body/MessageColumn"]
 unique_name_in_owner = true
-theme_override_styles/panel = SubResource("StyleBoxFlat_other")
+theme_type_variation = &"MessageBubbleOther"
 
 [node name="Content" type="VBoxContainer" parent="Row/Body/MessageColumn/Bubble"]
 unique_name_in_owner = true
@@ -119,6 +86,7 @@ visible = false
 size_flags_horizontal = 4
 expand_mode = 1
 stretch_mode = 5
+script = ExtResource("5_image_entry")
 
 [node name="ImageButton" type="Button" parent="Row/Body/MessageColumn/Bubble/Content"]
 unique_name_in_owner = true
@@ -132,6 +100,7 @@ size_flags_horizontal = 4
 mouse_default_cursor_shape = 2
 expand_mode = 1
 stretch_mode = 5
+script = ExtResource("5_image_entry")
 
 [node name="Caption" type="Label" parent="Row/Body/MessageColumn"]
 autowrap_mode = 3

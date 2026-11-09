@@ -62,7 +62,7 @@ func run() -> void:
 	style.style_changed.connect(func(): notifications.append(true))
 	var own := make_bubble(style, true)
 	var other := make_bubble(style)
-	var source: StyleBoxFlat = own.own_style
+	var source: StyleBoxFlat = own.get_theme_stylebox("panel", "MessageBubbleOwn")
 	var chat = load("res://scenes/ui/chat_view.tscn").instantiate()
 	chat.set_ui_style(style)
 	root.add_child(chat)
@@ -115,7 +115,7 @@ func check_failed_save() -> void:
 	check(not result.ok and window.is_dirty(), "failed save retains appearance draft")
 	_check_failure_does_not_change_runtime_appearance(style, changes)
 	check(store.values == {"style":"flat","icons":"svg","unrelated":"keep"}, "failure restores store values")
-	check(window.get_node("%Result").text.contains("本地保存失败"), "window reports local persistence failure")
+	check(window.get_node("%SaveToast").last_text().contains("本地保存失败"), "window reports local persistence failure")
 	check(store.saves == 1, "two settings use one write")
 	window.close_requested.emit()
 	window.get_node("%UnsavedDialog").get_node("%SaveAndClose").pressed.emit()
@@ -138,7 +138,7 @@ func _check_fresh_configuration_defaults_to_flat_svg(style: Variant) -> void:
 	check(style.ui_style == "flat" and style.icon_style == "svg", "fresh configuration defaults to flat/svg")
 
 func _check_scene_stylebox_asset_is_not_mutated(source: Variant) -> void:
-	check(source.corner_radius_top_left == 8 and source.shadow_size == 0, "scene stylebox asset is not mutated")
+	check(source.corner_radius_top_left == 8 and source.shadow_size == 0, "shared theme stylebox is not mutated")
 
 func _check_freed_controls_are_pruned_safely(style: Variant) -> void:
 	check(style.save_preferences("crystal", "emoji") == OK and style._icon_registry.is_empty(), "freed controls are pruned safely")

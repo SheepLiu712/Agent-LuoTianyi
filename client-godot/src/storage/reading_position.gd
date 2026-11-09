@@ -1,4 +1,4 @@
-﻿extends RefCounted
+extends RefCounted
 const AccountScope = preload("res://src/domain/account_scope.gd")
 const ServerAddress = preload("res://src/domain/server_address.gd")
 var _root: String

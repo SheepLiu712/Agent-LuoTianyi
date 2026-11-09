@@ -340,7 +340,7 @@ func _test_image_sequence() -> bool:
 		if not selection_ack.ok or selection_ack.event.get("reply_to") != selection_id:
 			return false
 	var touch_id := _send_event("ws.user_touch.send", "user_touch", {
-		"touchArea": ["头"], "touchCount": 1, "timeSinceLastSentTouch": 0.0
+		"touch_area": ["头"], "touch_count": 1, "time_since_last_sent_touch": 0.0
 	})
 	var touch_ack := await _expect_event("ws.user_touch.ack", "server_ack")
 	if not touch_ack.ok or touch_ack.event.get("reply_to") != touch_id:

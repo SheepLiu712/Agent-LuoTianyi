@@ -5,6 +5,8 @@ signal image_action(action: String)
 const USER_ICON := preload("res://assets/ui/user_icon.png")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
 const AudioRow = preload("res://scenes/ui/message_audio.tscn")
+## 送达结果不确定的消息不呈现任何气泡；列表层已先过滤，这里是兜底。
+const HIDDEN_STATUS := "uncertain"
 @export var own_style: StyleBoxFlat
 @onready var _row: HBoxContainer = %Row
 @onready var _time_marker: CenterContainer = %TimeMarker
@@ -31,6 +33,18 @@ var _ui_style: RefCounted
 var _other_style: StyleBoxFlat
 var _styled_panel: StyleBoxFlat
 var _time_style: StyleBoxFlat
+var _user_avatar: Texture2D
+
+## 自定义头像只影响自己的气泡；没有上传时仍回落到占位图。
+func set_user_avatar(texture: Texture2D) -> void:
+	_user_avatar = texture
+	if is_node_ready() and _own:
+		_avatar.texture = _avatar_texture()
+
+func _avatar_texture() -> Texture2D:
+	if not _own:
+		return TIANYI_ICON
+	return _user_avatar if _user_avatar != null else USER_ICON
 
 func set_ui_style(style: RefCounted) -> void:
 	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_ui_style):
@@ -42,27 +56,40 @@ func set_ui_style(style: RefCounted) -> void:
 
 func _apply_ui_style() -> void:
 	if _ui_style != null and _time_style != null:
-		_time_style.bg_color = Color(0.91, 0.95, 0.98, 0.72) if _ui_style.is_crystal() else Color(0.93, 0.95, 0.97, 1)
+		_time_style.bg_color = _ui_style.time_chip_color(_chip_base_color())
 	if _ui_style == null or _styled_panel == null: return
 	_ui_style.apply_bubble_style(_styled_panel)
-	_styled_panel.bg_color = (Color(0.863, 0.949, 1, 0.74) if _own else Color(1, 1, 1, 0.75)) if _ui_style.is_crystal() else (Color(0.80, 0.92, 1.0, 1) if _own else Color(0.945, 0.969, 0.984, 1))
+	_styled_panel.bg_color = _ui_style.bubble_color(_own, _bubble_base_color())
+
+## 扁平模式的底色来自共享主题，脚本只负责清透模式的替换。
+func _bubble_base_color() -> Color:
+	var style := _own_panel_style() if _own else _other_style
+	return style.bg_color if style != null else Color.WHITE
+
+func _chip_base_color() -> Color:
+	var style := get_theme_stylebox("panel", "MessageTimeChip") as StyleBoxFlat
+	return style.bg_color if style != null else Color.WHITE
 
 func _ready() -> void:
 	_time_style = _time_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
 	_time_panel.add_theme_stylebox_override("panel", _time_style)
 	_other_style = _bubble.get_theme_stylebox("panel") as StyleBoxFlat
 	_image_button.pressed.connect(func(): image_action.emit("retry" if _image_status == "error" else "preview"))
-	_history_picture.gui_input.connect(func(event):
-		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			image_action.emit("preview"))
-	_picture.gui_input.connect(func(event):
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			image_opened.emit(_picture.texture))
+	# 两个图片入口都用同一套激活信号：鼠标点击与键盘 Enter/Space 行为一致。
+	_history_picture.activated.connect(func(): image_action.emit("preview"))
+	_picture.activated.connect(func():
+		if _picture.texture != null: image_opened.emit(_picture.texture))
 	resized.connect(_queue_layout)
 	_text.theme_changed.connect(_queue_layout)
 	_bubble.theme_changed.connect(_queue_layout)
 	_column.minimum_size_changed.connect(_sync_height)
 	_queue_layout()
+
+## 场景不再自带一份气泡底板：共享主题是唯一来源，本导出只在确有局部覆盖时生效。
+func _own_panel_style() -> StyleBoxFlat:
+	if own_style != null:
+		return own_style
+	return get_theme_stylebox("panel", "MessageBubbleOwn") as StyleBoxFlat
 
 func configure(message: Dictionary, image_texture: Texture2D = null) -> void:
 	_system_message = message.role == "system"
@@ -75,11 +102,10 @@ func configure(message: Dictionary, image_texture: Texture2D = null) -> void:
 	_own = message.role == "user"
 	_is_image = message.get("type") == "image"
 	_row.alignment = BoxContainer.ALIGNMENT_END if _own else BoxContainer.ALIGNMENT_BEGIN
-	_avatar.texture = USER_ICON if _own else TIANYI_ICON
+	_avatar.texture = _avatar_texture()
 	if _own:
 		_row.move_child(_avatar,_row.get_child_count()-1)
-		_bubble.add_theme_stylebox_override("panel",own_style)
-	_styled_panel = (own_style if _own else _other_style).duplicate() as StyleBoxFlat
+	_styled_panel = (_own_panel_style() if _own else _other_style).duplicate() as StyleBoxFlat
 	_bubble.add_theme_stylebox_override("panel", _styled_panel)
 	_apply_ui_style()
 	if _is_image:
@@ -121,17 +147,22 @@ func _queue_layout() -> void:
 	_resize_bubble.call_deferred()
 
 func _sync_height() -> void:
-	# The wrapper contributes height, not its descendants' minimum width. This
-	# lets a previously wide message shrink when the history viewport narrows.
+	# 外层只贡献高度，不继承子节点最小宽度，长消息才能在窄视口里收缩。
 	_body.custom_minimum_size.y = _column.get_combined_minimum_size().y
 	_column.offset_bottom = _body.custom_minimum_size.y
 
 func update_message(message: Dictionary) -> void:
+	# 送达结果不确定：整条气泡都不出现，连占位和上一状态的字样都不留。
+	visible = str(message.get("status", "")) != HIDDEN_STATUS
+	if not visible:
+		_caption.text = ""
+		_caption.hide()
+		return
 	if not _system_message and _text.text != message.text:
 		_text.text = message.text
 		_queue_layout()
 	if _own:
-		_caption.text = {"failed":"发送失败", "uncertain":"无法确认送达，请勿重复发送"}.get(message.status, "")
+		_caption.text = "发送失败" if message.status == "failed" else ""
 		_caption.visible = not _caption.text.is_empty()
 		_caption.add_theme_color_override("font_color", get_theme_color("delivery_failed", "MessageBubble"))
 

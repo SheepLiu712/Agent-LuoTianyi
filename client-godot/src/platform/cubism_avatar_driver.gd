@@ -1,5 +1,5 @@
 extends "res://src/avatar/avatar_driver.gd"
-## Project-facing Live2D boundary. Call only from the main thread.
+## 面向项目的 Live2D 边界：只允许主线程调用。
 
 const MAPPING_PATH = "res://assets/live2d/live2d_interface_config.json"
 var _model: Node2D
@@ -152,7 +152,7 @@ func _apply_parameters(_source: Object, delta: float) -> void:
 	for index in 2:
 		var parameter: String = ["ParamEyeBallX", "ParamEyeBallY"][index]
 		if _parameters.has(parameter): _parameters[parameter].value = _gaze[index]
-	# The bundled model has no EyeBlink group, so use its actual eye parameters.
+	# 随包模型没有 EyeBlink 组，只能用实际的睁眼参数做眨眼。
 	var blink_phase := fmod(_elapsed, 4.5)
 	var openness := absf(blink_phase - 4.41) / 0.09 if blink_phase > 4.32 else 1.0
 	for index in 2:
@@ -175,7 +175,7 @@ func _check_model_files(model_path: String, references: Dictionary) -> Error:
 			files.append(motion.File)
 	for file in files:
 		var resource_path: String = model_path.get_base_dir().path_join(file)
-		# Exported textures are imported resources, not loose PNG files.
+		# 导出后纹理是导入资源，不是散落的 PNG 文件。
 		if not FileAccess.file_exists(resource_path) and not ResourceLoader.exists(resource_path):
 			return ERR_FILE_NOT_FOUND
 	return OK

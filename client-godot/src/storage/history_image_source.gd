@@ -8,6 +8,9 @@ func get_state(_id: String) -> Dictionary:
 	return {"status":"error","texture":null,"original_size":Vector2i.ZERO,"code":"IMAGE_SOURCE_UNAVAILABLE"}
 func ensure(id: String) -> void:
 	changed.emit(id,get_state(id))
+## 本地发送的图片只有本地副本，缺失时不发起网络请求。
+func ensure_local(id: String) -> void:
+	changed.emit(id,get_state(id))
 func retry(id: String) -> void:
 	ensure(id)
 func preview(_id: String) -> Texture2D:

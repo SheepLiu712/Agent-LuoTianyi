@@ -1,5 +1,5 @@
 extends RefCounted
-## A user-selected destination, never a path interpreted by a UI/controller.
+## 用户选择的目标路径，界面与控制器不得自行解释路径含义。
 var _path: String
 func _init(path: String) -> void:
 	_path = path

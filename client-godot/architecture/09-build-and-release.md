@@ -250,7 +250,7 @@ flowchart LR
 
 **交付包的两个独立校验点**
 
-- `tests/verify_release_archive.py`（24 行）接收 `archive` 与 `source` 两个路径参数：校验 ZIP 名等于 `<product>-<version>.zip`（`:8`）、期望条目集合等于 `source` 递归出的全部文件加前缀（`:9`、`:15`）、`agentluo.exe` 与 `agentluo.pck` 必须存在（`:10`）、`.dll` 恰好 2 个（`:11`）、`testzip()` 校验 CRC（`:13`）、逐条目 SHA-256 与源文件字节比对（`:16` 到 `:17`），最后打印含字节数、条目数、ZIP 哈希与两个 DLL 哈希的 JSON（`:18` 到 `:20`）。
+- `tests/verify_release_archive.py`（24 行）接收 `archive` 与 `source` 两个路径参数：校验 ZIP 名等于 `<product>-<version>.zip`（`:8`）、期望条目集合等于 `source` 递归出的全部文件加前缀（`:9`、`:15`）、`agentluo.exe` 与 `agentluo.pck` 必须存在（`:10`）、`.dll` 恰好 3 个（`:11`）、`testzip()` 校验 CRC（`:13`）、逐条目 SHA-256 与源文件字节比对（`:16` 到 `:17`），最后打印含字节数、条目数、ZIP 哈希与三个 DLL 哈希的 JSON（`:18` 到 `:20`）。
 - `tests/verify_native_dynamics.py`（14 行）用 `ctypes` 调 `user32`，从命令行取两个 HWND：断言两者不同且非零（`:9`）、主窗口确实处于最小化（`:10`，`IsIconic`）、动态窗口可见且未最小化（`:11`）、`GetWindow(hwnd, GW_OWNER=4)` 为空即无 owner（`:12`）、扩展样式里没有 `WS_EX_TOOLWINDOW`（`0x80`，`:13`）。这是**只在 Windows 上可跑**的校验，用来证明动态窗口能独立出现在任务栏。
 
 ## 扩展点与已知坑

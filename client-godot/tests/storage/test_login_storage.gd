@@ -20,7 +20,9 @@ func run() -> void:
 	var empty: Dictionary = service.read_login_profile()
 	check(empty.ok and empty.data.is_empty(), "missing profile is a fresh install")
 	var profile := {"version":2,"server":"https://example.test","username":"alice","accounts":[]}
-	check(service.write_login_profile(profile) == OK, "profile writes atomically")
+	check(service.write_login_profile(profile) == OK, "profile is written through a replacement file")
+	check(not FileAccess.file_exists(path + "/account.cfg.tmp"), "successful write leaves no temporary file")
+	_check_replacement_seams(path, credentials, profile)
 	var restored: Dictionary = service.read_login_profile().data
 	_check_profile_round_trip(restored, profile)
 	check(service.save_login_token(profile.server, "alice", "PRIVATE_TOKEN") == OK, "protected credential saves")
@@ -46,6 +48,42 @@ func run() -> void:
 	remove_folder(path)
 	print("Login storage: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+## 外部 seam：写入中断与替换失败都必须保留上一份可用配置。
+func _check_replacement_seams(path: String, credentials: Variant, profile: Dictionary) -> void:
+	var original := FileAccess.get_file_as_string(path + "/account.cfg")
+	var interrupted = InterruptedWrite.new(path + "/account.cfg", credentials)
+	check(interrupted.write_login_profile({"version":9}) != OK, "interrupted write reports failure")
+	check(FileAccess.get_file_as_string(path + "/account.cfg") == original, "interrupted write keeps the previous profile")
+	check(not FileAccess.file_exists(path + "/account.cfg.tmp"), "interrupted write removes its temporary file")
+	var failing = FailingReplace.new(path + "/account.cfg", credentials)
+	check(failing.write_login_profile({"version":9}) != OK, "failed replacement reports failure")
+	check(FileAccess.get_file_as_string(path + "/account.cfg") == original, "failed replacement keeps the previous profile")
+	check(not FileAccess.file_exists(path + "/account.cfg.tmp"), "failed replacement removes its temporary file")
+	var guarded = load("res://src/storage/godot_storage_service.gd").new(path + "/guarded/account.cfg", FailingProtector.new())
+	check(guarded.save_login_token(profile.server, "alice", "TOKEN") != OK, "protector failure is reported instead of a fake save")
+	check(not guarded.read_login_token(profile.server, "alice").ok, "protector failure cannot read a token back")
+
+class InterruptedWrite extends "res://src/storage/godot_storage_service.gd":
+	func _store_temporary(path: String, text: String) -> Error:
+		var file := FileAccess.open(path, FileAccess.WRITE)
+		if file != null:
+			file.store_string(text.substr(0, 4))
+			file.close()
+		return ERR_FILE_CANT_WRITE
+
+class FailingReplace extends "res://src/storage/godot_storage_service.gd":
+	func _replace_file(_temporary: String, _target: String) -> Error:
+		return ERR_FILE_CANT_WRITE
+
+class FailingProtector:
+	extends RefCounted
+	func save(_server: String, _username: String, _token: String) -> Error:
+		return ERR_UNAVAILABLE
+	func read(_server: String, _username: String) -> Dictionary:
+		return {"ok": false, "code": "PROTECTED_STORAGE_UNAVAILABLE", "data": {}}
+	func forget(_server: String, _username: String) -> Error:
+		return ERR_UNAVAILABLE
+
 func remove_folder(path: String) -> void:
 	for directory in DirAccess.get_directories_at(path): remove_folder(path.path_join(directory))
 	for file in DirAccess.get_files_at(path): DirAccess.remove_absolute(path.path_join(file))

@@ -1,5 +1,5 @@
-﻿extends Control
-## Client-local UI style (flat/crystal) and icon style (svg/emoji) settings page.
+extends Control
+## 客户端本地外观（扁平/清透）与图标风格（svg/emoji）设置页。
 
 var _ui_style: RefCounted
 var _ui_style_pending := {}

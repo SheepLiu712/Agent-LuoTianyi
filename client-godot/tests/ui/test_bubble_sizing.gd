@@ -50,12 +50,11 @@ func run() -> void:
 	update.status = "uncertain"
 	own.update_message(update)
 	await settle()
-	check(is_equal_approx(own.get_node("%Bubble").size.x,own_width), "long delivery status does not widen the text panel")
-	_check_uncertain_delivery_retains_duplicate_send_safety_warning(own)
+	_check_uncertain_delivery_leaves_no_trace(own)
 	update.status = "sent"
 	own.update_message(update)
 	await settle()
-	check(not own.get_node("%Caption").visible and is_equal_approx(own.get_combined_minimum_size().y, normal_height), "successful delivery clears previous error without blank space")
+	_check_restored_after_uncertain(own, normal_height)
 	own.set_audio_state({"available":true,"code":"","status":"idle","blocked":false,"duration":2.4,"position":0.0,"waveform":PackedFloat32Array([.1,.5,.9])})
 	await settle()
 	check(is_equal_approx(own.get_node("%Bubble").size.x,own_width) and own.find_child("MessageAudio",true,false).size.x > own_width, "audio remains usable without widening short text")
@@ -104,5 +103,11 @@ func _check_long_text_is_capped_at_90_percent_and_grows_vertically(long: Variant
 func _check_failed_delivery_retains_error_caption(own: Variant) -> void:
 	check(own.get_node("%Caption").visible and own.get_node("%Caption").text == "发送失败", "failed delivery retains error caption")
 
-func _check_uncertain_delivery_retains_duplicate_send_safety_warning(own: Variant) -> void:
-	check(own.get_node("%Caption").visible and own.get_node("%Caption").text == "无法确认送达，请勿重复发送", "uncertain delivery retains duplicate-send safety warning")
+func _check_uncertain_delivery_leaves_no_trace(own: Variant) -> void:
+	check(not own.visible, "uncertain delivery leaves the bubble invisible")
+	check(own.get_node("%Caption").text.is_empty(), "uncertain delivery writes no caption")
+
+func _check_restored_after_uncertain(own: Variant, normal_height: float) -> void:
+	check(own.visible, "a later status brings the bubble back")
+	check(not own.get_node("%Caption").visible, "the restored bubble carries no leftover caption")
+	check(is_equal_approx(own.get_combined_minimum_size().y, normal_height), "the restored bubble reserves no caption height")

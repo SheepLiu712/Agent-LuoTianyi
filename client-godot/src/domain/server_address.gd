@@ -1,5 +1,5 @@
 extends RefCounted
-## Pure canonical address rules shared by transport, sessions and storage.
+## 传输、会话与存储共用的纯地址规范化规则。
 
 static func normalize(address: String) -> String:
 	var value := address.strip_edges()

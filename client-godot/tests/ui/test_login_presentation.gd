@@ -187,8 +187,8 @@ func remove_folder(path: String) -> void:
 	for file in DirAccess.get_files_at(path): DirAccess.remove_absolute(path.path_join(file))
 	DirAccess.remove_absolute(path)
 
-func _check_login_uses_a_fixed_transparent_native_window() -> void:
-	check(root.borderless and root.transparent and root.transparent_bg and root.unresizable, "login uses a fixed transparent native window")
+func _check_login_uses_a_fixed_system_frame() -> void:
+	check(not root.borderless and not root.transparent and not root.transparent_bg and root.unresizable, "login keeps the system frame with a fixed size")
 
 func _check_signed_in_workspace_restores_the_system_frame() -> void:
 	check(not root.borderless and not root.transparent and not root.transparent_bg and not root.unresizable, "signed-in workspace restores the system frame")
@@ -199,8 +199,8 @@ func _check_login_checkbox_is_a_24px_hollow_circle_not_a_square(circle: Variant)
 func _check_remembered_account_shows_an_honest_status_without_fake_password_dots(session: Variant, view: Variant) -> void:
 	check(session.get_session().is_empty() and view.get_node("%SavedLogin").is_visible_in_tree() and not view.get_node("%Password").visible and view.get_node("%Password").text.is_empty(), "remembered account shows an honest status without fake password dots")
 
-func _check_missing_account_service_still_permits_close_and_diagnostic_menu(exit_requested: Variant, unavailable: Variant) -> void:
-	check(exit_requested == [true] and unavailable.get_node("%MenuPopup").visible and unavailable.get_node("%SetServer").disabled, "missing account service still permits close and diagnostic menu")
+func _check_missing_account_service_still_permits_diagnostic_menu(unavailable: Variant) -> void:
+	check(unavailable.get_node("%MenuPopup").visible and unavailable.get_node("%SetServer").disabled, "missing account service still permits the diagnostic menu")
 
 func _check_back_keeps_name_and_clears_secrets(view: Variant) -> void:
 	check(view.get_node("%Username").text == "test" and view.get_node("%Password").text.is_empty() and view.get_node("%Invite").text.is_empty(), "back keeps name and clears secrets")
@@ -209,7 +209,7 @@ func _check_rounded_outside_is_transparent_and_body_is_white(pixels: Variant) ->
 	check(pixels.get_pixel(0,0).a < .1 and pixels.get_pixel(12,100).is_equal_approx(Color.WHITE), "rounded outside is transparent and body is white")
 
 func _check_logout_restores_compact_presentation() -> void:
-	check(root.borderless and root.unresizable, "logout restores compact presentation")
+	check(not root.borderless and root.unresizable, "logout restores the fixed system frame")
 
 func _check_account_view_exposes_navigation_and_feedback(candidate: Variant) -> void:
 	check(candidate.has_method("select_mode") and candidate.has_signal("feedback_requested"), "account view exposes navigation and feedback")
@@ -241,7 +241,7 @@ func _check_failed_remember_storage_stays_visible_after_the_login_page_is_hidden
 func _check_authored_login() -> bool:
 	var scene: PackedScene = load("res://scenes/ui/account_view.tscn")
 	var candidate := scene.instantiate()
-	for name in ["MenuButton","CloseLogin","RegisterLink","ResetLink","AutoLogin","Remember","SavedLogin","UsePassword","HistoryButton","ServerDialog","ServerSave","ServerCancel","Feedback","FeedbackAddress"]:
+	for name in ["MenuButton","RegisterLink","ResetLink","AutoLogin","Remember","SavedLogin","UsePassword","HistoryButton","ServerDialog","ServerSave","ServerCancel","Feedback","FeedbackAddress"]:
 		check(candidate.get_node_or_null("%" + name) != null, "scene authors " + name)
 	_check_account_view_exposes_navigation_and_feedback(candidate)
 	check(candidate.get_node_or_null("%AccountMode") == null, "old account-mode dropdown is removed")
@@ -261,12 +261,10 @@ func _check_authored_login() -> bool:
 		quit(1)
 		return false
 	var unavailable := scene.instantiate()
-	var exit_requested: Array[bool] = []
-	unavailable.exit_requested.connect(func(): exit_requested.append(true))
 	root.add_child(unavailable)
-	press(unavailable,"CloseLogin")
+	check(unavailable.get_node_or_null("%CloseLogin") == null, "login window relies on the system close button")
 	press(unavailable,"MenuButton")
-	_check_missing_account_service_still_permits_close_and_diagnostic_menu(exit_requested, unavailable)
+	_check_missing_account_service_still_permits_diagnostic_menu(unavailable)
 	unavailable.queue_free()
 	await process_frame
 	return true
@@ -281,7 +279,7 @@ func _check_login_native_presentation(view: Control) -> void:
 			for expected in [true,false,true,false]:
 				await click_control(view.get_node("%"+pair[0]))
 				check(view.get_node("%"+pair[1]).visible == expected, "login trigger clicks alternate: " + pair[0])
-		_check_login_uses_a_fixed_transparent_native_window()
+		_check_login_uses_a_fixed_system_frame()
 		check(root.size == Vector2i(480,690), "compact login has the approved default dimensions")
 		var pixels := root.get_texture().get_image()
 		_check_rounded_outside_is_transparent_and_body_is_white(pixels)
@@ -296,7 +294,7 @@ func _check_login_scales(view: Control) -> void:
 			root.size = Vector2i(Vector2(480,690)*factor)
 			await capture("login-scale-%s" % int(factor*100))
 			var area := Rect2(Vector2.ZERO, root.get_visible_rect().size)
-			for name in ["MenuButton","CloseLogin","Submit","ResetLink","RegisterLink"]:
+			for name in ["MenuButton","Submit","ResetLink","RegisterLink"]:
 				check(area.encloses(view.get_node("%"+name).get_global_rect()), "login action fits scale %s: %s" % [factor,name])
 		root.content_scale_factor = 1
 		root.min_size = Vector2i(320,480)
@@ -305,5 +303,5 @@ func _check_login_scales(view: Control) -> void:
 		view.get_node("%BodyScroll").ensure_control_visible(view.get_node("%Submit"))
 		await capture("login-small")
 		var small_area := Rect2(Vector2.ZERO, root.get_visible_rect().size)
-		for name in ["MenuButton","CloseLogin","Submit","ResetLink","RegisterLink"]:
+		for name in ["MenuButton","Submit","ResetLink","RegisterLink"]:
 			check(small_area.encloses(view.get_node("%"+name).get_global_rect()), "small screen keeps action reachable: " + name)

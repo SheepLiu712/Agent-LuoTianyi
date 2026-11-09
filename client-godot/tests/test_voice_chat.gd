@@ -174,7 +174,7 @@ func _check_clear_cache_settings(session: Variant, view: Variant, cache: Variant
 	page.get_node("%OlderThanDays").value = 0
 	var menu = page.get_node("%ClearCache")
 	menu.pressed.emit()
-	var dialogs = page.find_children("*Dialog","Window",true,false)
+	var dialogs = page.find_children("*Dialog","Window",true,false).filter(func(dialog): return dialog.visible)
 	_check_clear_cache_requires_confirmation(dialogs)
 	if not dialogs.is_empty():
 		check(cache.lookup("voice-first").has("path"),"opening clear dialog does not delete cache")

@@ -4,7 +4,14 @@ extends MarginContainer
 signal image_requested(provider: Callable)
 signal attachment_requested(provider: Callable, confirm: Callable)
 signal attachment_cleared
+## 松手才发一次：应用层据此写盘，拖动过程中不碰磁盘。
+signal composer_height_changed(height: float)
 const Attachment = preload("res://src/media/image_attachment.gd")
+const MIN_COMPOSER_HEIGHT := 48.0
+const MAX_COMPOSER_HEIGHT := 320.0
+const AUTO_MAX_HEIGHT := 128.0
+const COMPOSER_LINE_HEIGHT := 24.0
+const COMPOSER_PADDING := 24.0
 var _attachment: Dictionary = {}
 @onready var _margin: MarginContainer = %Margin
 @onready var _status: Label = %Status
@@ -18,12 +25,16 @@ var _attachment: Dictionary = {}
 @onready var _volume: HSlider = %Volume
 @onready var _input: TextEdit = %Input
 @onready var _send_button: Button = %Send
+## 输入区上沿的分隔线就是拖动带：抓这里才是抓那条线。
+@onready var _composer = %ComposerSurface
 var _session: Node
 var _initialized := false
 var _ui_style: RefCounted
 var _card_style: StyleBoxFlat
 var _composer_style: StyleBoxFlat
 var _input_style: StyleBoxFlat
+var _auto_height := MIN_COMPOSER_HEIGHT
+var _manual_height := 0.0
 
 func set_ui_style(style: RefCounted) -> void:
 	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_ui_style):
@@ -56,9 +67,8 @@ func _ready() -> void:
 	%VolumeButton.pressed.connect(_show_volume)
 	_card_style = get_node("Background").get_theme_stylebox("panel").duplicate() as StyleBoxFlat
 	get_node("Background").add_theme_stylebox_override("panel", _card_style)
-	var composer := get_node("Margin/Column/ComposerSurface") as PanelContainer
-	_composer_style = composer.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	composer.add_theme_stylebox_override("panel", _composer_style)
+	_composer_style = _composer.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	_composer.add_theme_stylebox_override("panel", _composer_style)
 	_input_style = _input.get_theme_stylebox("normal").duplicate() as StyleBoxFlat
 	_input.add_theme_stylebox_override("normal", _input_style)
 	for button in [_latest, _unread]:
@@ -72,6 +82,8 @@ func _ready() -> void:
 	_apply_ui_style()
 	resized.connect(_update_density)
 	_update_density()
+	_composer.drag_delta.connect(_on_resize_drag)
+	_composer.drag_committed.connect(_on_resize_commit)
 	if _session == null:
 		return
 	_initialize()
@@ -86,6 +98,11 @@ func _initialize() -> void:
 	_scroll.image_action.connect(_image_action)
 	_scroll.visible_messages.connect(_visible_audio)
 	_scroll.interacted.connect(_session.note_read_interaction)
+	if _session.has_method("load_older_history"):
+		_scroll.older_requested.connect(_session.load_older_history)
+	if _session.has_method("set_avatar"):
+		_session.user_avatar_changed.connect(_scroll.set_user_avatar)
+		_scroll.set_user_avatar(_session.get_user_avatar())
 	_latest.pressed.connect(_to_latest)
 	_unread.pressed.connect(_jump_reading)
 	_input.send_requested.connect(_send)
@@ -100,12 +117,7 @@ func _initialize() -> void:
 	files.canceled.connect(func(): _session.set_image_selecting(false))
 	%PreviewImage.pressed.connect(_preview_attachment)
 	%RemoveImage.pressed.connect(func(): _clear_attachment(true))
-	_input.text_changed.connect(func():
-		_session.set_typing(not _input.text.is_empty(), _input.text.length())
-		var lines: int = _input.get_line_count()
-		for line in _input.get_line_count():
-			lines += _input.get_line_wrap_count(line)
-		_input.custom_minimum_size.y = clampf(lines * 24 + 24, 48, 128))
+	_input.text_changed.connect(_on_input_text_changed)
 	_volume.value = _session.get_audio_state().volume
 	_volume.value_changed.connect(func(value): _session.set_volume(value))
 	_send_button.pressed.connect(_send)
@@ -130,6 +142,40 @@ func _send() -> void:
 	if not _attachment.is_empty() and not _confirm_attachment(null): return
 	if not _session.send_text(_input.text).is_empty():
 		_input.clear()
+		_update_auto_height()
+
+## 文本自动增高只决定下限：手动拖过的高度不会被一段短文本压回去。
+func _on_input_text_changed() -> void:
+	_session.set_typing(not _input.text.is_empty(), _input.text.length())
+	_update_auto_height()
+
+func _update_auto_height() -> void:
+	var lines: int = _input.get_line_count()
+	for line in _input.get_line_count():
+		lines += _input.get_line_wrap_count(line)
+	_auto_height = clampf(lines * COMPOSER_LINE_HEIGHT + COMPOSER_PADDING, MIN_COMPOSER_HEIGHT, AUTO_MAX_HEIGHT)
+	_apply_height()
+
+## 0（或任何小于最小值的数）表示只跟随文本自动高度。
+func set_composer_height(height: float) -> void:
+	_manual_height = 0.0 if height < MIN_COMPOSER_HEIGHT else minf(height, MAX_COMPOSER_HEIGHT)
+	_apply_height()
+
+func get_composer_height() -> float:
+	return _input.custom_minimum_size.y
+
+func _apply_height() -> void:
+	_input.custom_minimum_size.y = clampf(maxf(_auto_height, _manual_height), MIN_COMPOSER_HEIGHT, MAX_COMPOSER_HEIGHT)
+
+## 往上拖 relative.y 为负，所以用减法：base - delta 就是「变高」。
+func _on_resize_drag(delta_y: float) -> void:
+	var base := _manual_height if _manual_height > 0.0 else _auto_height
+	_manual_height = clampf(base - delta_y, MIN_COMPOSER_HEIGHT, MAX_COMPOSER_HEIGHT)
+	_apply_height()
+
+func _on_resize_commit() -> void:
+	if _manual_height > 0.0:
+		composer_height_changed.emit(_manual_height)
 
 func _attach(result: Dictionary) -> void:
 	%ImageStatus.show()
@@ -259,6 +305,7 @@ func _update_density() -> void:
 
 func _update_history_status(state: Dictionary) -> void:
 	var history: Dictionary = state.get("history",{"phase":"idle","count":0})
+	_scroll.set_older_state(str(history.get("older","idle")))
 	_history_retry.visible = history.phase in ["first_failed","failed"]
 	_history_skip.visible = history.phase == "first_failed"
 	_history_status.text = {"first_loading":"正在同步最近历史；发送的消息将暂时排队。", "first_failed":"首批历史加载失败；可重试或跳过后发送。", "loading":"后台同步历史 · 已加载 %s 条" % history.count, "failed":"较早历史加载失败，已加载内容保留。", "skipped":"已跳过本次历史同步。"}.get(history.phase, "")

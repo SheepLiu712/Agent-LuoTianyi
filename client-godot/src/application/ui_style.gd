@@ -1,10 +1,13 @@
 extends RefCounted
-## Application-owned preferences. Update the shared theme in memory only;
-## keep every scene's original theme reference and the theme asset on disk.
+## 应用级外观偏好：只改内存里的共享主题实例，场景原有主题引用与磁盘主题资源保持不变。
 signal style_changed
 
 const SECTION := "ui"
 const THEME_PATH := "res://theme/app_theme.tres"
+## 清透模式的气泡与时间条底色；扁平模式直接用主题里的语义色，不再各写一份。
+const CRYSTAL_OWN_BUBBLE := Color(0.863, 0.949, 1, 0.74)
+const CRYSTAL_OTHER_BUBBLE := Color(1, 1, 1, 0.75)
+const CRYSTAL_TIME_CHIP := Color(0.91, 0.95, 0.98, 0.72)
 var ui_style := "flat"
 var icon_style := "svg"
 var _store: Resource
@@ -51,7 +54,7 @@ func is_crystal() -> bool:
 func uses_emoji() -> bool:
 	return icon_style == "emoji"
 
-## Safe before entering the tree; all scenes already share the app theme.
+## 入树前即可调用：所有场景已共用应用主题。
 func apply_view(view: Node, icons: Dictionary = {}) -> void:
 	for name in icons:
 		register_icon(view.get_node("%" + name), icons[name])
@@ -72,7 +75,7 @@ func _apply_theme() -> void:
 	_theme.set_block_signals(false)
 	_theme.emit_changed()
 
-## Updating a registration is used by the play/pause button.
+## 重复注册用于播放/暂停这类需要切换图标的按钮。
 func register_icon(button: Button, name: String) -> void:
 	var alive: Array[Dictionary] = []
 	for entry in _icon_registry:
@@ -97,6 +100,15 @@ func _apply_icon(button: Button, name: String) -> void:
 	button.expand_icon = false
 	button.add_theme_constant_override("icon_max_width", 20)
 	button.add_theme_color_override("icon_disabled_color", Color(1, 1, 1, 0.4))
+
+## 气泡底色：扁平模式沿用主题语义色，清透模式换成半透明冰蓝。
+func bubble_color(own: bool, base: Color) -> Color:
+	if not is_crystal():
+		return base
+	return CRYSTAL_OWN_BUBBLE if own else CRYSTAL_OTHER_BUBBLE
+
+func time_chip_color(base: Color) -> Color:
+	return CRYSTAL_TIME_CHIP if is_crystal() else base
 
 func apply_bubble_style(stylebox: StyleBoxFlat) -> void:
 	if is_crystal():

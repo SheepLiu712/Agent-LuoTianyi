@@ -13,7 +13,9 @@ class FeedController extends Node:
 	var fail_next_comments := false
 	var posts: Array[Dictionary] = []
 	var comments := {}
-	var state := {"busy":false, "has_more":true, "code":"OK", "unread":1, "unread_code":"OK"}
+	var state := {"phase":"ready", "busy":false, "has_more":true, "code":"OK", "unread":1, "unread_code":"OK"}
+	var last_read := "2026-09-30 19:00:00"
+	var marked: Array[String] = []
 
 	func _init() -> void:
 		for index in 12: posts.append(make_post(index))
@@ -78,9 +80,17 @@ class FeedController extends Node:
 		refresh_calls += 1
 		changed.emit()
 
-	func mark_read() -> void:
-		state.unread = 0
-		unread_changed.emit(0)
+	func is_unread(post: Dictionary) -> bool:
+		return post.author_type != "user" and post.created_at > last_read
+
+	func mark_read(before: String = "") -> void:
+		marked.append(before)
+		if before.is_empty():
+			state.unread = 0
+			unread_changed.emit(0)
+		elif before > last_read:
+			last_read = before
+		changed.emit()
 
 func check(ok: bool, label: String) -> void:
 	if not ok:
@@ -142,7 +152,10 @@ func run() -> void:
 	await settle()
 	check(window.get_node_or_null("%More") == null, "feed has no manual load-more button")
 	check(window.get_selected_id().is_empty(), "opening still has no selected post")
+	check(window._rows["review-0"].get_node("%UnreadDot").visible, "unread rows carry a dot before they are opened")
 	await click(window, window._rows["review-0"])
+	check(not window._rows["review-0"].get_node("%UnreadDot").visible, "opening a row retires its unread dot")
+	check(controller.marked.has("2026-09-30 20:00:00"), "opening a row pushes the read mark to its publish time")
 	var detail = window._details["review-0"]
 	check(detail.get_node_or_null("%LoadMore") == null, "detail has no loading box or manual comment-load button")
 	check(controller.get_comments("review-0").busy, "comment request is really running")
@@ -177,7 +190,7 @@ func run() -> void:
 	await click(window, window._rows["review-0"])
 	await settle()
 	_check_another_click_retries_failed_comments(detail, draft)
-	check(controller.refresh_calls == 0 and controller.state.unread == 1, "card refresh needs no manual feed refresh and does not mark read")
+	check(controller.refresh_calls == 0 and controller.state.unread == 1, "card refresh needs no manual feed refresh and opening only advances the local read mark")
 	var list_scroll: ScrollContainer = window.get_node("%ListScroll")
 	controller.fail_next_page = true
 	for attempt in 60:

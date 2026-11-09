@@ -1,5 +1,5 @@
 extends Resource
-## Reserved device boundary; no protocol, permissions or connection is implemented.
+## 预留设备边界：协议、权限与连接均未实现。
 signal state_changed(state: Dictionary)
 signal event_received(event: Dictionary)
 signal completed(request_id: String, result: Dictionary)

@@ -1,6 +1,5 @@
 extends RefCounted
-## Popup auto-dismissal occurs during the trigger press, before its release.
-## Remember the initial visibility regardless of hide/button_down signal order.
+## 弹层在 press 阶段就关闭（早于 release）；初始可见性按信号到达顺序只记一次，避免 hide/button_down 竞态。
 var _popup: Popup
 var _just_dismissed := false
 var _dismissed_on_press := false

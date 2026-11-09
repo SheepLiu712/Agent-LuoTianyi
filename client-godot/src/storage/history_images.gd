@@ -47,25 +47,41 @@ func store_local(id: String, bytes: PackedByteArray) -> Error:
 func ensure(id: String) -> void:
 	if id.is_empty() or _session.is_empty() or _states.has(id):
 		return
-	var path := _path(id)
-	if FileAccess.file_exists(path):
-		var cached := _decode(FileAccess.get_file_as_bytes(path))
-		if cached != null:
-			_ready_image(id,cached,"")
-			return
-		DirAccess.remove_absolute(path)
+	var cached := _cached(id)
+	if cached != null:
+		_ready_image(id,cached,"")
+		return
 	_states[id] = {"status":"loading","texture":null,"original_size":Vector2i.ZERO,"code":""}
 	changed.emit(id,get_state(id))
 	_queue.append(id)
 	_pump()
+## 本地发送的图片只有本地副本，缺失即不可用，不回源服务器。
+func ensure_local(id: String) -> void:
+	if id.is_empty() or _session.is_empty() or _states.has(id):
+		return
+	var cached := _cached(id)
+	if cached == null:
+		_error(id,"IMAGE_MISSING")
+		return
+	_ready_image(id,cached,"")
+func _cached(id: String) -> Image:
+	if _directory.is_empty():
+		return null
+	var path := _path(id)
+	if not FileAccess.file_exists(path):
+		return null
+	var image := _decode(FileAccess.get_file_as_bytes(path))
+	if image == null:
+		DirAccess.remove_absolute(path)
+	return image
 func retry(id: String) -> void:
 	if get_state(id).status == "error":
 		_states.erase(id)
 		ensure(id)
 func preview(id: String) -> Texture2D:
 	var image: Image = _volatile.get(id)
-	if image == null and not _directory.is_empty() and FileAccess.file_exists(_path(id)):
-		image = _decode(FileAccess.get_file_as_bytes(_path(id)))
+	if image == null:
+		image = _cached(id)
 	if image == null:
 		_error(id,"INVALID_IMAGE")
 		return null

@@ -9,6 +9,7 @@ class ControlledFeed extends Node:
 	var posts: Array[Dictionary] = []
 	var comments := {}
 	var page_calls := 0
+	var last_read := ""
 
 	func _init() -> void:
 		for id in ["first", "second", "short"]:
@@ -23,7 +24,7 @@ class ControlledFeed extends Node:
 		return posts.duplicate(true)
 
 	func get_state() -> Dictionary:
-		return {"busy":false, "has_more":false, "code":"OK", "unread":0, "unread_code":"OK"}
+		return {"phase":"ready", "busy":false, "has_more":false, "code":"OK", "unread":0, "unread_code":"OK"}
 
 	func get_comments(id: String) -> Dictionary:
 		return comments[id].duplicate(true)
@@ -40,7 +41,11 @@ class ControlledFeed extends Node:
 	func refresh() -> void:
 		changed.emit()
 
-	func mark_read() -> void:
+	func is_unread(post: Dictionary) -> bool:
+		return post.author_type != "user" and post.created_at > last_read
+
+	func mark_read(before: String = "") -> void:
+		if before > last_read: last_read = before
 		unread_changed.emit(0)
 
 	func load_comments(id: String, more: bool = false) -> void:

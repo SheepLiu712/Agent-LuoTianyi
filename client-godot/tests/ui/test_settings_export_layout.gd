@@ -27,8 +27,9 @@ func run() -> void:
 					await RenderingServer.frame_post_draw
 					window.get_texture().get_image().save_png(output.path_join("settings-%s-%s.png" % [entry[0],dimensions.x]))
 		var logout: Control = window.get_node("%LogoutButton")
-		var category: Control = window.get_node("%PreferencesTab")
-		check(is_equal_approx(logout.size.x,category.size.x) and is_equal_approx(logout.global_position.x,category.global_position.x), "logout aligns with sidebar width and left edge")
+		var sidebar: Control = window.get_node("%Sidebar")
+		# 导航项缩进后不再和底栏同缘；对齐目标改为侧栏列本身。
+		check(is_equal_approx(logout.size.x,sidebar.size.x) and is_equal_approx(logout.global_position.x,sidebar.global_position.x), "logout aligns with the sidebar column")
 	window.queue_free()
 	await process_frame
 	print("Settings exported layout: ", "PASS" if failures.is_empty() else "FAIL")

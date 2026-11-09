@@ -1,4 +1,4 @@
-﻿extends Control
+extends Control
 signal close_requested
 signal published(id: String)
 var _controller: Node

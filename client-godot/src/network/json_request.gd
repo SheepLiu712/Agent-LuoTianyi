@@ -1,4 +1,4 @@
-﻿extends Node
+extends Node
 signal _done(response: Dictionary)
 var _http: HTTPRequest
 var _timeout: float

@@ -1,6 +1,6 @@
 # agentluo Godot 客户端架构分析（总览）
 
-> **历史快照说明（2026-09-20 场景化后）**：本文及本目录 01–10 篇描述的是 `42b5b1c`，作为迁移前架构背景保留。以下行号、脚本构造视图、三个薄场景与 preview_style.gd 的描述不代表当前实现。当前行为见 [现行架构](../docs/architecture.md)，最新验证见 [整改记录](../docs/review-186.md)。历史源码目录原名为 `client_godot/`，本文执行命令已更新为当前 `client-godot/`。
+> **历史快照说明（2026-09-20 场景化后）**：本文及本目录 01–10 篇描述的是 `42b5b1c`，作为迁移前架构背景保留。以下行号、脚本构造视图、三个薄场景与 preview_style.gd 的描述不代表当前实现。当前行为见 [现行架构](../docs/architecture.md)，最新验证见 [整改记录](../../archive/worklog/pr-186/review-186-4th-round.md)。历史源码目录原名为 `client_godot/`，本文执行命令已更新为当前 `client-godot/`。
 
 当前 UI 由 `scenes/main.tscn`、`scenes/ui/`、`scenes/avatar/`、`scenes/preview/` 的节点树承载，行为脚本以唯一节点名绑定；业务依赖通过 `instantiate() → setup() → add_child()` 注入，主场景无注入时保留用户目录默认值。主题唯一来源是 `theme/app_theme.tres`，旧 `preview_style.gd` 已删除。固定子视图内嵌，数据驱动的气泡、动态行、菜单项实例化对应场景；所有确认框和波形也已改为控件场景；仅非 UI 的 Live2D 模型/特效仍在运行期创建。当前窗口关系与关闭行为见 [现行架构](../docs/architecture.md)。
 
@@ -12,7 +12,7 @@
 | 性质 | 只读现状分析（as-built）。除本系列 `.md` 与 `export_presets.cfg` 的导出排除项外不改动任何文件 |
 | 行号口径 | `file:line` 为撰写时工作树行号；无前缀路径相对 `client-godot/` |
 | 契约权威顺序 | [现行架构](../docs/architecture.md) 与对应源码/测试；原快照所引用的接口文档已随上游重组移除 |
-| 交付事实权威 | [当前整改证据](../docs/review-186.md)；不重建不可核验的历史阶段记录 |
+| 交付事实权威 | [当前整改证据](../../archive/worklog/pr-186/review-186-4th-round.md)；不重建不可核验的历史阶段记录 |
 
 本文只描述工程实现现状与风险，不复述行为契约。契约内容一律以上表两份文档为准。
 
@@ -279,7 +279,7 @@ flowchart LR
 - 版本唯一来源是 `release.json`（`{"product":"agentluo","version":"0.1.1"}`）：构建脚本读它做名字与格式校验（`scripts/build.ps1:5`），运行时读它做窗口标题（`src/release_info.gd:3`）。
 - 版本格式必须是三段数字（`scripts/build.ps1:6`），且构建不自动递增。
 - 打包用「先写临时名、逐条核对条目与长度、最后 Move 到正式名」的方式，避免留下残缺的正式包（`scripts/build.ps1:27` 到 `scripts/build.ps1:51`）。正式包已存在时直接拒绝（`scripts/build.ps1:9`）。
-- 交付目录必须整体分发：EXE、PCK、两个 DLL、`licenses/`、`PREVIEW.md`、`release.json`。`tests/verify_release_archive.py:11` 强制恰好 2 个 DLL，并逐字节比对。
+- 交付目录必须整体分发：EXE、PCK、三个 DLL、`licenses/`、`PREVIEW.md`、`release.json`。`tests/verify_release_archive.py:11` 强制恰好 3 个 DLL（含 godot-sqlite），并按 `dependencies.lock.json` 逐字节比对。
 - **历史快照变更说明**：`exclude_filter` 增加了 `architecture/*`（改动前为 `scripts/*,tests/*,artifacts/*,dist/*,native/*`）。实测结论：改动前用 `--export-pack` 生成的 PCK 中检索 `architecture/`、`01-application`、`ARCHITECTURE` 命中均为 0，说明 `all_resources` 本来就不打包 `.md`。因此该项是**防御性声明**，不是修复了实际的资源泄漏。09 篇必须如实这样写。
 
 ## 8. 测试与验证体系

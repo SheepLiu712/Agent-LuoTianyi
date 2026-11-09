@@ -1,7 +1,7 @@
 extends Control
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 signal touched(areas: Array[String])
-## View owns pointer gestures; framing owns the persisted transform.
+## 指针手势归视图，持久化变换归 framing。
 const Driver = preload("res://src/avatar/avatar_driver.gd")
 const Framing = preload("res://src/avatar/avatar_framing.gd")
 @export var settings: Resource = preload("res://src/storage/settings_store.gd").new()

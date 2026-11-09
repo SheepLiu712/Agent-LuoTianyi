@@ -1,4 +1,4 @@
-﻿extends "res://src/ui/draft_window.gd"
+extends "res://src/ui/draft_window.gd"
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const Detail = preload("res://src/ui/dynamic_detail.gd")
 const DetailScene = preload("res://scenes/ui/dynamic_detail.tscn")
@@ -15,6 +15,12 @@ const PostRow = preload("res://scenes/ui/dynamics_post_row.tscn")
 @onready var _read_all: Button = %ReadAll
 var _controller: Node
 @export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
+const PLACEHOLDERS := {
+	"loading": "正在加载动态…",
+	"empty": "还没有动态，发布第一条吧。",
+	"failed": "动态加载失败，点击刷新重试。",
+	"unselected": "选择左侧一条动态查看评论。",
+}
 var _ratio := .35
 var _selected := ""
 var _details := {}
@@ -26,6 +32,36 @@ var _initialized := false
 var _ui_style: RefCounted
 var _panel_style: StyleBoxFlat
 var _right_style: StyleBoxFlat
+var _avatar_source: Node
+var _custom_avatar: Texture2D
+var _username := ""
+
+## 头像源由装配层给出；这里只把纹理转发给每一行和每个详情，重建列表交给控制器。
+func set_avatar_source(source: Node) -> void:
+	if _avatar_source != null and _avatar_source.avatar_changed.is_connected(_sync_avatar):
+		_avatar_source.avatar_changed.disconnect(_sync_avatar)
+	_avatar_source = source
+	if source == null:
+		return
+	source.avatar_changed.connect(_sync_avatar)
+	_sync_avatar(source.get_texture())
+
+func _sync_avatar(texture: Texture2D) -> void:
+	_custom_avatar = texture
+	_username = _avatar_source.get_username() if _avatar_source != null else ""
+	for id in _rows:
+		_rows[id].set_avatar(_row_avatar(_find_post(str(id))))
+	for id in _details:
+		_details[id].set_avatar_context(texture, _username)
+
+func _row_avatar(post: Dictionary) -> Texture2D:
+	return Detail.avatar_texture(post, _custom_avatar, _username)
+
+func _find_post(id: String) -> Dictionary:
+	for post in _controller.get_posts():
+		if str(post.id) == id:
+			return post
+	return {}
 
 func set_ui_style(style: RefCounted) -> void:
 	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_ui_style):
@@ -80,7 +116,9 @@ func _initialize() -> void:
 	_update()
 	_update_unread(_controller.get_state().unread)
 	_resize_split.call_deferred()
-	if _controller.get_posts().is_empty(): _controller.refresh()
+	# 只有「一次也没取过」才在开窗时补拉；空列表与失败都有各自的占位和重试入口，
+	# 开窗时再拉一次会把已经落定的状态改写成加载中。
+	if _controller.get_state().code.is_empty(): _controller.refresh()
 
 func get_selected_id() -> String:
 	return _selected
@@ -91,6 +129,8 @@ func select_post(id: String) -> bool:
 	if _selected == id:
 		_refresh_selected_comments(id)
 		return true
+	# 点开就算读过：已读时间戳推到这条的发布时间，圆点随之消退。
+	if _controller.is_unread(posts[0]): _controller.mark_read(posts[0].created_at)
 	if not _selected.is_empty() and _details.has(_selected):
 		_detail_scroll_positions[_selected] = _details[_selected].get_reading_position()
 	_selected = id
@@ -100,6 +140,7 @@ func select_post(id: String) -> bool:
 		var detail = DetailScene.instantiate()
 		if _ui_style != null: detail.set_ui_style(_ui_style)
 		detail.setup(_controller,posts[0])
+		detail.set_avatar_context(_custom_avatar, _username)
 		_details[id] = detail
 		_right.add_child(detail)
 	_details[id].show()
@@ -119,31 +160,98 @@ func is_dirty() -> bool:
 
 func _update_unread(count: int) -> void:
 	_unread.text = "动态"+(" · "+("99+" if count>99 else str(count)) if count else "")
-	_notice.text = "有新的动态或评论，点击卡片查看最新评论，刷新可更新动态列表。" if count else ""
-	var state: Dictionary = _controller.get_state()
-	if state.busy:
-		_notice.text += " 正在加载动态…"
-	elif state.code not in ["","OK"]:
-		_notice.text += " 动态加载失败（%s），滚动到底部或点击刷新重试。" % state.code
-	var code: String = state.unread_code
-	if code not in ["","OK"]: _notice.text += " 未读操作失败（%s）。"%code
+	_notice.text = _notice_text(count, _controller.get_state())
+
+## 只为「已有内容但加载失败」和未读失败保留横幅；首屏状态交给占位文案。
+func _notice_text(count: int, state: Dictionary) -> String:
+	var text := "有新的动态或评论，点击卡片查看最新评论，刷新可更新动态列表。" if count else ""
+	if _shows_failure(state):
+		text += " 动态刷新失败（%s），点击刷新重试。" % state.code
+	if str(state.unread_code) not in ["","OK"]:
+		text += " 未读操作失败（%s）。" % state.unread_code
+	return text.strip_edges()
+
+## 翻页失败不会把 phase 推成 failed，只看 phase 会漏报，所以以 code 兜底。
+func _shows_failure(state: Dictionary) -> bool:
+	if _controller.get_posts().is_empty(): return false
+	return state.phase == "failed" or str(state.code) not in ["","OK"]
 
 func _update() -> void:
 	var state: Dictionary = _controller.get_state()
 	_update_unread(state.unread)
 	var posts: Array = _controller.get_posts()
+	_sync_rows(posts)
+	_sync_details(posts)
+	_sync_selection(posts)
+	_refresh_placeholder(posts, state)
+
+## 服务端已删除的动态必须连同行、详情和缓存一起消失，否则刷新只会越积越多。
+func _sync_rows(posts: Array) -> void:
+	var live := {}
 	for index in posts.size():
 		var post: Dictionary = posts[index]
+		live[str(post.id)] = true
 		if not _rows.has(post.id):
-			var row = PostRow.instantiate()
-			row.name = "Post_"+post.id
-			row.setup(post,Detail.avatar_path(post))
-			row.pressed.connect(func(): select_post(post.id))
-			_list.add_child(row)
-			_rows[post.id] = row
-		_list.move_child(_rows[post.id],index)
+			_rows[post.id] = _create_row(post)
+		_rows[post.id].set_avatar(_row_avatar(post))
+		_rows[post.id].set_unread(_controller.is_unread(post))
+		_list.move_child(_rows[post.id], index)
 		if _details.has(post.id): _details[post.id].update_post(post)
+	for id in _rows.keys():
+		if live.has(id): continue
+		_list.remove_child(_rows[id])
+		_rows[id].queue_free()
+		_rows.erase(id)
 	_select_style()
+
+
+func _create_row(post: Dictionary) -> Control:
+	var row = PostRow.instantiate()
+	row.name = "Post_"+str(post.id)
+	row.setup(post,_row_avatar(post))
+	row.pressed.connect(func(): select_post(post.id))
+	_list.add_child(row)
+	return row
+
+
+func _sync_details(posts: Array) -> void:
+	var live := {}
+	for post in posts:
+		live[str(post.id)] = true
+	for id in _details.keys():
+		if live.has(id): continue
+		_right.remove_child(_details[id])
+		_details[id].queue_free()
+		_details.erase(id)
+		_detail_scroll_positions.erase(id)
+
+
+func _sync_selection(posts: Array) -> void:
+	if _selected.is_empty():
+		return
+	for post in posts:
+		if str(post.id) == _selected:
+			return
+	_selected = ""
+	for detail in _details.values(): detail.hide()
+
+
+## 四种状态互斥：加载中、空列表、失败可重试、未选择动态。
+func _refresh_placeholder(posts: Array, state: Dictionary) -> void:
+	var text := _placeholder_text(posts, state)
+	_empty.text = text
+	_empty.visible = not text.is_empty()
+	_refresh_button.disabled = bool(state.busy)
+
+
+func _placeholder_text(posts: Array, state: Dictionary) -> String:
+	if state.phase == "loading" and posts.is_empty():
+		return PLACEHOLDERS.loading
+	if state.phase == "failed":
+		return PLACEHOLDERS.failed
+	if posts.is_empty():
+		return PLACEHOLDERS.empty
+	return PLACEHOLDERS.unselected if _selected.is_empty() else ""
 
 func _select_style() -> void:
 	for id in _rows:

@@ -1,5 +1,7 @@
-﻿extends ScrollContainer
+extends ScrollContainer
 const CommentRow = preload("res://scenes/ui/dynamic_comment_row.tscn")
+const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
+const USER_ICON := preload("res://assets/ui/user_icon.png")
 @onready var _column: VBoxContainer = %Column
 @onready var _avatar: TextureRect = %Avatar
 @onready var _author: Label = %Author
@@ -26,6 +28,27 @@ var _draft_style: StyleBoxFlat
 var _reply_style: StyleBoxFlat
 var _pending_scroll := -1
 var _restore_frames := 0
+var _custom_avatar: Texture2D
+var _username := ""
+
+## 自定义头像只替换「本人」的行；其他 user 作者仍用占位图，免得把别人画成自己。
+static func avatar_texture(item: Dictionary, custom: Texture2D, username: String) -> Texture2D:
+	var author_type := str(item.get("author_type", ""))
+	if custom != null and author_type == "user" and str(item.get("author_name", "")) == username:
+		return custom
+	return TIANYI_ICON if author_type == "agent" else USER_ICON
+
+func set_avatar_context(texture: Texture2D, username: String) -> void:
+	_custom_avatar = texture
+	_username = username
+	if not is_node_ready():
+		return
+	_avatar.texture = _avatar_for(_post)
+	for item in _controller.get_comments(_post.id).items:
+		if _rows.has(item.id): _rows[item.id].set_avatar(_avatar_for(item))
+
+func _avatar_for(item: Dictionary) -> Texture2D:
+	return avatar_texture(item, _custom_avatar, _username)
 var _applying_scroll := false
 
 func set_ui_style(style: RefCounted) -> void:
@@ -60,7 +83,7 @@ func _ready() -> void:
 func _initialize() -> void:
 	if _initialized: return
 	_initialized = true
-	_avatar.texture = load(avatar_path(_post))
+	_avatar.texture = _avatar_for(_post)
 	_author.text = _post.author_name
 	_created_at.text = _post.created_at
 	_send.pressed.connect(func(): _submit(false))
@@ -137,24 +160,32 @@ func update_comments() -> void:
 	_update_comment_status(state)
 	var names := {}
 	for item in state.items: names[item.id] = item.author_name
-	for index in state.items.size():
-		var item: Dictionary = state.items[index]
-		if not _rows.has(item.id):
-			var row = CommentRow.instantiate()
-			var target: String = str(item.get("parent_comment_id","") if item.get("parent_comment_id") != null else "")
-			row.setup(avatar_path(item),item.author_name,("回复 %s："%names.get(target,"较早评论") if not target.is_empty() else "")+item.content,relative_time(item.created_at),item.created_at,_post.allow_comment,func():
-				if _writing: return
-				_parent = item.id
-				_reply_label.text = "回复 "+item.author_name
-				_place_reply()
-				_reply_draft.grab_focus())
-			_comments.add_child(row)
-			_rows[item.id] = row
-		_comments.move_child(_rows[item.id],index)
+	for index in state.items.size(): _sync_row(state.items[index], index, names)
 	if _pending_scroll >= 0:
 		_queue_restore()
 	elif previous_scroll > 0:
 		restore_reading_position(int(previous_scroll))
+func _sync_row(item: Dictionary, index: int, names: Dictionary) -> void:
+	if not _rows.has(item.id):
+		var row = CommentRow.instantiate()
+		row.setup(_avatar_for(item),item.author_name,_row_body(item,names),relative_time(item.created_at),item.created_at,_post.allow_comment,_reply_to(item))
+		_comments.add_child(row)
+		_rows[item.id] = row
+	_rows[item.id].set_avatar(_avatar_for(item))
+	_comments.move_child(_rows[item.id],index)
+
+func _row_body(item: Dictionary, names: Dictionary) -> String:
+	var target: String = str(item.get("parent_comment_id","") if item.get("parent_comment_id") != null else "")
+	return ("" if target.is_empty() else "回复 %s：" % names.get(target, "较早评论")) + item.content
+
+func _reply_to(item: Dictionary) -> Callable:
+	return func():
+		if _writing: return
+		_parent = item.id
+		_reply_label.text = "回复 "+item.author_name
+		_place_reply()
+		_reply_draft.grab_focus()
+
 func _place_reply() -> void:
 	var destination: Node = _column if _parent.is_empty() else _rows.get(_parent,_column)
 	if _reply_box.get_parent() != destination: _reply_box.reparent(destination)
@@ -197,9 +228,6 @@ func _at_bottom() -> void:
 	var state: Dictionary = _controller.get_comments(_post.id)
 	if bar.value+bar.page >= bar.max_value-24 and state.loaded and state.has_more and not state.busy and state.code in ["","OK"]:
 		_controller.load_comments(_post.id,true)
-
-static func avatar_path(item: Dictionary) -> String:
-	return "res://assets/ui/tianyi_icon.png" if item.author_type == "agent" else "res://assets/ui/user_icon.png"
 
 static func relative_time(raw: String) -> String:
 	if raw.length() != 19: return raw

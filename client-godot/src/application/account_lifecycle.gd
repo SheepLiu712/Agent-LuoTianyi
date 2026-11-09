@@ -6,19 +6,21 @@ var _dynamics: Node
 var _appearance: Resource
 var _world: Resource
 var _devices: Resource
+var _avatar: Node
 var _generation := 0
 var _active := false
 var _has_resources := false
 var _identity := ""
 var _context: Dictionary = {}
 
-func _init(chat: Node, models: Node, dynamics: Node, appearance: Resource = null, world: Resource = null, devices: Resource = null) -> void:
+func _init(chat: Node, models: Node, dynamics: Node, appearance: Resource = null, world: Resource = null, devices: Resource = null, avatar: Node = null) -> void:
 	_chat = chat
 	_models = models
 	_dynamics = dynamics
 	_appearance = appearance
 	_world = world
 	_devices = devices
+	_avatar = avatar
 
 func start(session: Dictionary) -> Error:
 	var scope := Scope.key(session.server,session.username)
@@ -29,20 +31,20 @@ func start(session: Dictionary) -> Error:
 	_generation += 1
 	_context = {"scope_id":scope,"generation":_generation,"character_id":"luotianyi"}
 	_has_resources = true
-	# Chat owns the transport boundary.  It must be ready before controllers
-	# that advertise models, history or dynamics can observe the new account.
+	# 聊天握着 transport 边界：必须先就绪，动态/历史/模型控制器才能观察新账号。
 	var result: Error = _chat.start(session)
 	if result != OK:
 		stop()
 		return result
 	_models.start(session)
 	_dynamics.start(session)
+	# 头像只跟着账号走：换账号时先清空再读新账号的那一张。
+	if _avatar != null: _avatar.start(session)
 	for capability in [_appearance,_world,_devices]:
 		if capability == null:
 			continue
 		var capability_result: Error = capability.start(get_context())
-		# Optional future capabilities are allowed to be unavailable without
-		# preventing text chat. Any other startup error rolls the account back.
+		# 扩展能力允许缺席（ERR_UNAVAILABLE）而不阻断文字聊天；其它启动错误整体回滚。
 		if capability_result != OK and capability_result != ERR_UNAVAILABLE:
 			stop()
 			return capability_result
@@ -60,6 +62,7 @@ func stop() -> void:
 	_context.clear()
 	for capability in [_appearance,_world,_devices]:
 		if capability != null: capability.stop()
+	if _avatar != null: _avatar.stop()
 	for controller in [_models,_dynamics,_chat]:
 		if is_instance_valid(controller): controller.stop()
 	_has_resources = false

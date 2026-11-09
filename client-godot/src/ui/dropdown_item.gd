@@ -1,5 +1,5 @@
 extends Button
-## One row of the shared dropdown: the static look lives in the scene, setup() injects the row.
+## 共享下拉的一行：静态外观在共享主题里，setup() 只注入数据。
 func setup(item: Dictionary) -> void:
 	text = item.label
 	set_meta("id",item.id)

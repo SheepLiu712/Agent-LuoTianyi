@@ -10,8 +10,9 @@ LICENSE_FILES = {
     "godot-cpp.md", "Godot-third-party.json", "Godot.txt", "RESOURCES.md",
 }
 DLL_FILES = {
-    "libgd_cubism.windows.release.x86_64.dll": "gd_cubism",
-    "windows_security.dll": "windows_security",
+    "libgd_cubism.windows.release.x86_64.dll": ("gd_cubism", "binary_sha256"),
+    "libgdsqlite.windows.template_release.x86_64.dll": ("godot_sqlite", "windows_release_sha256"),
+    "windows_security.dll": ("windows_security", "binary_sha256"),
 }
 
 
@@ -48,9 +49,9 @@ def _verify_zip(archive, expected_names, expected):
 
 
 def _verify_dlls(source, lock):
-    for dll_name, lock_key in DLL_FILES.items():
+    for dll_name, (section, field) in DLL_FILES.items():
         digest = hashlib.sha256((source / dll_name).read_bytes()).hexdigest().lower()
-        expected_digest = lock[lock_key]["binary_sha256"].lower()
+        expected_digest = lock[section][field].lower()
         assert digest == expected_digest, f"{dll_name} SHA256 differs from dependency lock"
 
 

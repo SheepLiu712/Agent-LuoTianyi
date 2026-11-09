@@ -5,22 +5,30 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/account_view.tscn" id="3_account"]
 [ext_resource type="Script" uid="uid://bjg42nfn7ocje" path="res://src/platform/desktop_window_host.gd" id="13_a8y0u"]
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+[ext_resource type="Texture2D" uid="uid://dmqh7enibb3me" path="res://assets/ui/icons/nav_at.svg" id="icon_nav_at"]
+[ext_resource type="Texture2D" uid="uid://b1vd85eb0cv11" path="res://assets/ui/icons/nav_chat.svg" id="icon_nav_chat"]
+[ext_resource type="Texture2D" uid="uid://cv5p0s2yahd64" path="res://assets/ui/icons/nav_scroll.svg" id="icon_nav_scroll"]
+[ext_resource type="Texture2D" uid="uid://bqmf4xba7mu0m" path="res://assets/ui/icons/nav_settings.svg" id="icon_nav_settings"]
 [ext_resource type="Resource" path="res://resources/platform/decoder.tres" id="isolation_decoder"]
 [ext_resource type="Resource" path="res://resources/platform/encryption.tres" id="isolation_password_encryption"]
 [ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
 [ext_resource type="Resource" path="res://resources/platform/secrets.tres" id="isolation_secret_protection"]
-[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_chat.svg" id="icon_nav_chat"]
-[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_at.svg" id="icon_nav_at"]
-[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_settings.svg" id="icon_nav_settings"]
-[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_scroll.svg" id="icon_nav_scroll"]
 [ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
 [ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
+
+[sub_resource type="Gradient" id="WorkspaceGradient"]
+colors = PackedColorArray(0.965, 0.976, 0.988, 1, 0.965, 0.976, 0.988, 1)
+
+[sub_resource type="GradientTexture2D" id="WorkspaceBackdrop"]
+resource_local_to_scene = true
+gradient = SubResource("WorkspaceGradient")
+fill_to = Vector2(1, 1)
 
 [sub_resource type="StyleBoxFlat" id="NavigationRail"]
 resource_local_to_scene = true
 content_margin_left = 8.0
-content_margin_right = 8.0
 content_margin_top = 24.0
+content_margin_right = 8.0
 content_margin_bottom = 16.0
 bg_color = Color(0.941, 0.965, 0.98, 1)
 border_width_right = 1
@@ -30,21 +38,10 @@ border_color = Color(0.878, 0.914, 0.941, 1)
 bg_color = Color(0.259, 0.725, 0.929, 1)
 corner_radius_top_left = 3
 corner_radius_top_right = 3
-corner_radius_bottom_left = 3
 corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
 
-[sub_resource type="Gradient" id="WorkspaceGradient"]
-colors = PackedColorArray(0.965, 0.976, 0.988, 1, 0.965, 0.976, 0.988, 1)
-
-[sub_resource type="GradientTexture2D" id="WorkspaceBackdrop"]
-resource_local_to_scene = true
-gradient = SubResource("WorkspaceGradient")
-width = 64
-height = 64
-fill_from = Vector2(0, 0)
-fill_to = Vector2(1, 1)
-
-[sub_resource type="Resource" id="Resource_a8y0u"]
+[sub_resource type="Resource" id="Resource_jkv2x"]
 resource_local_to_scene = true
 script = ExtResource("13_a8y0u")
 
@@ -74,7 +71,7 @@ texture = SubResource("WorkspaceBackdrop")
 expand_mode = 1
 
 [node name="Workspace" type="Control" parent="." unique_id=1149884569]
-layout_mode = 0
+anchors_preset = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 
@@ -83,6 +80,7 @@ unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(80, 0)
 layout_mode = 1
+anchors_preset = 9
 anchor_bottom = 1.0
 offset_right = 80.0
 theme_override_styles/panel = SubResource("NavigationRail")
@@ -98,14 +96,14 @@ layout_mode = 2
 theme_type_variation = &"NavigationButton"
 toggle_mode = true
 button_pressed = true
-icon = ExtResource("icon_nav_chat")
-expand_icon = false
 text = "聊天"
+icon = ExtResource("icon_nav_chat")
 icon_alignment = 1
 vertical_icon_alignment = 0
 
-[node name="ActiveMark" type="ColorRect" parent="Workspace/Navigation/Items/NavChat"]
+[node name="ActiveMark" type="ColorRect" parent="Workspace/Navigation/Items/NavChat" unique_id=244176653]
 layout_mode = 1
+anchors_preset = 4
 anchor_top = 0.5
 anchor_bottom = 0.5
 offset_left = -8.0
@@ -120,17 +118,17 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(64, 64)
 layout_mode = 2
 theme_type_variation = &"NavigationButton"
-clip_text = true
-icon = ExtResource("icon_nav_at")
-expand_icon = false
 text = "动态"
+icon = ExtResource("icon_nav_at")
+clip_text = true
 icon_alignment = 1
 vertical_icon_alignment = 0
 
-[node name="DynamicsUnread" type="Panel" parent="Workspace/Navigation/Items/NavDynamics"]
+[node name="DynamicsUnread" type="Panel" parent="Workspace/Navigation/Items/NavDynamics" unique_id=121172028]
 unique_name_in_owner = true
 visible = false
 layout_mode = 1
+anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -15.0
@@ -145,9 +143,8 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(64, 64)
 layout_mode = 2
 theme_type_variation = &"NavigationButton"
-icon = ExtResource("icon_nav_settings")
-expand_icon = false
 text = "设置"
+icon = ExtResource("icon_nav_settings")
 icon_alignment = 1
 vertical_icon_alignment = 0
 
@@ -161,9 +158,8 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(62, 68)
 layout_mode = 2
 theme_type_variation = &"NavigationButton"
-icon = ExtResource("icon_nav_scroll")
-expand_icon = false
 text = "日志"
+icon = ExtResource("icon_nav_scroll")
 icon_alignment = 1
 vertical_icon_alignment = 0
 
@@ -171,6 +167,7 @@ vertical_icon_alignment = 0
 unique_name_in_owner = true
 visible = false
 layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 96.0
@@ -179,8 +176,8 @@ offset_right = -16.0
 offset_bottom = -16.0
 size_flags_horizontal = 3
 size_flags_vertical = 3
-dragger_visibility = 2
 theme_override_constants/separation = 8
+dragger_visibility = 2
 
 [node name="Center" type="MarginContainer" parent="." unique_id=89554627]
 unique_name_in_owner = true
@@ -233,4 +230,4 @@ autowrap_mode = 3
 unique_name_in_owner = true
 anchors_preset = 0
 login_mode = true
-host = SubResource("Resource_a8y0u")
+host = SubResource("Resource_jkv2x")

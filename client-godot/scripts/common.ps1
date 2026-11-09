@@ -30,6 +30,12 @@ function Resolve-Godot([string]$Path) {
     return $resolved
 }
 
+function Restore-Environment([hashtable]$Previous) {
+    foreach ($name in $Previous.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $Previous[$name])
+    }
+}
+
 function Invoke-GodotChecked([string]$Executable, [string[]]$Arguments, [string]$LogName, [switch]$RequirePass, [switch]$UseHostUserData) {
     $logDirectory = Join-Path $ProjectRoot 'artifacts'
     New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
@@ -50,20 +56,27 @@ function Invoke-GodotChecked([string]$Executable, [string[]]$Arguments, [string]
     $startInfo.RedirectStandardError = $true
     # Never let a check inherit the developer's account/cache.  This also
     # makes every direct Godot check as reproducible as the Python runners.
+    # Windows PowerShell 5.1 exposes ProcessStartInfo.EnvironmentVariables as
+    # null, so the overrides go through the process environment instead; the
+    # child inherits them at Start() and they are restored right after.
     $userDataRoot = $null
+    $previousEnvironment = @{}
     if (-not $UseHostUserData) {
         $userDataRoot = Join-Path ([IO.Path]::GetTempPath()) ("agentluo-godot-" + [Guid]::NewGuid().ToString('N'))
         $appData = Join-Path $userDataRoot 'appdata'
         $localAppData = Join-Path $userDataRoot 'localappdata'
         New-Item -ItemType Directory -Force -Path $appData, $localAppData | Out-Null
-        $startInfo.EnvironmentVariables['APPDATA'] = $appData
-        $startInfo.EnvironmentVariables['LOCALAPPDATA'] = $localAppData
+        $previousEnvironment['APPDATA'] = [Environment]::GetEnvironmentVariable('APPDATA')
+        $previousEnvironment['LOCALAPPDATA'] = [Environment]::GetEnvironmentVariable('LOCALAPPDATA')
+        [Environment]::SetEnvironmentVariable('APPDATA', $appData)
+        [Environment]::SetEnvironmentVariable('LOCALAPPDATA', $localAppData)
     }
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $startInfo
     $exitCode = -1
     try {
         $process.Start() | Out-Null
+        Restore-Environment $previousEnvironment
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit(120000)) {
@@ -74,6 +87,7 @@ function Invoke-GodotChecked([string]$Executable, [string[]]$Arguments, [string]
         $stdout.Result | Set-Content -LiteralPath $stdoutLog -Encoding UTF8
         $stderr.Result | Set-Content -LiteralPath $stderrLog -Encoding UTF8
     } finally {
+        Restore-Environment $previousEnvironment
         $process.Dispose()
         if ($userDataRoot -and (Test-Path -LiteralPath $userDataRoot)) { Remove-Item -LiteralPath $userDataRoot -Recurse -Force -ErrorAction SilentlyContinue }
     }

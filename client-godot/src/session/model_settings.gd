@@ -1,4 +1,4 @@
-﻿extends Node
+extends Node
 const ServerAddress = preload("res://src/domain/server_address.gd")
 signal changed(state: Dictionary)
 var _http: Node

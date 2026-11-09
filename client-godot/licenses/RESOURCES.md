@@ -1,10 +1,12 @@
 # 资源来源
 
-本工程复用本仓库 `client/res/live2d/models/luo`、`client/res/live2d/backgrounds/bg2.jpg`、`client/res/gui/tianyi_icon.png`、`user_icon.png` 及 `client/config/live2d_interface_config.json`，基线 `79ae2c0`，不修改旧端资源。
+本工程复用本仓库 `client/res/live2d/models/luo`、`client/res/live2d/backgrounds/bg2.jpg`、`client/res/gui/user_icon.png` 及 `client/config/live2d_interface_config.json`，基线 `79ae2c0`，不修改旧端资源。
 
 应用图标复用 `client/res/gui/icon.svg` 与 `icon.ico`，对应Godot的`assets/ui/app_icon.svg`和`app_icon.ico`，内容保持逐字节一致。
 
 `assets/ui/login_portrait.png`由同一Live2D模型在normal表情、双眼睁开、视线居中状态下离线渲染生成（800×800透明画面，截取头部(125,40)至(675,530)，等比缩至384×342并透明留白到384×384）；仅作为登录静态头像，不改变模型许可。SHA-256：`27fe9011b3de3c4e302f8629330727ca76c9c8a610237eea278ac4420441a8df`。
+
+`assets/ui/tianyi_icon.png`由`login_portrait.png`派生：取非透明包围盒，等比缩至 225×225 并居中于 256×256 透明画布，四周留白以避免圆形遮罩切到头发与下巴。它替换了旧端的同名占位图标，用于聊天气泡、聊天页标题与动态中的天依头像。生成脚本为 `scripts/build_tianyi_icon.gd`。SHA-256：`dc20dc77cd5cfb36a0bfd1df1063c0e828de54a104484a6801c6655e45f35403`。
 
 模型来源及用途说明见仓库 `client/README.md`「关于 AI 生成内容的声明」第 3 项：火爆鸡王发布的洛天依 Live2D 模型，非商业用途免费使用。背景及 Logo 沿用原项目声明，不因程序使用 MIT 许可证而改变素材的使用条件。
 

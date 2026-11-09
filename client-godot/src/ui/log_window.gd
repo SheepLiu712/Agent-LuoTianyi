@@ -1,4 +1,4 @@
-﻿extends Window
+extends Window
 @export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
 @export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _logger: RefCounted

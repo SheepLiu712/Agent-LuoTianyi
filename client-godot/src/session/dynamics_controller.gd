@@ -16,7 +16,7 @@ var _cursor := ""
 var _unread_busy := false
 var _latest_unread: Dictionary = {}
 var _writing := false
-var _state := {"phase":"idle","code":"","unread":0,"unread_code":"","has_more":false,"busy":false}
+var _state := {"phase":"idle","code":"","unread":0,"unread_code":"","has_more":false,"busy":false,"last_read":""}
 
 func _init(logger: RefCounted = null,timeout: float = 15.0) -> void:
 	_logger = logger
@@ -49,16 +49,34 @@ func stop() -> void:
 	_unread_busy = false
 	_latest_unread.clear()
 	_writing = false
-	_state = {"phase":"idle","code":"","unread":0,"unread_code":"","has_more":false,"busy":false}
+	_state = {"phase":"idle","code":"","unread":0,"unread_code":"","has_more":false,"busy":false,"last_read":""}
 	changed.emit()
 	unread_changed.emit(0)
 	latest_unread_changed.emit({})
 
 func get_state() -> Dictionary:
-	return _state.duplicate()
+	var state := _state.duplicate()
+	state.phase = _phase()
+	return state
+
+
+## 可观察状态：首次加载、刷新失败、就绪。空列表由视图按条数派生。
+func _phase() -> String:
+	if _state.busy:
+		return "loading"
+	if _state.code not in ["", "OK"] and _posts.is_empty():
+		return "failed"
+	return "ready"
 
 func get_posts() -> Array[Dictionary]:
 	return _posts.duplicate(true)
+
+## 未读只按发布时间判定：自己发的从来不算，之前看过的也不算。
+func is_unread(post: Dictionary) -> bool:
+	if str(post.get("author_type","")) == "user":
+		return false
+	var created := str(post.get("created_at",""))
+	return not created.is_empty() and created > str(_state.last_read)
 
 func get_latest_unread() -> Dictionary:
 	return _latest_unread.duplicate(true)
@@ -87,11 +105,30 @@ func _load_posts(more: bool) -> void:
 	if result.ok:
 		result = _page(result.data,cursor,false)
 	if result.ok:
-		_posts = _merge(_posts,result.items) if more else _merge(result.items,_posts)
-		_cursor = result.cursor
-		_state.has_more = result.has_more
+		_store_page(result, more)
 	_state.code = result.code
 	_notify()
+
+
+## 整页刷新以服务端为准，被删掉的动态必须消失；只有翻页才在已有列表后追加。
+func _store_page(result: Dictionary, more: bool) -> void:
+	if more:
+		_posts = _merge(_posts, result.items)
+	else:
+		_posts = _merge([], result.items)
+	_cursor = result.cursor
+	_state.has_more = result.has_more
+	_prune_comments()
+
+
+## 动态消失后，它的评论缓存也不该继续留在这个账号的内存里。
+func _prune_comments() -> void:
+	var live := {}
+	for post in _posts:
+		live[str(post.id)] = true
+	for id in _comments.keys():
+		if not live.has(id):
+			_comments.erase(id)
 
 func load_comments(id: String,more: bool = false) -> void:
 	if _comments_blocked(id):
@@ -161,6 +198,8 @@ func refresh_unread() -> void:
 	if result.ok:
 		result = _read_unread_count(result)
 	if result.ok:
+		_read_last_read(result)
+	if result.ok:
 		var latest := await _unread_preview(result, generation)
 		if generation != _generation: return
 		_latest_unread = latest
@@ -185,7 +224,20 @@ func _load_latest_unread(generation: int, last_read: String) -> Dictionary:
 		if seen.has(result.cursor): return _failure("INVALID_RESPONSE")
 		cursor = result.cursor
 	return _failure("CANCELLED")
-func mark_read() -> void:
+## 服务端只有「全部已读」一个入口，没有「只推进到某一条」：点开一条就只在本机记下已读位置，
+## 圆点当次消退；重启或换设备后仍以服务端那份记录为准。
+func mark_read(before: String = "") -> void:
+	if before.is_empty():
+		await _mark_all_read()
+		return
+	if before <= str(_state.last_read):
+		return
+	_state.last_read = before
+	_clear_latest_unread()
+	changed.emit()
+
+## 全部已读：服务端把动态和评论一起推到当前时间，徽标与预览随即清零。
+func _mark_all_read() -> void:
 	if _session.is_empty() or _unread_busy:
 		return
 	_unread_busy = true
@@ -198,11 +250,26 @@ func mark_read() -> void:
 		result = _failure("INVALID_RESPONSE")
 	if result.ok:
 		_state.unread = 0
-		_latest_unread.clear()
-		latest_unread_changed.emit({})
+		_read_last_read(result)
+		_clear_latest_unread()
 	_state.unread_code = result.code
 	unread_changed.emit(_state.unread)
 	_log("ready",result.code)
+
+## 服务端只前进不后退，这里也照着只取更新的一条，乱序响应不会把圆点又点亮。
+func _read_last_read(result: Dictionary) -> void:
+	var last_read: Variant = result.data.get("last_read_dynamic_at")
+	if last_read is String and last_read > str(_state.last_read):
+		_state.last_read = last_read
+
+## 预览卡片只留到它变成已读为止。
+func _clear_latest_unread() -> void:
+	if _latest_unread.is_empty():
+		return
+	if str(_latest_unread.get("created_at","")) > str(_state.last_read):
+		return
+	_latest_unread.clear()
+	latest_unread_changed.emit({})
 
 func _request(path: String,method: int = HTTPClient.METHOD_GET,data: Dictionary = {},limit: int = 0,cursor: String = "") -> Dictionary:
 	if _session.is_empty() or _requests.size() >= 8:
@@ -344,13 +411,14 @@ func _unread_preview(result: Dictionary, generation: int) -> Dictionary:
 	var latest: Dictionary = {}
 	var dynamic_count: Variant = result.data.get("unread_dynamic_count", 0)
 	if _has_unread_dynamics(dynamic_count):
-		var last_read: Variant = result.data.get("last_read_dynamic_at")
-		var preview := await _load_latest_unread(generation, last_read if last_read is String else "")
+		# 基线取本机已读位置：本机点开过的动态不该再塞回预览卡片。
+		var last_read := str(_state.last_read)
+		var preview := await _load_latest_unread(generation, last_read)
 		if preview.ok:
 			latest = preview.post
 		else:
 			result.code = preview.code
-			if not _latest_unread.is_empty() and (not last_read is String or _latest_unread.created_at >= last_read):
+			if not _latest_unread.is_empty() and _latest_unread.created_at >= last_read:
 				latest = get_latest_unread()
 	return latest
 func _first_unread_post(items: Array, last_read: String) -> Dictionary:

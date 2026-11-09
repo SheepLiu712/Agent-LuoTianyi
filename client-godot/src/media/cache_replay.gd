@@ -1,5 +1,5 @@
 extends Node
-## Internal media sink; only ReplyAudio arbitrates ownership of sound and mouth.
+## 内部媒体接收端：声音与口型的归属只由 ReplyAudio 裁决。
 signal changed
 signal finished(id: String, code: String)
 signal mouth_changed(value: float)

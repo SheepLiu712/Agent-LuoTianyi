@@ -1,8 +1,6 @@
 extends PanelContainer
-@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 signal log_requested
 signal feedback_requested
-signal exit_requested
 const Session = preload("res://src/session/account_session.gd")
 const HistoryRow = preload("res://scenes/ui/login_account_row.tscn")
 const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
@@ -32,8 +30,6 @@ func setup(session: Node) -> void:
 func _ready() -> void:
 	_menu_trigger = preload("res://src/ui/popup_trigger.gd").new(%MenuButton,%MenuPopup)
 	_history_trigger = preload("res://src/ui/popup_trigger.gd").new(%HistoryButton,%HistoryPopup)
-	%CloseLogin.pressed.connect(func(): exit_requested.emit())
-	%DragArea.gui_input.connect(_drag_window)
 	%MenuButton.pressed.connect(_open_menu)
 	%MenuPopup.visibility_changed.connect(func(): %MenuButton.set_pressed_no_signal(%MenuPopup.visible))
 	%Logs.pressed.connect(func(): %MenuPopup.hide(); log_requested.emit())
@@ -249,10 +245,6 @@ func report_feedback_result(error: Error) -> void:
 	if error == OK: return
 	_status.text = "无法打开浏览器，可复制下方项目地址。"
 	%FeedbackAddress.show()
-
-func _drag_window(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and not event.double_click:
-		window_system.drag(get_window())
 
 func _layout_form() -> void:
 	%FormMargin.theme_type_variation = &"LoginCompactMargin" if size.x < 440 else &"LoginFormMargin"

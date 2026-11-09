@@ -1,4 +1,4 @@
-﻿extends Logger
+extends Logger
 var _logger: RefCounted
 func _init(logger: RefCounted) -> void:
 	_logger = logger
