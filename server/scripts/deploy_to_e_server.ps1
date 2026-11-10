@@ -64,9 +64,12 @@ if ($destination.Equals(([System.IO.Path]::GetPathRoot($destinationFull)).TrimEn
     throw 'Source and destination must be separate directories; the destination cannot be a drive root.'
 }
 
-$requiredPaths = @(
-    'server_main.py', 'start_server.bat', 'pyproject.toml', 'README.md', 'setup.bat',
-    'scripts/install_windows.bat', 'src', 'config/config.json',
+$runtimeFiles = @(
+    'server_main.py', 'pyproject.toml', 'README.md', 'scripts/deploy/install_windows.bat',
+    'scripts/deploy/start_server.bat', 'scripts/deploy/windows-conda.yml'
+)
+$requiredPaths = $runtimeFiles + @(
+    'src', 'config/config.json',
     'res/admin_ui/admin_static/index.html', 'data'
 )
 foreach ($relativePath in $requiredPaths) {
@@ -119,9 +122,7 @@ foreach ($relativePath in @('src', 'config', 'res', 'data')) {
 }
 Copy-RuntimeTree -RelativePath 'res/admin_ui/admin_static' -ExcludedDirectories $commonExcludedDirectories -ExcludedFiles $excludedFiles
 
-foreach ($relativePath in @(
-    'server_main.py', 'start_server.bat', 'pyproject.toml', 'README.md', 'setup.bat', 'scripts/install_windows.bat'
-)) {
+foreach ($relativePath in $runtimeFiles) {
     Write-Host "Copying $relativePath ..."
     if (-not $PlanOnly) {
         $targetFile = Join-Path $destination $relativePath

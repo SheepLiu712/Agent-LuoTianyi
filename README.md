@@ -87,18 +87,7 @@ npx expo start                 # 启动 Expo 开发服务器
    cd Agent-LuoTianyi/server
    ```
 
-2. 确保 conda 已安装，随后运行安装脚本：
-    ```bash
-    setup.bat
-    ```
-    推荐将服务端环境命名为 `lty`。脚本会询问 Conda 环境名称和 PyTorch 的 CPU/CUDA 构建；Python 运行依赖由 `server/pyproject.toml` 统一管理，脚本只补充 PyTorch wheel 源、FFmpeg 和 Playwright Chromium 等环境步骤。
-
-    如果已经准备好 Python 3.10、PyTorch 和 FFmpeg，也可以直接安装：
-    ```bash
-    python -m pip install -e ".[speech,song-learning]"
-    python -m playwright install chromium
-    ```
-    参与开发时再执行 `python -m pip install -e ".[dev]"`。当前采用仓库内 editable install，`config/`、`res/`、`data/` 不打入 wheel。
+2. 按[服务端部署指南](server/README.md)安装环境。Windows 默认使用 uv，也可以选择 Conda。
 
 3. 下载资源：
    - 联系开发者获取资源文件。至少需要TTS模型、角色资源、知识库等基础资源，缺失时对应功能无法启动或会在控制台配置检查中报错。
@@ -116,12 +105,7 @@ npx expo start                 # 启动 Expo 开发服务器
    一般情况下仓库会包含已构建的控制台静态文件；只有修改控制台前端或构建产物缺失时才需要执行这一步。
 
 ### 三、启动并配置服务
-1. 在命令行中进入服务端目录并启动 conda 环境：
-   ```bash
-   cd Agent-LuoTianyi/server
-   conda activate lty
-   python server_main.py
-   ```
+1. 在服务端目录运行 `scripts\deploy\start_server.bat`。使用 Conda 时，在 Anaconda Prompt 中运行 `scripts\deploy\start_server.bat conda`。
    启动后终端会显示控制台地址，例如：
    ```text
    AgentLuo 控制台: http://127.0.0.1:60030/admin

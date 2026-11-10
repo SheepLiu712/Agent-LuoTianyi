@@ -1,0 +1,27 @@
+[project]
+name = "agentluo-linux-deployment"
+version = "0.1.0"
+requires-python = "==3.10.*"
+dependencies = [
+    "agentluo-server[speech,song-learning]",
+    "gsv-tts-lite==0.4.7",
+    "setuptools>=80,<81",
+    "transformers<5",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+    "torchvision==0.23.0",
+]
+
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.sources]
+agentluo-server = { path = "../..", editable = true }
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
