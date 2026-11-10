@@ -19,6 +19,7 @@ import yaml
 
 from src.infrastructure.observability.call_reply_timing import record_tts_worker_event
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 
 from .call_pcm import normalize_clip_to_pcm16_mono
 from .errors import TTSStreamCancelled
@@ -29,7 +30,7 @@ def _build_absolute_path(path_value: Optional[str]) -> Optional[str]:
         return None
     if os.path.isabs(path_value):
         return path_value
-    return os.path.abspath(path_value)
+    return str(resolve_server_path(path_value))
 
 
 def _extract_model_paths_from_yaml(config_path: str) -> Dict[str, Any]:
@@ -45,7 +46,7 @@ def _extract_model_paths_from_yaml(config_path: str) -> Dict[str, Any]:
         "sovits_model_path": sovits_path,
         "device": custom.get("device"),
         "is_half": custom.get("is_half"),
-        "pretrained_models_path": custom.get("pretrained_models_path"),
+        "pretrained_models_path": _build_absolute_path(custom.get("pretrained_models_path")),
     }
 
 

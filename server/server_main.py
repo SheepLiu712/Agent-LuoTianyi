@@ -8,13 +8,17 @@ from src.application.host_context import ServerHostContext
 from src.application.server_lifecycle import ServerLifecycle
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger, install_access_log_filter
+from src.utils.server_paths import ServerPaths
 from src.web.bindings import bind_web_interfaces
 
+paths = ServerPaths.from_environment()
+paths.runtime_dir.mkdir(parents=True, exist_ok=True)
+os.chdir(paths.runtime_dir)
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
-os.chdir(current_dir)
 logger = get_logger("server_main")
-config = load_config("config/config.json")
-server_lifecycle = ServerLifecycle(root_dir=current_dir)
+config = load_config(str(paths.config_dir / "config.json"))
+server_lifecycle = ServerLifecycle(root_dir=current_dir, config_path=paths.config_dir / "config.json")
 app = FastAPI()
 bind_web_interfaces(app, current_dir)
 

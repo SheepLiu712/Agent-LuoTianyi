@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from src.utils.helpers import apply_env_variables
+from src.utils.server_paths import ServerPaths
 
 
 class ConfigStore:
@@ -25,7 +26,7 @@ class ConfigStore:
             return json.load(f)
 
     def read_resolved(self) -> dict[str, Any]:
-        return apply_env_variables(self.read_raw())
+        return ServerPaths.from_environment(self.root_dir).resolve_config(apply_env_variables(self.read_raw()))
 
     def write_raw(self, config: dict[str, Any], *, backup: bool = True) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,4 +50,4 @@ class ConfigStore:
         path = Path(raw_path)
         if path.is_absolute():
             return path
-        return self.root_dir / path
+        return ServerPaths.from_environment(self.root_dir).resolve(path)

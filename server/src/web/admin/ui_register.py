@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.utils.server_paths import ServerPaths
+
 from .admin_interface import router as admin_router
 
 if TYPE_CHECKING:
@@ -16,7 +18,7 @@ def register_admin_ui(app: "FastAPI", current_dir: str) -> None:
     app.include_router(admin_router)
 
     # 2. 注册管理后台的静态资源
-    admin_ui_build = os.path.join(current_dir, "res", "admin_ui", "admin_static")
+    admin_ui_build = str(ServerPaths.from_environment(current_dir).resource_dir / "admin_ui/admin_static")
     admin_ui_assets = os.path.join(admin_ui_build, "assets")
     if os.path.isdir(admin_ui_assets):
         app.mount("/admin/assets", StaticFiles(directory=admin_ui_assets), name="admin-assets")

@@ -21,6 +21,7 @@ from chromadb.config import Settings
 from src.infrastructure.models.llm.embedding import SiliconFlowEmbeddings
 from src.infrastructure.observability.retrieval_timing import record_retrieval_phase, retrieval_phase
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 
 # 单用户记录删除的分页大小：避免 n_results 上限造成的静默截断。
 _USER_RECORD_PAGE_SIZE = 1000
@@ -129,7 +130,7 @@ class ChromaVectorStore(VectorStore):
         self.config = config
 
         # 配置参数
-        self.persist_directory = config.get("vector_store_path", "./data/vector_store")
+        self.persist_directory = str(resolve_server_path(config.get("vector_store_path", "./data/vector_store")))
         if not os.path.exists(self.persist_directory):
             os.makedirs(self.persist_directory, exist_ok=True)
         self.collection_name = config.get("collection_name", "luotianyi_memory")

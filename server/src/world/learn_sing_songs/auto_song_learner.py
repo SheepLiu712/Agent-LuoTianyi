@@ -25,6 +25,7 @@ from src.domain.music_type import WishEntry
 from src.infrastructure.media.song_asset_validation import playable_segments
 from src.utils.helpers import get_unified_song_name
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 
 _SONGLEARNER_PATH_ADDED = False
 
@@ -100,19 +101,21 @@ class AutoSongLearner:
         self._ensure_directories()
 
         # Songlearner integration
-        self.songlearner_dir = cwd / Path(config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner"))
-        self.songlearner_resource_dir = cwd / Path(config.get("songlearner_resource_dir", "res/song_learner"))
-        self.work_dir = self._resolve_path(cwd, config.get("work_dir", ".runtime/song_learner"))
+        self.songlearner_dir = resolve_server_path(
+            config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner")
+        )
+        self.songlearner_resource_dir = resolve_server_path(config.get("songlearner_resource_dir", "res/song_learner"))
+        self.work_dir = resolve_server_path(config.get("work_dir", ".runtime/song_learner"))
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
         else:
-            self.logger.error("Songlearner 模型未就绪（需下载 MSST 预训练权重），" "无法执行自动学歌")
+            self.logger.error("Songlearner 模型未就绪（需下载 MSST 预训练权重），无法执行自动学歌")
             raise RuntimeError("Songlearner 模型未就绪，无法执行自动学歌")
 
         # QQ 音乐凭证检测（启动时）
         credential_path = config.get("qq_credential_file", "config/qq_music_credential.json")
-        self._credential_file = self._resolve_path(cwd, credential_path)
+        self._credential_file = resolve_server_path(credential_path)
         self.qq_credential_refresh_before_seconds = max(
             0,
             int(config.get("qq_credential_refresh_before_seconds", 86400)),
@@ -411,7 +414,7 @@ class AutoSongLearner:
         stderr = proc.stderr or ""
         parsed = self._parse_songlearner_error(stderr)
         if parsed:
-            return f"{parsed['code']} {parsed['step']}: {parsed['message']} " f"(exit_code={parsed['exit_code']})"
+            return f"{parsed['code']} {parsed['step']}: {parsed['message']} (exit_code={parsed['exit_code']})"
 
         stderr_tail = self._last_nonempty_line(stderr) or "无 stderr"
         return f"SL099 unexpected: Songlearner 流水线执行失败，退出码 {proc.returncode}: {stderr_tail}"
