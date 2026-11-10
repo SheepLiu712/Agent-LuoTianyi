@@ -61,8 +61,6 @@ bash scripts/deploy/install_linux.sh
 
 安装脚本使用 Python 3.10.22 创建 `.venv/`，按 [Linux 依赖锁文件](scripts/deploy/uv.lock) 安装 PyTorch 2.9.1、torchaudio 2.9.1 和 torchvision 0.24.1 的 CUDA 12.8 构建，以及语音合成和学歌依赖。随后安装 Chromium 的系统库和浏览器，浏览器文件保存在 `.runtime/browsers/`。安装结束前会检查 Python 依赖、显卡矩阵运算、音频重采样、MP3 编码和浏览器页面渲染。
 
-已有 PyTorch 2.8.0 实例升级时，按 [Linux 语音推理对照与上线交接](scripts/deploy/Linux语音推理对照与上线交接.md) 比较真实语音的首包延迟和合成速度，再将选定环境投入运行。
-
 **3. 前台启动并验收。**
 
 ```bash
@@ -71,27 +69,18 @@ bash scripts/deploy/start_linux.sh
 
 启动日志应出现“配置校验通过，ServerRuntime 已自动启动”。在服务器上打开 `http://127.0.0.1:15673/admin`（端口以配置为准），确认业务运行时已启动，再通过客户端发送一条消息并试听语音回复。前台运行时可用 Ctrl+C 停止服务。
 
-**4. 需要后台运行时，交给 systemd 管理。** 先停止前台实例，执行 `id -un` 和 `pwd -P` 获取运行账号和服务端绝对路径。使用 `sudo systemctl edit --force --full agentluo.service` 创建以下服务单元，将两处中文占位内容替换为实际值。
-
-```ini
-[Unit]
-Description=AgentLuo Server
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=运行账号
-WorkingDirectory=服务端绝对路径
-ExecStart=/bin/bash scripts/deploy/start_linux.sh
-UMask=0077
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+**4. 需要后台运行时，交给 systemd 管理。** 先停止前台实例，复制 [systemd 模板](scripts/deploy/agentluo.service.example) 并编辑：
 
 ```bash
+cp scripts/deploy/agentluo.service.example /tmp/agentluo.service
+nano /tmp/agentluo.service
+```
+
+将模板中的全部占位符替换为实际值：`@SERVICE_USER@` 是安装环境时使用的普通账号（`id -un`），`@SERVER_DIR@` 是包含 `server_main.py` 的绝对路径（`pwd -P`），`@SERVICE_HOME@` 是该账号的主目录。模板设置失败重启、5 分钟内最多启动 3 次、120 秒停止超时，并将日志交给 journal。检查并安装服务单元：
+
+```bash
+systemd-analyze verify /tmp/agentluo.service
+sudo install -m 644 /tmp/agentluo.service /etc/systemd/system/agentluo.service
 sudo systemctl daemon-reload
 sudo systemctl start agentluo
 systemctl status agentluo --no-pager
