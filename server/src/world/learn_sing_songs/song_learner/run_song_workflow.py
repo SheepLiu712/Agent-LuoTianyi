@@ -117,6 +117,9 @@ def safe_name(name: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="一键执行歌曲处理工作流（仅需歌曲名）。")
+    parser.add_argument(
+        "--prompt_json", default=str(SERVER_ROOT / "res/agent/prompts/song_segmentation_prompt.json")
+    )
     parser.add_argument("song_name", help="歌曲名，例如：万古生香")
     parser.add_argument(
         "--output_dir",
@@ -400,7 +403,7 @@ def main() -> None:
             print("[SKIP] 步骤 generate_llm_lrc 已完成，跳过")
         else:
             print("[PROCESS] 正在执行步骤: generate_llm_lrc - 生成LLM歌词（llm.lrc）")
-            generate_llm_lrc(target_song_dir, prompt_json=resource_root / "re_segment_prompt.json")
+            generate_llm_lrc(target_song_dir, prompt_json=Path(args.prompt_json).expanduser().resolve())
             status.mark_completed("generate_llm_lrc")
     except Exception as exc:
         raise_step_error(70, "generate_llm_lrc", exc)
