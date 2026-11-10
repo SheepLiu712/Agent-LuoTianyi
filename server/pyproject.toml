@@ -30,6 +30,7 @@ dependencies = [
     "psutil",
     "pydantic>=2.13.3,<3",
     "pydub",
+    "python-multipart",
     "python-jose",
     "PyYAML>=6",
     "requests",
@@ -48,6 +49,7 @@ speech = [
     "gsv-tts-lite>=0.4,<0.5",
     "scipy>=1.10,<2",
     "soundfile>=0.12",
+    "soxr",
 ]
 # Heavy, hardware-sensitive dependencies used only by the automatic song
 # learning pipeline. Keeping them out of the base install makes the server's

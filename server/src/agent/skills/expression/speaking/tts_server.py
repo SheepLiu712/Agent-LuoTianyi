@@ -9,6 +9,7 @@ import threading
 import time
 import traceback
 from contextlib import contextmanager
+from importlib.metadata import version
 from multiprocessing.queues import Queue as MPQueue
 from multiprocessing.synchronize import Event as MPEvent
 from queue import Empty
@@ -152,6 +153,18 @@ def _run_gsv_worker(  # noqa: C901
         import pathlib
 
         from gsv_tts import TTS
+
+        if version("torch").partition("+")[0] == "2.8.0" and version("gsv-tts-lite") in {"0.4.6", "0.4.7"}:
+            from gsv_tts import Config
+            from gsv_tts.GPT_SoVITS.GPT import t2s_model
+            from torch.nn.attention import SDPBackend
+
+            # PyTorch 2.8.0 excludes cuDNN for single-token decoding even
+            # when gsv's square attention probe selected it successfully.
+            if Config.SDPBACKEND == SDPBackend.CUDNN_ATTENTION:
+                backends = [SDPBackend.CUDNN_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+                Config.SDPBACKEND = backends
+                t2s_model.SDPBACKEND = backends
 
         model_config = _extract_model_paths_from_yaml(config_path)
         tts = TTS(
