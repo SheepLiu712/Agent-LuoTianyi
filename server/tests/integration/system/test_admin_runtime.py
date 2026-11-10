@@ -632,7 +632,7 @@ def test_qq_music_credential_refresh_runs_in_background(tmp_path, monkeypatch):
     assert status["state"] == "success"
     assert status["success"] is True
     assert credential_file.exists()
-    assert legacy_file.exists()
+    assert not legacy_file.exists()
     assert learner.qq_credential_valid is True
 
 

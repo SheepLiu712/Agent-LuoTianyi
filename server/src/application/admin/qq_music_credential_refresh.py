@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,7 +52,7 @@ class QQMusicCredentialRefreshService:
         with self._lock:
             if self._status.get("running"):
                 return dict(self._status)
-            credential_file, legacy_file = self._resolve_credential_paths()
+            credential_file = self._resolve_credential_file()
             qr_file = credential_file.parent / "qq_login_qr.png"
             self._status = {
                 "state": "running",
@@ -63,12 +62,12 @@ class QQMusicCredentialRefreshService:
                 "finished_at": None,
                 "success": None,
                 "credential_file": str(credential_file),
-                "legacy_file": str(legacy_file),
+                "legacy_file": None,
                 "qr_file": str(qr_file),
             }
             self._thread = threading.Thread(
                 target=self._run_refresh,
-                args=(credential_file, legacy_file, timeout_seconds),
+                args=(credential_file, timeout_seconds),
                 name="qq-music-credential-refresh",
                 daemon=True,
             )
@@ -82,7 +81,7 @@ class QQMusicCredentialRefreshService:
             return None
         return Path(str(raw_path))
 
-    def _run_refresh(self, credential_file: Path, legacy_file: Path, timeout_seconds: int) -> None:
+    def _run_refresh(self, credential_file: Path, timeout_seconds: int) -> None:
         try:
             if not download_qq_song.QQ_SDK_AVAILABLE:
                 raise RuntimeError(f"qqmusic-api-python 不可用: {download_qq_song.QQ_SDK_IMPORT_ERROR}")
@@ -95,10 +94,6 @@ class QQMusicCredentialRefreshService:
             saved = download_qq_song.load_saved_credential(credential_file)
             if not saved or not download_qq_song.validate_credential(saved):
                 raise RuntimeError(f"登录完成但 credential 格式校验失败: {credential_file}")
-
-            if credential_file.resolve() != legacy_file.resolve():
-                legacy_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(credential_file, legacy_file)
 
             self._mark_runtime_credentials_valid(credential_file)
             self._finish(True, f"QQ 音乐凭证刷新成功: {credential_file}")
@@ -118,12 +113,12 @@ class QQMusicCredentialRefreshService:
                 }
             )
 
-    def _resolve_credential_paths(self) -> tuple[Path, Path]:
+    def _resolve_credential_file(self) -> Path:
         raw_config = self._read_raw_config_safely()
         learner_cfg = (raw_config.get("world") or {}).get("auto_song_learner") or {}
-        credential_file = self._resolve_path(learner_cfg.get("qq_credential_file") or "config/qq_music_credential.json")
-        resource_dir = self._resolve_path(learner_cfg.get("songlearner_resource_dir") or "res/song_learner")
-        return credential_file, resource_dir / ".qq_music_credential.json"
+        return ServerPaths.from_environment(self.root_dir).resolve(
+            learner_cfg.get("qq_credential_file") or "config/qq_music_credential.json"
+        )
 
     def _read_raw_config_safely(self) -> dict[str, Any]:
         try:
@@ -131,12 +126,6 @@ class QQMusicCredentialRefreshService:
         except (json.JSONDecodeError, OSError) as exc:
             self.logger.warning(f"读取配置失败，使用默认 QQ 音乐凭证路径: {exc}")
             return {}
-
-    def _resolve_path(self, raw_path: str | Path) -> Path:
-        path = Path(raw_path).expanduser()
-        if path.is_absolute():
-            return path
-        return ServerPaths.from_environment(self.root_dir).resolve(path)
 
     def _mark_runtime_credentials_valid(self, credential_file: Path) -> None:
         if self.runtime_getter is None:

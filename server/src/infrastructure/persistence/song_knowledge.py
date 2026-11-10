@@ -5,6 +5,8 @@ from typing import Dict
 from sqlalchemy import Column, String, Text, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
+from src.utils.server_paths import resolve_server_path
+
 Base = declarative_base()
 
 
@@ -43,16 +45,7 @@ def init_song_db(config: Dict):
 
 def get_song_db():
     """Generator for database session"""
-    global SessionLocal
-    if SessionLocal is None:
-        # Fallback default path if not initialized explicitly
-        init_song_db(
-            {
-                "db_folder": str(Path(__file__).resolve().parents[3] / "res" / "knowledge"),
-                "db_file": "knowledge_db.db",
-            }
-        )
-    db = SessionLocal()
+    db = get_song_session()
     try:
         yield db
     finally:
@@ -66,7 +59,7 @@ def get_song_session() -> Session:
         # Fallback default path if not initialized explicitly
         init_song_db(
             {
-                "db_folder": str(Path(__file__).resolve().parents[3] / "res" / "knowledge"),
+                "db_folder": str(resolve_server_path("data/knowledge")),
                 "db_file": "knowledge_db.db",
             }
         )

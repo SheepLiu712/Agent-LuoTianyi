@@ -1,9 +1,15 @@
 import argparse
 import json
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Iterable
+
+SERVER_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(SERVER_ROOT))
+
+from src.utils.server_paths import resolve_server_path
 
 
 LEFT_TO_RIGHT = {
@@ -191,19 +197,19 @@ def main() -> None:
     parser.add_argument(
         "--song-dir",
         type=Path,
-        default=Path("res") / "knowledge" / "歌曲合集",
+        default=resolve_server_path("data/knowledge/歌曲合集"),
         help="Directory containing song json files",
     )
     parser.add_argument(
         "--song-output",
         type=Path,
-        default=Path("res") / "knowledge" / "song_name_keywords.txt",
+        default=resolve_server_path("data/knowledge/song_name_keywords.txt"),
         help="Output txt path for song-name keywords",
     )
     parser.add_argument(
         "--lyric-output",
         type=Path,
-        default=Path("res") / "knowledge" / "song_lyric_keywords.txt",
+        default=resolve_server_path("data/knowledge/song_lyric_keywords.txt"),
         help="Output txt path for lyric keywords with source songs",
     )
     args = parser.parse_args()

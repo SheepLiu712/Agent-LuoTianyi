@@ -23,6 +23,8 @@ if str(SERVER_ROOT) not in sys.path:
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from src.utils.server_paths import resolve_server_path
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
@@ -31,7 +33,7 @@ if hasattr(sys.stderr, "reconfigure"):
 OUTPUTS_DIR = Path(
     os.environ.get("TEST_SONGS_DIR", Path.cwd() / "outputs" / "songs")
 )
-RESOURCE_ROOT = Path(os.environ.get("SONGLEARNER_RESOURCE_DIR", SERVER_ROOT / "res" / "song_learner"))
+RESOURCE_ROOT = Path(os.environ.get("SONGLEARNER_RESOURCE_DIR") or resolve_server_path("res/song_learner"))
 
 download_qq_song = import_module("pipeline.download_qq_song")
 workflow_status = import_module("pipeline.workflow_status")
@@ -118,7 +120,7 @@ def safe_name(name: str) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="一键执行歌曲处理工作流（仅需歌曲名）。")
     parser.add_argument(
-        "--prompt_json", default=str(SERVER_ROOT / "res/agent/prompts/song_segmentation_prompt.json")
+        "--prompt_json", default=str(resolve_server_path("res/agent/prompts/song_segmentation_prompt.json"))
     )
     parser.add_argument("song_name", help="歌曲名，例如：万古生香")
     parser.add_argument(
@@ -136,8 +138,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--credential_file",
         type=str,
-        default=os.environ.get("SONGLEARNER_QQ_CREDENTIAL_FILE", ""),
-        help="QQ 音乐 credential 文件路径，默认读取 SONGLEARNER_QQ_CREDENTIAL_FILE 或 resource_root/.qq_music_credential.json。",
+        default=str(download_qq_song.default_credential_file()),
+        help="QQ 音乐凭证路径，默认读取 SONGLEARNER_QQ_CREDENTIAL_FILE 或实例配置目录中的 qq_music_credential.json。",
     )
     parser.add_argument(
         "--no_auto_login",
@@ -256,11 +258,7 @@ def main() -> None:
     project_root: Path = SERVER_ROOT
     outputs_dir: Path = Path(args.output_dir).expanduser().resolve()
     resource_root: Path = Path(args.resource_root).expanduser().resolve()
-    credential_file: Path = (
-        Path(args.credential_file).expanduser().resolve()
-        if args.credential_file
-        else resource_root / ".qq_music_credential.json"
-    )
+    credential_file = Path(args.credential_file or download_qq_song.default_credential_file()).expanduser().resolve()
 
     song_name = safe_name(args.song_name)
     if not song_name:

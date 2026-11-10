@@ -14,31 +14,17 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
+from src.utils.server_paths import resolve_server_path
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song as qq_song
 
 
 def read_config() -> dict[str, Any]:
-    config_path = SERVER_ROOT / "config" / "config.json"
+    config_path = resolve_server_path("config/config.json")
     try:
         return json.loads(config_path.read_text(encoding="utf-8"))
     except Exception as exc:
         print(f"[WARN] 读取 config/config.json 失败，将使用默认路径: {exc}")
         return {}
-
-
-def resolve_server_path(raw_path: str | Path) -> Path:
-    path = Path(raw_path).expanduser()
-    if path.is_absolute():
-        return path
-    return SERVER_ROOT / path
-
-
-def default_paths(config: dict[str, Any]) -> tuple[Path, Path]:
-    learner_cfg = (config.get("world") or {}).get("auto_song_learner") or {}
-    credential_file = resolve_server_path(learner_cfg.get("qq_credential_file") or "config/qq_music_credential.json")
-    resource_dir = resolve_server_path(learner_cfg.get("songlearner_resource_dir") or "res/song_learner")
-    legacy_file = resource_dir / ".qq_music_credential.json"
-    return credential_file, legacy_file
 
 
 def sync_legacy_credential(credential_file: Path, legacy_file: Path) -> None:
@@ -95,12 +81,14 @@ def refresh_credential(args: argparse.Namespace) -> int:
         return 2
 
     config = read_config()
-    default_credential_file, default_legacy_file = default_paths(config)
-    credential_file = resolve_server_path(args.credential_file) if args.credential_file else default_credential_file
-    legacy_file = resolve_server_path(args.legacy_file) if args.legacy_file else default_legacy_file
+    learner_cfg = (config.get("world") or {}).get("auto_song_learner") or {}
+    credential_file = resolve_server_path(
+        args.credential_file or learner_cfg.get("qq_credential_file") or "config/qq_music_credential.json"
+    )
+    legacy_file = resolve_server_path(args.legacy_file) if args.legacy_file and not args.no_legacy_sync else None
 
     print(f"[INFO] 主 credential 路径: {credential_file}")
-    if not args.no_legacy_sync:
+    if legacy_file:
         print(f"[INFO] 兼容 credential 路径: {legacy_file}")
     print("[INFO] 即将生成 QQ 登录二维码，请用 QQ 扫码并确认登录。")
 
@@ -117,7 +105,7 @@ def refresh_credential(args: argparse.Namespace) -> int:
     if not validate_saved_credential(credential_file):
         return 4
 
-    if not args.no_legacy_sync:
+    if legacy_file:
         try:
             sync_legacy_credential(credential_file, legacy_file)
         except Exception as exc:
@@ -134,7 +122,7 @@ def refresh_credential(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="刷新 QQ 音乐 credential：生成二维码，等待扫码，写回 credential 文件。")
     parser.add_argument("--credential-file", default="", help="主 credential 输出路径，默认读取 config.json")
-    parser.add_argument("--legacy-file", default="", help="兼容 credential 输出路径，默认 songlearner_resource_dir/.qq_music_credential.json")
+    parser.add_argument("--legacy-file", default="", help="显式指定需要额外同步的兼容凭证路径")
     parser.add_argument("--no-legacy-sync", action="store_true", help="不再同步兼容旧路径")
     parser.add_argument("--login-timeout", type=int, default=180, help="等待扫码登录秒数，默认 180")
     parser.add_argument("--timeout", type=int, default=20, help="探测接口超时秒数，默认 20")

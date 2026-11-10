@@ -128,7 +128,7 @@ class AutoSongLearner:
         if not self.qq_credential_valid:
             self.logger.warning("QQ 音乐凭证无效或不存在，正在生成登录二维码...")
             self._generate_login_qr()
-            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}")
+            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self._credential_file.parent / 'qq_login_qr.png'}")
 
     # -- directory setup -----------------------------------------------------
 
@@ -210,7 +210,7 @@ class AutoSongLearner:
         if not valid:
             self.logger.warning("QQ 音乐凭证仍然无效，重新生成登录二维码...")
             self._generate_login_qr()
-            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}")
+            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self._credential_file.parent / 'qq_login_qr.png'}")
         return valid
 
     # -- main entry ----------------------------------------------------------
