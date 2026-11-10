@@ -106,6 +106,9 @@ class AutoSongLearner:
         )
         self.songlearner_resource_dir = resolve_server_path(config.get("songlearner_resource_dir", "res/song_learner"))
         self.work_dir = resolve_server_path(config.get("work_dir", ".runtime/song_learner"))
+        self.prompt_file = resolve_server_path(
+            config.get("prompt_file", "res/agent/prompts/song_segmentation_prompt.json")
+        )
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
@@ -348,6 +351,8 @@ class AutoSongLearner:
                     str(self.songs_dir),
                     "--resource_root",
                     str(self.songlearner_resource_dir),
+                    "--prompt_json",
+                    str(self.prompt_file),
                     "--credential_file",
                     str(self._credential_file),
                     "--no_auto_login",
@@ -569,8 +574,10 @@ class AutoSongLearner:
             "msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt",
             "msst/configs/model_mel_band_roformer_denoise.yaml",
             "msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt",
-            "re_segment_prompt.json",
         ]
+        if not self.prompt_file.is_file():
+            self.logger.warning(f"Songlearner Prompt 缺失: {self.prompt_file}")
+            return False
         for rel_path in required_models:
             if not (self.songlearner_resource_dir / rel_path).exists():
                 self.logger.warning(f"Songlearner 模型缺失: {rel_path}")

@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "path": "res/admin_ui/admin_static/assets/index-CYgWeTa-.js",
+      "size": 249963,
+      "sha256": "cc0d0b080259f0e00beb9874c0e7986cfe4d1a8751272deca3d099eea56c1980"
+    },
+    {
+      "path": "res/admin_ui/admin_static/assets/index-D2JFY0DV.css",
+      "size": 14121,
+      "sha256": "40129e9c4174f05d16df79f68136447d0accf1fc8900d6e748bcee141b90d971"
+    },
+    {
+      "path": "res/admin_ui/admin_static/index.html",
+      "size": 435,
+      "sha256": "61f8724b03ac8457020b991da55a0df4bbeb1cb8673622c184b52f32a8590f48"
+    },
+    {
+      "path": "res/agent/persona/llm_tones_mapping.json",
+      "size": 3741,
+      "sha256": "5c3674a8562d1ea5b634d6fede3f5bf412ad0edcdb89c62b5fe9177b80dd01a1"
+    },
+    {
+      "path": "res/agent/persona/persona.json",
+      "size": 1243,
+      "sha256": "f448b80b91479dd95fae47755e0c40ded75e7d66c5b87eea7e33d1ebe23db5a4"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_opening_1.wav",
+      "size": 155564,
+      "sha256": "f509b7b9e8559fb0853219a368ae8b7aabf936bf00027e0e089645c20edd0e76"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_opening_2.wav",
+      "size": 88364,
+      "sha256": "12a5ca378535ced15815297883d1a830dee7f56b4da7f62a15677846c4091951"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_opening_3.wav",
+      "size": 132524,
+      "sha256": "4a5cb45af29c7d7c5c003c62ac9cba260b455c08d96f18090003c23b48f0c3f8"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_opening_4.wav",
+      "size": 149804,
+      "sha256": "99511412893fdfb0b4bac8da85d710c0d5fa95fa43a888cdc55ef3bd5aaac00c"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_silence_1.wav",
+      "size": 126764,
+      "sha256": "9ccf6840fc5179bfa3cc2318727e7528ae51870fa4ce5bcc3ca7d58110e3fc24"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_silence_2.wav",
+      "size": 151724,
+      "sha256": "97d21475fcdc6ca45e8143adcefcbaaa786cffbecc31537ab468e12c25866c73"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_silence_3.wav",
+      "size": 132524,
+      "sha256": "e4aef921f284eced3bcbe8b76ce3b339099b1ee78b195793f3d9159c84539adb"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_silence_4.wav",
+      "size": 96044,
+      "sha256": "ff9933b452cf7a142e34083f18f83f23b3b1143adaf17f41770c7bb896e1586b"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_turn_1.wav",
+      "size": 90284,
+      "sha256": "7c587bade37cd66457bdead7129197c5e984eb47b9f840f3e4ba663d1509809f"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_turn_2.wav",
+      "size": 122924,
+      "sha256": "e483b8ce5fd33b86ce59162bf4207cf93d3bfaa45c2b77d151751e92d4e7cb70"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_turn_3.wav",
+      "size": 161324,
+      "sha256": "6fd298be2ca80dbe26b11358d8e25a2194aa3a763eda9d1dff0d04deccbd81fe"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/call_apology_turn_4.wav",
+      "size": 138284,
+      "sha256": "94f35dc1abc305d0db77bf82e0d54f9a91cb41fbfbb7832573f577ce16eb1ee3"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/first_greet_1.wav",
+      "size": 167724,
+      "sha256": "a5e03de07f29490bb4627d891fe073af62fc87ae5d0884e435616b97d77dc2ab"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/first_greet_2.wav",
+      "size": 236844,
+      "sha256": "0c42438a0bcf3d8719da5d4fc2c4c86d9e7d8a0a834a7628408bcf4ba26954cc"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice1.wav",
+      "size": 55084,
+      "sha256": "6cc1686f63581422ad3a53b333e6c0ffcc098af7ddec88edacc2e6c3ec8ab7f3"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice2.wav",
+      "size": 101164,
+      "sha256": "5211cb9000ca57496bffcee000eee89d092d6969aa4201e902d61571c0ff7f0e"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice3.wav",
+      "size": 65324,
+      "sha256": "2f8ce7da196416671ccc8c8eacd32b6f556e046a45fc79f10269d06d18601dfb"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice4.wav",
+      "size": 85804,
+      "sha256": "2119524f0db7b99cc6cef78d74486f915315517244a9b0a38f32fb0b3dbfff1e"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice5.wav",
+      "size": 80684,
+      "sha256": "a4e075ebe82de439a8d9f0740249d4f01af2ce218a648cf5c533435e912b3849"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice6.wav",
+      "size": 131884,
+      "sha256": "476fdb88e6584dcff9be57d3bc3949a6d7ad3e7fcd907da4ec19ef1d5eef131b"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice7.wav",
+      "size": 131884,
+      "sha256": "98a20c7f9f2bc999abd20ad2c755d98ac61db49fecedd48e96cd70df926976e9"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/audio/touch_voice8.wav",
+      "size": 101164,
+      "sha256": "968a0974ae5bed7dc03046706738e099c04f2d3e0fe46b44ea39a4cbee47b5df"
+    },
+    {
+      "path": "res/agent/prepared_speech/luotianyi/manifest.json",
+      "size": 3585,
+      "sha256": "67530017674d17f179d1b53bde77207cc7da2ef11ce7e210be56c7a590e939ae"
+    },
+    {
+      "path": "res/agent/prompts/audio_understanding_prompt.json",
+      "size": 812,
+      "sha256": "0b17fa3852526450b9e851a8429027735895e6d4e25980d8c6485750587db3fa"
+    },
+    {
+      "path": "res/agent/prompts/bili_dynamic_fetcher_prompt.json",
+      "size": 1953,
+      "sha256": "22b256cbae343287c4d8ac07f2a101dfbc4d90f146612c96ecd1aaea9e9febc6"
+    },
+    {
+      "path": "res/agent/prompts/call_asr_instructions.txt",
+      "size": 645,
+      "sha256": "e5089f08fcf567f2cb6966f9e45f65775ea2881d57b85620885eff7f8e7e3d76"
+    },
+    {
+      "path": "res/agent/prompts/call_summary_prompt.json",
+      "size": 606,
+      "sha256": "a137295d095a3825137fb9180426a8f261b5df2e20e5a18a2fe219f711c429ec"
+    },
+    {
+      "path": "res/agent/prompts/citywalk_llm_prompt.json",
+      "size": 116,
+      "sha256": "37be7adc771f564bede1ebadd04fff38c911424a6061807f81cd23a5ec2972b3"
+    },
+    {
+      "path": "res/agent/prompts/citywalk_vlm_prompt.json",
+      "size": 76,
+      "sha256": "6977577ee55f2982e4cb4314333327497bc9bd6475bfce1f34f624e14de5672c"
+    },
+    {
+      "path": "res/agent/prompts/crawl_prompt.json",
+      "size": 1407,
+      "sha256": "1fffeb0445e5829f916b6e35f09a7206e255da1e93d8a617d0d0337c76529a70"
+    },
+    {
+      "path": "res/agent/prompts/date_detection_prompt.json",
+      "size": 1757,
+      "sha256": "e7285e7262a619e45a57923c1ce60c1cf7f05db5b897d0f3fc271a0af96f81d1"
+    },
+    {
+      "path": "res/agent/prompts/diary_prompt.json",
+      "size": 1557,
+      "sha256": "eb9da0df40d091436d6ac6b88a01095df2bc3779da984819b48401cf4d2b5fc6"
+    },
+    {
+      "path": "res/agent/prompts/dynamic_post_prompt.json",
+      "size": 873,
+      "sha256": "89957bbf4379646edc7d09e510fb5fcf70581e3b7390eddab85a4996a9cf6406"
+    },
+    {
+      "path": "res/agent/prompts/dynamic_reply_prompt.json",
+      "size": 1772,
+      "sha256": "a9d6d7fbecbacbd198d97973ecfa1dd4f7b34e2d1564f154686e3c94dec3fbf6"
+    },
+    {
+      "path": "res/agent/prompts/event_store_prompt.json",
+      "size": 872,
+      "sha256": "8d191145ce645194a0071921f915669ee2f6c228b03a2a2cfbae73d234339410"
+    },
+    {
+      "path": "res/agent/prompts/memory_store_prompt.json",
+      "size": 76,
+      "sha256": "c7961961888013650c08e45375f7d5bf5f0f0870189608478142162a2b5b3145"
+    },
+    {
+      "path": "res/agent/prompts/memory_write_prompt.json",
+      "size": 2108,
+      "sha256": "977b0d0a5b223afc0e66357db829122ebdcf9829a06ab615e12d038675d87433"
+    },
+    {
+      "path": "res/agent/prompts/realtime_call_prompt.json",
+      "size": 2726,
+      "sha256": "5080ce2a12a7991bb710a7ae7e223cbc7505d55eac45c05a4e180ce27c95fdc5"
+    },
+    {
+      "path": "res/agent/prompts/return_login_activity_prompt.json",
+      "size": 896,
+      "sha256": "0aaaf3a993ae15a1f482276b73c9967592ae0cdc217659942278674c99cef733"
+    },
+    {
+      "path": "res/agent/prompts/song_emotion_prompt.json",
+      "size": 984,
+      "sha256": "9629cd6325f6d1b1afedb5c8d5a61b6f588ca932cb6fe74f1524544853a2a27d"
+    },
+    {
+      "path": "res/agent/prompts/song_knowledge_crawler_prompt.json",
+      "size": 531,
+      "sha256": "89b7b603660af8b36ab049212ee4d897a2005f3501411b22204c19ed9c8d80dc"
+    },
+    {
+      "path": "res/agent/prompts/song_knowledge_extraction_prompt.json",
+      "size": 1615,
+      "sha256": "f513dbb2030079067ceb088a60f8c4cac6fe91b396ee64f02cf473c6cbd2c2e2"
+    },
+    {
+      "path": "res/agent/prompts/song_segmentation_prompt.json",
+      "size": 1054,
+      "sha256": "7f5d8770bf163d3f05e212b0563fa572260e2921a5d1d4ad345407d69868ed50"
+    },
+    {
+      "path": "res/agent/prompts/summary_prompt.json",
+      "size": 800,
+      "sha256": "414b9b375dfb3a7b707b9cd0b4dc4c9099336bac624ea9325e5a42f757ee3841"
+    },
+    {
+      "path": "res/agent/prompts/topic_extraction_prompt.json",
+      "size": 1749,
+      "sha256": "240f184af38fc4493c6386484c803f7def2d04c08395c9a24abfa0d7e6a1c1b3"
+    },
+    {
+      "path": "res/agent/prompts/topic_reply_prompt.json",
+      "size": 2215,
+      "sha256": "eed2966d60906d15a074734bb01e3dd5636b4f8901e8a110570dc16e14fc987a"
+    },
+    {
+      "path": "res/agent/prompts/user_profile_update_prompt.json",
+      "size": 1517,
+      "sha256": "e361511b5e6d7096d60dab5eb69920240bd7b4e08deef62130c80dca3ef6ccc6"
+    },
+    {
+      "path": "res/agent/prompts/vision_interaction_prompt.json",
+      "size": 1004,
+      "sha256": "288dc2650c3a1c43be649c009c12a29170eed2562a05ad8437069836b380f2aa"
+    },
+    {
+      "path": "src/world/get_new_songs/vcpedia_templates.json",
+      "size": 3864,
+      "sha256": "557f656af4853590b6dfae7f4f59f71bfa3c253a3c1771aea727f1b9d0f920fc"
+    },
+    {
+      "path": "src/world/learn_sing_songs/song_learner/src/msaf/algorithms/olda/models/EstBeats_BeatlesIso.npy",
+      "size": 70768,
+      "sha256": "25dc20819d734a82fb24b8a9d071fefb01fcf967c11f444adfb6d078b5f1f1e3"
+    },
+    {
+      "path": "src/world/learn_sing_songs/song_learner/src/msaf/algorithms/olda/models/EstBeats_BeatlesTUT.npy",
+      "size": 70768,
+      "sha256": "0fe6383981dcc829794a4616bad0691e113b0baf3e6f19aeed54a85fe1fe95c3"
+    },
+    {
+      "path": "src/world/learn_sing_songs/song_learner/src/msaf/algorithms/olda/models/EstBeats_SALAMI-i.npy",
+      "size": 70768,
+      "sha256": "96f4f09c0e164485d0d622c2f334a09c5c4663af0cba0982fa6eabeef086eb56"
+    }
+  ]
+}

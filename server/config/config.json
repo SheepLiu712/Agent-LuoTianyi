@@ -676,6 +676,7 @@
             },
             "songlearner_dir": "src/world/learn_sing_songs/song_learner",
             "songlearner_resource_dir": "res/song_learner",
+            "prompt_file": "res/agent/prompts/song_segmentation_prompt.json",
             "qq_credential_file": "config/qq_music_credential.json",
             "qq_credential_refresh_before_seconds": 86400
         },
