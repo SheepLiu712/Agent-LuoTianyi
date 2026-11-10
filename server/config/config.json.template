@@ -231,7 +231,7 @@
                 "characters": {
                     "luotianyi": {
                         "character_name": "洛天依",
-                        "resource_path": "res/sing_song/luotianyi"
+                        "resource_path": "data/singing/luotianyi"
                     }
                 }
             },
@@ -357,8 +357,8 @@
             },
             "jargon_recognition": {
                 "song_entity_linker": {
-                    "songname_file": "res/knowledge/song_name_keywords.txt",
-                    "lyric_file": "res/knowledge/song_lyric_keywords.txt"
+                    "songname_file": "data/knowledge/song_name_keywords.txt",
+                    "lyric_file": "data/knowledge/song_lyric_keywords.txt"
                 }
             },
             "topic_extraction": {
@@ -375,7 +375,7 @@
             },
             "knowledge": {
                 "song_database": {
-                    "db_folder": "res/knowledge",
+                    "db_folder": "data/knowledge",
                     "db_file": "knowledge_db.db"
                 }
             },
@@ -553,7 +553,7 @@
                 }
             },
             "song_database": {
-                "db_folder": "res/knowledge",
+                "db_folder": "data/knowledge",
                 "db_file": "knowledge_db.db"
             },
             "crawler": {

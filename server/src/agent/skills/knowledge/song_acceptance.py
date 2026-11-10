@@ -1,7 +1,7 @@
 """幂等接纳歌曲知识候选，在同一幂等边界内写入歌曲知识与关键词索引。
 
-写入对象是既有歌曲知识库（`res/knowledge/knowledge_db.db`）与既有关键词文件
-（`res/knowledge/song_name_keywords.txt`、`song_lyric_keywords.txt`），不新建第二份知识库。
+写入对象是既有歌曲知识库（`data/knowledge/knowledge_db.db`）与既有关键词文件
+（`data/knowledge/song_name_keywords.txt`、`song_lyric_keywords.txt`），不新建第二份知识库。
 
 现有 `Song` 表没有来源与修订列，因此幂等门以名称与 safe name 的既有项为准
 （与工单 #81 的「名称/safe name 已有项跳过」一致）；来源、外部标识与修订随结果返回，
@@ -67,10 +67,12 @@ class SongKnowledgeStore:
         server_root = Path(__file__).resolve().parents[4]
         configured = dict(song_database or {})
         self._song_database = {
-            "db_folder": configured.get("db_folder") or str(server_root / "res" / "knowledge"),
+            "db_folder": configured.get("db_folder") or str(server_root / "data" / "knowledge"),
             "db_file": configured.get("db_file") or "knowledge_db.db",
         }
-        knowledge_dir = Path(config.get("knowledge_dir") or server_root / "res" / "knowledge")
+        knowledge_dir = Path(
+            config.get("knowledge_dir") or configured.get("db_folder") or server_root / "data" / "knowledge"
+        )
         self._song_name_file = knowledge_dir / "song_name_keywords.txt"
         self._lyric_file = knowledge_dir / "song_lyric_keywords.txt"
         self._database_lock = threading.Lock()

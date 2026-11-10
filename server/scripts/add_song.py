@@ -126,8 +126,8 @@ def populate_database(json_dir: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Add songs to knowledge database.")
-    parser.add_argument("--dir", type=str, default="res/knowledge/歌曲合集", help="Directory containing song JSON files")
-    parser.add_argument("--db_dir", type=str, default="res/knowledge", help="Directory for the database")
+    parser.add_argument("--dir", type=str, default="data/knowledge/歌曲合集", help="Directory containing song JSON files")
+    parser.add_argument("--db_dir", type=str, default="data/knowledge", help="Directory for the database")
     parser.add_argument("--db_name", type=str, default="knowledge_db.db", help="Database filename")
     
     args = parser.parse_args()

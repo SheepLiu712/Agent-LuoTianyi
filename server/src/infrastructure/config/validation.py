@@ -423,13 +423,13 @@ class RuntimeConfigValidator:
 
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
         linker_cfg = self._get(config, "agent_runtime.skills.jargon_recognition.song_entity_linker") or {}
-        songname_file = linker_cfg.get("songname_file") or "res/knowledge/song_name_keywords.txt"
+        songname_file = linker_cfg.get("songname_file") or "data/knowledge/song_name_keywords.txt"
         lyric_file = (
-            linker_cfg.get("lyric_file") or linker_cfg.get("lyrics_file") or "res/knowledge/song_lyric_keywords.txt"
+            linker_cfg.get("lyric_file") or linker_cfg.get("lyrics_file") or "data/knowledge/song_lyric_keywords.txt"
         )
 
         song_db_cfg = self._get(config, "agent_runtime.skills.knowledge.song_database") or {}
-        db_folder = song_db_cfg.get("db_folder") or "res/knowledge"
+        db_folder = song_db_cfg.get("db_folder") or "data/knowledge"
         db_file = song_db_cfg.get("db_file") or "knowledge_db.db"
         raw_db_file = Path(str(db_file))
         db_path = raw_db_file if raw_db_file.is_absolute() else Path(str(db_folder)) / raw_db_file
