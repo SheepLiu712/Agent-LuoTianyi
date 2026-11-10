@@ -102,6 +102,7 @@ class AutoSongLearner:
         # Songlearner integration
         self.songlearner_dir = cwd / Path(config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner"))
         self.songlearner_resource_dir = cwd / Path(config.get("songlearner_resource_dir", "res/song_learner"))
+        self.work_dir = self._resolve_path(cwd, config.get("work_dir", ".runtime/song_learner"))
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
@@ -334,6 +335,7 @@ class AutoSongLearner:
         env = self._build_songlearner_env()
 
         try:
+            self.work_dir.mkdir(parents=True, exist_ok=True)
             proc = subprocess.run(
                 [
                     sys.executable,
@@ -349,7 +351,7 @@ class AutoSongLearner:
                     "--singer_name",
                     self.character_name,
                 ],
-                cwd=str(self.songlearner_dir),
+                cwd=str(self.work_dir),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
