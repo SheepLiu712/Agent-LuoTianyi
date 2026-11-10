@@ -7,9 +7,9 @@ dependencies = [
     "gsv-tts-lite==0.4.7",
     "setuptools>=80,<81",
     "transformers<5",
-    "torch==2.8.0",
-    "torchaudio==2.8.0",
-    "torchvision==0.23.0",
+    "torch==2.9.1",
+    "torchaudio==2.9.1",
+    "torchvision==0.24.1",
 ]
 
 [tool.uv]

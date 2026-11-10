@@ -59,7 +59,9 @@ if [ -f config/admin_auth.json ]; then chmod 600 config/admin_auth.json; fi
 bash scripts/deploy/install_linux.sh
 ```
 
-安装脚本使用 Python 3.10.22 创建 `.venv/`，按 [Linux 依赖锁文件](scripts/deploy/uv.lock) 安装 PyTorch 2.8.0（CUDA 12.8）、语音合成和学歌依赖。随后安装 Chromium 的系统库和浏览器，浏览器文件保存在 `.runtime/browsers/`。安装结束前会检查 Python 依赖、显卡矩阵运算、音频重采样、MP3 编码和浏览器页面渲染。
+安装脚本使用 Python 3.10.22 创建 `.venv/`，按 [Linux 依赖锁文件](scripts/deploy/uv.lock) 安装 PyTorch 2.9.1、torchaudio 2.9.1 和 torchvision 0.24.1 的 CUDA 12.8 构建，以及语音合成和学歌依赖。随后安装 Chromium 的系统库和浏览器，浏览器文件保存在 `.runtime/browsers/`。安装结束前会检查 Python 依赖、显卡矩阵运算、音频重采样、MP3 编码和浏览器页面渲染。
+
+已有 PyTorch 2.8.0 实例升级时，按 [Linux 语音推理对照与上线交接](scripts/deploy/Linux语音推理对照与上线交接.md) 比较真实语音的首包延迟和合成速度，再将选定环境投入运行。
 
 **3. 前台启动并验收。**
 
