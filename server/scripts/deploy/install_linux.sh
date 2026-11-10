@@ -9,13 +9,15 @@ if [[ $(uname -s) != Linux || $(uname -m) != x86_64 || $EUID == 0 ]]; then
 fi
 nvidia-smi
 umask 077
-mkdir -p .runtime
-exec 9>.runtime/server.lock
+runtime_dir="${AGENTLUO_RUNTIME_DIR:-$server_dir/.runtime}"
+if [[ "$runtime_dir" != /* ]]; then runtime_dir="$server_dir/$runtime_dir"; fi
+mkdir -p "$runtime_dir"
+exec 9>"$runtime_dir/server.lock"
 flock -n 9 || { echo "请等待安装结束或停止服务后重试。" >&2; exit 1; }
 
 export UV_PROJECT_ENVIRONMENT="$server_dir/.venv"
 export UV_LINK_MODE=copy
-export PLAYWRIGHT_BROWSERS_PATH="$server_dir/.runtime/browsers"
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$runtime_dir/browsers}"
 uv python install 3.10.22
 uv sync --project scripts/deploy --python 3.10.22 --locked --no-dev
 uv pip check --python .venv/bin/python

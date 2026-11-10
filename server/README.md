@@ -158,3 +158,7 @@ Windows 和 Linux 启动脚本都会保留已有的代理例外，并将本机�
 - 感谢阿里云、硅基流动平台提供的API服务
 - 感谢ChatGPT，这是我大爹，我的代码基本都是它写的。
 - 感谢所有贡献者的努力和支持！
+
+## 多实例与部署资源
+
+独立配置、数据与模型路径、旧资源离线迁移及资源清单校验见 [部署资源布局](scripts/deploy/RESOURCE_LAYOUT.md)。启动前可使用 `python server_main.py --check-startup` 检查监听配置；此命令不启动业务服务。

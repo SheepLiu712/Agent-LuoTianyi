@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import os
 
@@ -6,19 +7,19 @@ from fastapi import FastAPI
 
 from src.application.host_context import ServerHostContext
 from src.application.server_lifecycle import ServerLifecycle
-from src.utils.helpers import load_config
+from src.application.startup import prepare_startup
 from src.utils.logger import get_logger, install_access_log_filter
-from src.utils.server_paths import ServerPaths
 from src.web.bindings import bind_web_interfaces
 
-paths = ServerPaths.from_environment()
-paths.runtime_dir.mkdir(parents=True, exist_ok=True)
-os.chdir(paths.runtime_dir)
+startup = prepare_startup()
+paths = startup.paths
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 logger = get_logger("server_main")
-config = load_config(str(paths.config_dir / "config.json"))
-server_lifecycle = ServerLifecycle(root_dir=current_dir, config_path=paths.config_dir / "config.json")
+config = startup.config
+server_lifecycle = ServerLifecycle(
+    root_dir=current_dir, config_path=paths.config_dir / "config.json", secret_store=startup.secrets
+)
 app = FastAPI()
 bind_web_interfaces(app, current_dir)
 
@@ -45,7 +46,7 @@ async def run_server(
         await lifecycle.stop()
 
 
-def main() -> None:
+def main(*, check_only: bool = False) -> None:
     """仅从配置读取启动模式和端口；SERVER_HOST 可覆盖监听主机地址。"""
     try:
         is_debug = config["is_debug"]
@@ -61,6 +62,10 @@ def main() -> None:
     logger.info("服务器正在以%s模式运行，监听端口：%s", "调试" if is_debug else "生产", port)
     logger.info("启用 HTTP 模式")
     host = os.environ.get("SERVER_HOST", "127.0.0.1")
+    if check_only:
+        print(f"Startup configuration valid: host={host} port={port}")
+        print(f"config_dir={paths.config_dir} data_dir={paths.data_dir} runtime_dir={paths.runtime_dir}")
+        return
     display_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     admin_url = f"http://{display_host}:{port}/admin"
     logger.info("控制台地址: %s", admin_url)
@@ -72,4 +77,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check-startup", action="store_true", help="Check startup config without starting services")
+    args = parser.parse_args()
+    main(check_only=args.check_startup)
