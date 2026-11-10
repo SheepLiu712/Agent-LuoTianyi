@@ -14,6 +14,7 @@ from src.infrastructure.persistence.database.utils import (
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
     MIN_MESSAGE_TOKEN_TTL_SECONDS,
 )
+from src.utils.server_paths import ServerPaths
 
 
 @dataclass
@@ -530,7 +531,7 @@ class RuntimeConfigValidator:
         path = Path(str(raw))
         if path.is_absolute():
             return path
-        return self.root_dir / path
+        return ServerPaths.from_environment(self.root_dir).resolve(path)
 
     @staticmethod
     def _get(data: dict[str, Any], path: str) -> Any:

@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional
 
 import requests
 
+from src.utils.server_paths import resolve_server_path
+
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
@@ -39,9 +41,9 @@ class VCPediaFetcher:
         self.llm_client = None
 
         # Define directories to search
-        self.data_dir = Path(config.get("data_dir", "data/crawled_data"))
+        self.data_dir = resolve_server_path(config.get("data_dir", "data/crawled_data"))
         # Default save directory
-        self.default_save_dir = Path(crawler_config.get("output_dir", "data/crawled_data"))
+        self.default_save_dir = resolve_server_path(crawler_config.get("output_dir", "data/crawled_data"))
 
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": user_agent()})

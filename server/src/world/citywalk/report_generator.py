@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from src.utils.helpers import ensure_directory
+from src.utils.server_paths import resolve_server_path
 from src.world.citywalk.history_store import append_citywalk_history
 from src.world.citywalk.types import CitywalkSessionResult
 
@@ -70,7 +71,7 @@ class CitywalkReportGenerator:
         ensure_directory(output_dir)
         session_tag = result.created_at.strftime("%Y%m%d_%H%M%S")
         filename = f"citywalk_{session_tag}.json"
-        output_path = Path(output_dir) / filename
+        output_path = resolve_server_path(output_dir) / filename
         output_path.write_text(self.render(result), encoding="utf-8")
 
         places = [e.poi.name for e in result.events if e.poi and e.poi.name]

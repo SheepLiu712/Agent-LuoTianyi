@@ -356,6 +356,10 @@ def main() -> None:
                 input_file=downloaded_mp3,
                 output_dir=target_song_dir,
                 final_stem_name=safe_song_name,
+                stage1_config=str(resource_root / "msst/configs/model_bs_roformer_ep_317_sdr_12.9755.yaml"),
+                stage1_ckpt=str(resource_root / "msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt"),
+                stage2_config=str(resource_root / "msst/configs/model_mel_band_roformer_denoise.yaml"),
+                stage2_ckpt=str(resource_root / "msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"),
             )
             ensure_file(cleaned_tmp, "清洗后音频")
             ensure_file(inst_tmp, "伴奏音频")

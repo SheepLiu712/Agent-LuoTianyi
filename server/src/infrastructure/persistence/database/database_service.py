@@ -16,6 +16,7 @@ from src.infrastructure.persistence.database.utils import (
     normalize_message_token_ttl_seconds,
 )
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -59,7 +60,7 @@ class DatabaseManager:
         """初始化所有数据库组件（SQL/Redis 缓存）。"""
         try:
             init_sql_db(
-                self.config.get("sql_db_folder", "data/database"),
+                str(resolve_server_path(self.config.get("sql_db_folder", "data/database"))),
                 self.config.get("sql_db_file", "luotianyi.db"),
             )
             init_redis_buffer(self.config.get("redis", {}))
@@ -161,7 +162,10 @@ class DatabaseManager:
     def init_all(config: Dict[str, Any]) -> None:
         """初始化主数据库组件（SQL/Redis 缓存）。"""
         try:
-            init_sql_db(config.get("sql_db_folder", "data/database"), config.get("sql_db_file", "luotianyi.db"))
+            init_sql_db(
+                str(resolve_server_path(config.get("sql_db_folder", "data/database"))),
+                config.get("sql_db_file", "luotianyi.db"),
+            )
             init_redis_buffer(config.get("redis", {}))
             logger.info("Main database initialized successfully.")
         except Exception as e:

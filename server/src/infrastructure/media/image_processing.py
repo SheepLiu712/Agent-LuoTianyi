@@ -6,6 +6,8 @@ import os
 from fastapi import UploadFile
 from PIL import Image
 
+from src.utils.server_paths import resolve_server_path
+
 
 async def get_image_bytes_and_base64(upload_file: UploadFile):
     # 1. 读取原始字节
@@ -86,7 +88,7 @@ def save_image(user_id: str, image_bytes: bytes, postfix: str) -> str:
     :rtype: str
     """
     try:
-        save_dir = os.path.join("data", "images", user_id)
+        save_dir = str(resolve_server_path("data/images") / user_id)
         os.makedirs(save_dir, exist_ok=True)
 
         # File name handling (replace invalid chars for windows/linux)

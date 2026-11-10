@@ -4,16 +4,18 @@
 提供统一的日志记录功能
 """
 
+import logging
 import os
 import re
 import sys
-from typing import Optional, Dict, Any
-from pathlib import Path
-import logging
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any, Dict, Optional
 from urllib.parse import unquote_plus
+
 import colorlog
 
+from src.utils.server_paths import resolve_server_path
 
 # 全局日志配置
 _LOGGER_INSTANCES: Dict[str, logging.Logger] = {}
@@ -43,7 +45,7 @@ def setup_logging(config: Optional[Dict[str, Any]] = None) -> None:
         _DEFAULT_CONFIG.update(config)
     
     # 创建日志目录
-    log_file = Path(_DEFAULT_CONFIG["file"])
+    log_file = resolve_server_path(_DEFAULT_CONFIG["file"])
     log_file.parent.mkdir(parents=True, exist_ok=True)
     old_handlers = []
     if _CONSOLE_HANDLER is not None:
@@ -325,12 +327,10 @@ def _create_file_handler() -> logging.Handler:
         fmt='%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    if not os.path.exists(_DEFAULT_CONFIG["file"]):
-        if not os.path.exists(os.path.dirname(_DEFAULT_CONFIG["file"])):
-            os.makedirs(os.path.dirname(_DEFAULT_CONFIG["file"]))
-        open(_DEFAULT_CONFIG["file"], 'a').close()
+    log_file = resolve_server_path(_DEFAULT_CONFIG["file"])
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     file_handler = WindowsSafeRotatingFileHandler(
-        filename=_DEFAULT_CONFIG["file"],
+        filename=str(log_file),
         maxBytes=rotation_size,
         backupCount=5,
         encoding='utf-8'

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable
 from uuid import uuid4
 
+from src.utils.server_paths import ServerPaths
+
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 
 
@@ -110,7 +112,7 @@ class ObservabilityService:
         db_path = config.get("db_path") or os.path.join("data", "admin_metrics.sqlite3")
         self.db_path = Path(db_path)
         if not self.db_path.is_absolute():
-            self.db_path = (Path(base_dir) if base_dir is not None else Path.cwd()) / self.db_path
+            self.db_path = ServerPaths.from_environment(base_dir).resolve(self.db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.retention_days = int(config.get("retention_days", 30))
         self._lock = threading.RLock()

@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from src.infrastructure.config.store import ConfigStore
 from src.utils.logger import get_logger
+from src.utils.server_paths import ServerPaths
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 
 
@@ -135,7 +136,7 @@ class QQMusicCredentialRefreshService:
         path = Path(raw_path).expanduser()
         if path.is_absolute():
             return path
-        return self.root_dir / path
+        return ServerPaths.from_environment(self.root_dir).resolve(path)
 
     def _mark_runtime_credentials_valid(self, credential_file: Path) -> None:
         if self.runtime_getter is None:

@@ -26,6 +26,7 @@ from src.infrastructure.persistence import (
     get_song_session,
     init_song_db,
 )
+from src.utils.server_paths import resolve_server_path
 
 
 class SongAcceptanceStatus(str, Enum):
@@ -64,14 +65,13 @@ class SongKnowledgeStore:
         song_database = config.get("song_database")
         if song_database is not None and not isinstance(song_database, dict):
             raise TypeError("song_knowledge.song_database 必须是字典")
-        server_root = Path(__file__).resolve().parents[4]
         configured = dict(song_database or {})
         self._song_database = {
-            "db_folder": configured.get("db_folder") or str(server_root / "data" / "knowledge"),
+            "db_folder": configured.get("db_folder") or str(resolve_server_path("data/knowledge")),
             "db_file": configured.get("db_file") or "knowledge_db.db",
         }
         knowledge_dir = Path(
-            config.get("knowledge_dir") or configured.get("db_folder") or server_root / "data" / "knowledge"
+            config.get("knowledge_dir") or configured.get("db_folder") or resolve_server_path("data/knowledge")
         )
         self._song_name_file = knowledge_dir / "song_name_keywords.txt"
         self._lyric_file = knowledge_dir / "song_lyric_keywords.txt"
