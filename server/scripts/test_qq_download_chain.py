@@ -14,20 +14,14 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
+from src.utils.server_paths import resolve_server_path
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 
 
 def read_config() -> dict[str, Any]:
-    config_path = SERVER_ROOT / "config" / "config.json"
+    config_path = resolve_server_path("config/config.json")
     with config_path.open("r", encoding="utf-8") as f:
         return json.load(f)
-
-
-def resolve_server_path(raw_path: str | Path) -> Path:
-    path = Path(raw_path).expanduser()
-    if path.is_absolute():
-        return path
-    return SERVER_ROOT / path
 
 
 def get_nested(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
@@ -70,11 +64,7 @@ def run(args: argparse.Namespace) -> int:
     )
     singer_name = args.singer or sing_cfg.get("character_name") or "洛天依"
     output_root = resolve_server_path(args.output_dir) if args.output_dir else (
-        SERVER_ROOT
-        / "data"
-        / "diagnostics"
-        / "qq_download_chain"
-        / time.strftime("%Y%m%d-%H%M%S")
+        resolve_server_path("data/diagnostics/qq_download_chain") / time.strftime("%Y%m%d-%H%M%S")
     )
 
     print(f"[TEST] song={args.song}")

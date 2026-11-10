@@ -1,9 +1,9 @@
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 from src.world.citywalk.errors import LLMDecisionError
 from src.world.citywalk.types import CitywalkEvent, CitywalkState, POI
 
@@ -63,7 +63,7 @@ class CitywalkDecisionEngine:
         self.model = llm_cfg.get("model", "qwen3.5-plus")
         self.base_url = llm_cfg.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
-        persona_path = decision_cfg.get("persona_path", "res/agent/persona/luotianyi_persona.json")
+        persona_path = decision_cfg.get("persona_path", "res/agent/persona/persona.json")
         self.persona = self._load_persona(persona_path)
 
         api_key = str(llm_cfg.get("api_key", "")).strip()
@@ -121,13 +121,14 @@ class CitywalkDecisionEngine:
         return "\n".join(lines)
 
     def _load_persona(self, persona_path: str) -> str:
-        path = Path(persona_path)
+        path = resolve_server_path(persona_path)
         if not path.exists():
             return "洛天依，温柔、活泼、共情强，表达简洁真诚。"
 
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            raw_persona = str(data.get("character_persona", "")).strip()
+            persona = data.get("character_persona", "")
+            raw_persona = "".join(part.strip() for part in persona) if isinstance(persona, list) else persona.strip()
             if not raw_persona:
                 return "洛天依，温柔、活泼、共情强，表达简洁真诚。"
             return raw_persona[:300]

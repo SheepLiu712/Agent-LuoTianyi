@@ -15,6 +15,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+SERVER_ROOT = Path(__file__).resolve().parents[6]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
+
+from src.utils.server_paths import resolve_server_path
+
+
+def default_credential_file() -> Path:
+    override = os.environ.get("SONGLEARNER_QQ_CREDENTIAL_FILE")
+    return Path(override) if override else resolve_server_path("config/qq_music_credential.json")
+
+
 def load_qq_sdk() -> Dict[str, Any]:
     try:
         qqmusic_api = importlib.import_module("qqmusic_api")
@@ -78,7 +90,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=20, help="网络请求超时秒数（默认：20）。")
     parser.add_argument(
         "--credential_file",
-        default="config/qq_music_credential.json",
+        default=str(default_credential_file()),
         help="QQ 音乐登录凭证保存路径（默认：config/qq_music_credential.json）。",
     )
     parser.add_argument(
@@ -635,7 +647,7 @@ def download_song_and_lyric(
     no_auto_login: bool = False,
 ) -> Tuple[str, Path, Path]:
     if credential_file is None:
-        credential_file = Path("res/song_learner/.qq_music_credential.json")
+        credential_file = default_credential_file()
 
     output_dir = Path(output_dir).expanduser().resolve()
     credential_file = Path(credential_file).expanduser().resolve()

@@ -1,15 +1,17 @@
-import sys
-import os
-import json
 import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
 from sqlalchemy.exc import SQLAlchemyError
 
 # Ensure valid import paths
-cwd = os.getcwd()
-if cwd not in sys.path:
-    sys.path.append(cwd)
+server_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(server_root))
 
 from src.infrastructure.persistence.song_knowledge import Song, get_song_session, init_song_db
+from src.utils.server_paths import resolve_server_path
 
 
 def clean_lyrics(lyrics_text: str) -> str:
@@ -126,8 +128,11 @@ def populate_database(json_dir: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Add songs to knowledge database.")
-    parser.add_argument("--dir", type=str, default="data/knowledge/歌曲合集", help="Directory containing song JSON files")
-    parser.add_argument("--db_dir", type=str, default="data/knowledge", help="Directory for the database")
+    knowledge_dir = resolve_server_path("data/knowledge")
+    parser.add_argument(
+        "--dir", type=str, default=str(knowledge_dir / "歌曲合集"), help="Directory containing song JSON files"
+    )
+    parser.add_argument("--db_dir", type=str, default=str(knowledge_dir), help="Directory for the database")
     parser.add_argument("--db_name", type=str, default="knowledge_db.db", help="Database filename")
     
     args = parser.parse_args()

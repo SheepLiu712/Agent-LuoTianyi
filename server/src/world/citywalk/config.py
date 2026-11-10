@@ -38,7 +38,7 @@ DEFAULT_CITYWALK_CONFIG: Dict[str, Any] = {
     },
     "decision": {
         "enabled": True,
-        "persona_path": "res/agent/persona/luotianyi_persona.json",
+        "persona_path": "res/agent/persona/persona.json",
         "max_poi_candidates": 5,
         "constrained_rounds": 2,
         "use_llm_environment_feedback": False,

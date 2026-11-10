@@ -1,5 +1,11 @@
 import argparse
+import sys
 from pathlib import Path
+
+SERVER_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SERVER_ROOT))
+
+from src.utils.server_paths import resolve_server_path
 
 
 def transform_line(line: str) -> str:
@@ -45,7 +51,7 @@ def main() -> None:
     parser.add_argument(
         "--file",
         type=Path,
-        default=Path("res") / "knowledge" / "song_lyric_keywords.txt",
+        default=resolve_server_path("data/knowledge/song_lyric_keywords.txt"),
         help="Target lyric keyword file path",
     )
     args = parser.parse_args()
