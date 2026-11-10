@@ -12,6 +12,7 @@ WorkingDirectory=@SERVER_DIR@
 ExecStart=/bin/bash "@SERVER_DIR@/scripts/deploy/start_linux.sh"
 Environment="HOME=@SERVICE_HOME@"
 Environment="PATH=@SERVER_DIR@/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-@INSTANCE_ENV_FILE@
 UMask=0077
 Restart=on-failure
 RestartSec=15

@@ -37,3 +37,18 @@ python scripts/deploy/check_resources.py --assets-root /path/to/assets
 ```
 
 缺文件、大小或哈希不符时检查失败。第三方模型库可能另有首次初始化缓存行为，本次校验不等于已完成所有 GPU 工作负载的只读挂载验证。资产应先离线准备完整，再进行实际推理验收。
+
+## 统一启动
+
+Linux 使用 `bash scripts/deploy/start_linux.sh`，Windows 使用现有启动脚本，也可以直接执行 `python server_main.py`。所有入口由 `prepare_startup` 加载当前实例的 `secrets.local.env`，再解析配置；AdminShell 复用同一个 SecretStore，避免移除密钥时恢复已被删除的文件值。业务密钥仍由现有运行时校验负责，不额外硬编码特定模型供应商。
+
+Linux 启动器的 `AGENTLUO_PYTHON` 可指定解释器，默认当前发布目录的 `.venv/bin/python`。安装器和启动器使用同一实例运行目录的 `server.lock`。不同实例的虚拟环境应独立维护；更新依赖前停止使用该环境的所有实例。systemd 示例中的 `@INSTANCE_ENV_FILE@` 替换为该实例的环境文件路径，格式参考 `instance.env.example`；该文件不是 shell 脚本。
+
+```bash
+bash scripts/deploy/start_linux.sh --check-startup
+python server_main.py --check-startup
+```
+
+检查只验证配置解析及监听模式/端口，不启动 HTTP、数据库或模型；不会打印密钥值。它不替代 `check_resources.py`、业务配置校验或 GPU 推理测试。
+
+`start_production.sh` 仅为旧运维命令提供兼容入口，不再使用本机独有的 `production_main.py`。首次切换前停止旧服务，按原实例配置核对密钥与锁位置；本系列改动不迁移线上文件，也不替换生产的 TTS 或通话行为补丁。

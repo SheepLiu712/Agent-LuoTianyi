@@ -28,11 +28,17 @@ class AdminShell:
     observability: ObservabilityService
 
     @classmethod
-    async def initialize(cls, *, root_dir: str | Path, config_path: str | Path = "config/config.json") -> "AdminShell":
+    async def initialize(
+        cls,
+        *,
+        root_dir: str | Path,
+        config_path: str | Path = "config/config.json",
+        secret_store: SecretStore | None = None,
+    ) -> "AdminShell":
         root = Path(root_dir)
         paths = ServerPaths.from_environment(root)
         config_store = ConfigStore(paths.resolve(config_path), root_dir=root)
-        secret_store = SecretStore(paths.config_dir / "secrets.local.env")
+        secret_store = secret_store or SecretStore(paths.config_dir / "secrets.local.env")
         secret_store.load_into_environment()
         try:
             raw_config = config_store.read_raw()
@@ -78,9 +84,14 @@ class AdminShell:
 _admin_shell: AdminShell | None = None
 
 
-async def init_admin_shell(*, root_dir: str | Path, config_path: str | Path = "config/config.json") -> AdminShell:
+async def init_admin_shell(
+    *,
+    root_dir: str | Path,
+    config_path: str | Path = "config/config.json",
+    secret_store: SecretStore | None = None,
+) -> AdminShell:
     global _admin_shell
-    _admin_shell = await AdminShell.initialize(root_dir=root_dir, config_path=config_path)
+    _admin_shell = await AdminShell.initialize(root_dir=root_dir, config_path=config_path, secret_store=secret_store)
     return _admin_shell
 
 
