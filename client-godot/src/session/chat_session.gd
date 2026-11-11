@@ -35,7 +35,7 @@ var _last_touch_ms := -1000
 var _typing := false
 var _persistence: RefCounted
 var _history_root := ""
-var _audio_migration: Object
+var _media_migration: Object
 var _avatar_source: Node
 
 func _init(transport: Node, logger: RefCounted = null, media: Node = null, history: Node = null, reading: RefCounted = null, images: Node = null, models: Node = null, persistence: RefCounted = null) -> void:
@@ -45,7 +45,8 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 	_persistence = persistence
 	if models != null:
 		add_child(models)
-		models.completed.connect(func(response): _transport.send_event("llm_response",response,false))
+		# 模型结果必须能跨短暂断线重试；request_id 保证服务端可幂等处理。
+		models.completed.connect(func(response): _transport.send_event("llm_response",response,true,true))
 	_media = media if media != null else Audio.new(logger)
 	add_child(_media)
 	_media.playback_finished.connect(_audio_finished)
@@ -73,6 +74,8 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 		# 旧夹具可能还没有对账信号；缺了就不接，避免整个 _init 中断。
 		if history.has_signal("reconciled"):
 			history.reconciled.connect(_reconcile_page)
+		if history.has_signal("delivery_reconciled"):
+			history.delivery_reconciled.connect(_delivery_reconciled)
 		history.boundary_ready.connect(_release_history_sends)
 		history.state_changed.connect(func(_value):
 			_update_reading()
@@ -111,15 +114,26 @@ func set_history_root(path: String) -> void:
 	_history_root = path
 
 
-## 语音兜底迁移只在这里转交，会话层不碰文件系统也不认识具体实现。
+## Python 媒体导入只在这里转交，会话层不碰文件系统也不认识具体实现。
+func set_media_migration(migration: Object) -> void:
+	_media_migration = migration
+
+
+## 兼容旧装配入口：语义已扩展到语音与图片。
 func set_audio_migration(migration: Object) -> void:
-	_audio_migration = migration
+	set_media_migration(migration)
 
 
 ## 迁移落盘后让气泡重新问一次缓存：播放条不会因为早先的空结果一直缺席。
 func refresh_message_audio(ids: Array) -> void:
 	if _media != null:
 		_media.forget_audio(ids)
+
+
+## 图片导入落盘后让气泡重新读取缓存；未加载的 id 由下次 ensure 自然命中。
+func refresh_message_images(ids: Array) -> void:
+	if _images != null:
+		_images.refresh(ids)
 
 
 func _history_session(session: Dictionary) -> Dictionary:
@@ -197,22 +211,21 @@ func _queue_or_send(message: Dictionary, event_type: String, payload: Dictionary
 
 func _send_now(message: Dictionary, event_type: String, payload: Dictionary) -> String:
 	payload["llm_mode"] = {"types": _model_types()}
-	var wire := _send_attempt(message.id, event_type, payload)
+	var wire: String = _transport.send_event(event_type, payload, true)
 	if wire.is_empty():
 		_system_error("SEND_REJECTED")
 		return ""
 	message.status = "queued"
-	return _accept_local(message)
+	var accepted := _accept_local(message)
+	# send_attempts.message_id 有外键，必须先落下 messages 行再记录尝试。
+	_record_sent(message.id, wire)
+	return accepted
 
 
-func _send_attempt(message_id: String, event_type: String, payload: Dictionary) -> String:
-	var wire: String = _transport.send_event(event_type, payload, true)
-	if wire.is_empty():
-		return ""
+func _record_sent(message_id: String, wire: String) -> void:
 	_wire_ids[wire] = message_id
 	if _persistence != null:
 		_persistence.record_attempt(message_id, wire)
-	return wire
 
 
 func _accept_local(message: Dictionary) -> String:
@@ -221,7 +234,9 @@ func _accept_local(message: Dictionary) -> String:
 	if _persistence != null:
 		_persistence.save_live(message.duplicate(true))
 	if _logger != null:
-		_logger.record("message_queued", {"reply_id": message.id})
+		_logger.log_info("info_message_queued", {"reply_id": message.id, "phase":"queued"})
+		var text: Variant = message.get("text", "")
+		_logger.log_debug("debug_state", {"data":{"kind":str(message.get("type", "")), "text_chars":str(text).length() if text is String else 0, "has_image":message.get("image") != null}})
 	changed.emit()
 	return message.id
 
@@ -263,6 +278,12 @@ func record_touch(areas: Array[String]) -> void:
 func get_messages() -> Array[Dictionary]:
 	return _messages.duplicate(true)
 
+
+## UI 只读视图：浅拷贝避免每个流式分片都深拷贝整份消息正文。
+## 调用方不得修改返回的 Dictionary；需要独立快照时仍用 get_messages()。
+func get_messages_view() -> Array[Dictionary]:
+	return _messages.duplicate()
+
 func get_state() -> Dictionary:
 	var result := _state.duplicate(true)
 	result.history = get_history_state()
@@ -303,8 +324,12 @@ func stop() -> void:
 		_models.stop()
 	if _images != null:
 		_images.stop()
-	if _audio_migration != null:
-		_audio_migration.stop()
+	if _media_migration != null:
+		_media_migration.stop()
+	# 先让待发消息得到确定的失败状态并落库，再清空映射；
+	# 否则 transport.stop() 回调到达时 _wire_ids 已丢失，UI 会永远停在“发送中”。
+	_fail_pending_history()
+	_transport.stop()
 	_waiting_history = false
 	_pending_history.clear()
 	_wire_ids.clear()
@@ -312,7 +337,6 @@ func stop() -> void:
 		_history.stop()
 	if _reading != null:
 		_reading.start("","")
-	_transport.stop()
 	_media.set_scope("", "")
 	_messages.clear()
 	_by_id.clear()
@@ -322,9 +346,20 @@ func stop() -> void:
 	changed.emit()
 	state_changed.emit(get_state())
 
+
+## 退出时还没获得发送机会的本地消息不能悄悄消失：标记失败并保留在缓存，
+## 下次登录由历史库恢复为“发送失败”，而不是永远显示 waiting_history。
+func _fail_pending_history() -> void:
+	for id in _pending_history:
+		if not _by_id.has(id):
+			continue
+		_by_id[id].status = "failed"
+		_by_id[id].code = "SEND_CANCELLED"
+		_persist_status(id)
+
 func _connection_changed(connection: Dictionary) -> void:
 	if _logger != null:
-		_logger.record("connection_state", connection)
+		_logger.log_runtime("runtime_connection_state", {"phase":connection.get("phase","unknown"), "code":connection.get("code",""), "reason":"connection"})
 	_state.phase = connection.phase
 	_state.code = connection.code
 	if connection.phase != "ready":
@@ -341,7 +376,7 @@ func _connection_changed(connection: Dictionary) -> void:
 func _delivery_changed(wire_id: String, status: String, code: String) -> void:
 	var id := str(_wire_ids.get(wire_id, wire_id))
 	if _logger != null:
-		_logger.record("message_delivery", {"reply_id":id,"phase":status,"code":code})
+		_logger.log_info("info_message_delivery", {"reply_id":id,"phase":status,"code":code})
 	if not _by_id.has(id):
 		return
 	_by_id[id].status = status
@@ -355,10 +390,10 @@ func _delivery_changed(wire_id: String, status: String, code: String) -> void:
 
 func _system_error(code: String, reply_id: String = "") -> void:
 	if _logger != null:
-		var fields := {"code":code}
+		var fields := {"code":code, "detail":code, "phase":"error"}
 		if not reply_id.is_empty():
 			fields.reply_id = reply_id
-		_logger.record("system_error", fields)
+		_logger.log_error("error_system", fields)
 	_state.code = code
 	state_changed.emit(get_state())
 
@@ -499,6 +534,9 @@ func skip_history() -> void:
 func _release_history_sends() -> void:
 	_waiting_history = false
 	for id in _pending_history:
+		# restore_page 可能已经用历史窗口替换了视图；缺失条目不能再按下标访问。
+		if not _by_id.has(id):
+			continue
 		var pending: Dictionary = _pending_history[id]
 		pending.payload.llm_mode = {"types":_model_types()}
 		var wire: String = _transport.send_event(pending.type,pending.payload,true)
@@ -506,24 +544,50 @@ func _release_history_sends() -> void:
 			_by_id[id].status = "failed"
 			_by_id[id].code = "SEND_REJECTED"
 		else:
-			_wire_ids[wire] = id
 			_by_id[id].status = "queued"
-			if _persistence != null:
-				_persistence.record_attempt(id, wire)
+			_record_sent(id, wire)
 		_persist_status(id)
 	_pending_history.clear()
 	changed.emit()
 
 
-## 本地缓存先显示：整窗口替换，不累加，避免重复进入已展示的消息。
+## 本地缓存先显示：用历史窗口替换服务端视图，但保留等待历史期间用户已产生的
+## 本地消息。它们可能已经/正在发送，不能因为一次缓存刷新而从界面消失。
 func _restore_page(messages: Array[Dictionary]) -> void:
-	_messages.clear()
-	_by_id.clear()
-	for message in messages:
-		_messages.append(message)
-		_by_id[message.id] = message
-	_request_missing_audio(messages)
+	var next_messages: Array[Dictionary] = []
+	var next_by_id := {}
+	_merge_history_page(messages, next_messages, next_by_id)
+	_append_local_tail(next_messages, next_by_id)
+	_messages = next_messages
+	_by_id = next_by_id
+	_request_missing_audio(_messages)
 	changed.emit()
+
+func _merge_history_page(messages: Array[Dictionary], next_messages: Array[Dictionary], next_by_id: Dictionary) -> void:
+	for message in messages:
+		var id := str(message.get("id", ""))
+		if id.is_empty() or next_by_id.has(id):
+			continue
+		if _by_id.has(id):
+			var existing: Dictionary = _by_id[id]
+			if existing.get("timestamp") == null:
+				existing.timestamp = message.get("timestamp")
+			next_messages.append(existing)
+			next_by_id[id] = existing
+		else:
+			next_messages.append(message)
+			next_by_id[id] = message
+
+func _append_local_tail(next_messages: Array[Dictionary], next_by_id: Dictionary) -> void:
+	# 缓存窗口之外的本地消息保留在末尾，维持用户看到的时间顺序。
+	for message in _messages:
+		var id := str(message.get("id", ""))
+		if id.is_empty() or next_by_id.has(id):
+			continue
+		if str(message.get("id_source", "")) != "local" and not _pending_history.has(id):
+			continue
+		next_messages.append(message)
+		next_by_id[id] = message
 
 
 func load_older_history() -> void:
@@ -573,7 +637,7 @@ func _history_page(messages: Array[Dictionary]) -> void:
 ## 增量迁移的触发点：只针对刚进入视野的这一页里、属于对方的消息。
 ## 后台补齐的页不经过这里（history_sync 不为它发信号），所以不会偷偷扫盘。
 func _request_missing_audio(messages: Array[Dictionary]) -> void:
-	if _audio_migration == null:
+	if _media_migration == null:
 		return
 	var ids: Array = []
 	for message in messages:
@@ -583,7 +647,7 @@ func _request_missing_audio(messages: Array[Dictionary]) -> void:
 		if not id.is_empty():
 			ids.append(id)
 	if not ids.is_empty():
-		_audio_migration.request_ids(ids)
+		_media_migration.request_ids(ids)
 
 ## 对账只走历史控制器：会话层不发 HTTP、不写库。
 func request_reconcile() -> void:
@@ -609,6 +673,23 @@ func _reconcile_page(messages: Array[Dictionary], position: String) -> void:
 	if added == 0:
 		return
 	changed.emit()
+
+
+## 服务器历史已确认的本地副本：从内存窗口移除，由服务器副本继续显示。
+func _delivery_reconciled(ids: Array) -> void:
+	if ids.is_empty():
+		return
+	var removed := false
+	for index in range(_messages.size() - 1, -1, -1):
+		var id := str(_messages[index].id)
+		if not ids.has(id):
+			continue
+		_by_id.erase(id)
+		_pending_history.erase(id)
+		_messages.remove_at(index)
+		removed = true
+	if removed:
+		changed.emit()
 
 
 ## 无锚点时的起点：tail 追加到末尾，head 插到最前；
@@ -638,6 +719,13 @@ func note_read_interaction() -> void:
 func reading_located() -> void:
 	if _reading != null:
 		_reading.located()
+
+
+## “回到最新”优先于未读定位：消费目标后，后续自动定位不得再把用户拉回旧消息。
+func dismiss_unread() -> void:
+	if _reading != null:
+		_reading.dismiss()
+
 
 func report_visible_messages(ids: Array[String], foreground: bool) -> void:
 	if _reading != null and _reading.report_visible(ids,foreground) != OK:
@@ -674,7 +762,8 @@ func _log_reply(id: String, payload: Dictionary) -> void:
 			"final":payload.get("is_final_package", true), "audio_error":payload.get("audio_error", false)}
 		if payload.get("audio_error", false) == true:
 			fields.code = payload.error_code if payload.get("error_code") in ["TTS_EMPTY", "TTS_STREAM_ERROR", "TTS_CANCELLED"] else "REMOTE_AUDIO_ERROR"
-		_logger.record("reply_received", fields)
+			fields.phase = "received"
+			_logger.log_info("info_reply_received", fields)
 
 func _update_reply(reply: Dictionary, payload: Dictionary) -> void:
 	if payload.get("text") is String and not payload.text.is_empty():

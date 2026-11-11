@@ -8,7 +8,7 @@ signal image_action(id: String, action: String)
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
 const ChatTime = preload("res://src/ui/chat_time.gd")
 ## 送达结果不确定的消息按「没发生过」处理：不建气泡、不占高度、退出也不会因此拦人。
-const HIDDEN_STATUS := "uncertain"
+const HIDDEN_STATUSES: Array[String] = ["uncertain", "superseded"]
 @onready var _canvas: Control = %Canvas
 var _messages: Array[Dictionary] = []
 var _offsets: Array[float] = []
@@ -22,8 +22,13 @@ var _laying := false
 var _visible: Array[String] = []
 var _restore_pending := false
 var _restore_queued := false
+var _measure_queued := false
 var _pending_anchor: Dictionary = {}
 var _pending_follow := false
+## 用户最后稳定看到的正文位置：异步图片改高度时用它补偿，避免重排后的中间状态污染锚点。
+var _stable_anchor: Dictionary = {}
+var _stable_follow := true
+var _stable_ready := false
 var _ui_style: RefCounted
 var _older_state := "idle"
 var _older_armed := false
@@ -40,6 +45,7 @@ func set_ui_style(style: RefCounted) -> void:
 func _ready() -> void:
 	get_v_scroll_bar().value_changed.connect(func(_value):
 		if not _laying and not _restore_pending:
+			_capture_stable_now()
 			_render()
 			_request_older())
 	get_v_scroll_bar().gui_input.connect(_user_input)
@@ -47,30 +53,54 @@ func _ready() -> void:
 	resized.connect(_resized)
 
 func set_messages(messages: Array[Dictionary]) -> void:
-	var follow := is_at_latest()
-	var anchor := get_reading_anchor()
+	var follow := _layout_follow()
+	var anchor := _layout_anchor()
+	var anchor_index := int(_indices.get(str(anchor.get("id", "")), -1))
 	_messages = _renderable(messages)
+	if _messages.is_empty():
+		_stable_anchor = {}
+		_stable_follow = true
+		_stable_ready = true
+		_older_armed = false
+		_layout({}, true)
+		return
+	_sync_time_markers()
+	_rebuild_indices()
+	_prune_missing()
+	anchor = _resolve_anchor(anchor, anchor_index)
+	_older_armed = false
+	_layout(anchor, follow)
+
+func _sync_time_markers() -> void:
 	var next_markers := ChatTime.markers(_messages)
 	for id in _heights.keys():
-		if _time_markers.get(id, "") != next_markers.get(id, ""): _heights.erase(id)
+		if _time_markers.get(id, "") != next_markers.get(id, ""):
+			_heights.erase(id)
 	_time_markers = next_markers
+
+func _rebuild_indices() -> void:
 	_indices.clear()
 	for index in _messages.size():
 		_indices[_messages[index].id] = index
+
+func _prune_missing() -> void:
 	for id in _nodes.keys():
 		if not _indices.has(id):
 			_remove(id)
 	for id in _heights.keys():
 		if not _indices.has(id):
 			_heights.erase(id)
-	_older_armed = false
-	_layout(anchor,follow)
+
+func _resolve_anchor(anchor: Dictionary, anchor_index: int) -> Dictionary:
+	if anchor.is_empty() or _indices.has(str(anchor.get("id", ""))):
+		return anchor
+	return {"id":_messages[clampi(anchor_index, 0, _messages.size()-1)].id, "offset":0.0}
 
 ## 不可见状态在入口就剔掉，后面的索引、偏移、可见集合才和屏幕上真正有的气泡一致。
 func _renderable(messages: Array[Dictionary]) -> Array[Dictionary]:
 	var kept: Array[Dictionary] = []
 	for message in messages:
-		if str(message.get("status", "")) != HIDDEN_STATUS:
+		if not HIDDEN_STATUSES.has(str(message.get("status", ""))):
 			kept.append(message)
 	return kept
 
@@ -94,14 +124,23 @@ func set_older_state(state: String) -> void:
 func scroll_to_message(id: String) -> bool:
 	if not _indices.has(id):
 		return false
+	_stable_anchor = {"id":id, "offset":0.0}
+	_stable_follow = false
+	_stable_ready = true
 	_layout({"id":id,"offset":0.0},false)
 	return true
 
 func scroll_to_latest() -> void:
+	_stable_anchor = {}
+	_stable_follow = true
+	_stable_ready = true
 	_layout({},true)
 
 func get_visible_ids() -> Array[String]:
 	return _visible.duplicate()
+
+func has_message(id: String) -> bool:
+	return _indices.has(id)
 
 func get_reading_anchor() -> Dictionary:
 	if _messages.is_empty() or _offsets.is_empty():
@@ -114,6 +153,36 @@ func get_reading_anchor() -> Dictionary:
 		return {"id":_messages[target_index].id,"offset":target-_offsets[target_index]}
 	var index := _at(float(scroll_vertical))
 	return {"id":_messages[index].id,"offset":float(scroll_vertical)-_offsets[index]}
+
+func get_stable_anchor() -> Dictionary:
+	return _stable_anchor.duplicate(true)
+
+## 只在稳定状态下采样：用户滚动后或布局恢复完成后。
+func _capture_stable_now() -> void:
+	if _messages.is_empty() or _offsets.is_empty():
+		_stable_anchor = {}
+		_stable_follow = true
+		_stable_ready = true
+		return
+	var index := _at(float(scroll_vertical))
+	_stable_anchor = {
+		"id":_messages[index].id,
+		"offset":float(scroll_vertical)-_offsets[index],
+	}
+	_stable_follow = float(scroll_vertical) >= _total-size.y-24
+	_stable_ready = true
+
+## 内容驱动的重排不得读取 pending 锚点；pending 只服务于它自己的延迟恢复。
+func _layout_anchor() -> Dictionary:
+	if _stable_ready:
+		if _stable_anchor.is_empty():
+			return {"id":"", "offset":0.0}
+		if _indices.has(str(_stable_anchor.get("id", ""))):
+			return _stable_anchor.duplicate(true)
+	return get_reading_anchor()
+
+func _layout_follow() -> bool:
+	return _stable_follow if _stable_ready else is_at_latest()
 
 func is_at_latest() -> bool:
 	if _messages.is_empty(): return true
@@ -131,28 +200,42 @@ func set_image_state(id: String, state: Dictionary) -> void:
 func _user_input(event: InputEvent) -> void:
 	if (event is InputEventMouseButton and event.pressed) or event is InputEventPanGesture or (event is InputEventKey and event.pressed):
 		_restore_pending = false
+		_capture_stable_now.call_deferred()
 		interacted.emit()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP,MOUSE_BUTTON_WHEEL_DOWN] and get_global_rect().has_point(get_global_mouse_position()):
 		_restore_pending = false
+		_capture_stable_now.call_deferred()
 		interacted.emit()
 
 func _resized() -> void:
-	var anchor := get_reading_anchor()
-	var follow := is_at_latest()
+	var anchor := _layout_anchor()
+	var follow := _layout_follow()
 	if absf(_width-size.x)>1:
 		_heights.clear()
 		_width = size.x
 	_layout(anchor,follow)
 
-func _process(_delta: float) -> void:
-	if _laying or _messages.is_empty():
+## 高度变化由气泡的最小尺寸信号驱动；不再每帧遍历所有可见控件。
+func _queue_measure() -> void:
+	if _measure_queued:
 		return
-	var anchor := get_reading_anchor()
-	var follow := is_at_latest()
+	_measure_queued = true
+	_measure_heights.call_deferred()
+
+
+func _measure_heights() -> void:
+	_measure_queued = false
+	if _laying or _messages.is_empty():
+		_queue_measure()
+		return
+	var anchor := _layout_anchor()
+	var follow := _layout_follow()
 	var changed := false
 	for id in _nodes:
+		if not _indices.has(id):
+			continue
 		var system_message: bool = _nodes[id].get_node("%System").visible
 		var minimum_height := 18.0 if system_message else 54.0
 		var spacing := 4.0 if system_message else 17.0
@@ -162,6 +245,11 @@ func _process(_delta: float) -> void:
 			changed = true
 	if changed:
 		_layout(anchor,follow)
+
+
+func _bubble_minimum_changed(id: String) -> void:
+	if _nodes.has(id):
+		_queue_measure()
 
 func _layout(anchor: Dictionary, follow: bool) -> void:
 	if not is_inside_tree():
@@ -208,6 +296,7 @@ func _finish_scroll_restore() -> void:
 	_restore_pending = false
 	_laying = false
 	_render()
+	_capture_stable_now()
 
 func _render() -> void:
 	var wanted: Dictionary = {}
@@ -263,3 +352,5 @@ func _create_bubble(id: String, message: Dictionary) -> void:
 	bubble.image_opened.connect(func(texture): image_opened.emit(texture))
 	bubble.image_action.connect(func(action): image_action.emit(id,action))
 	_nodes[id] = bubble
+	bubble.minimum_size_changed.connect(_bubble_minimum_changed.bind(id))
+	_queue_measure()

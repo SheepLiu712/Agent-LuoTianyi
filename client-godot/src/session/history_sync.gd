@@ -13,6 +13,7 @@ signal page_received(messages: Array[Dictionary])
 signal older_page(messages: Array[Dictionary])
 signal restore_page(messages: Array[Dictionary])
 signal reconciled(messages: Array[Dictionary], position: String)
+signal delivery_reconciled(ids: Array)
 signal boundary_ready
 signal state_changed(state: Dictionary)
 
@@ -46,6 +47,9 @@ var _reconcile_fetcher: Node
 var _reconcile_seq := 0
 var _reconcile_wanted := false
 var _reconcile_inflight := false
+var _older_wanted := false
+var _delivery_reconcile_inflight := false
+var _delivery_reconcile_wanted := false
 
 
 func _init(source: Node, persistence: RefCounted = null, logger: RefCounted = null, reconcile_source: Node = null) -> void:
@@ -78,6 +82,7 @@ func stop() -> void:
 	_reconcile_seq += 1
 	_reconcile_wanted = false
 	_reconcile_inflight = false
+	_delivery_reconcile_wanted = false
 	if _fetcher != null:
 		_fetcher.cancel()
 	if _reconcile_fetcher != null and _reconcile_fetcher != _fetcher:
@@ -90,6 +95,7 @@ func stop() -> void:
 	_baseline = ""
 	_open = false
 	_boundary_released = false
+	_older_wanted = false
 	_state = _empty()
 	_notify()
 
@@ -125,6 +131,11 @@ func skip() -> void:
 
 func load_older() -> void:
 	if _state.initial != "ready" or _state.older == "loading":
+		return
+	# catchup 与上翻共用 fetcher：直接发起会让两个请求互相判 CANCELLED/BUSY。
+	# 先记下意图，等补齐结束后再读本地或发网络页。
+	if _state.catchup == "running":
+		_older_wanted = true
 		return
 	_load_older.call_deferred(_generation)
 
@@ -187,6 +198,7 @@ func _reconcile_store(rows: Array, seq: int, generation: int) -> void:
 	if not saved.ok:
 		_reconcile_done(str(saved.code), 0)
 		return
+	_reconcile_delivery_async(generation)
 	var inserted := int(saved.data.get("inserted", 0))
 	# 整页下发而不是只发新增：内存需要页内已有 id 当锚点才能插到正确位置。
 	if inserted > 0:
@@ -197,7 +209,7 @@ func _reconcile_store(rows: Array, seq: int, generation: int) -> void:
 func _reconcile_done(code: String, inserted: int) -> void:
 	_reconcile_inflight = false
 	if _logger != null:
-		_logger.record("history_reconcile", {"count": inserted, "reason": code})
+		_logger.log_info("info_history_reconcile", {"count": inserted, "reason": code, "phase":"complete"})
 	_reconcile_check_wanted()
 
 
@@ -266,6 +278,12 @@ func _open_storage(generation: int) -> bool:
 
 
 func _restore_local(generation: int) -> void:
+	if _persistence != null:
+		# 先把库内已有服务器副本能确认的本地 uncertain 副本收敛掉，
+		# 再读最新窗口；这样启动时不会把已确认的副本又送进 UI。
+		await _persistence.reconcile_delivery()
+		if generation != _generation:
+			return
 	var result: Dictionary = await _persistence.read_latest(Policy.PAGE_SIZE)
 	if generation != _generation or not result.ok:
 		return
@@ -304,6 +322,9 @@ func _fail_initial(code: String) -> void:
 	_state.initial = "failed"
 	_state.code = code
 	_notify()
+	# 首屏失败不能阻塞后续发送：本地无缓存时 boundary 否则永远不会释放，
+	# 用户之后发出的每条消息都会停在 waiting_history。
+	_release_boundary_once()
 	_reconcile_check_wanted.call_deferred()
 
 
@@ -351,6 +372,9 @@ func _settle_catchup() -> void:
 		_state.has_gap = true
 	_state.catchup = "failed" if _state.catchup == "failed" else "done"
 	_notify()
+	if _older_wanted and _state.older == "idle":
+		_older_wanted = false
+		_load_older.call_deferred(_generation)
 	_reconcile_check_wanted.call_deferred()
 
 
@@ -427,6 +451,26 @@ func _save(rows: Array, start: int, end_index: int, direction: String) -> void:
 		{"start_index": start, "history": rows},
 		{"epoch": _epoch, "end_index": end_index, "direction": direction}
 	)
+	# worker 按提交顺序执行：这条对账一定排在 save_history 之后。
+	_reconcile_delivery_async(_generation)
+
+
+func _reconcile_delivery_async(generation: int) -> void:
+	if _persistence == null or not _open:
+		return
+	if _delivery_reconcile_inflight:
+		_delivery_reconcile_wanted = true
+		return
+	_delivery_reconcile_inflight = true
+	var result: Dictionary = await _persistence.reconcile_delivery()
+	_delivery_reconcile_inflight = false
+	if generation == _generation and result.ok:
+		var ids: Array = result.data.get("ids", [])
+		if not ids.is_empty():
+			delivery_reconciled.emit(ids)
+	if _delivery_reconcile_wanted:
+		_delivery_reconcile_wanted = false
+		_reconcile_delivery_async(generation)
 
 
 func _validated(response: Dictionary, end_index: int) -> Dictionary:
@@ -516,10 +560,10 @@ func _legacy_phase() -> String:
 func _notify() -> void:
 	_state.next_end = _next_end
 	if _logger != null:
-		_logger.record("history_state", {
+		_logger.log_runtime("runtime_history_state", {
 			"storage": _state.storage, "initial": _state.initial,
 			"catchup": _state.catchup, "older": _state.older,
-			"code": _state.code, "count": _state.count, "next_end": _next_end,
+			"code": _state.code, "count": _state.count, "next_end": _next_end, "reason":"history",
 		})
 	state_changed.emit(get_state())
 

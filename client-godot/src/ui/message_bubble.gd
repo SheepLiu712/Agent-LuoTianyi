@@ -5,8 +5,9 @@ signal image_action(action: String)
 const USER_ICON := preload("res://assets/ui/user_icon.png")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
 const AudioRow = preload("res://scenes/ui/message_audio.tscn")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 ## 送达结果不确定的消息不呈现任何气泡；列表层已先过滤，这里是兜底。
-const HIDDEN_STATUS := "uncertain"
+const HIDDEN_STATUSES: Array[String] = ["uncertain", "superseded"]
 @export var own_style: StyleBoxFlat
 @onready var _row: HBoxContainer = %Row
 @onready var _time_marker: CenterContainer = %TimeMarker
@@ -153,7 +154,7 @@ func _sync_height() -> void:
 
 func update_message(message: Dictionary) -> void:
 	# 送达结果不确定：整条气泡都不出现，连占位和上一状态的字样都不留。
-	visible = str(message.get("status", "")) != HIDDEN_STATUS
+	visible = not HIDDEN_STATUSES.has(str(message.get("status", "")))
 	if not visible:
 		_caption.text = ""
 		_caption.hide()
@@ -162,7 +163,7 @@ func update_message(message: Dictionary) -> void:
 		_text.text = message.text
 		_queue_layout()
 	if _own:
-		_caption.text = "发送失败" if message.status == "failed" else ""
+		_caption.text = ""
 		_caption.visible = not _caption.text.is_empty()
 		_caption.add_theme_color_override("font_color", get_theme_color("delivery_failed", "MessageBubble"))
 
@@ -184,6 +185,7 @@ func set_audio_state(state: Dictionary) -> void:
 func set_image_state(state: Dictionary) -> void:
 	if not _is_image:
 		return
+	var previous_status := _image_status
 	_image_status = state.status
 	_history_picture.texture = state.texture
 	_original_size = state.get("original_size",Vector2i.ZERO)
@@ -192,7 +194,7 @@ func set_image_state(state: Dictionary) -> void:
 	_history_picture.visible = state.status == "ready"
 	_image_button.visible = state.status != "ready"
 	_image_button.disabled = state.status in ["idle","loading"]
-	_image_button.text = {"idle":"加载图片…","loading":"正在下载图片…","ready":"打开原图","error":"图片加载失败 · 重试"}.get(state.status,"")
-	if state.code == "CACHE_WRITE_FAILED":
-		_image_button.text += " · 未能缓存"
+	_image_button.text = {"idle":"加载图片…","loading":"正在下载图片…","ready":"打开原图","error":"重试"}.get(state.status,"")
+	if state.status == "error" and previous_status != "error":
+		ErrorDialog.present(self, "图片未加载，点击重试。")
 	_queue_layout()

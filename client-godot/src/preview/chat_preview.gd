@@ -103,8 +103,9 @@ func _refresh() -> void:
 			continue
 		_messages.remove_child(child)
 		child.queue_free()
-	_empty.visible = _session.get_messages().is_empty()
-	_empty.text = {"empty":"从一句问候开始", "disconnected":"连接暂时中断", "error":"暂时无法加载消息"}.get(_scenario, "")
+	var empty_text: String = {"empty":"", "disconnected":"连接暂时中断", "error":"暂时无法加载消息"}.get(_scenario, "")
+	_empty.text = empty_text
+	_empty.visible = _session.get_messages().is_empty() and not empty_text.is_empty()
 	for message in _session.get_messages():
 		message.demo = true
 		var bubble = Bubble.instantiate()

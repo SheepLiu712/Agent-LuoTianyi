@@ -1,6 +1,7 @@
 extends RefCounted
 const AccountScope = preload("res://src/domain/account_scope.gd")
 const ServerAddress = preload("res://src/domain/server_address.gd")
+const AtomicFile = preload("res://src/storage/atomic_file.gd")
 var _root: String
 var _path := ""
 var _messages: Array = []
@@ -42,6 +43,11 @@ func interact() -> void:
 func located() -> void:
 	if not _state.pending:
 		_state.located = true
+## 显式回到最新后消费未读目标：保留已读锚点，但不再提供“定位未读”。
+func dismiss() -> void:
+	_state.manual = true
+	_state.located = true
+	_state.target_id = ""
 func report_visible(ids: Array, foreground: bool) -> Error:
 	if not foreground or _state.pending or not _state.located or _path.is_empty():
 		return OK
@@ -76,16 +82,4 @@ func _visible_candidate(ids: Array) -> String:
 	return candidate
 
 func _save_candidate(candidate: String) -> Error:
-	var error := DirAccess.make_dir_recursive_absolute(_root)
-	if error == OK:
-		var file := FileAccess.open(_path+".tmp",FileAccess.WRITE)
-		if file == null:
-			error = FileAccess.get_open_error()
-		else:
-			file.store_string(JSON.stringify({"uuid":candidate}))
-			file.flush()
-			error = file.get_error()
-			file.close()
-			if error == OK:
-				error = DirAccess.rename_absolute(_path+".tmp",_path)
-	return error
+	return AtomicFile.write_text(_path, JSON.stringify({"uuid":candidate}))

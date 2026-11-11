@@ -5,6 +5,7 @@ extends RefCounted
 ## 上层因此可以只依赖 `{ok, code, data}` 这一种返回形态。
 
 const Schema = preload("res://src/storage/history_schema.gd")
+const LogSchema = preload("res://src/storage/log_schema.gd")
 
 var _db: Object
 
@@ -47,17 +48,32 @@ func execute_block(block: String) -> Dictionary:
 
 
 ## BEGIN IMMEDIATE：写事务一开始就拿写锁，避免提交时才暴露冲突。
-func transaction(action: Callable) -> Dictionary:
+func transaction(action: Callable, label: String = "") -> Dictionary:
 	if not ready():
 		return failure("CACHE_CONNECTION_INVALID")
+	var started := Time.get_ticks_usec()
+	var transaction_id := LogSchema.new_transaction_id()
 	var begun := execute("BEGIN IMMEDIATE")
 	if not begun.ok:
+		begun.transaction = _transaction_meta(transaction_id, label, "begin_failed", "failure", started)
 		return begun
 	var result: Dictionary = action.call()
 	if not result.get("ok", false):
-		return _rollback(result)
+		var rolled := _rollback(result)
+		rolled.transaction = _transaction_meta(transaction_id, label, "rolled_back", "failure", started)
+		return rolled
 	var committed := execute("COMMIT")
-	return _rollback(committed) if not committed.ok else result
+	if not committed.ok:
+		var failed := _rollback(committed)
+		failed.transaction = _transaction_meta(transaction_id, label, "commit_failed", "failure", started)
+		return failed
+	result.transaction = _transaction_meta(transaction_id, label, "committed", "success", started)
+	return result
+
+func _transaction_meta(transaction_id: String, label: String, phase: String, outcome: String, started: int) -> Dictionary:
+	return {"transaction_id":transaction_id, "scope":"sqlite", "operation":label if not label.is_empty() else "unknown",
+		"phase":phase, "outcome":outcome, "duration_ms":int((Time.get_ticks_usec() - started) / 1000),
+		"trace_id":transaction_id}
 
 
 func ready() -> bool:

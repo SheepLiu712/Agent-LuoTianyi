@@ -51,11 +51,44 @@ size_flags_vertical = 3
 size_flags_horizontal = 3
 theme_override_constants/separation = 16
 [node name="Title" type="Label" parent="Scroll/Column"]
-text = "语音缓存"
+text = "缓存与导入"
 theme_override_font_sizes/font_size = 22
 [node name="Description" type="Label" parent="Scroll/Column"]
-text = "已接收的完整语音保存在这台电脑上，供消息重放。\n缓存按服务器和账号隔离，退出登录或重启后仍保留，不会自动清理。"
+text = "已接收的完整语音与历史图片保存在这台电脑上，供消息重放与查看。\n缓存按服务器和账号隔离，退出登录或重启后仍保留，不会自动清理。"
 autowrap_mode = 3
+[node name="MigrationTitle" type="Label" parent="Scroll/Column"]
+text = "从 Python 客户端导入媒体"
+theme_override_font_sizes/font_size = 16
+[node name="MigrationDescription" type="Label" parent="Scroll/Column"]
+text = "先选择 Python 客户端程序（Chat with Luotianyi.exe），再把这台电脑上可按消息对齐的语音与历史图片复制过来。\n聊天文字不在这里导入：历史正文仍从服务器读取。"
+autowrap_mode = 3
+[node name="PythonPathRow" type="HBoxContainer" parent="Scroll/Column"]
+theme_override_constants/separation = 8
+[node name="PythonPathLabel" type="Label" parent="Scroll/Column/PythonPathRow"]
+text = "Python 客户端"
+[node name="PythonPath" type="LineEdit" parent="Scroll/Column/PythonPathRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+editable = false
+placeholder_text = "尚未选择"
+[node name="BrowsePython" type="Button" parent="Scroll/Column/PythonPathRow"]
+unique_name_in_owner = true
+text = "浏览…"
+custom_minimum_size = Vector2(0, 40)
+[node name="MigrationActions" type="HBoxContainer" parent="Scroll/Column"]
+theme_override_constants/separation = 8
+[node name="MigrateMedia" type="Button" parent="Scroll/Column/MigrationActions"]
+unique_name_in_owner = true
+text = "开始导入…"
+size_flags_horizontal = 0
+custom_minimum_size = Vector2(0, 40)
+[node name="MigrationStatus" type="Label" parent="Scroll/Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+[node name="MigrationHint" type="Label" parent="Scroll/Column"]
+text = "只新增不覆盖：已有缓存保持不变，Python 端的源文件也不会被移动、改名或删除。\n导入按服务器和账号分桶；若 Python 端记录的账号不同，会先提示再决定。"
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
 [node name="UsageRow" type="HBoxContainer" parent="Scroll/Column"]
 theme_override_constants/separation = 16
 [node name="UsageRing" type="Control" parent="Scroll/Column/UsageRow"]
@@ -111,7 +144,7 @@ size_flags_vertical = 4
 autowrap_mode = 3
 text = "正在读取本账号缓存与磁盘容量…"
 [node name="Scope" type="Label" parent="Scroll/Column"]
-text = "清理仅作用于当前服务器和账号。聊天文字保留，已经清理的语音将无法重放。正在播放的在线语音不会被打断。"
+text = "清理仅作用于当前服务器和账号的语音缓存；历史图片缓存不在此清理范围内。聊天文字保留，已经清理的语音将无法重放。正在播放的在线语音不会被打断。"
 autowrap_mode = 3
 [node name="AgeRow" type="HBoxContainer" parent="Scroll/Column"]
 theme_override_constants/separation = 8
@@ -146,26 +179,6 @@ text = "重新扫描"
 [node name="CacheStatus" type="Label" parent="Scroll/Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
-[node name="MigrationTitle" type="Label" parent="Scroll/Column"]
-text = "从 Python 客户端迁移"
-theme_override_font_sizes/font_size = 16
-[node name="MigrationDescription" type="Label" parent="Scroll/Column"]
-text = "此前用 Python 客户端聊过的话，可以把它留在这台电脑上的语音一次性带过来。\n未执行一键迁移时，向上翻看历史消息会按需把对应语音逐步迁入。"
-autowrap_mode = 3
-[node name="MigrationActions" type="HBoxContainer" parent="Scroll/Column"]
-theme_override_constants/separation = 8
-[node name="MigrateAudio" type="Button" parent="Scroll/Column/MigrationActions"]
-unique_name_in_owner = true
-text = "一键迁移语音…"
-size_flags_horizontal = 0
-custom_minimum_size = Vector2(0, 40)
-[node name="MigrationStatus" type="Label" parent="Scroll/Column"]
-unique_name_in_owner = true
-autowrap_mode = 3
-[node name="MigrationHint" type="Label" parent="Scroll/Column"]
-text = "只新增不覆盖：已有缓存保持不变，Python 端的源文件也不会被移动或删除。"
-autowrap_mode = 3
-theme_override_font_sizes/font_size = 12
 [node name="Spacer" type="Control" parent="Scroll/Column"]
 size_flags_vertical = 3
 mouse_filter = 2
@@ -180,7 +193,16 @@ ok_button_text = "清理"
 cancel_button_text = "取消"
 [node name="MigrationDialog" parent="." instance=ExtResource("decision")]
 unique_name_in_owner = true
-title = "迁移语音"
-dialog_text = "把本机 Python 客户端保存的语音迁入当前账号？"
-ok_button_text = "开始迁移"
+title = "导入媒体"
+dialog_text = "把本机 Python 客户端保存的语音与历史图片复制到当前账号？"
+ok_button_text = "开始导入"
 cancel_button_text = "取消"
+[node name="PythonPicker" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "选择 Python 客户端程序"
+size = Vector2i(720, 480)
+ok_button_text = "使用这个程序"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.exe ; Windows 可执行文件")
+use_native_dialog = true

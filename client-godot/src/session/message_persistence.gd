@@ -99,6 +99,13 @@ func save_reconcile(rows: Array) -> Dictionary:
 	}).wait()
 
 
+## 启动/历史页落库后对账本地 uncertain 副本：只返回被软标记的本地 id。
+func reconcile_delivery() -> Dictionary:
+	if not is_open():
+		return _failure("STORAGE_UNAVAILABLE")
+	return await _worker.submit("reconcile_delivery", {"scope": _scope}).wait()
+
+
 func record_attempt(message_id: String, wire_id: String) -> void:
 	_submit("record_attempt", {
 		"scope": _scope,
@@ -197,6 +204,7 @@ func _row_to_message(row: Dictionary) -> Dictionary:
 		"status": str(row.get("delivery_state", "received")),
 		"code": str(row.get("error_code", "")),
 		"stream_complete": int(row.get("stream_complete", 1)) == 1,
+		"restored": true,
 	}
 
 

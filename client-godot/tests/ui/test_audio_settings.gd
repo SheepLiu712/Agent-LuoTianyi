@@ -23,7 +23,10 @@ func run() -> void:
 	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
 	check(window.get_node_or_null("%AudioTab") is Button, "settings includes voice cache management")
 	check(window.get_node("%AudioPage").get_node_or_null("%OlderThanDays") is SpinBox, "user can choose cache age in days")
-	check(window.get_node("%AudioPage").get_node_or_null("%MigrateAudio") is Button, "voice cache page owns a one-click migration entry")
+	check(window.get_node("%AudioPage").get_node_or_null("%MigrateMedia") is Button, "cache page owns a media import entry")
+	check(window.get_node("%AudioPage").get_node_or_null("%BrowsePython") is Button, "cache page can pick a python client")
+	check(window.get_node("%AudioPage").get_node_or_null("%PythonPath") is LineEdit, "cache page shows the selected python client")
+	check(window.get_node("%AudioPage").get_node_or_null("%PythonPicker") is FileDialog, "cache page owns an exe picker")
 	if failures.is_empty():
 		window.setup(null, null, null, session.clear_cache)
 		root.add_child(window)
@@ -31,7 +34,10 @@ func run() -> void:
 		window.get_node("%AudioTab").pressed.emit()
 		var page = window.get_node("%AudioPage")
 		check(page.visible and not window.is_dirty(), "cache page is independent of unsaved preferences")
-		check(page.get_node("%MigrateAudio").disabled, "migration entry stays disabled until a service is wired")
+		check(page.get_node("%MigrateMedia").disabled, "media import entry stays disabled until a service is wired")
+		check(page.get_node("%BrowsePython").disabled, "python picker stays disabled until a service is wired")
+		check(page.get_node("%PythonPicker").file_mode == FileDialog.FILE_MODE_OPEN_FILE, "picker selects one executable")
+		check(page.get_node("%PythonPicker").filters.size() == 1 and page.get_node("%PythonPicker").filters[0].contains("*.exe"), "picker filters executables")
 		check(page.get_node("%MigrationStatus").text.is_empty(), "no migration status without a service")
 		page.get_node("%ClearCache").pressed.emit()
 		await create_timer(0.3).timeout

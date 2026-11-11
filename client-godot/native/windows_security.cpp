@@ -11,6 +11,7 @@
 #include <vector>
 #include "pcm_stream_decoder.h"
 #include "storage_volume.h"
+#include "windows_input_method.h"
 using namespace godot;
 
 namespace {
@@ -128,6 +129,7 @@ public:
 void initialize_security(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         ClassDB::register_class<WindowsSecurity>();
+        ClassDB::register_class<WindowsInputMethod>();
         ClassDB::register_class<PcmStreamDecoder>();
         ClassDB::register_class<StorageVolume>();
     }

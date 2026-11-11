@@ -44,6 +44,10 @@ func _run() -> void:
 	events.clear()
 	now_ms += 10000
 	check(await until(func(): return events.any(func(e): return e.type == "heartbeat_seen" and e.payload.ping_id == 2)), "heartbeat repeats after ten seconds")
+	now_ms += 20000
+	transport._ping_sent_at = now_ms - 16000
+	transport._tick_heartbeat(now_ms)
+	check(transport.get_state().phase == "reconnecting", "unanswered heartbeat marks a half-open socket dead")
 	transport.stop()
 	check(transport.get_state().phase == "idle" and transport.send_event("user_text", {}, true).is_empty(), "stop closes and rejects work")
 	check(transport.start(session("drop")) == OK, "reconnect scenario starts")

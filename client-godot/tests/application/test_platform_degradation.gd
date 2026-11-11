@@ -17,6 +17,10 @@ func run() -> void:
 	check(logs.size() == 1 and logs[0].visible, "diagnostics remain available without authentication")
 	app.queue_free()
 	await process_frame
+	var security_dialog := _error_dialog()
+	if security_dialog != null:
+		security_dialog.get_node("%ErrorConfirm").pressed.emit()
+	await process_frame
 	for name in DirAccess.get_files_at(directory.path_join("logs")):
 		DirAccess.remove_absolute(directory.path_join("logs").path_join(name))
 	DirAccess.remove_absolute(directory.path_join("logs"))
@@ -26,8 +30,15 @@ func run() -> void:
 	panel.get_node("%Driver").set_script(load("res://src/avatar/avatar_driver.gd"))
 	root.add_child(panel)
 	await process_frame
-	check(not panel.avatar.get_status().loaded and not panel.get_node("%Error").text.is_empty(), "unavailable avatar reports failure without crashing the view")
+	var dialog := _error_dialog()
+	check(not panel.avatar.get_status().loaded and panel.get_node("%Error").text.is_empty() and dialog != null and dialog.get_current_text().contains("角色资源缺失"), "unavailable avatar reports failure through the error popup without crashing the view")
 	panel.queue_free()
 	await process_frame
 	print("Platform degradation: ","PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+func _error_dialog() -> Node:
+	for child in root.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			return child
+	return null

@@ -1,4 +1,5 @@
 extends Window
+const ModalStack = preload("res://src/ui/modal_stack.gd")
 signal confirmed
 signal canceled
 signal custom_action(action: String)
@@ -22,7 +23,9 @@ func _display() -> void:
 	%Confirm.text = ok_button_text
 	%Cancel.text = cancel_button_text
 	%SaveAndClose.visible = show_save
-	if visible: %Cancel.grab_focus.call_deferred()
+	if visible:
+		ModalStack.activate(self)
+		%Cancel.grab_focus.call_deferred()
 
 func _cancel() -> void:
 	hide()

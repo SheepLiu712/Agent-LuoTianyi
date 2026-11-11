@@ -1,6 +1,7 @@
 extends Control
 signal close_requested
 signal published(id: String)
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 var _controller: Node
 @onready var _draft: TextEdit = %PublishDraft
 @onready var _send: Button = %PublishButton
@@ -29,7 +30,13 @@ func _publish() -> void:
 		published.emit(result.item_id)
 		queue_free()
 	else:
-		_status.text = "发布结果不确定，请先刷新核实；草稿已保留。" if result.code in ["TIMEOUT","NETWORK_ERROR"] else "发布失败，草稿已保留（%s）。"%result.code
+		_status.text = ""
+		if result.code in ["TIMEOUT","NETWORK_ERROR"]:
+			ErrorDialog.present(self, "发布结果不确定，请先刷新核实；草稿已保留。")
+		elif result.code == "INVALID_INPUT":
+			ErrorDialog.present(self, "发布内容不能为空。")
+		else:
+			ErrorDialog.present(self, "发布失败，草稿已保留。")
 
 func open() -> void:
 	show()
@@ -40,6 +47,22 @@ func _request_close() -> void:
 		%DiscardDialog.get_cancel_button().grab_focus()
 	else: queue_free()
 func _input(event: InputEvent) -> void:
+	if is_visible_in_tree() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
+		get_viewport().set_input_as_handled()
+		_cycle_focus(event.shift_pressed)
+		return
 	if is_visible_in_tree() and not %DiscardDialog.visible and event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		close_requested.emit()
+
+
+## 浮层内循环焦点，避免 Tab 走到被遮罩的动态列表。
+func _cycle_focus(reverse: bool) -> void:
+	var controls: Array[Control] = [_draft, %CancelPublish, %PublishButton]
+	var current := get_viewport().gui_get_focus_owner()
+	var index := controls.find(current)
+	if reverse:
+		index = controls.size() - 1 if index <= 0 else index - 1
+	else:
+		index = 0 if index < 0 or index >= controls.size() - 1 else index + 1
+	controls[index].grab_focus()

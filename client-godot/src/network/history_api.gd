@@ -4,6 +4,8 @@ extends Node
 ## 分页、重试与边界判定都在会话层，避免这里再长出一套状态机。
 
 const ServerAddress = preload("res://src/domain/server_address.gd")
+const Schema = preload("res://src/storage/log_schema.gd")
+const Events = preload("res://src/storage/log_events.gd")
 
 ## 每批 30 条：与分页口径一致，避免「首屏拉 50 条」的隐性放大。
 const DEFAULT_COUNT := 30
@@ -14,25 +16,35 @@ signal _completed(response: Dictionary)
 
 var _http: HTTPRequest
 var _timeout: float
+var _logger: RefCounted
+var _started := 0
+var _trace_id := ""
 
 
-func _init(timeout: float = 15.0) -> void:
+func _init(timeout: float = 15.0, logger: RefCounted = null) -> void:
 	_timeout = timeout
+	_logger = logger
 
 
 func fetch_page(session: Dictionary, end_index: int = -1, count: int = DEFAULT_COUNT) -> Dictionary:
+	var started := Time.get_ticks_usec()
+	var trace_id := Schema.new_trace_id("req")
+	_started = started
+	_trace_id = trace_id
 	if not _valid_request(session, end_index, count):
-		return _failure("INVALID_INPUT")
+		return _log_and_return(_failure("INVALID_INPUT"), 0, 0, started, trace_id)
 	if _http != null:
-		return _failure("BUSY")
+		return _log_and_return(_failure("BUSY"), 0, 0, started, trace_id)
 	var http := _open()
 	http.request_completed.connect(_on_completed.bind(http))
 	var error := http.request(_url(session, end_index, count), _headers(session), HTTPClient.METHOD_GET)
 	if error != OK:
 		_release(http)
-		return _failure("NETWORK_ERROR")
+		return _log_and_return(_failure("NETWORK_ERROR"), 0, 0, started, trace_id)
 	var response: Dictionary = await _completed
 	_release(http)
+	response.trace_id = trace_id
+	response.duration_ms = int((Time.get_ticks_usec() - started) / 1000)
 	return response
 
 
@@ -40,7 +52,9 @@ func cancel() -> void:
 	if _http == null:
 		return
 	_http.cancel_request()
-	_completed.emit(_failure("CANCELLED"))
+	var response := _failure("CANCELLED")
+	Events.http(_logger, response, 0, 0, _started, _trace_id, "/history", "GET")
+	_completed.emit(response)
 
 
 func _exit_tree() -> void:
@@ -68,7 +82,10 @@ func _on_completed(result: int, status: int, _headers: PackedStringArray, body: 
 	# 旧请求的回调必须被身份识别掉，不能覆盖当前请求的结果。
 	if _http != http:
 		return
-	_completed.emit(_response(result, status, body))
+	var response := _response(result, status, body)
+	response.bytes = body.size()
+	Events.http(_logger, response, status, body.size(), _started, _trace_id, "/history", "GET")
+	_completed.emit(response)
 
 
 func _response(result: int, status: int, body: PackedByteArray) -> Dictionary:
@@ -115,7 +132,8 @@ func _valid_count(count: int) -> bool:
 func _valid_credentials(session: Dictionary) -> bool:
 	return not _text(session, "username").is_empty() \
 		and not _text(session, "message_token").is_empty() \
-		and not _server(session).is_empty()
+		and not _server(session).is_empty() \
+		and ServerAddress.allows_insecure(_server(session))
 
 
 func _url(session: Dictionary, end_index: int, count: int) -> String:
@@ -139,6 +157,12 @@ func _text(session: Dictionary, key: String) -> String:
 
 static func _failure(code: String, status: int = 0) -> Dictionary:
 	return {"ok": false, "code": code, "status": status, "data": {}}
+
+func _log_and_return(response: Dictionary, status: int, bytes: int, started: int, trace_id: String) -> Dictionary:
+	Events.http(_logger, response, status, bytes, started, trace_id, "/history", "GET")
+	response.trace_id = trace_id
+	response.duration_ms = int((Time.get_ticks_usec() - started) / 1000)
+	return response
 
 
 static func _valid_index(value: Variant) -> bool:

@@ -11,6 +11,8 @@ func run() -> void:
 	var app = load("res://scenes/main.tscn").instantiate()
 	root.add_child(app)
 	await process_frame
+	app._sample_performance()
+	await process_frame
 	app.queue_free()
 	await process_frame
 	var archived := false
@@ -18,7 +20,7 @@ func run() -> void:
 		if filename not in before:
 			if filename.ends_with(".jsonl"):
 				var content := FileAccess.get_file_as_string("user://logs/" + filename)
-				archived = content.contains("client_started") and content.contains("client_stopped")
+				archived = content.contains("runtime_app_started") and content.contains("runtime_app_stopped") and content.contains("performance_startup") and content.contains("performance_sample")
 			DirAccess.remove_absolute("user://logs/" + filename)
 	print("Default startup archives logs in user directory: ", "PASS" if archived else "FAIL")
 	quit(0 if archived else 1)

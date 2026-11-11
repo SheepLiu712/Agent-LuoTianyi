@@ -7,6 +7,7 @@ signal attachment_cleared
 ## 松手才发一次：应用层据此写盘，拖动过程中不碰磁盘。
 signal composer_height_changed(height: float)
 const Attachment = preload("res://src/media/image_attachment.gd")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const MIN_COMPOSER_HEIGHT := 48.0
 const MAX_COMPOSER_HEIGHT := 320.0
 const AUTO_MAX_HEIGHT := 128.0
@@ -19,7 +20,6 @@ var _attachment: Dictionary = {}
 @onready var _history_retry: Button = %HistoryRetry
 @onready var _history_skip: Button = %HistorySkip
 @onready var _scroll = %Scroll
-@onready var _empty: Label = %Empty
 @onready var _latest: Button = %Latest
 @onready var _unread: Button = %Unread
 @onready var _volume: HSlider = %Volume
@@ -35,6 +35,14 @@ var _composer_style: StyleBoxFlat
 var _input_style: StyleBoxFlat
 var _auto_height := MIN_COMPOSER_HEIGHT
 var _manual_height := 0.0
+## 未读目标不在当前窗口时，等下一页历史到达后再试一次；用户显式操作会取消。
+var _pending_unread_jump := false
+var _last_error_code := ""
+var _last_history_phase := ""
+var _announced_messages: Dictionary = {}
+var _auth_announced := false
+var _history_incomplete_announced := false
+var _refresh_queued := false
 
 func set_ui_style(style: RefCounted) -> void:
 	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_ui_style):
@@ -49,6 +57,14 @@ func _apply_ui_style() -> void:
 	if _ui_style == null or not is_node_ready(): return
 	_ui_style.apply_surface_style(_card_style)
 	_card_style.bg_color = Color(1, 1, 1, 0.82 if _ui_style.is_crystal() else 1.0)
+	if _ui_style.is_crystal():
+		_card_style.set_corner_radius_all(0)
+		_card_style.border_width_left = 0
+		_card_style.border_width_top = 0
+		_card_style.border_width_right = 0
+		_card_style.border_width_bottom = 0
+		_card_style.shadow_size = 0
+		_card_style.shadow_offset = Vector2.ZERO
 	_composer_style.bg_color = Color(1, 1, 1, 0.45 if _ui_style.is_crystal() else 1.0)
 	_composer_style.set_corner_radius_all(12 if _ui_style.is_crystal() else 8)
 	_composer_style.corner_radius_top_left = 0
@@ -97,14 +113,14 @@ func _initialize() -> void:
 	_scroll.audio_action.connect(_audio_action)
 	_scroll.image_action.connect(_image_action)
 	_scroll.visible_messages.connect(_visible_audio)
-	_scroll.interacted.connect(_session.note_read_interaction)
+	_scroll.interacted.connect(_on_scroll_interacted)
 	if _session.has_method("load_older_history"):
 		_scroll.older_requested.connect(_session.load_older_history)
 	if _session.has_method("set_avatar"):
 		_session.user_avatar_changed.connect(_scroll.set_user_avatar)
 		_scroll.set_user_avatar(_session.get_user_avatar())
 	_latest.pressed.connect(_to_latest)
-	_unread.pressed.connect(_jump_reading)
+	_unread.pressed.connect(_request_unread)
 	_input.send_requested.connect(_send)
 	_input.image_pasted.connect(func(image):
 		_session.set_image_selecting(true)
@@ -123,7 +139,7 @@ func _initialize() -> void:
 	_send_button.pressed.connect(_send)
 	_session.message_audio_changed.connect(_audio_changed)
 	_session.message_image_changed.connect(func(id,state): _scroll.set_image_state(id,state))
-	_session.changed.connect(_refresh)
+	_session.changed.connect(_schedule_refresh)
 	_session.state_changed.connect(_state_changed)
 	_state_changed(_session.get_state())
 	_refresh()
@@ -139,9 +155,15 @@ func _show_volume() -> void:
 func _send() -> void:
 	_session.note_read_interaction()
 	_session.set_typing(false)
+	if _input.text.strip_edges().is_empty():
+		return
+	if str(_session.get_state().get("phase", "")) in ["idle", "auth_rejected"]:
+		ErrorDialog.present(self, "未连接，消息未发送。")
+		return
 	if not _attachment.is_empty() and not _confirm_attachment(null): return
 	if not _session.send_text(_input.text).is_empty():
 		_input.clear()
+		_last_error_code = ""
 		_update_auto_height()
 
 ## 文本自动增高只决定下限：手动拖过的高度不会被一段短文本压回去。
@@ -180,7 +202,9 @@ func _on_resize_commit() -> void:
 func _attach(result: Dictionary) -> void:
 	%ImageStatus.show()
 	if not result.ok:
-		%ImageStatus.text = {"IMAGE_TOO_LARGE":"图片过大，请选择小于 6 MiB 的图片。", "IMAGE_DIMENSIONS":"图片尺寸过大（最多8192像素、1600万像素）。", "IMAGE_FORMAT":"支持 PNG、JPEG、WebP 和 BMP 图片。", "IMAGE_READ_FAILED":"图片无法读取，请检查文件后重试。"}.get(result.code,"图片格式无效或文件已损坏。")
+		%ImageStatus.text = ""
+		%ImageStatus.hide()
+		ErrorDialog.present(self, {"IMAGE_TOO_LARGE":"图片过大，请选择小于 6 MiB 的图片。", "IMAGE_DIMENSIONS":"图片尺寸过大（最多8192像素、1600万像素）。", "IMAGE_FORMAT":"支持 PNG、JPEG、WebP 和 BMP 图片。", "IMAGE_READ_FAILED":"图片无法读取，请检查文件后重试。"}.get(result.code,"图片格式无效或文件已损坏。"))
 		_session.set_image_selecting(false)
 		return
 	_attachment = result
@@ -198,7 +222,9 @@ func _confirm_attachment(_texture: Texture2D) -> bool:
 	if _attachment.is_empty(): return false
 	var id: String = _session.send_image(_attachment.bytes, _attachment.mime)
 	if id.is_empty():
-		%ImageStatus.text = "图片暂时无法发送，内容已保留；请检查连接后重试。"
+		%ImageStatus.text = ""
+		%ImageStatus.hide()
+		ErrorDialog.present(self, "图片暂时无法发送，请检查当前连接后重试。图片已保留。")
 		return false
 	_clear_attachment(false)
 	return true
@@ -212,45 +238,57 @@ func _clear_attachment(canceled: bool) -> void:
 	if canceled: _session.set_image_selecting(false)
 	attachment_cleared.emit()
 
+## 同一帧内多个流式分片只刷新一次，避免重复深拷贝和整表重排。
+func _schedule_refresh() -> void:
+	if _refresh_queued:
+		return
+	_refresh_queued = true
+	_refresh.call_deferred()
+
+
 func _refresh() -> void:
-	var messages: Array[Dictionary] = _session.get_messages()
-	_empty.visible = messages.is_empty()
+	_refresh_queued = false
+	var retry_unread := _pending_unread_jump
+	var messages: Array[Dictionary] = _session.get_messages_view() if _session.has_method("get_messages_view") else _session.get_messages()
+	_announce_message_failures(messages)
 	_scroll.set_messages(messages)
 	_visible_audio(_scroll.get_visible_ids())
 	_apply_reading()
+	if retry_unread and _pending_unread_jump:
+		_pending_unread_jump = false
+		_jump_reading()
 
 func _visible_audio(ids: Array[String]) -> void:
 	for id in ids:
 		_scroll.set_audio_state(id,_session.get_message_audio(id))
 		_session.request_message_image(id)
 		_scroll.set_image_state(id,_session.get_message_image(id))
-	_latest.visible = not _scroll.is_at_latest()
+	_update_latest_visibility()
 	_report_reading()
 
 func _to_latest() -> void:
+	_pending_unread_jump = false
+	_session.dismiss_unread()
+	_unread.hide()
 	_scroll.scroll_to_latest()
 	_latest.hide()
+	_report_reading.call_deferred()
 
 func _state_changed(state: Dictionary) -> void:
 	_update_history_status(state)
-	_status.text = {"idle":"连接已关闭", "connecting":"正在连接…", "authenticating":"正在验证账户…",
-		"ready":"已连接", "reconnecting":"正在重新连接 · 可以继续输入", "auth_rejected":"聊天凭据已失效，请退出后重新登录。"}.get(state.phase, "")
+	_status.text = {"idle":"未连接", "connecting":"正在连接…", "authenticating":"正在验证账户…",
+		"ready":"已连接", "reconnecting":"连接已断开，正在重试", "auth_rejected":"未连接"}.get(state.phase, "")
 	if state.thinking:
 		_status.text = "天依正在想一想…"
 	if state.get("speaking", false):
 		_status.text += " · 正在播放语音"
-	if state.code == "REMOTE_AUDIO_ERROR":
-		_status.text += " · 服务端语音生成失败，可继续文字聊天。"
-	elif state.code == "AUDIO_ERROR":
-		_status.text += " · 本条语音暂时无法播放，文字已保留。"
-	elif state.code == "CACHE_CLEAR_FAILED":
-		_status.text += " · 部分语音未能清理，请关闭占用文件后重试。"
-	elif state.code == "SEND_REJECTED":
-		_status.text += " · 暂时无法发送，内容已保留。"
-	elif state.code == "INVALID_RESPONSE":
-		_status.text += " · 收到的数据不完整。"
-	elif state.phase == "ready" and not state.code.is_empty():
-		_status.text += " · 服务器暂时无法处理请求，请稍后重试。"
+	if state.phase == "auth_rejected":
+		if not _auth_announced:
+			_auth_announced = true
+			ErrorDialog.present(self, "聊天凭据已失效，请重新登录。")
+	else:
+		_auth_announced = false
+	_announce_chat_code(str(state.code))
 func _audio_changed(id: String, state: Dictionary) -> void:
 	_scroll.set_audio_state(id,state)
 
@@ -263,11 +301,18 @@ func _audio_action(id: String, action: String) -> void:
 
 func _apply_reading() -> void:
 	var reading: Dictionary = _session.get_reading_state()
-	if reading.pending or reading.located:
+	if reading.pending:
+		return
+	if str(reading.target_id).is_empty():
+		_unread.hide()
+		return
+	if reading.located:
+		_unread.hide()
 		return
 	if reading.manual:
-		_unread.visible = not reading.target_id.is_empty()
-		_session.reading_located()
+		_unread.show()
+		if _scroll.has_message(str(reading.target_id)):
+			_session.reading_located()
 	else:
 		_jump_reading()
 
@@ -275,11 +320,33 @@ func _jump_reading() -> void:
 	var reading: Dictionary = _session.get_reading_state()
 	if reading.pending:
 		return
-	if not reading.target_id.is_empty() and not _scroll.scroll_to_message(reading.target_id):
+	var target := str(reading.target_id)
+	if target.is_empty():
+		_pending_unread_jump = false
+		_unread.hide()
 		return
+	if not _scroll.scroll_to_message(target):
+		_pending_unread_jump = true
+		if _session.has_method("load_older_history"):
+			_session.load_older_history()
+		return
+	_pending_unread_jump = false
 	_session.reading_located()
 	_unread.hide()
+	_update_latest_visibility()
 	_report_reading.call_deferred()
+
+func _request_unread() -> void:
+	_session.note_read_interaction()
+	_jump_reading()
+
+## 用户真实滚动会取消待执行的未读跳转，避免下一页到达后反向拉回。
+func _on_scroll_interacted() -> void:
+	_pending_unread_jump = false
+	_session.note_read_interaction()
+
+func _update_latest_visibility() -> void:
+	_latest.visible = not _scroll.is_at_latest()
 
 func _report_reading() -> void:
 	if is_inside_tree():
@@ -308,13 +375,54 @@ func _update_history_status(state: Dictionary) -> void:
 	_scroll.set_older_state(str(history.get("older","idle")))
 	_history_retry.visible = history.phase in ["first_failed","failed"]
 	_history_skip.visible = history.phase == "first_failed"
-	_history_status.text = {"first_loading":"正在同步最近历史；发送的消息将暂时排队。", "first_failed":"首批历史加载失败；可重试或跳过后发送。", "loading":"后台同步历史 · 已加载 %s 条" % history.count, "failed":"较早历史加载失败，已加载内容保留。", "skipped":"已跳过本次历史同步。"}.get(history.phase, "")
+	_history_status.text = {"first_loading":"正在同步最近历史；发送的消息将暂时排队。", "first_failed":"", "loading":"后台同步历史 · 已加载 %s 条" % history.count, "failed":"", "skipped":"已跳过本次历史同步。"}.get(history.phase, "")
+	if history.phase != _last_history_phase:
+		_last_history_phase = str(history.phase)
+		if history.phase == "first_failed":
+			ErrorDialog.present(self, "首批历史加载失败，可重试或跳过。")
+		elif history.phase == "failed":
+			ErrorDialog.present(self, "较早历史加载失败，已加载内容保留。")
 	if history.get("incomplete",false):
-		_history_status.text += " 检测到分页重复，无法确认历史完整。"
+		if not _history_incomplete_announced:
+			_history_incomplete_announced = true
+			ErrorDialog.present(self, "部分历史可能缺失。")
 	_apply_reading()
 	var reading: Dictionary = _session.get_reading_state()
-	if reading.reason == "NOT_FOUND":
-		_history_status.text += " 原阅读位置已找不到，回到最新消息。"
-	elif reading.reason == "SAVE_FAILED":
-		_history_status.text += " 本机阅读位置未能保存。"
 	%HistoryRow.visible = not _history_status.text.is_empty() or _history_retry.visible or _history_skip.visible
+
+func _announce_chat_code(code: String) -> void:
+	if code == "":
+		_last_error_code = ""
+		return
+	if code == _last_error_code:
+		return
+	_last_error_code = code
+	var text: String = {
+		"REMOTE_AUDIO_ERROR":"语音生成失败，可继续文字聊天。",
+		"AUDIO_ERROR":"这条语音无法播放。",
+		"CACHE_CLEAR_FAILED":"部分语音文件被占用，关闭后重试。",
+		"SEND_REJECTED":"消息未发送，内容已保留。",
+		"INVALID_RESPONSE":"服务器响应异常，请稍后重试。",
+		"SAVE_FAILED":"",
+	}.get(code, "服务器暂时无法处理，请稍后重试。")
+	if text.is_empty():
+		return
+	ErrorDialog.present(self, text)
+
+func _announce_message_failures(messages: Array[Dictionary]) -> void:
+	for message in messages:
+		var id := str(message.get("id", ""))
+		if id.is_empty() or _announced_messages.has(id):
+			continue
+		var status := str(message.get("status", ""))
+		if status == "failed":
+			_announced_messages[id] = true
+			ErrorDialog.present(self, "发送失败")
+		elif status == "uncertain":
+			# 从本地库恢复的旧结果不再每次启动弹阻塞框；
+			# 实时送达不确定仍由本会话的 delivery_changed 触发提示。
+			if bool(message.get("restored", false)):
+				_announced_messages[id] = true
+				continue
+			_announced_messages[id] = true
+			ErrorDialog.present(self, "消息未确认送达，请刷新核实或重发。")

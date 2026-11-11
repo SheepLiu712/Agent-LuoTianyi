@@ -112,11 +112,6 @@ text = "跳过本次"
 unique_name_in_owner = true
 size_flags_vertical = 3
 
-[node name="Empty" type="Label" parent="Margin/Column/MessagesMargin/Messages"]
-unique_name_in_owner = true
-text = "从一句问候开始"
-horizontal_alignment = 1
-
 [node name="ComposerSurface" type="PanelContainer" parent="Margin/Column"]
 unique_name_in_owner = true
 mouse_filter = 1

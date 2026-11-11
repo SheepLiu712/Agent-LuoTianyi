@@ -122,6 +122,18 @@ func _check_run_result(result: Variant, settings: Variant, pair: Variant) -> voi
 func _check_open_surfaces_hot_switch_shadows(theme: Variant, crystal: Variant) -> void:
 	check(theme.get_stylebox("panel", "AppSurface").shadow_size == (12 if crystal else 0), "open surfaces hot-switch shadows")
 
+func _check_chat_surface_hot_switch(chat: Variant, crystal: bool) -> void:
+	var card: StyleBoxFlat = chat.get_node("Background").get_theme_stylebox("panel")
+	check(card.corner_radius_top_left == (0 if crystal else 8), "chat surface corners follow style")
+	check(card.border_width_left == (0 if crystal else 1), "chat surface border follows style")
+	check(card.shadow_size == 0, "chat surface has no corner shadow")
+
+func _check_avatar_border_hot_switch(app: Variant, crystal: bool) -> void:
+	if app._avatar == null:
+		check(false, "avatar exists for border check")
+		return
+	check(app._avatar.get_node("Border").visible == (not crystal), "avatar border follows style")
+
 func _check_application_defaults_to_flat_svg(app: Variant) -> void:
 	check(app._services.ui_style.ui_style == "flat" and app._services.ui_style.icon_style == "svg", "application defaults to flat/svg")
 
@@ -158,6 +170,8 @@ func _check_style_combinations(app: Variant, settings: Variant, chat: Variant, d
 			check(theme.get_color("selection_color", kind).is_equal_approx(Color("0078d7")), "text selection stays blue in " + str(pair) + ": " + kind)
 			check(theme.get_color("font_selected_color", kind).is_equal_approx(Color.WHITE), "selected text stays white in " + str(pair) + ": " + kind)
 		_check_open_surfaces_hot_switch_shadows(theme, crystal)
+		_check_chat_surface_hot_switch(chat, crystal)
+		_check_avatar_border_hot_switch(app, crystal)
 		for bubble in chat.get_node("%Scroll").get_node("%Canvas").get_children():
 			var panel: StyleBoxFlat = bubble.get_node("%Bubble").get_theme_stylebox("panel")
 			_check_existing_message_changes_without_rebuilding_chat(panel, crystal)

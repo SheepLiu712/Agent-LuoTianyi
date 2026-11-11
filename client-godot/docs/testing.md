@@ -35,6 +35,8 @@ runner 使用本地 HTTP/WebSocket 夹具和独立 APPDATA，不访问公共账�
 
 ## 独立检查
 
+日志专项：`tests/test_log_schema.gd`、`tests/test_client_log.gd`、`tests/test_log_integration.gd`、`tests/test_log_window.gd`、`tests/storage/test_sqlite_transaction_log.gd`。覆盖九类必填字段、旧归档别名、调试开关、线程安全队列、WS/HTTP/凭证埋点、事务元数据、类别筛选与导出脱敏。
+
 ```powershell
 & $python client-godot/tests/test_dependency_boundaries.py
 & $python client-godot/scripts/check_complexity.py

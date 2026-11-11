@@ -30,6 +30,7 @@ func run() -> void:
 	_case_head(session)
 	_case_duplicates(session)
 	_case_local_state_kept(session)
+	await _case_restore_keeps_pending_local(session)
 	_case_idle_ignores(session)
 	session.queue_free()
 	await process_frame
@@ -97,6 +98,25 @@ func _case_idle_ignores(session: Node) -> void:
 	session._connection_changed({"phase": "auth_rejected", "code": "AUTH_REJECTED"})
 	session._reconcile_page(_typed([_message("late", "user", "late")]), "tail")
 	check(session.get_messages().size() == before, "reconcile is ignored outside a live session")
+
+
+## 等待历史期间已产生的本地消息不能因为 restore_page 替换视图而消失。
+func _case_restore_keeps_pending_local(session: Node) -> void:
+	var local := _message("local-pending", "user", "发送中的消息")
+	local.id_source = "local"
+	local.status = "waiting_history"
+	session._waiting_history = true
+	session._pending_history[local.id] = {"type":"user_text", "payload":{"message":local.text}}
+	session._accept_local(local)
+	session._restore_page(_typed([
+		_message("history-1", "assistant", "缓存一"),
+		_message("history-2", "user", "缓存二"),
+	]))
+	check(_ids(session) == ["history-1", "history-2", "local-pending"], "restore keeps pending local message at the tail")
+	check(_find(session, "local-pending").status == "waiting_history", "restore keeps pending delivery state")
+	session._release_history_sends()
+	check(_find(session, "local-pending").status == "failed", "offline release marks pending message failed instead of crashing")
+	check(_ids(session).has("local-pending"), "failed release keeps the local message visible")
 
 
 func _message(id: String, role: String, text: String) -> Dictionary:

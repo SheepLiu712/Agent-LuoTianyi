@@ -11,12 +11,6 @@ const Writer = preload("res://src/storage/history_page_writer.gd")
 const Installer = preload("res://src/storage/history_schema_installer.gd")
 const Migration = preload("res://src/storage/history_migration.gd")
 
-const OPERATIONS := [
-	"open_scope", "read_latest", "read_before", "save_live", "save_history",
-	"save_reconcile", "record_attempt", "update_attempt", "read_sync_state",
-	"flush", "close_scope",
-]
-
 var _db: Object
 var _access: RefCounted
 var _reader: RefCounted
@@ -27,7 +21,7 @@ var _handlers: Dictionary = {}
 
 
 func _init() -> void:
-	configure_handlers()
+	_configure_handlers()
 
 
 func open(root_path: String, scope: String) -> Dictionary:
@@ -69,7 +63,7 @@ func metadata() -> Dictionary:
 	})
 
 
-func configure_handlers() -> void:
+func _configure_handlers() -> void:
 	_handlers = {
 		"open_scope": _open_command,
 		"read_latest": _read_latest_command,
@@ -77,6 +71,7 @@ func configure_handlers() -> void:
 		"save_live": _save_live_command,
 		"save_history": _save_history_command,
 		"save_reconcile": _save_reconcile_command,
+		"reconcile_delivery": _reconcile_delivery_command,
 		"record_attempt": _record_attempt_command,
 		"update_attempt": _update_attempt_command,
 		"read_sync_state": _read_sync_command,
@@ -129,6 +124,13 @@ func _save_reconcile_command(payload: Dictionary) -> Dictionary:
 	if not guard.ok:
 		return guard
 	return _writer.save_reconcile(payload.get("rows", []))
+
+
+func _reconcile_delivery_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
+	return _writer.reconcile_delivery()
 
 
 func _record_attempt_command(payload: Dictionary) -> Dictionary:
@@ -269,10 +271,26 @@ func _schema_state(version: int) -> String:
 func _unversioned_state() -> String:
 	if not _access.has_table("messages"):
 		return "fresh"
-	return "current" if _access.column_names("messages").has("message_id") else "legacy"
+	if not _access.column_names("messages").has("message_id"):
+		return "legacy"
+	# version=0 且结构缺表/缺列：这是建库中断留下的半成品，不能当 current。
+	if not _missing_tables().is_empty() or not _missing_columns().is_empty():
+		return "fresh"
+	if not Schema.REQUIRED_UNIQUE_INDEX in _access.index_names("messages"):
+		return "fresh"
+	return "current"
 
 
 func _install() -> Dictionary:
+	return _access.transaction(_install_in_transaction, "install_schema")
+
+
+## 建表、写 epoch/scope、写 user_version 必须同事务；
+## 否则崩溃会留下一个被误判为 current 的永久坏库。
+func _install_in_transaction() -> Dictionary:
+	var dropped: Dictionary = _access.execute_block(Schema.DROP_V3)
+	if not dropped.ok:
+		return dropped
 	var created: Dictionary = _access.execute_block(Schema.CREATE_V3)
 	if not created.ok:
 		return created
@@ -346,7 +364,7 @@ func _validate_scope() -> Dictionary:
 		return result
 	var row: Dictionary = _access.first_row(result)
 	if row.is_empty():
-		return Installer.install_scope(_access, _scope)
+		return _access.transaction(func(): return Installer.install_scope(_access, _scope), "install_scope")
 	return _success() if str(row.scope_key) == _scope else _failure("STALE_SCOPE")
 
 

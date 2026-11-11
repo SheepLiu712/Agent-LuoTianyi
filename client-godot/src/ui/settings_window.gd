@@ -1,6 +1,7 @@
 extends Window
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const StorageService = preload("res://src/storage/storage_service.gd")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 ## 保存中要一直看得见，成功短留、失败留久一点；负数代表常驻。
 const NOTICE_SECONDS := {"saving": -1.0, "success": 2.0, "error": 8.0}
 const DEFAULT_NOTICE_SECONDS := 2.0
@@ -18,7 +19,7 @@ var _hidden_by_main := false
 var _notice_kind := ""
 var _ui_style: RefCounted
 var _avatar_source: Node
-var _audio_migration: Object
+var _media_migration: Object
 @onready var _preferences_page = %PreferencesPage
 @onready var _model_page = %ModelPage
 @onready var _profile_page = %ProfilePage
@@ -30,11 +31,16 @@ func set_avatar_source(source: Node) -> void:
 	if is_node_ready(): _profile_page.set_avatar_source(source)
 
 
-## 语音迁移是会话级服务，页面只拿到端口对象（信号 + 两个请求方法）。
-func set_audio_migration(migration: Object) -> void:
-	_audio_migration = migration
+## Python 媒体导入是会话级服务，页面只拿到端口对象。
+func set_media_migration(migration: Object) -> void:
+	_media_migration = migration
 	if is_node_ready():
-		%AudioPage.set_audio_migration(migration)
+		%AudioPage.set_media_migration(migration)
+
+
+## 兼容旧装配入口：页面语义已扩展到语音与图片。
+func set_audio_migration(migration: Object) -> void:
+	set_media_migration(migration)
 
 ## 显示前注入 UI 样式：偏好页 setup 时即读取，脏标记与保存并入统一汇总。
 func set_ui_style(ui_style: RefCounted) -> void:
@@ -54,7 +60,7 @@ func _ready() -> void:
 	_preferences_page.setup(_preferences)
 	_model_page.setup(_models,_executor)
 	if _ui_style != null: %StylePage.set_ui_style(_ui_style)
-	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory, _audio_migration)
+	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory, _media_migration)
 	%AudioTab.disabled = not _clear_cache.is_valid()
 	%AudioTab.pressed.connect(func(): select_page("audio"))
 	%StyleTab.disabled = _ui_style == null
@@ -94,6 +100,9 @@ func open() -> void:
 	%Chrome.open_window()
 
 func _process(_delta: float) -> void:
+	# 关闭后窗口仍被协调器缓存；隐藏状态下不要再逐帧深拷贝模型/偏好算脏。
+	if not visible and not _hidden_by_main:
+		return
 	var dirty := is_dirty()
 	%SaveAll.disabled = _saving or not dirty
 	_clear_success_notice(dirty)
@@ -151,17 +160,23 @@ func save_changes() -> Dictionary:
 	return {"ok":ok,"results":results}
 
 func _report(results: Array) -> void:
-	var errors: Array[String] = []
+	var failures := 0
 	var successes := 0
+	var messages: Array[String] = []
 	for result in results:
 		if result.ok: successes += 1
 		else:
-			var label: String = result.id
-			if result.section == "models" and _models != null:
-				for purpose in _models.get_types():
-					if purpose.id == result.id: label = "模型配置 · " + purpose.name
-			errors.append("%s：%s" % [label,result.code])
-	_notify("全部修改已保存。" if errors.is_empty() else "已保存 %s 项；未保存：%s。草稿已保留。" % [successes,"；".join(errors)], "success" if errors.is_empty() else "error")
+			failures += 1
+			if result.get("message") is String and not str(result.message).is_empty():
+				messages.append(str(result.message))
+	if failures == 0:
+		_notify("全部修改已保存。", "success")
+	else:
+		_notify("", "")
+		for text in messages:
+			ErrorDialog.present(self, text)
+		if messages.size() < failures:
+			ErrorDialog.present(self, "已保存 %d 项；%d 项未保存，修改仍保留在本次会话。" % [successes, failures])
 
 ## 成功后用户又改动就撤掉提示；保存中 is_dirty() 恒为真，必须排除，否则会清掉常驻的「正在保存…」。
 func _clear_success_notice(dirty: bool) -> void:
@@ -175,8 +190,13 @@ func _notify(text: String, kind: String) -> void:
 	if text.is_empty():
 		_toast.clear()
 		return
-	_toast.show_message(text, float(NOTICE_SECONDS.get(kind, DEFAULT_NOTICE_SECONDS)))
+	var visual: String = str({"success":"success", "error":"error", "saving":"progress"}.get(kind, "info"))
+	_toast.show_kind(text, visual, float(NOTICE_SECONDS.get(kind, DEFAULT_NOTICE_SECONDS)))
 
 func _input(event: InputEvent) -> void:
+	if visible and event.is_action_pressed("ui_cancel"):
+		get_viewport().set_input_as_handled()
+		_request_close()
+		return
 	if _saving and event is InputEventKey:
 		get_viewport().set_input_as_handled()

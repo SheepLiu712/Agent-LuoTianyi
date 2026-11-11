@@ -66,6 +66,8 @@ func run() -> void:
 	await settle()
 	check(list.get_reading_anchor().id == anchor.id and absf(list.get_reading_anchor().offset-anchor.offset) < 2, "late long image preserves the reading anchor below it")
 	check(list.get_visible_ids().has(anchor.id) and not list.get_visible_ids().has("19"), "visible rows agree with the restored anchor")
+	await _check_partially_visible_image_keeps_stable_anchor(list, messages)
+	await _check_pending_image_layout_does_not_capture_prepend_anchor(list, messages)
 	list.queue_free()
 	images.queue_free()
 	await process_frame
@@ -80,6 +82,42 @@ func remove_folder(path: String) -> void:
 func _check_tall_image_is_reachable(list: Variant) -> void:
 	check(list.scroll_to_message("19"), "tall image row can be scrolled to")
 	check(list.get_visible_ids().has("19"), "tall image row is reachable inside the visible window")
+
+## 图片正在视口内加载时，稳定锚点必须保留用户看到的像素偏移，而不是跳到图片顶部。
+func _check_partially_visible_image_keeps_stable_anchor(list: Variant, messages: Array[Dictionary]) -> void:
+	list.set_messages(messages)
+	await settle()
+	list.scroll_to_message("20")
+	await settle()
+	var target := int(list._offsets[19] + 80.0)
+	list.scroll_vertical = target
+	await process_frame
+	var before: Dictionary = list.get_stable_anchor()
+	check(before.id == "19" and absf(float(before.offset) - 80.0) < 3, "partially visible image becomes the stable anchor")
+	var image := Image.create(100, 2400, false, Image.FORMAT_RGBA8)
+	image.fill(Color("66ccff"))
+	list.set_image_state("19", {"status":"ready", "texture":ImageTexture.create_from_image(image), "code":"", "original_size":Vector2i(100,2400)})
+	await settle()
+	var after: Dictionary = list.get_stable_anchor()
+	check(after.id == before.id and absf(float(after.offset) - float(before.offset)) < 3, "image growth keeps the partially visible anchor offset")
+	check(float(after.offset) > 1.0, "image growth never snaps the anchor to the image top")
+
+## 图片重排的 pending 锚点不能被历史前插复用；否则会被拉回图片顶部。
+func _check_pending_image_layout_does_not_capture_prepend_anchor(list: Variant, messages: Array[Dictionary]) -> void:
+	list.set_messages(messages)
+	await settle()
+	list.scroll_to_message("20")
+	await settle()
+	var stable: Dictionary = list.get_stable_anchor()
+	list._layout({"id":"19", "offset":0.0}, false)
+	var older: Array[Dictionary] = []
+	for index in 30:
+		older.append({"id":"older-%s" % index, "role":"user", "text":"更早历史", "status":"received", "code":""})
+	list.set_messages(older + messages)
+	await settle()
+	var after: Dictionary = list.get_stable_anchor()
+	check(after.id == stable.id and absf(float(after.offset) - float(stable.offset)) < 3, "prepend ignores pending image anchor")
+	check(after.id != "19" or float(after.offset) > 1.0, "prepend never snaps to the pending image top")
 
 func _check_failure_retains_a_reachable_retry_action(picture: Variant, row: Variant) -> void:
 	check(not picture.visible and not row.get_node("%ImageButton").disabled and row.get_node("%ImageButton").text.contains("重试"), "failure retains a reachable retry action")

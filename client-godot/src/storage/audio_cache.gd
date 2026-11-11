@@ -1,6 +1,12 @@
 extends RefCounted
 const AccountScope = preload("res://src/domain/account_scope.gd")
 const ServerAddress = preload("res://src/domain/server_address.gd")
+const Schema = preload("res://src/storage/log_schema.gd")
+const Events = preload("res://src/storage/log_events.gd")
+const Pruner = preload("res://src/storage/cache_pruner.gd")
+## 单条与单账号配额：长会话/多账号使用不能无限占用磁盘。
+const MAX_ITEM_BYTES := 16 * 1024 * 1024
+const MAX_SCOPE_BYTES := 256 * 1024 * 1024
 var _root: String
 var _directory := ""
 var _logger: RefCounted
@@ -36,6 +42,8 @@ func set_scope(server: String, username: String) -> Error:
 	result = _cleanup_incomplete_and_orphans()
 	if result != OK:
 		_directory = ""
+	else:
+		_prune_scope_bytes()
 	return result
 
 func _cleanup_incomplete_and_orphans() -> Error:
@@ -70,10 +78,10 @@ func begin(id: String) -> Error:
 func append(id: String, bytes: PackedByteArray) -> Error:
 	if not _pending.has(id):
 		return ERR_DOES_NOT_EXIST
-	if bytes.size() > 8*1024*1024:
+	var file: FileAccess = _pending[id]
+	if bytes.size() > 8*1024*1024 or file.get_position() + bytes.size() > MAX_ITEM_BYTES:
 		abort(id)
 		return _error(id,ERR_OUT_OF_MEMORY)
-	var file: FileAccess = _pending[id]
 	file.store_buffer(bytes)
 	var result := file.get_error()
 	if result != OK:
@@ -82,6 +90,8 @@ func append(id: String, bytes: PackedByteArray) -> Error:
 	return OK
 
 func commit(id: String, status: Dictionary, waveform: PackedFloat32Array) -> Error:
+	var started := Time.get_ticks_usec()
+	var transaction_id := Schema.new_transaction_id()
 	if not _pending.has(id):
 		return ERR_DOES_NOT_EXIST
 	var file: FileAccess = _pending[id]
@@ -105,9 +115,12 @@ func commit(id: String, status: Dictionary, waveform: PackedFloat32Array) -> Err
 		for extension in [".part", ".audio", ".json.tmp"]:
 			if FileAccess.file_exists(_path(id,extension)):
 				DirAccess.remove_absolute(_path(id,extension))
+		_log_transaction(transaction_id, id, metadata, false, started)
 		return _error(id,result)
 	if _logger != null:
-		_logger.record("cache_committed",{"reply_id":id,"bytes":metadata.bytes,"frames":metadata.frames})
+		Events.file_transaction(_logger, "cache", "cache_commit", transaction_id, true, started, "OK",
+			{"reply_id":id, "bytes":metadata.bytes, "frames":metadata.frames})
+	_prune_scope_bytes()
 	return OK
 func lookup(id: String) -> Dictionary:
 	if _directory.is_empty() or id.is_empty() or not FileAccess.file_exists(_path(id,".json")):
@@ -181,7 +194,7 @@ func clear(older_than_days: int = 0) -> Error:
 			if removed != OK:
 				result = removed
 	if _logger != null:
-		_logger.record("cache_cleared",{"code":"OK" if result == OK else "CACHE_CLEAR_FAILED"})
+		_logger.log_info("info_cache_cleared",{"code":"OK" if result == OK else "CACHE_CLEAR_FAILED","phase":"complete","count":1})
 	return result
 
 func _now() -> int:
@@ -202,12 +215,17 @@ func _clear_older(days: int) -> Error:
 		var removed := _clear_old_manifest(_directory.path_join(name), cutoff)
 		if removed != OK:
 			result = removed
-	if _logger != null: _logger.record("cache_cleared", {"code":"OK" if result == OK else "CACHE_CLEAR_FAILED"})
+	if _logger != null: _logger.log_info("info_cache_cleared", {"code":"OK" if result == OK else "CACHE_CLEAR_FAILED","phase":"complete","count":1})
 	return result
 func _error(id: String, result: Error) -> Error:
 	if _logger != null:
-		_logger.record("cache_error",{"reply_id":id,"code":"CACHE_WRITE_FAILED"})
+		_logger.log_error("error_cache",{"reply_id":id,"code":"CACHE_WRITE_FAILED","detail":error_string(result),"phase":"error"})
 	return result
+
+func _log_transaction(transaction_id: String, id: String, metadata: Dictionary, success: bool, started: int) -> void:
+	Events.file_transaction(_logger, "cache", "cache_commit", transaction_id, success, started,
+		"OK" if success else "CACHE_WRITE_FAILED",
+		{"reply_id":id, "bytes":int(metadata.get("bytes", 0)), "frames":int(metadata.get("frames", 0))})
 
 func open_stream(id: String) -> RefCounted:
 	if lookup(id).is_empty(): return null
@@ -282,9 +300,21 @@ func _clear_old_manifest(manifest_path: String, cutoff: float) -> Error:
 	return _remove_cache_pair(audio_path, manifest_path)
 
 func _remove_cache_pair(audio_path: String, manifest_path: String) -> Error:
+	var result := OK
 	if FileAccess.file_exists(audio_path):
-		var removed := DirAccess.remove_absolute(audio_path)
-		if removed != OK:
-			return removed
-	var removed := DirAccess.remove_absolute(manifest_path)
-	return removed
+		result = DirAccess.remove_absolute(audio_path)
+		if result != OK:
+			return result
+	if FileAccess.file_exists(manifest_path):
+		result = DirAccess.remove_absolute(manifest_path)
+	return result
+
+
+## 只按文件大小与修改时间淘汰，不解析每条 manifest；在 start/commit 后调用。
+func _prune_scope_bytes() -> void:
+	Pruner.prune(
+		_directory,
+		func(name): return name.ends_with(".audio") and _owned.search(name) != null,
+		func(item): return _remove_cache_pair(str(item.path), str(item.path).get_basename() + ".json"),
+		MAX_SCOPE_BYTES,
+	)

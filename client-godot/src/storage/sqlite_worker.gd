@@ -6,6 +6,8 @@ extends Node
 
 signal stopped
 
+const Schema = preload("res://src/storage/log_schema.gd")
+
 ## 一次命令的凭据：主线程 await 它，工作线程只会投递结果。
 class Ticket:
 	extends RefCounted
@@ -33,21 +35,26 @@ var _semaphore := Semaphore.new()
 var _jobs: Array = []
 var _results: Array = []
 var _factory: Callable
+var _logger: RefCounted
 var _running := false
+var _accepting := false
 var _stopped := false
 
 
-func _init(factory: Callable) -> void:
+func _init(factory: Callable, logger: RefCounted = null) -> void:
 	_factory = factory
+	_logger = logger
 
 
 func start() -> Dictionary:
 	if _running:
 		return _failure("STORAGE_RUNNING")
 	_running = true
+	_accepting = true
 	_thread = Thread.new()
 	if _thread.start(_run) != OK:
 		_running = false
+		_accepting = false
 		return _failure("STORAGE_UNAVAILABLE")
 	return _success()
 
@@ -55,10 +62,15 @@ func start() -> Dictionary:
 ## 未启动或正在关闭时立即失败，让调用方拿到确定的错误而不是无限等待。
 func submit(operation: String, payload: Dictionary) -> Ticket:
 	var ticket := Ticket.new()
-	if not _running:
+	_mutex.lock()
+	var available := _running and _accepting
+	if available:
+		_jobs.append({"operation": operation, "payload": payload.duplicate(true), "ticket": ticket})
+	_mutex.unlock()
+	if not available:
 		ticket.settle(_failure("STORAGE_UNAVAILABLE"))
 		return ticket
-	_enqueue({"operation": operation, "payload": payload.duplicate(true), "ticket": ticket})
+	_semaphore.post()
 	return ticket
 
 
@@ -74,16 +86,26 @@ func pending_jobs() -> int:
 
 
 func begin_shutdown() -> void:
-	if not _running:
+	_mutex.lock()
+	if not _running or not _accepting:
+		_mutex.unlock()
 		return
-	_enqueue({"operation": "", "payload": {}, "ticket": Ticket.new()})
+	# 关闭标志与哨兵入队必须在同一临界区：之后到达的提交立即失败，
+	# 不能排在哨兵后面永远不被工作线程取走。
+	_accepting = false
+	_jobs.append({"operation": "", "payload": {}, "ticket": Ticket.new()})
+	_mutex.unlock()
+	_semaphore.post()
 
 
 func wait_to_finish() -> void:
 	if _thread != null:
 		_thread.wait_to_finish()
 		_thread = null
+	_mutex.lock()
 	_running = false
+	_accepting = false
+	_mutex.unlock()
 	_drain()
 	if _stopped:
 		return
@@ -92,6 +114,8 @@ func wait_to_finish() -> void:
 
 
 func _process(_delta: float) -> void:
+	if _results.is_empty():
+		return
 	_drain()
 
 
@@ -102,20 +126,33 @@ func _exit_tree() -> void:
 
 func _run() -> void:
 	var repository: RefCounted = _factory.call()
+	if repository == null:
+		_fail_remaining("STORAGE_UNAVAILABLE")
+		return
 	while true:
 		_semaphore.wait()
 		var job: Variant = _take_job()
 		if job == null or str(job.operation).is_empty():
 			break
-		_results_push({"ticket": job.ticket, "result": repository.execute(str(job.operation), job.payload)})
+		var started := Time.get_ticks_usec()
+		var result: Dictionary = repository.execute(str(job.operation), job.payload)
+		result.duration_ms = int((Time.get_ticks_usec() - started) / 1000)
+		result.operation = str(job.operation)
+		_results_push({"ticket": job.ticket, "result": result})
 	repository.close()
 
 
-func _enqueue(job: Dictionary) -> void:
+## 线程退出时仍有排队任务（异常/强制关闭）：主动结算，主线程不能无限 await。
+func _fail_remaining(code: String) -> void:
 	_mutex.lock()
-	_jobs.append(job)
+	var remaining := _jobs.duplicate()
+	_jobs.clear()
+	_running = false
+	_accepting = false
 	_mutex.unlock()
-	_semaphore.post()
+	for job in remaining:
+		if job.has("ticket"):
+			_results_push({"ticket": job.ticket, "result": _failure(code)})
 
 
 func _take_job() -> Variant:
@@ -138,7 +175,32 @@ func _drain() -> void:
 	_results.clear()
 	_mutex.unlock()
 	for entry in entries:
+		_log_result(entry.result)
 		entry.ticket.settle(entry.result)
+
+func _log_result(result: Dictionary) -> void:
+	if _logger == null:
+		return
+	var operation := str(result.get("operation", "unknown"))
+	var outcome := "success" if result.get("ok", false) else "failure"
+	var code := str(result.get("code", "UNKNOWN"))
+	var duration := int(result.get("duration_ms", 0))
+	var transaction: Variant = result.get("transaction")
+	var trace_id := ""
+	if transaction is Dictionary:
+		trace_id = str(transaction.get("trace_id", ""))
+	if trace_id.is_empty():
+		trace_id = Schema.new_trace_id("db")
+	_logger.log_performance("performance_sqlite", {"operation":operation, "outcome":outcome,
+		"duration_ms":duration, "queue_depth":pending_jobs(), "code":code, "trace_id":trace_id})
+	if transaction is Dictionary:
+		_logger.log_transaction("transaction_sqlite", {"transaction_id":str(transaction.get("transaction_id", trace_id)),
+			"scope":"sqlite", "operation":str(transaction.get("operation", operation)),
+			"phase":str(transaction.get("phase", "rolled_back")), "outcome":str(transaction.get("outcome", outcome)),
+			"duration_ms":int(transaction.get("duration_ms", duration)), "trace_id":trace_id, "code":code})
+	if code == "STALE_SCOPE":
+		_logger.log_security("security_scope", {"action":"db_scope_guard", "outcome":"denied", "reason_code":"STALE_SCOPE",
+			"subject":Schema.hash_subject("", "db"), "trace_id":trace_id})
 
 
 static func _failure(code: String) -> Dictionary:

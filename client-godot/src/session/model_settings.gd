@@ -96,7 +96,7 @@ func _default(type: Dictionary) -> Dictionary:
 	return {"enabled":false,"provider":"OpenAI 兼容","base_url":"","api_key":"","model":"","model_kind":type.model_kind,"model_capabilities":{"can_use_json":false,"can_enable_thinking":false},"params":{}}
 func _notify() -> void:
 	if _logger != null:
-		_logger.record("settings_models",{"phase":_state.phase,"code":_state.code,"count":_state.count})
+		_logger.log_info("info_settings_models",{"phase":_state.phase,"code":_state.code,"count":_state.count})
 	changed.emit(get_state())
 func _exit_tree() -> void:
 	stop()
@@ -113,7 +113,7 @@ func _valid_config_fields(config: Dictionary) -> bool:
 	return true
 
 func _validate_enabled(type_id: String, config: Dictionary) -> Dictionary:
-	if config.provider.strip_edges().is_empty() or ServerAddress.normalize(config.base_url).is_empty() or config.api_key.strip_edges().is_empty() or config.model.strip_edges().is_empty():
+	if config.provider.strip_edges().is_empty() or ServerAddress.normalize(config.base_url).is_empty() or not ServerAddress.allows_insecure(config.base_url) or config.api_key.strip_edges().is_empty() or config.model.strip_edges().is_empty():
 		return {"ok":false,"code":"MODEL_FIELDS_REQUIRED"}
 	if (_types[type_id].requires_json and not config.model_capabilities.can_use_json) or (_types[type_id].requires_thinking and not config.model_capabilities.can_enable_thinking):
 		return {"ok":false,"code":"MODEL_CAPABILITY_MISMATCH"}

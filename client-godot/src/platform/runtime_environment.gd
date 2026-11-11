@@ -15,3 +15,5 @@ func process_running(_id: int) -> bool:
 	return true
 func os_name() -> String:
 	return "unavailable"
+func supports_blur() -> bool:
+	return false

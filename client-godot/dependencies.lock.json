@@ -27,8 +27,9 @@
     "sha256": "073f623fc3fb06c192e68bb5287fdb9dab1952164c2a956dec6d4b45fd342ffb"
   },
   "windows_security": {
-    "binary_sha256": "b6c270c557b15f303d0d80cac89f42962f0d62268b474c46db47d20f4de0e8bc",
+    "binary_sha256": "037b797d14fe04de6e4ef72b5c74174f04bcf2f6089ca06c653bd8123d8b8752",
     "source": "native/windows_security.cpp",
+    "input_method_sources": ["native/windows_input_method.h", "native/windows_input_method.cpp"],
     "audio_sources": ["native/pcm_stream_decoder.h", "native/pcm_stream_decoder.cpp"],
     "storage_sources": ["native/storage_volume.h", "native/storage_volume.cpp"],
     "system_libraries": ["bcrypt", "crypt32"],

@@ -751,6 +751,7 @@ LineEdit/styles/focus = SubResource("ControlFocus")
 LineEdit/styles/normal = SubResource("InputSurface")
 LineEdit/styles/read_only = SubResource("ReadOnlyInput")
 LogEntry/colors/ERROR = Color(1, 0.54901963, 0.54901963, 1)
+LogEntry/colors/DEBUG = Color(0.59607846, 0.65882355, 0.7137255, 1)
 LogEntry/colors/INFO = Color(0.8392157, 0.8980392, 0.93333334, 1)
 LogEntry/colors/WARN = Color(1, 0.8352941, 0.5411765, 1)
 LoginAccountField/base_type = &"LineEdit"

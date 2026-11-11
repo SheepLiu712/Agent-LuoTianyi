@@ -55,7 +55,7 @@ func run() -> void:
 			scenarios.item_selected.emit(index)
 			await process_frame
 			await process_frame
-			check(scene.get_node("%Empty").visible == (index in [1, 2, 3]), "empty state visibility for scenario " + str(index))
+			check(scene.get_node("%Empty").visible == (index in [2, 3]), "empty state visibility for scenario " + str(index))
 			if index in [2, 3]:
 				editor.text = "失败时保留草稿"
 				await key(false)

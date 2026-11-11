@@ -1,12 +1,13 @@
 extends Control
-## 相处偏好页：成功与草稿状态都不再占用版面，只有失败才用顶部浮层说一句话。
-const NOTICES := {"error": "相处偏好加载失败，重新打开设置可重试。"}
+## 相处偏好页：保存失败走错误弹窗；加载失败用不挡输入的浮层说明如何重试。
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 var _controller: Node
 var _fields: Dictionary = {}
 @onready var _toast = %Toast
 var _initialized := false
 var _refreshing := false
 var _presets: Array[Button] = []
+var _last_error_code := ""
 
 func setup(controller: Node) -> void:
 	_controller = controller
@@ -75,13 +76,17 @@ func _apply_field(key: String, state: Dictionary) -> void:
 	_fields[key].editable = state.phase == "ready" and key not in ["relationship","speaking_style"]
 
 func _update_notice(state: Dictionary) -> void:
-	var text: String = NOTICES.get(state.phase,"")
-	if state.phase == "ready" and state.code != "OK":
-		text = "相处偏好保存失败（%s），修改已保留。" % state.code
-	if text.is_empty():
-		_toast.clear()
+	_toast.clear()
+	if state.phase == "error":
+		push_warning("Preferences failed to load")
+		_toast.show_kind("相处偏好加载失败，请重新打开设置重试。", "error", 3.5)
 		return
-	_toast.show_message(text)
+	if state.phase == "ready" and state.code != "OK":
+		if state.code != _last_error_code:
+			_last_error_code = state.code
+			ErrorDialog.present(self, "偏好保存失败，修改已保留。")
+	else:
+		_last_error_code = ""
 
 func save_changes() -> Dictionary:
 	if not is_dirty(): return {"ok":true,"results":[]}

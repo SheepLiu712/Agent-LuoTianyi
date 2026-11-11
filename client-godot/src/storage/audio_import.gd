@@ -10,65 +10,16 @@ extends RefCounted
 ##   - 源文件只读，不移动、不删除。
 
 const Wav = preload("res://src/storage/wav_metadata.gd")
+const Locator = preload("res://src/storage/python_client_locator.gd")
 
-const UUID_PATTERN := "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 const AUDIO_EXTENSION := ".audio"
 const MANIFEST_EXTENSION := ".json"
 const VERSION := 1
 const MARKER_DIRECTORY := "migration"
 
-static var _uuid: RegEx
-
 
 static func is_uuid(value: String) -> bool:
-	if _uuid == null:
-		_uuid = RegEx.create_from_string(UUID_PATTERN)
-	return _uuid.search(value) != null
-
-
-## Python 端音频目录的候选位置。路径来自客户端自己的工作目录，
-## 所以只能按「常见的几种摆放」去猜，猜不到就让页面提示用户。
-static func candidates() -> Array[String]:
-	var roots: Array[String] = []
-	var project := ProjectSettings.globalize_path("res://").trim_suffix("/")
-	_append_root(roots, project)
-	# 仓库形态下 Python 客户端与 client-godot 平级，所以要往上一级找。
-	_append_root(roots, project.get_base_dir())
-	_append_root(roots, OS.get_executable_path().get_base_dir())
-	var ancestor := OS.get_executable_path().get_base_dir()
-	for _index in 3:
-		ancestor = ancestor.get_base_dir()
-		if ancestor.is_empty():
-			break
-		_append_root(roots, ancestor)
-	var result: Array[String] = []
-	for root in roots:
-		for relative in ["temp/tts_output", "client/temp/tts_output", "cli-client/temp/tts_output"]:
-			var path: String = root.path_join(relative)
-			if DirAccess.dir_exists_absolute(path) and not result.has(path):
-				result.append(path)
-	return result
-
-
-## 目录里所有「文件名就是 UUID」的 wav：id → 绝对路径。
-static func index(directory: String) -> Dictionary:
-	var entries: Dictionary = {}
-	for name in DirAccess.get_files_at(directory):
-		if not name.to_lower().ends_with(".wav"):
-			continue
-		var id := name.get_basename()
-		if not is_uuid(id):
-			continue
-		entries[id] = directory.path_join(name)
-	return entries
-
-
-static func find(sources: Array, id: String) -> String:
-	for source in sources:
-		var path: String = str(source).path_join(id + ".wav")
-		if FileAccess.file_exists(path):
-			return path
-	return ""
+	return Locator.is_uuid(value)
 
 
 static func import_file(cache_directory: String, id: String, source: String) -> Dictionary:
@@ -103,7 +54,7 @@ static func read_marker(cache_directory: String) -> Dictionary:
 	return parsed if parsed is Dictionary else {}
 
 
-static func write_marker(cache_directory: String, counts: Dictionary) -> void:
+static func write_marker(cache_directory: String, counts: Dictionary, source_hash: String = "") -> void:
 	var path := marker_path(cache_directory)
 	if DirAccess.make_dir_recursive_absolute(path.get_base_dir()) != OK:
 		return
@@ -114,6 +65,7 @@ static func write_marker(cache_directory: String, counts: Dictionary) -> void:
 	file.store_string(JSON.stringify({
 		"version": VERSION,
 		"completed_at_unix": int(Time.get_unix_time_from_system()),
+		"source_hash": source_hash,
 		"counts": counts,
 	}))
 	file.flush()
@@ -231,13 +183,6 @@ static func _remove(paths: Array) -> void:
 	for path in paths:
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)
-
-
-static func _append_root(roots: Array[String], value: String) -> void:
-	var path := value.trim_suffix("/")
-	if path.is_empty() or roots.has(path):
-		return
-	roots.append(path)
 
 
 static func _result(status: String, code: String) -> Dictionary:

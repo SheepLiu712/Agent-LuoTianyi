@@ -66,7 +66,7 @@ static func backup(source_path: String, version: int) -> Dictionary:
 
 
 static func migrate(access: RefCounted, scope: String) -> Dictionary:
-	return access.transaction(_in_transaction.bind(access, scope))
+	return access.transaction(_in_transaction.bind(access, scope), "migrate")
 
 
 static func _in_transaction(access: RefCounted, scope: String) -> Dictionary:

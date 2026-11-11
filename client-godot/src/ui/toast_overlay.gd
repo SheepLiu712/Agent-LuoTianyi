@@ -12,6 +12,7 @@ const LAYOUT_PASSES := 2
 @onready var _text: Label = %Text
 var _last := ""
 var _tween: Tween
+var _kind := "info"
 
 
 func _ready() -> void:
@@ -63,10 +64,17 @@ func _notification(what: int) -> void:
 
 
 func show_message(text: String, seconds: float = DEFAULT_SECONDS) -> void:
+	show_kind(text, "info", seconds)
+
+
+## 语义化提示：成功/错误/进行中使用不同边框与底色，避免只看停留时长区分。
+func show_kind(text: String, kind: String, seconds: float = DEFAULT_SECONDS) -> void:
 	if text.is_empty():
 		return
+	_kind = kind
 	_last = text
 	_text.text = text
+	_apply_kind_style(kind)
 	_layout()
 	show()
 	_kill_tween()
@@ -85,7 +93,32 @@ func clear() -> void:
 	_kill_tween()
 	_last = ""
 	_text.text = ""
+	_panel.remove_theme_stylebox_override("panel")
+	_kind = "info"
 	hide()
+
+
+func _apply_kind_style(kind: String) -> void:
+	if not is_node_ready():
+		return
+	var style := _panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	if style == null:
+		return
+	match kind:
+		"success":
+			style.border_color = Color(0.18, 0.64, 0.40, 0.9)
+			style.bg_color = Color(0.94, 1.0, 0.96, 1)
+		"error":
+			style.border_color = Color(0.78, 0.24, 0.24, 0.9)
+			style.bg_color = Color(1.0, 0.95, 0.95, 1)
+		"progress":
+			style.border_color = Color(0.20, 0.52, 0.86, 0.9)
+			style.bg_color = Color(0.95, 0.98, 1.0, 1)
+		_:
+			style.border_color = Color(0.18, 0.48, 0.80, 0.9)
+			style.bg_color = Color(1, 1, 1, 1)
+	style.set_border_width_all(1)
+	_panel.add_theme_stylebox_override("panel", style)
 
 
 ## 文案在淡出后仍可读，测试与诊断不必和动画赛跑。

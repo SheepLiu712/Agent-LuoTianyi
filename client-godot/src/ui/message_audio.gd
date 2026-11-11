@@ -1,5 +1,6 @@
 extends VBoxContainer
 signal action(value: String)
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 @onready var _row: HBoxContainer = %Row
 @onready var _play: Button = %Play
 @onready var _wave = %Wave
@@ -8,6 +9,7 @@ signal action(value: String)
 @onready var _error: Label = %Error
 var _status := "idle"
 var _ui_style: RefCounted
+var _last_code := ""
 
 func set_ui_style(style: RefCounted) -> void:
 	_ui_style = style
@@ -23,10 +25,12 @@ func _ready() -> void:
 	_stop.pressed.connect(func(): action.emit("stop"))
 
 func update_state(state: Dictionary) -> void:
-	visible = state.available or not state.code.is_empty()
+	visible = state.available
 	_row.visible = state.available
-	_error.visible = not state.code.is_empty()
-	_error.text = "语音未能保存" if state.code == "CACHE_WRITE_FAILED" else "语音暂时无法重放"
+	_error.visible = false
+	if not state.available and not state.code.is_empty() and state.code != _last_code:
+		_last_code = state.code
+		ErrorDialog.present(self, "这条语音无法播放。")
 	_status = state.status
 	_update_icon()
 	_play.text = {"idle":"重放","playing":"暂停","paused":"继续"}[_status]

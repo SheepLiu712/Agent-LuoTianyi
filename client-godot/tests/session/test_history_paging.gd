@@ -21,12 +21,15 @@ class FakeSource:
 	var total := 0
 	var requests: Array = []
 	var overrides: Dictionary = {}
+	var fail := false
 
 	func cancel() -> void:
 		pass
 
 	func fetch(_session: Dictionary, end_index: int, count: int) -> Dictionary:
 		requests.append(end_index)
+		if fail:
+			return {"ok": false, "code": "NETWORK_OFFLINE", "status": 0, "data": {}}
 		var stop := total if end_index < 0 else end_index
 		var start := maxi(0, stop - count)
 		var rows: Array = overrides.get(end_index, _rows(start, stop))
@@ -83,6 +86,7 @@ func run() -> void:
 	await _case_reconcile_waits_for_initial()
 	await _case_reconcile_silent_on_failure()
 	await _case_reconcile_cancelled_by_stop()
+	await _case_initial_failure_releases_boundary()
 	print("History paging: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -322,6 +326,23 @@ func _case_reconcile_cancelled_by_stop() -> void:
 	await create_timer(1.8).timeout
 	check(reconcile_source.requests.is_empty(), "stop cancels a pending reconcile")
 	check(_count_of("reconcile") == 0, "cancelled reconcile never reaches the view")
+	opened.worker.begin_shutdown()
+	opened.worker.wait_to_finish()
+
+
+## 首屏失败后 boundary 必须释放，否则之后用户发出的消息永远停在 waiting_history。
+func _case_initial_failure_releases_boundary() -> void:
+	var scope := _scope("f")
+	var opened: Dictionary = await _open(scope)
+	var source := FakeSource.new()
+	source.fail = true
+	var sync: Node = _sync(source, opened.persistence)
+	var released := [false]
+	sync.boundary_ready.connect(func(): released[0] = true)
+	sync.start(_session(scope))
+	check(await _until(func(): return sync.get_state().initial == "failed"), "initial failure settles")
+	check(released[0], "initial failure releases the send boundary")
+	sync.stop()
 	opened.worker.begin_shutdown()
 	opened.worker.wait_to_finish()
 

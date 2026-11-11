@@ -5,7 +5,7 @@ const MAX_AGE_MS := 240000
 const RETRY_DELAYS := [1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]
 var _pending: Dictionary = {}
 
-func enqueue(type: String, payload: Dictionary, durable: bool, now_ms: int) -> String:
+func enqueue(type: String, payload: Dictionary, durable: bool, now_ms: int, parallel: bool = false) -> String:
 	if _pending.size() >= 128:
 		return ""
 	var id := "c-" + Crypto.new().generate_random_bytes(16).hex_encode()
@@ -13,7 +13,7 @@ func enqueue(type: String, payload: Dictionary, durable: bool, now_ms: int) -> S
 		"ts":int(Time.get_unix_time_from_system() * 1000), "reply_to":null}
 	if JSON.stringify(packet).to_utf8_buffer().size() > 8 * 1024 * 1024:
 		return ""
-	_pending[id] = {"packet":packet, "durable":durable, "created":now_ms,
+	_pending[id] = {"packet":packet, "durable":durable, "parallel":parallel, "created":now_ms,
 		"ready":now_ms, "deadline":0, "attempts":0, "waiting":false}
 	delivery_changed.emit(id, "queued", "")
 	return id
@@ -27,7 +27,7 @@ func take_ready(now_ms: int, connected: bool) -> Array[Dictionary]:
 	var durable_blocked := false
 	for id in _pending.keys():
 		var entry: Dictionary = _pending[id]
-		if entry.durable:
+		if entry.durable and not entry.get("parallel", false):
 			if durable_blocked:
 				continue
 			durable_blocked = true

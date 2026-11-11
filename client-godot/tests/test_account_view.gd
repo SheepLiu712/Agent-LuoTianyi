@@ -29,6 +29,17 @@ func has_text(view: Control, text: String) -> bool:
 			return true
 	return false
 
+func focused_name(view: Control) -> String:
+	var focused := view.get_viewport().gui_get_focus_owner()
+	return "" if focused == null else String(focused.name)
+
+func press_tab() -> void:
+	var event := InputEventKey.new()
+	event.keycode = KEY_TAB
+	event.physical_keycode = KEY_TAB
+	event.pressed = true
+	root.push_input(event)
+
 func _initialize() -> void:
 	call_deferred("run")
 
@@ -53,6 +64,7 @@ func run() -> void:
 	var password := input(view, "密码")
 	_check_account_form_is_available(server, username, password)
 	if server != null and username != null and password != null:
+		await check_focus_order(view, username)
 		await session.set_server(OS.get_environment("GODOT_TEST_SERVER"))
 		username.text = "reject"
 		password.text = "synthetic-password"
@@ -88,3 +100,18 @@ func run() -> void:
 
 func _check_account_form_is_available(server: Variant, username: Variant, password: Variant) -> void:
 	check(server != null and username != null and password != null, "account form is available")
+
+func check_focus_order(view: Control, username: LineEdit) -> void:
+	username.focus_next = NodePath()
+	username.grab_focus()
+	await process_frame
+	check(focused_name(view) == "Username", "login focus starts at the account field")
+	press_tab()
+	await process_frame
+	check(focused_name(view) == "Password", "Tab moves from the account field directly to password")
+	press_tab()
+	await process_frame
+	check(focused_name(view) == "AutoLogin", "Tab reaches automatic login after password")
+	press_tab()
+	await process_frame
+	check(focused_name(view) == "Remember", "Tab reaches remember login after automatic login")

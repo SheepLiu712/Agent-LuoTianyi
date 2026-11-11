@@ -34,7 +34,7 @@ const SCENES := {
 		"root":"DropdownItem","type":"Button","setup":"setup","unique":[]
 	},
 	"res://scenes/ui/log_window.tscn": {
-		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","LevelDropdown","ModuleDropdown","Search","Text","Follow","CopyButton","ExportButton","Status","Picker"]
+		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","CategoryDropdown","LevelDropdown","ModuleDropdown","Search","Text","Follow","CopyButton","ExportButton","Status","Picker"]
 	},
 	"res://scenes/ui/message_audio.tscn": {
 		"root":"MessageAudio","type":"VBoxContainer","setup":"","unique":["Row","Play","Wave","Time","Stop","Error"]
@@ -46,7 +46,7 @@ const SCENES := {
 		"root":"VirtualMessageList","type":"ScrollContainer","setup":"","unique":["Canvas"]
 	},
 	"res://scenes/ui/chat_view.tscn": {
-		"root":"ChatView","type":"MarginContainer","setup":"setup","unique":["Margin","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","VolumeButton","VolumePopup","ImageButton","Input","Send","ComposerSurface"]
+		"root":"ChatView","type":"MarginContainer","setup":"setup","unique":["Margin","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Latest","Unread","Volume","VolumeButton","VolumePopup","ImageButton","Input","Send","ComposerSurface"]
 	},
 	"res://scenes/ui/image_window.tscn": {
 		"root":"ImageWindow","type":"Window","setup":"","unique":["ImageScroll","Picture","ImageError","RetryImage","ZoomIn","ZoomOut","FitImage","OriginalSize","CloseImage","ConfirmImage","Chrome"]
@@ -64,7 +64,7 @@ const SCENES := {
 		"root":"DynamicDetail","type":"ScrollContainer","setup":"setup","unique":["Column","Avatar","Author","CreatedAt","Body","Notice","CommentDraft","Send","Comments","ReplyBox","ReplyLabel","ReplyDraft","CancelReply","ReplySend","Status"]
 	},
 	"res://scenes/avatar/avatar_panel.tscn": {
-		"root":"AvatarPanel","type":"Control","setup":"","unique":["Driver","Error","Reset"]
+		"root":"AvatarPanel","type":"Control","setup":"","unique":["Driver","Error","Reset","Heading"]
 	},
 	"res://scenes/avatar/avatar_preview.tscn": {
 		"root":"AvatarPreview","type":"Control","setup":"","unique":["Driver","Error","Reset"]
@@ -96,6 +96,7 @@ const INPUT_HINTS := {
 	"chat_view":["Input"], "dynamic_detail":["CommentDraft","ReplyDraft"],
 }
 const TOOL_HINTS := {"account_view":["Server"], "chat_view":["Volume"], "avatar_panel":["Reset"]}
+const CLICK_TARGETS := {"avatar_panel":{"%Heading":{"mouse_filter":Control.MOUSE_FILTER_STOP,"mouse_default_cursor_shape":Control.CURSOR_POINTING_HAND}}}
 var failures: Array[String] = []
 var _temp := ""
 
@@ -169,6 +170,7 @@ func check_scene(path: String, spec: Dictionary) -> void:
 		var dropdown := instance.get_node_or_null("%" + name)
 		_check_check_scene_result_2(dropdown, name)
 	_check_semantic_properties(instance, kind)
+	_check_click_targets(instance, kind)
 	if spec.get("inject_layout", false): instance.callv(spec.setup, [null, _temp.path_join("window.cfg")])
 	root.add_child(instance)
 	await process_frame
@@ -204,3 +206,11 @@ func _check_semantic_properties(instance: Node, kind: String) -> void:
 		if control == null: continue
 		for property: String in PROPERTIES[kind][key]:
 			check(control.get(property) == PROPERTIES[kind][key][property], "semantic property %s.%s: %s" % [kind,key,property])
+
+func _check_click_targets(instance: Node, kind: String) -> void:
+	for key: String in CLICK_TARGETS.get(kind, {}):
+		var control := instance.get_node_or_null(key)
+		check(control != null, "click target exists: " + key)
+		if control == null: continue
+		for property: String in CLICK_TARGETS[kind][key]:
+			check(control.get(property) == CLICK_TARGETS[kind][key][property], "click target %s.%s: %s" % [kind,key,property])

@@ -12,8 +12,9 @@ var _active := false
 var _has_resources := false
 var _identity := ""
 var _context: Dictionary = {}
+var _logger: RefCounted
 
-func _init(chat: Node, models: Node, dynamics: Node, appearance: Resource = null, world: Resource = null, devices: Resource = null, avatar: Node = null) -> void:
+func _init(chat: Node, models: Node, dynamics: Node, appearance: Resource = null, world: Resource = null, devices: Resource = null, avatar: Node = null, logger: RefCounted = null) -> void:
 	_chat = chat
 	_models = models
 	_dynamics = dynamics
@@ -21,6 +22,7 @@ func _init(chat: Node, models: Node, dynamics: Node, appearance: Resource = null
 	_world = world
 	_devices = devices
 	_avatar = avatar
+	_logger = logger
 
 func start(session: Dictionary) -> Error:
 	var scope := Scope.key(session.server,session.username)
@@ -34,6 +36,7 @@ func start(session: Dictionary) -> Error:
 	# 聊天握着 transport 边界：必须先就绪，动态/历史/模型控制器才能观察新账号。
 	var result: Error = _chat.start(session)
 	if result != OK:
+		_log("start", "failure", result)
 		stop()
 		return result
 	_models.start(session)
@@ -49,6 +52,7 @@ func start(session: Dictionary) -> Error:
 			stop()
 			return capability_result
 	_active = true
+	_log("start", "success", OK)
 	return OK
 
 func get_context() -> Dictionary:
@@ -66,3 +70,10 @@ func stop() -> void:
 	for controller in [_models,_dynamics,_chat]:
 		if is_instance_valid(controller): controller.stop()
 	_has_resources = false
+	_log("stop", "success", OK)
+
+func _log(action: String, outcome: String, result: Error) -> void:
+	if _logger == null:
+		return
+	_logger.log_runtime("runtime_account_lifecycle", {"phase":action, "reason":"account", "outcome":outcome,
+		"code":"OK" if result == OK else "ACCOUNT_START_FAILED"})

@@ -92,6 +92,9 @@ func _run() -> void:
 	deadline = Time.get_ticks_msec()+3000
 	while not session.get_session().is_empty() and Time.get_ticks_msec()<deadline: await process_frame
 	await process_frame
+	check(dialog.visible and dialog.dialog_text.contains("结束本机登录"), "completed save still asks for logout confirmation")
+	dialog.get_ok_button().pressed.emit()
+	await process_frame
 	_check_completed_save_permits_logout_and_keeps_logs(session, window, logs)
 	app.queue_free()
 	await process_frame

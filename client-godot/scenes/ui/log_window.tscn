@@ -46,10 +46,16 @@ theme_type_variation = &"AppSurface"
 unique_name_in_owner = true
 size_flags_horizontal = 3
 
+[node name="CategoryDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+
 [node name="LevelDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
 
 [node name="ModuleDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+
+[node name="OriginDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
 
 [node name="Search" type="LineEdit" parent="Panel/Column"]

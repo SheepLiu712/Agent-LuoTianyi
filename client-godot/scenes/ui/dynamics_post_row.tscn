@@ -15,7 +15,6 @@ corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
 [node name="DynamicsPostRow" type="Button"]
-clip_contents = true
 custom_minimum_size = Vector2(0, 102)
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")

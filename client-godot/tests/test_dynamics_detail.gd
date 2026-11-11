@@ -10,6 +10,7 @@ func _run() -> void:
 	await test_details()
 	await test_publish_failure()
 	await test_pruning_and_states()
+	await test_open_post_from_card()
 	print("Dynamics detail: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -155,6 +156,36 @@ func _check_empty_and_failure_placeholders() -> void:
 	check(not failing_window.get_node("%Refresh").disabled,"failure keeps an explicit retry action")
 	failing_window.queue_free()
 	failing.queue_free()
+	await process_frame
+
+## 角色卡片只带预览快照：确认它能选中详情、清空预览且不会把删除条目当成成功。
+func test_open_post_from_card() -> void:
+	var controller = load("res://src/session/dynamics_controller.gd").new()
+	root.add_child(controller)
+	var scope := {"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"detail","message_token":"fixture-token"}
+	await controller.start(scope)
+	var preview: Dictionary = controller.get_latest_unread()
+	check(not preview.is_empty(),"card preview fetched")
+	controller.dismiss_preview("other")
+	check(not controller.get_latest_unread().is_empty(),"dismiss ignores another dynamic")
+	controller.dismiss_preview(str(preview.id))
+	check(controller.get_latest_unread().is_empty() and controller.get_state().unread == 123,"dismiss hides card without marking read")
+	await controller.start(scope)
+	preview = controller.get_latest_unread()
+	await controller.refresh()
+	var window = _open_dynamics_window(controller)
+	await process_frame
+	var opened: bool = await window.open_post(preview)
+	check(opened,"card opens its dynamic")
+	check(window.get_selected_id() == str(preview.id),"card selection matches preview")
+	check(controller.get_latest_unread().is_empty(),"opening card clears preview")
+	var deleted := preview.duplicate(true)
+	deleted.id = "deleted-post"
+	var deleted_opened: bool = await window.open_post(deleted)
+	check(not deleted_opened,"missing dynamic reports failure")
+	window.queue_free()
+	await process_frame
+	controller.queue_free()
 	await process_frame
 
 

@@ -58,4 +58,7 @@ func reset() -> Dictionary:
 
 func _log(code: String) -> void:
 	if _logger != null:
-		_logger.record("avatar_apply", {"code": code})
+		if code == "OK":
+			_logger.log_info("info_avatar_apply", {"code":code, "phase":"complete"})
+		else:
+			_logger.log_error("error_avatar_save", {"code":code, "detail":code, "phase":"error"})

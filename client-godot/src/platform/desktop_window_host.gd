@@ -53,6 +53,10 @@ func _restore(default_size: Vector2i, minimum: Vector2i) -> void:
 			screens.append(DisplayServer.screen_get_usable_rect(index))
 	var fallback := Rect2i(_window.position + (_window.size-default_size)/2,default_size)
 	var state: Dictionary = _store.read_layout(_key,fallback,minimum,screens) if _store != null else {"rect":fallback,"maximized":false}
+	# OS 缩放后可用区可能小于页面最小尺寸；min_size 若原样下传，会把底栏顶到屏幕外。
+	if not screens.is_empty():
+		var usable := screens[clampi(_window.current_screen,0,screens.size()-1)]
+		minimum = Vector2i(mini(minimum.x,maxi(1,usable.size.x)),mini(minimum.y,maxi(1,usable.size.y)))
 	if login_mode:
 		var extent := default_size
 		if not screens.is_empty():

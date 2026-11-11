@@ -11,6 +11,8 @@ const HistoryRuns = preload("res://src/domain/history_runs.gd")
 const ROLES := ["agent", "user", "system"]
 const TYPES := ["text", "image", "sing", "cmd"]
 const SOURCES := ["server", "local"]
+## 本地接纳时刻与服务器处理时刻可能相差几十秒；十分钟内视为同一条消息。
+const SUPERSEDE_WINDOW_SECONDS := 600.0
 
 var _access: RefCounted
 
@@ -20,7 +22,7 @@ func _init(access: RefCounted) -> void:
 
 
 func save_live(message: Dictionary) -> Dictionary:
-	return _access.transaction(_save_live_in_transaction.bind(message))
+	return _access.transaction(_save_live_in_transaction.bind(message), "save_live")
 
 
 func _save_live_in_transaction(message: Dictionary) -> Dictionary:
@@ -68,7 +70,7 @@ func _update_live(message: Dictionary, existing: Dictionary) -> Dictionary:
 
 
 func save_page(page: Dictionary, context: Dictionary) -> Dictionary:
-	return _access.transaction(_save_page_in_transaction.bind(page, context))
+	return _access.transaction(_save_page_in_transaction.bind(page, context), "save_page")
 
 
 func _save_page_in_transaction(page: Dictionary, context: Dictionary) -> Dictionary:
@@ -88,7 +90,7 @@ func _save_page_in_transaction(page: Dictionary, context: Dictionary) -> Diction
 	var updated := _update_known(rows, known.data.known)
 	if not updated.ok:
 		return updated
-	var saved := _save_metadata(page, context, applied.data.ids)
+	var saved := _save_metadata(page, context)
 	if not saved.ok:
 		return saved
 	return _success({
@@ -150,6 +152,7 @@ func _load_known(rows: Array) -> Dictionary:
 	for row in _access.rows_of(result):
 		known[str(row.message_id)] = {
 			"message_id": str(row.message_id), "timeline_order": int(row.timeline_order),
+			"id_source": str(row.id_source), "source": str(row.source), "message_type": str(row.message_type),
 		}
 	return _success({"known": known})
 
@@ -171,7 +174,7 @@ func _apply_run(run: Dictionary, context: Dictionary) -> Dictionary:
 		return bounds
 	var slots := TimelineSlots.allocate(bounds.data.left, bounds.data.right, rows.size())
 	if str(slots.get("code", "")) == "RENUMBER_REQUIRED":
-		var renumbered := renumber()
+		var renumbered := _renumber()
 		if not renumbered.ok:
 			return renumbered
 		# 重编号后邻居位置已经变化，必须重查再分配一次。
@@ -185,7 +188,9 @@ func _apply_run(run: Dictionary, context: Dictionary) -> Dictionary:
 
 
 ## 锚点位置一律现查：重编号会让缓存里的旧位置失效。
-## 缺一侧锚点时改用真实邻居，否则分配出来的位置会撞到已有记录。
+## 缺一侧锚点时改用真实邻居；两侧锚点之间也可能夹着本页没带上的旧行
+## （本地消息、服务端分页漂移），必须把区间收窄到最近邻居之前，
+## 否则按整段均分会正好复制出旧行已占用的位置。
 func _run_bounds(run: Dictionary, context: Dictionary) -> Dictionary:
 	var left: Variant = _anchor_order(str(run.left))
 	var right: Variant = _anchor_order(str(run.right))
@@ -193,8 +198,12 @@ func _run_bounds(run: Dictionary, context: Dictionary) -> Dictionary:
 		return _unanchored_bounds(context)
 	if left == null:
 		left = _neighbor_order(int(right), true)
-	if right == null:
+	elif right == null:
 		right = _neighbor_order(int(left), false)
+	else:
+		var next_after_left: Variant = _neighbor_order(int(left), false)
+		if next_after_left != null and int(next_after_left) < int(right):
+			right = next_after_left
 	return _success({"left": left, "right": right})
 
 
@@ -219,9 +228,10 @@ func _unanchored_bounds(context: Dictionary) -> Dictionary:
 		return result
 	var row: Dictionary = _access.first_row(result)
 	var column := "head" if direction == "older" else "tail"
-	var order := int(row.get(column, 0))
-	if order == 0:
+	var value: Variant = row.get(column)
+	if value == null:
 		return _success({"left": null, "right": null})
+	var order := int(value)
 	return _success({"left": null, "right": order}) if direction == "older" else _success({"left": order, "right": null})
 
 
@@ -250,6 +260,10 @@ func _update_known(rows: Array, known: Dictionary) -> Dictionary:
 	for row in rows:
 		if not known.has(str(row.uuid)):
 			continue
+		var guard := _guard_identity(known[str(row.uuid)], _history_message(row, {}))
+		if not guard.ok:
+			# 历史页只允许原位更新它自己的服务端记录；本地副本和身份冲突整行跳过。
+			continue
 		var updated: Dictionary = _access.execute(Schema.UPDATE_MESSAGE_CONTENT, [
 			_content_of(row), JSON.stringify(row.timestamp), 1, "history", _now_ms(), str(row.uuid),
 		])
@@ -262,7 +276,7 @@ func _update_known(rows: Array, known: Dictionary) -> Dictionary:
 ## 因此这里刻意不调用 _save_metadata：next_end/baseline/caught_up 与
 ## cached_ranges/history_positions 都必须保持对账前的状态。
 func save_reconcile(rows: Array) -> Dictionary:
-	return _access.transaction(_save_reconcile_in_transaction.bind(rows))
+	return _access.transaction(_save_reconcile_in_transaction.bind(rows), "save_reconcile")
 
 
 func _save_reconcile_in_transaction(rows: Array) -> Dictionary:
@@ -314,7 +328,7 @@ func _reconcile_position() -> Dictionary:
 	return _success({"position": "head" if _access.first_row(result).is_empty() else "tail"})
 
 
-func _save_metadata(page: Dictionary, context: Dictionary, ids: Array) -> Dictionary:
+func _save_metadata(page: Dictionary, context: Dictionary) -> Dictionary:
 	var epoch := int(context.get("epoch", 0))
 	var start := int(page.get("start_index", 0))
 	var rows: Array = page.get("history", [])
@@ -324,7 +338,7 @@ func _save_metadata(page: Dictionary, context: Dictionary, ids: Array) -> Dictio
 	var ranges := _save_range(epoch, start, rows)
 	if not ranges.ok:
 		return ranges
-	return _save_progress(start, ids, context)
+	return _save_progress(start, rows, context)
 
 
 func _save_positions(rows: Array, epoch: int, start: int) -> Dictionary:
@@ -347,17 +361,19 @@ func _save_range(epoch: int, start: int, rows: Array) -> Dictionary:
 
 ## 首屏页决定「下次登录的接合边界」：记下最新一条，供下次判断是否已经接上。
 ## 更早的页只推进游标，不改边界，否则边界会被旧消息拖回去。
-func _save_progress(start: int, ids: Array, context: Dictionary) -> Dictionary:
-	var caught := 1 if start == 0 and not ids.is_empty() else 0
-	if not ids.is_empty() and str(context.get("direction", "")) == "initial":
-		var head := str(ids[ids.size() - 1])
+func _save_progress(start: int, rows: Array, context: Dictionary) -> Dictionary:
+	var caught := 1 if start == 0 and not rows.is_empty() else 0
+	if not rows.is_empty() and str(context.get("direction", "")) == "initial":
+		# 边界取本页最后一条服务器消息，而不是本页最后一条“新插入”的消息；
+		# 与本地缓存重叠的页也必须把边界推进到页尾。
+		var head := str(rows[rows.size() - 1].uuid)
 		return _access.execute(Schema.UPDATE_SYNC_PROGRESS, [start, head, head, caught])
 	return _access.execute(Schema.UPDATE_NEXT_END, [start, caught])
 
 
 ## 投递状态与发送尝试必须一起落库：只更新尝试表会让消息停在旧状态。
 func update_attempt(payload: Dictionary) -> Dictionary:
-	return _access.transaction(_update_attempt_in_transaction.bind(payload))
+	return _access.transaction(_update_attempt_in_transaction.bind(payload), "update_attempt")
 
 
 func _update_attempt_in_transaction(payload: Dictionary) -> Dictionary:
@@ -398,11 +414,80 @@ func record_attempt(payload: Dictionary) -> Dictionary:
 	])
 
 
-func save_media(message_id: String, kind: String, relative_path: String, state: String) -> Dictionary:
-	return _access.execute(Schema.UPSERT_MEDIA, [message_id, kind, relative_path, state])
+## 启动/历史页落库后的本地副本对账：服务器已有同正文副本时，
+## 只把本地 uncertain 软标记为 superseded，不删除、不改顺序、不推进游标。
+func reconcile_delivery() -> Dictionary:
+	return _access.transaction(_reconcile_delivery_in_transaction, "reconcile_delivery")
 
 
-func renumber() -> Dictionary:
+func _reconcile_delivery_in_transaction() -> Dictionary:
+	var locals: Dictionary = _access.query(Schema.RECONCILE_LOCAL_UNCERTAIN)
+	if not locals.ok:
+		return locals
+	var claims := {}
+	var matches: Array = []
+	for row in _access.rows_of(locals):
+		var candidates := _server_copies(row)
+		if not candidates.ok:
+			return candidates
+		var ids: Array = candidates.data.ids
+		if ids.size() != 1:
+			continue
+		var server_id := str(ids[0])
+		if claims.has(server_id):
+			# 两条本地消息抢同一个服务器副本：两边都不能断言送达。
+			claims[server_id] = ""
+			continue
+		claims[server_id] = str(row.message_id)
+		matches.append({"local": str(row.message_id), "server": server_id})
+	var applied: Array = []
+	var now := _now_ms()
+	for match in matches:
+		if str(claims.get(str(match.server), "")) != str(match.local):
+			continue
+		var marked: Dictionary = _access.execute(Schema.MARK_SUPERSEDED, [now, str(match.local)])
+		if not marked.ok:
+			return marked
+		var attempt: Dictionary = _access.execute(Schema.MARK_ATTEMPT_SUPERSEDED, [str(match.local)])
+		if not attempt.ok:
+			return attempt
+		applied.append(str(match.local))
+	return _success({"ids": applied})
+
+
+## 候选必须唯一：同正文被用户说过多次时保持 uncertain，交给用户判断。
+func _server_copies(row: Dictionary) -> Dictionary:
+	var result: Dictionary = _access.query(Schema.RECONCILE_SERVER_CANDIDATES, [
+		str(row.message_type), str(row.content), str(row.message_id),
+	])
+	if not result.ok:
+		return result
+	var local_seconds := _timestamp_seconds(row.get("timestamp_json"))
+	if not is_finite(local_seconds):
+		return _success({"ids": []})
+	var ids: Array = []
+	for candidate in _access.rows_of(result):
+		var server_seconds := _timestamp_seconds(candidate.get("timestamp_json"))
+		if is_finite(server_seconds) and absf(server_seconds - local_seconds) <= SUPERSEDE_WINDOW_SECONDS:
+			ids.append(str(candidate.message_id))
+	return _success({"ids": ids})
+
+
+## 本地数值时间戳按本地墙钟比较；服务器无时区日历串按同口径解析。
+static func _timestamp_seconds(raw: Variant) -> float:
+	var parsed: Variant = raw
+	if raw is String:
+		parsed = JSON.parse_string(raw)
+	if parsed is int or parsed is float:
+		return float(parsed) + Time.get_time_zone_from_system().bias * 60.0
+	if parsed is String:
+		var text := str(parsed).strip_edges()
+		if text.length() >= 19:
+			return float(Time.get_unix_time_from_datetime_string(text.left(19).replace(" ", "T")))
+	return NAN
+
+
+func _renumber() -> Dictionary:
 	var renumbered: Dictionary = _access.execute_block(Schema.RENUMBER)
 	if not renumbered.ok:
 		return renumbered
@@ -413,8 +498,8 @@ func _tail_slot() -> Dictionary:
 	var result: Dictionary = _access.query(Schema.READ_MAX_ORDER)
 	if not result.ok:
 		return result
-	var tail := int(_access.first_row(result).get("tail", 0))
-	var slots := TimelineSlots.allocate(null if tail == 0 else tail, null, 1)
+	var tail: Variant = _access.first_row(result).get("tail")
+	var slots := TimelineSlots.allocate(null if tail == null else int(tail), null, 1)
 	if not slots.ok:
 		return _failure(str(slots.get("code", "ORDER_CONFLICT")))
 	return _success({"order": int(slots.values[0])})

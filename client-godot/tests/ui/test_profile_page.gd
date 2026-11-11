@@ -50,9 +50,13 @@ func _check_apply(page: Node, picture: String) -> void:
 func _check_errors(page: Node, not_an_image: String) -> void:
 	var before: Texture2D = page.get_node("%Preview").texture
 	page.get_node("%FileDialog").file_selected.emit(_temp.path_join("missing.png"))
-	check(page.get_node("%Result").text.contains("读不出来"), "unreadable picks explain the read failure")
+	var dialog := _error_dialog()
+	check(page.get_node("%Result").text.is_empty() and dialog != null and dialog.get_current_text().contains("读不出来"), "unreadable picks explain the read failure through the error popup")
 	page.get_node("%FileDialog").file_selected.emit(not_an_image)
-	check(page.get_node("%Result").text.contains("只支持"), "wrong formats name the accepted types")
+	if dialog != null:
+		dialog.get_node("%ErrorConfirm").pressed.emit()
+	await process_frame
+	check(dialog != null and dialog.get_current_text().contains("只支持"), "wrong formats name the accepted types")
 	check(page.get_node("%Preview").texture == before, "failed picks leave the preview alone")
 	await process_frame
 
@@ -77,6 +81,12 @@ func _png() -> PackedByteArray:
 	var image := Image.create(320, 200, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.4, 0.8, 1, 1))
 	return image.save_png_to_buffer()
+
+func _error_dialog() -> Node:
+	for child in root.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			return child
+	return null
 
 func _write(path: String, bytes: PackedByteArray) -> String:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_temp))

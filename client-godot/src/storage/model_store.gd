@@ -1,12 +1,17 @@
 extends RefCounted
 const ServerAddress = preload("res://src/domain/server_address.gd")
+const Schema = preload("res://src/storage/log_schema.gd")
+const Events = preload("res://src/storage/log_events.gd")
+const AtomicFile = preload("res://src/storage/atomic_file.gd")
 var _security: Object
 var _root: String
 var _scope := ""
 var _directory := ""
-func _init(security: Object,root: String = "user://models") -> void:
+var _logger: RefCounted
+func _init(security: Object,root: String = "user://models",logger: RefCounted = null) -> void:
 	_security = security
 	_root = root
+	_logger = logger
 func set_scope(server: String,username: String) -> void:
 	var base := ServerAddress.normalize(server)
 	_scope = "" if base.is_empty() or username.is_empty() else JSON.stringify([base,username])
@@ -21,7 +26,7 @@ func read(type_id: String) -> Dictionary:
 	config.api_key = ""
 	return _read_key(type_id, data, config)
 func save(type_id: String,config: Dictionary,allow_plain: bool = false) -> Dictionary:
-	if _directory.is_empty() or type_id.is_empty() or not config.get("api_key") is String:
+	if _invalid_save(type_id, config):
 		return {"ok":false,"code":"INVALID_CONFIG"}
 	var values := {}
 	for key in ["enabled","provider","base_url","model","model_kind","model_capabilities","params"]:
@@ -29,11 +34,21 @@ func save(type_id: String,config: Dictionary,allow_plain: bool = false) -> Dicti
 	var data := {"version":1,"config":values}
 	var key_result := _protect_key(type_id, config, data, allow_plain)
 	if not key_result.ok:
+		_log_token("write", type_id, "failure", str(key_result.get("code", "KEY_UNAVAILABLE")))
 		return key_result
 	var error := _write_config(type_id, data)
-	if error != OK and FileAccess.file_exists(_path(type_id)+".tmp"):
-		DirAccess.remove_absolute(_path(type_id)+".tmp")
+	if error != OK:
+		_discard_tmp(type_id)
+	_log_token("write", type_id, "success" if error == OK else "failure", "OK" if error == OK else "SAVE_FAILED")
 	return {"ok":error == OK,"code":"OK" if error == OK else "SAVE_FAILED"}
+
+func _invalid_save(type_id: String, config: Dictionary) -> bool:
+	return _directory.is_empty() or type_id.is_empty() or not config.get("api_key") is String
+
+func _discard_tmp(type_id: String) -> void:
+	var temporary := _path(type_id) + ".tmp"
+	if FileAccess.file_exists(temporary):
+		DirAccess.remove_absolute(temporary)
 func _path(type_id: String) -> String:
 	return _directory.path_join(type_id.sha256_text()+".json")
 
@@ -44,8 +59,10 @@ func _read_key(type_id: String, data: Dictionary, config: Dictionary) -> Diction
 		var plain: Dictionary = _security.unprotect_secret(Marshalls.base64_to_raw(data.api_key_dpapi),(_scope+"/"+type_id).to_utf8_buffer())
 		if not plain.ok:
 			config.enabled = false
+			_log_token("read", type_id, "failure", "KEY_UNAVAILABLE")
 			return {"ok":false,"code":"KEY_UNAVAILABLE","config":config}
 		config.api_key = plain.data.get_string_from_utf8()
+	_log_token("read", type_id, "success", "OK")
 	return {"ok":true,"code":"OK","config":config}
 
 func _protect_key(type_id: String, config: Dictionary, data: Dictionary, allow_plain: bool) -> Dictionary:
@@ -59,17 +76,8 @@ func _protect_key(type_id: String, config: Dictionary, data: Dictionary, allow_p
 			data.api_key_plain = config.api_key
 	return {"ok":true}
 
+func _log_token(action: String, type_id: String, outcome: String, code: String) -> void:
+	Events.security_token(_logger, action, Schema.hash_subject(_scope, type_id), outcome, code)
+
 func _write_config(type_id: String, data: Dictionary) -> Error:
-	var error := DirAccess.make_dir_recursive_absolute(_directory)
-	if error == OK:
-		var file := FileAccess.open(_path(type_id)+".tmp",FileAccess.WRITE)
-		if file == null:
-			error = FileAccess.get_open_error()
-		else:
-			file.store_string(JSON.stringify(data))
-			file.flush()
-			error = file.get_error()
-			file.close()
-			if error == OK:
-				error = DirAccess.rename_absolute(_path(type_id)+".tmp",_path(type_id))
-	return error
+	return AtomicFile.write_text(_path(type_id), JSON.stringify(data))

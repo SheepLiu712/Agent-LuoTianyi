@@ -28,6 +28,7 @@ func run() -> void:
 	_check_drag(chat, line)
 	_check_focus_out(chat, line)
 	_check_auto(chat, input)
+	await _check_tab_focus(chat, input)
 	chat.queue_free()
 	await process_frame
 	print("Composer resize: ", "PASS" if failures.is_empty() else "FAIL")
@@ -112,6 +113,18 @@ func _check_auto(chat: Control, input: TextEdit) -> void:
 	check(is_equal_approx(chat.get_composer_height(), 200.0), "auto shrink never undercuts manual")
 	chat.set_composer_height(0.0)
 	check(is_equal_approx(chat.get_composer_height(), 48.0), "zero restores pure auto height")
+
+
+func _check_tab_focus(chat: Control, input: TextEdit) -> void:
+	input.grab_focus()
+	await process_frame
+	var event := InputEventKey.new()
+	event.keycode = KEY_TAB
+	event.pressed = true
+	input._gui_input(event)
+	await process_frame
+	var owner: Control = root.gui_get_focus_owner()
+	check(owner != null and owner != input, "Tab leaves the composer instead of inserting a tab")
 
 func _press(line: Control, y: float = 3.0) -> void:
 	var event := InputEventMouseButton.new()

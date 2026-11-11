@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
 [ext_resource type="Script" path="res://src/ui/settings_window.gd" id="script"]
@@ -11,6 +11,9 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/audio_settings_page.tscn" id="audio"]
 [ext_resource type="PackedScene" path="res://scenes/ui/profile_page.tscn" id="profile"]
 [ext_resource type="PackedScene" path="res://scenes/ui/toast_overlay.tscn" id="save_toast"]
+
+[sub_resource type="ButtonGroup" id="SettingsTabs"]
+allow_unpress = false
 
 [node name="SettingsWindow" type="Window"]
 title = "设置"
@@ -72,6 +75,7 @@ unique_name_in_owner = true
 theme_type_variation = &"SettingsNavItem"
 text = "个人资料"
 toggle_mode = true
+button_group = SubResource("SettingsTabs")
 custom_minimum_size = Vector2(0, 40)
 
 [node name="PreferencesTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
@@ -79,6 +83,7 @@ unique_name_in_owner = true
 theme_type_variation = &"SettingsNavItem"
 text = "相处模式"
 toggle_mode = true
+button_group = SubResource("SettingsTabs")
 custom_minimum_size = Vector2(0, 40)
 
 [node name="ModelsTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
@@ -86,13 +91,15 @@ unique_name_in_owner = true
 theme_type_variation = &"SettingsNavItem"
 text = "模型配置"
 toggle_mode = true
+button_group = SubResource("SettingsTabs")
 custom_minimum_size = Vector2(0, 40)
 
 [node name="AudioTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
 unique_name_in_owner = true
 theme_type_variation = &"SettingsNavItem"
-text = "语音缓存"
+text = "缓存与导入"
 toggle_mode = true
+button_group = SubResource("SettingsTabs")
 custom_minimum_size = Vector2(0, 40)
 
 [node name="StyleTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
@@ -100,6 +107,7 @@ unique_name_in_owner = true
 theme_type_variation = &"SettingsNavItem"
 text = "风格外观"
 toggle_mode = true
+button_group = SubResource("SettingsTabs")
 custom_minimum_size = Vector2(0, 40)
 
 [node name="Content" type="Control" parent="Body/Column/PagesArea/Pages"]

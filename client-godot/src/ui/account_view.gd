@@ -3,7 +3,9 @@ signal log_requested
 signal feedback_requested
 const Session = preload("res://src/session/account_session.gd")
 const HistoryRow = preload("res://scenes/ui/login_account_row.tscn")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
+@export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _password_drafts := {"password":"", "confirm":""}
 var _password_carets := {"password":0, "confirm":0}
 var _session: Node
@@ -17,6 +19,9 @@ var _manual_password := false
 var _removing := ""
 var _menu_trigger: RefCounted
 var _history_trigger: RefCounted
+var _ime_suppressed := false
+var _ime_sync_queued := false
+var _ime_control: RefCounted
 @onready var _form: VBoxContainer = %Form
 @onready var _remember: CheckBox = %Remember
 @onready var _automatic: CheckBox = %AutoLogin
@@ -40,11 +45,14 @@ func _ready() -> void:
 func _initialize() -> void:
 	if _initialized: return
 	_initialized = true
+	_ime_control = input_service.create_ime_controller()
 	_fields = {"server":%Server,"username":%Username,"password":%Password,"confirm":%Confirm,"invite":%Invite}
 	for name in ["username","password","confirm","invite"]:
 		_fields[name].text_submitted.connect(func(_text): _send())
 	for name in ["password","confirm"]:
 		_fields[name].text_changed.connect(func(value): _password_changed(name,value))
+		_fields[name].focus_entered.connect(_queue_ime_sync)
+		_fields[name].focus_exited.connect(_queue_ime_sync)
 	_fields.username.text_changed.connect(_username_changed)
 	_submit.pressed.connect(_send)
 	%Cancel.pressed.connect(_session.cancel)
@@ -68,7 +76,12 @@ func _initialize() -> void:
 	_session.changed.connect(_update_state)
 	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton]: button.disabled = false
 	_sync_selected()
-	if _session.get_login_defaults().storage_error: _status.text = _error_text("STORAGE_ERROR")
+	if _session.get_login_defaults().storage_error:
+		push_warning("Login storage was not ready")
+	_queue_ime_sync()
+
+func _exit_tree() -> void:
+	_set_ime_active(true)
 
 func select_mode(mode: String) -> void:
 	if _busy or mode not in ["login","register","reset"]: return
@@ -103,6 +116,84 @@ func _apply_mode() -> void:
 	%Footer.get_parent().visible = login and not signed_in
 	_form.visible = not signed_in
 	_submit.text = {"login":"登录","register":"注册","reset":"重置账号"}[_mode]
+	_update_focus_chain()
+	_queue_ime_sync()
+
+## Tab 由登录表单优先接管：发布版里依赖 focus_next 时仍可能被窗口的
+## 空间导航带到右侧历史账号按钮，这里直接计算并抓取目标焦点。
+func _input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if not event is InputEventKey or not event.pressed or event.echo:
+		return
+	if event.keycode != KEY_TAB and event.physical_keycode != KEY_TAB:
+		_reinforce_password_ime()
+		return
+	var order := _focus_order()
+	if order.size() < 2:
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	var index := order.find(focused)
+	if index == -1:
+		return
+	get_viewport().set_input_as_handled()
+	var step := -1 if event.shift_pressed else 1
+	order[(index + step + order.size()) % order.size()].grab_focus()
+	_queue_ime_sync()
+
+func _focus_order() -> Array[Control]:
+	var order: Array[Control] = []
+	if _fields.is_empty(): return order
+	if _fields.username.is_visible_in_tree(): order.append(_fields.username)
+	for name in ["password","confirm","invite"]:
+		var field: LineEdit = _fields[name]
+		if field.is_visible_in_tree(): order.append(field)
+	if %UsePassword.is_visible_in_tree() and not %UsePassword.disabled: order.append(%UsePassword)
+	for control in [_automatic,_remember,_submit,%HistoryButton]:
+		if control.is_visible_in_tree() and not control.disabled: order.append(control)
+	return order
+
+## 显式同步 focus_next/previous，保留键盘与辅助功能的常规导航语义。
+func _update_focus_chain() -> void:
+	var order := _focus_order()
+	if order.size() < 2: return
+	for index in order.size():
+		var next: Control = order[(index+1)%order.size()]
+		var previous: Control = order[(index-1+order.size())%order.size()]
+		order[index].focus_next = order[index].get_path_to(next)
+		order[index].focus_previous = order[index].get_path_to(previous)
+
+func _queue_ime_sync() -> void:
+	if _ime_sync_queued: return
+	_ime_sync_queued = true
+	_sync_ime.call_deferred()
+
+## 密码字段只接受 ASCII。桌面端在焦点进入密码框时断开输入法上下文，
+## 避免中文候选窗出现；离开密码框后恢复，不影响聊天等中文输入。
+func _sync_ime() -> void:
+	_ime_sync_queued = false
+	if _fields.is_empty(): return
+	var focused: Control = get_viewport().gui_get_focus_owner()
+	var password_focused: bool = focused != null and (focused == _fields.password or focused == _fields.confirm) and focused.is_visible_in_tree()
+	_set_ime_active(not password_focused)
+
+func _set_ime_active(active: bool) -> void:
+	var suppressed := not active
+	if suppressed == _ime_suppressed: return
+	input_service.set_ime_active(active)
+	if _ime_control != null:
+		var result: Dictionary = _ime_control.set_english(suppressed)
+		if not result.get("ok", false):
+			push_warning("Input method switch failed: %s" % result.get("error", "UNKNOWN"))
+	_ime_suppressed = suppressed
+
+## 某些 TSF 输入法会在按键时自行切回中文；密码框每次按键前重新确认英文布局。
+func _reinforce_password_ime() -> void:
+	if _ime_control == null or _fields.is_empty():
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused == _fields.password or focused == _fields.confirm:
+		_ime_control.set_english(true)
 
 func _remembered() -> Dictionary:
 	for entry in _session.get_history():
@@ -142,7 +233,7 @@ func _options_changed(automatic_source: bool) -> void:
 		if not result.ok:
 			_remember.set_pressed_no_signal(entry.remember)
 			_automatic.set_pressed_no_signal(entry.auto_login)
-			_status.text = _error_text(result.code)
+			push_warning("set_login_options failed: %s" % result.code)
 	_apply_mode()
 
 func _send() -> void:
@@ -169,8 +260,12 @@ func _update_state(state: Dictionary) -> void:
 	if state.code in ["SERVER_CHANGED","ACCOUNT_SELECTED","ACCOUNT_REMOVED","LOGGED_OUT"]: _sync_selected()
 	if state.phase == "signed_in": _clear_secrets()
 	if not _checking_server or state.code == "SERVER_CHANGED":
-		_status.text = _error_text(state.code)
-		if state.storage_error: _status.text = _error_text("STORAGE_ERROR")
+		if _is_error_code(state.code):
+			_show_error(state.code)
+		else:
+			_status.text = _error_text(state.code)
+		if state.storage_error:
+			push_warning("Account storage failed during %s" % state.phase)
 	_apply_mode()
 
 func _open_menu() -> void:
@@ -216,7 +311,7 @@ func _open_history() -> void:
 func _remove_record() -> void:
 	var response: Dictionary = _session.remove_account(_removing)
 	_removing = ""
-	if not response.ok: _status.text = _error_text(response.code)
+	if not response.ok: push_warning("remove_account failed: %s" % response.code)
 
 func _open_server() -> void:
 	%MenuPopup.hide()
@@ -235,7 +330,7 @@ func _save_server() -> void:
 	_checking_server = false
 	if not %ServerDialog.visible: return
 	if response.ok: %ServerDialog.hide()
-	else: %ServerStatus.text = _error_text(response.code,response.get("status",0))
+	else: %ServerStatus.text = "无法连接服务器，请检查网络或服务器地址。"
 
 func _cancel_server() -> void:
 	if _busy and %ServerDialog.visible: _session.cancel()
@@ -243,7 +338,8 @@ func _cancel_server() -> void:
 
 func report_feedback_result(error: Error) -> void:
 	if error == OK: return
-	_status.text = "无法打开浏览器，可复制下方项目地址。"
+	_status.text = ""
+	ErrorDialog.present(self, "浏览器没有打开，请手动复制下面的地址。")
 	%FeedbackAddress.show()
 
 func _layout_form() -> void:
@@ -258,10 +354,12 @@ func _password_changed(field: String, value: String) -> void:
 	if _ascii_password(value):
 		_password_drafts[field] = value
 		_password_carets[field] = _fields[field].caret_column
-		if _status.text == PASSWORD_HINT: _status.text = ""
+		if _status.text == PASSWORD_HINT:
+			_status.text = ""
 	else:
 		_fields[field].text = _password_drafts[field]
 		_fields[field].caret_column = _password_carets[field]
+		# 直接回退输入会让用户以为按键失效；在页面上说明只接受英文符号。
 		_status.text = PASSWORD_HINT
 
 static func _ascii_password(value: String) -> bool:
@@ -274,18 +372,27 @@ static func _error_text(code: String, status: int = 0) -> String:
 	return {"OK":"登录成功。", "LOGGED_OUT":"已退出登录。", "PENDING":"正在处理…", "CANCELLED":"请求已取消。",
 		"AUTH_REJECTED":"用户名或密码错误，或自动登录凭据已失效。", "INVALID_INPUT":"请填写完整信息并检查服务器地址。",
 		"TIMEOUT":"连接超时，请稍后重试。", "NETWORK_ERROR":"无法连接服务器，请检查地址和网络。",
-		"PUBLIC_KEY_ERROR":"无法获取服务器公钥，请检查服务器地址。", "ENCRYPTION_ERROR":"密码加密失败，请检查密码长度或服务器公钥。",
-		"INVALID_RESPONSE":"服务器返回的数据不完整，请稍后重试。", "CREDENTIAL_UNAVAILABLE":"无法读取自动登录凭据，请重新登录。",
-		"HTTP_ERROR":"服务器拒绝了请求（%s），请检查账户信息或邀请码。" % status,
-		"NO_SAVED_LOGIN":"请使用密码登录。", "SERVER_CHANGED":"服务器已更新。", "CHECKING_SERVER":"正在验证服务器…", "ACCOUNT_SELECTED":"", "ACCOUNT_REMOVED":"本机账号记录已移除。", "OPTIONS_CHANGED":"", "STORAGE_ERROR":"本地登录资料未能保存或清除，请检查权限后重试。", "BUSY":"正在处理上一次请求。"}.get(code, "账户操作未完成，请重试。")
+		"PUBLIC_KEY_ERROR":"无法连接服务器，请检查网络或服务器地址。", "ENCRYPTION_ERROR":"登录暂时无法完成，请稍后重试。",
+		"INVALID_RESPONSE":"服务器响应异常，请稍后重试。", "CREDENTIAL_UNAVAILABLE":"无法读取自动登录凭据，请重新登录。",
+		"HTTP_ERROR":"服务器暂时无法处理，请稍后重试。",
+		"NO_SAVED_LOGIN":"请使用密码登录。", "SERVER_CHANGED":"服务器已更新。", "CHECKING_SERVER":"正在验证服务器…", "INSECURE_SERVER":"该地址未启用 HTTPS，已拒绝发送账号信息。", "ACCOUNT_SELECTED":"", "ACCOUNT_REMOVED":"本机账号记录已移除。", "OPTIONS_CHANGED":"", "STORAGE_ERROR":"", "BUSY":"正在处理中，请稍候。"}.get(code, "操作未完成，请重试。")
+
+func _is_error_code(code: String) -> bool:
+	return code in ["AUTH_REJECTED","INVALID_INPUT","INSECURE_SERVER","TIMEOUT","NETWORK_ERROR","PUBLIC_KEY_ERROR","ENCRYPTION_ERROR","INVALID_RESPONSE","CREDENTIAL_UNAVAILABLE","HTTP_ERROR","NO_SAVED_LOGIN","BUSY"]
+
+func _show_error(code: String, status: int = 0) -> void:
+	_status.text = _error_text(code, status)
+	ErrorDialog.present(self, _error_text(code, status))
 
 func _validate_passwords(operation: String) -> bool:
 	for name in (["password"] if operation == "login" else ["password","confirm"]):
 		if not _ascii_password(_fields[name].text):
-			_status.text = PASSWORD_HINT
+			_status.text = ""
+			ErrorDialog.present(self, PASSWORD_HINT)
 			return false
 	if operation != "login" and _fields.password.text != _fields.confirm.text:
 		_status.text = "两次输入的密码不一致。"
+		ErrorDialog.present(self, "两次输入的密码不一致。")
 		return false
 	return true
 
@@ -296,4 +403,7 @@ func _present_response(operation: String, response: Dictionary) -> void:
 			select_mode("login")
 			_status.text = "注册成功，请登录。" if operation == "register" else "账号重置成功，请使用新账号登录。"
 	elif not response.storage_error:
-		_status.text = _error_text(response.code, response.get("status",0))
+		if _is_error_code(response.code):
+			_show_error(response.code, response.get("status",0))
+		else:
+			_status.text = _error_text(response.code)

@@ -7,7 +7,6 @@
 [node name="PublishOverlay" type="Control"]
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 48.0
 theme = ExtResource("theme")
 script = ExtResource("script")
 
@@ -15,13 +14,13 @@ script = ExtResource("script")
 material = ExtResource("PopupGlass")
 anchor_right = 1.0
 anchor_bottom = 1.0
-mouse_filter = 2
+mouse_filter = 0
 color = Color(0.3,0.36,0.42,1)
 
 [node name="Center" type="CenterContainer" parent="."]
 anchor_right = 1.0
 anchor_bottom = 1.0
-mouse_filter = 2
+mouse_filter = 0
 
 [node name="Panel" type="PanelContainer" parent="Center"]
 custom_minimum_size = Vector2(560,400)

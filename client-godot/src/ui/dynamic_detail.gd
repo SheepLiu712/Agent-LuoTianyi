@@ -2,6 +2,7 @@ extends ScrollContainer
 const CommentRow = preload("res://scenes/ui/dynamic_comment_row.tscn")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
 const USER_ICON := preload("res://assets/ui/user_icon.png")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 @onready var _column: VBoxContainer = %Column
 @onready var _avatar: TextureRect = %Avatar
 @onready var _author: Label = %Author
@@ -22,6 +23,7 @@ var _post: Dictionary
 var _parent := ""
 var _rows := {}
 var _writing := false
+var _last_comment_code := ""
 var _initialized := false
 var _ui_style: RefCounted
 var _draft_style: StyleBoxFlat
@@ -213,7 +215,23 @@ func _submit(reply: bool) -> void:
 			_place_reply()
 		_set_status("")
 	else:
-		_set_status("发送结果不确定，请先刷新核实；草稿已保留。" if result.code in ["TIMEOUT","NETWORK_ERROR"] else "评论失败，草稿已保留（%s）。"%result.code)
+		_set_status("")
+		ErrorDialog.present(self, _comment_error_text(str(result.code)))
+
+func _comment_error_text(code: String) -> String:
+	match code:
+		"TIMEOUT", "NETWORK_ERROR":
+			return "发送结果不确定，请先刷新核实；草稿已保留。"
+		"INVALID_INPUT":
+			return "评论内容不能为空。"
+		"BUSY":
+			return "正在发送，请稍候。"
+		"COMMENT_NOT_ALLOWED":
+			return "此动态不支持评论。"
+		"INVALID_REPLY_TARGET":
+			return "回复对象已不存在。"
+		_:
+			return "评论失败，草稿已保留。"
 
 func _set_status(text: String) -> void:
 	_status.text = text
@@ -247,8 +265,12 @@ static func relative_time(raw: String) -> String:
 	return raw.left(10)
 func _update_comment_status(state: Dictionary) -> void:
 	if state.code not in ["","OK"]:
-		_set_status("评论加载失败（%s），已保留现有内容；点击动态卡片重试。"%state.code)
-	elif _status.text.begins_with("评论加载失败"):
+		_set_status("")
+		if state.code != _last_comment_code:
+			_last_comment_code = state.code
+			ErrorDialog.present(self, "评论加载失败，已保留现有内容，可重试。")
+	else:
+		_last_comment_code = ""
 		_set_status("")
 
 static func _valid_calendar_time(raw: String) -> bool:

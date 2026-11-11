@@ -128,7 +128,7 @@ func button(view: Node, text: String) -> Button:
 	return null
 
 func _check_network_to_playback_has_diagnostic_trail(logs: Variant) -> void:
-	check(logs.contains("audio_playback_started") and logs.contains("audio_playback_finished") and logs.contains("audio_error"), "network to playback has diagnostic trail")
+	check(logs.contains("info_audio_playback_started") and logs.contains("info_audio_playback_finished") and logs.contains("error_audio"), "network to playback has diagnostic trail")
 
 func _check_progress_preserves_bubble_and_selected_text(label: Variant, original: Variant) -> void:
 	check(label.get_instance_id() == original and label.get_selected_text() == "voice-first","progress preserves bubble and selected text")

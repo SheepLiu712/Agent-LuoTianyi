@@ -1,9 +1,11 @@
 extends Control
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 signal touched(areas: Array[String])
+signal dynamic_requested(post: Dictionary)
 ## 指针手势归视图，持久化变换归 framing。
 const Driver = preload("res://src/avatar/avatar_driver.gd")
 const Framing = preload("res://src/avatar/avatar_framing.gd")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 @export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
 const Ripple := preload("res://scenes/avatar/touch_ripple.tscn")
 @onready var avatar: Driver = %Driver
@@ -13,8 +15,11 @@ var framing: RefCounted
 var _dragging := false
 var _ui_style: RefCounted
 var _reset_styles: Array[StyleBoxFlat] = []
+var _dynamic_post: Dictionary = {}
+var _dynamic_opening := false
 
 func set_unread_dynamic(post: Dictionary) -> void:
+	_dynamic_post = post.duplicate(true) if not post.is_empty() else {}
 	%Heading.visible = not post.is_empty()
 	if post.is_empty():
 		get_node("Heading/Identity/Companion").text = ""
@@ -41,6 +46,7 @@ func _apply_ui_style() -> void:
 	var border := get_node("Border").get_theme_stylebox("panel") as StyleBoxFlat
 	_ui_style.apply_surface_style(border)
 	border.bg_color = Color(0, 0, 0, 0)
+	get_node("Border").visible = not _ui_style.is_crystal()
 	get_node("Stage/Background").material.set_shader_parameter("corner_radius", 12.0 if _ui_style.is_crystal() else 8.0)
 
 
@@ -57,14 +63,16 @@ func _ready() -> void:
 	_apply_ui_style()
 	framing = Framing.new(settings)
 	if avatar.load_character("res://assets/live2d/character.json") != OK:
-		_error_label.text = "角色加载失败，请检查资源是否完整。"
+		_error_label.text = ""
+		ErrorDialog.present(self, "角色资源缺失，请重新解压完整程序。")
 		return
 	var restored: Error = framing.load_settings()
 	if restored != OK and restored != ERR_FILE_NOT_FOUND:
-		_error_label.text = "未能恢复角色位置，已使用默认构图。"
+		push_warning("Avatar framing restore failed: %s" % restored)
 	resized.connect(_layout_avatar)
 	_layout_avatar()
 	gui_input.connect(_handle_pointer)
+	%Heading.gui_input.connect(_handle_heading_input)
 	mouse_exited.connect(func(): avatar.set_gaze(Vector2.ZERO))
 	_reset_button.visible = true
 	_reset_button.pressed.connect(func():
@@ -85,9 +93,37 @@ func _handle_pointer(event: InputEvent) -> void:
 		_handle_button(event)
 	elif event is InputEventMouseMotion:
 		_handle_motion(event)
+
+func _handle_heading_input(event: InputEvent) -> void:
+	if _dynamic_post.is_empty() or _dynamic_opening:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		accept_event()
+		_animate_dynamic_open()
+
+func _animate_dynamic_open() -> void:
+	var post := _dynamic_post.duplicate(true)
+	if post.is_empty():
+		return
+	_dynamic_opening = true
+	var heading := %Heading
+	heading.pivot_offset = heading.size * 0.5
+	var tween := create_tween()
+	tween.tween_property(heading, "scale", Vector2(0.97, 0.97), 0.06).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(heading, "modulate", Color(0.9, 0.94, 0.98, 1), 0.06)
+	tween.tween_property(heading, "scale", Vector2.ONE, 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	tween.parallel().tween_property(heading, "modulate", Color.WHITE, 0.1)
+	await tween.finished
+	heading.scale = Vector2.ONE
+	heading.modulate = Color.WHITE
+	_dynamic_opening = false
+	if _dynamic_post.is_empty() or str(_dynamic_post.get("id", "")) != str(post.get("id", "")):
+		return
+	dynamic_requested.emit(post)
+
 func _save() -> void:
 	if framing.save_settings() != OK:
-		_error_label.text = "当前角色位置无法保存，重启后将恢复上次设置。"
+		push_warning("Avatar framing save failed")
 
 
 func _notification(what: int) -> void:

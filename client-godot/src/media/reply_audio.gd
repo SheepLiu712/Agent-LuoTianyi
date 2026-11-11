@@ -5,10 +5,30 @@ signal receive_finished(id: String, code: String)
 signal playback_finished(id: String, code: String)
 signal mouth_changed(value: float)
 signal state_changed(state: Dictionary)
+const MAX_METADATA := 256
+
+const EVENT_MAP := {
+	"replay_finished":["info", "info_replay_finished", "complete"],
+	"audio_playback_finished":["info", "info_audio_playback_finished", "complete"],
+	"audio_error":["error", "error_audio", "error"],
+	"cache_error":["error", "error_cache", "error"],
+	"replay_started":["info", "info_replay_started", "playing"],
+	"replay_paused":["info", "info_replay_paused", "paused"],
+	"replay_resumed":["info", "info_replay_resumed", "playing"],
+	"replay_stopped":["info", "info_replay_stopped", "stopped"],
+	"audio_received":["debug", "debug_audio_received", "receiving"],
+	"audio_format":["debug", "debug_audio_format", "decoded"],
+	"audio_decoded":["debug", "debug_audio_decoded", "decoded"],
+	"audio_receive_finished":["info", "info_audio_receive_finished", "complete"],
+	"replay_preempted":["warning", "warning_replay_preempted", "warning"],
+	"audio_playback_started":["info", "info_audio_playback_started", "playing"],
+	"audio_underrun":["warning", "warning_audio_underrun", "warning"],
+}
 
 var _decoder_factory: Resource
 var _cache: RefCounted
 var _metadata: Dictionary = {}
+var _metadata_order: Array[String] = []
 var _cache_errors: Dictionary = {}
 var _replay = preload("res://src/media/cache_replay.gd").new()
 var _logger: RefCounted
@@ -34,7 +54,7 @@ func _init(logger: RefCounted = null, clock: Callable = Callable(), cache: RefCo
 	_replay.finished.connect(func(id,code):
 		if not code.is_empty():
 			_cache_errors[id] = code
-			_metadata[id] = {}
+			_remember_metadata(id, {})
 			_notify_audio(id)
 		_log("replay_finished",id,{"code":code})
 		replay_finished.emit(id,code))
@@ -43,8 +63,10 @@ func _init(logger: RefCounted = null, clock: Callable = Callable(), cache: RefCo
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_invalid_base64.compile("^[A-Za-z0-9+/]*={0,2}$")
 	add_child(_player)
+	set_process(false)
 
 func append_reply_audio(id: String, encoded: String, final: bool, audio_error: bool = false, ephemeral: bool = false) -> void:
+	set_process(true)
 	if _completed.has(id):
 		return
 	if not _ensure_stream(id):
@@ -101,11 +123,23 @@ func reset() -> void:
 	_completed.clear()
 	_active = ""
 	_stop_player()
+	set_process(false)
 
 func _log(event: String, id: String, fields: Dictionary = {}) -> void:
 	if _logger != null:
-		fields["reply_id"] = id
-		_logger.record(event, fields)
+		var mapped: Array = EVENT_MAP.get(event, ["info", event, ""])
+		var scoped := fields.duplicate(true)
+		scoped["reply_id"] = id
+		if not str(mapped[2]).is_empty():
+			scoped["phase"] = mapped[2]
+		if mapped[0] in ["error", "warning"]:
+			if event == "audio_underrun" and not scoped.has("code"):
+				scoped["code"] = "BUFFER_LIMIT"
+			if event == "replay_preempted" and not scoped.has("code"):
+				scoped["code"] = "INTERRUPTED"
+			scoped["detail"] = scoped.get("detail", scoped.get("code", ""))
+			scoped["stack"] = scoped.get("stack", [])
+		_logger.record_as(mapped[0], mapped[1], scoped)
 
 func _end_receive(id: String) -> void:
 	var item: Dictionary = _streams[id]
@@ -145,13 +179,21 @@ func _complete() -> void:
 	playback_finished.emit(id, code)
 
 func _process(_delta: float) -> void:
+	if _streams.is_empty():
+		set_process(false)
+		return
 	var now: int = _clock.call()
+	_expire_streams(now)
+	if not _streams.has(_active):
+		return
+	_pump_active(_streams[_active], now)
+
+func _expire_streams(now: int) -> void:
 	for id in _streams.keys():
 		if not _streams[id].final and now - int(_streams[id].updated) >= 60000:
 			_fail(id, "AUDIO_TIMEOUT")
-	if not _streams.has(_active):
-		return
-	var item: Dictionary = _streams[_active]
+
+func _pump_active(item: Dictionary, now: int) -> void:
 	if item.decoder == null or item.stopped:
 		if item.final:
 			_complete()
@@ -167,13 +209,14 @@ func _exit_tree() -> void:
 func set_scope(server: String, username: String) -> Error:
 	reset()
 	_metadata.clear()
+	_metadata_order.clear()
 	_cache_errors.clear()
 	# 缓存对纯文字聊天可选：缺少重放能力不得让 transport/账号会话启动失败。
 	return _cache.set_scope(server,username) if _cache != null else OK
 
 func get_message_audio(id: String) -> Dictionary:
 	if not _metadata.has(id):
-		_metadata[id] = _cache.lookup(id) if _cache != null else {}
+		_remember_metadata(id, _cache.lookup(id) if _cache != null else {})
 	var data: Dictionary = _metadata[id]
 	return {"available":not data.is_empty(), "duration":data.get("duration",0.0),
 		"waveform":data.get("waveform",PackedFloat32Array()), "blocked":_player.playing,
@@ -188,6 +231,7 @@ func forget_audio(ids: Array) -> void:
 		if id.is_empty():
 			continue
 		_metadata.erase(id)
+		_metadata_order.erase(id)
 		_cache_errors.erase(id)
 		_notify_audio(id)
 
@@ -197,6 +241,7 @@ func replay(id: String) -> Error:
 	if _replay.id == id and _replay.status == "playing":
 		return OK
 	_metadata.erase(id)
+	_metadata_order.erase(id)
 	if not get_message_audio(id).available:
 		_notify_audio(id)
 		return ERR_DOES_NOT_EXIST
@@ -204,7 +249,7 @@ func replay(id: String) -> Error:
 	var result: Error = _replay.start(id,_metadata[id],_cache.open_stream(id),_decoder_factory)
 	if result != OK:
 		_cache_errors[id] = "REPLAY_FAILED"
-		_metadata[id] = {}
+		_remember_metadata(id, {})
 		_notify_audio(id)
 	else:
 		_log("replay_started",id)
@@ -233,6 +278,7 @@ func clear_cache(older_than_days: int = 0) -> Error:
 	var ids := _metadata.keys()
 	var result: Error = _cache.clear(older_than_days) if _cache != null else ERR_UNCONFIGURED
 	_metadata.clear()
+	_metadata_order.clear()
 	_cache_errors.clear()
 	for id in ids:
 		_notify_audio(id)
@@ -248,6 +294,18 @@ func _cache_failed(id: String) -> void:
 func _notify_audio(id: String) -> void:
 	if not id.is_empty():
 		message_audio_changed.emit(id,get_message_audio(id))
+
+func _remember_metadata(id: String, data: Dictionary) -> void:
+	_metadata[id] = data
+	_metadata_order.erase(id)
+	_metadata_order.append(id)
+	while _metadata_order.size() > MAX_METADATA:
+		var old: String = _metadata_order.pop_front()
+		if old == _active or _streams.has(old) or _replay.id == old:
+			_metadata_order.append(old)
+			continue
+		_metadata.erase(old)
+		_cache_errors.erase(old)
 
 func _notify_all_audio() -> void:
 	for id in _metadata.keys():
@@ -328,6 +386,7 @@ func _commit_cache(id: String, item: Dictionary, status: Dictionary) -> void:
 			_cache_failed(id)
 		else:
 			_metadata.erase(id)
+			_metadata_order.erase(id)
 			_notify_audio(id)
 
 func _start_playback(item: Dictionary, status: Dictionary) -> bool:

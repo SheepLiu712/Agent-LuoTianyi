@@ -1,6 +1,7 @@
 extends RefCounted
 
 const GAP_SECONDS := 300.0
+static var _calendar_pattern: RegEx
 
 static func markers(messages: Array[Dictionary]) -> Dictionary:
 	var result := {}
@@ -33,9 +34,9 @@ static func _numeric_seconds(value: float) -> float:
 	return value + Time.get_time_zone_from_system().bias * 60
 
 static func _calendar_seconds(text: String) -> float:
-	var pattern := RegEx.new()
-	pattern.compile("^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:\\.(\\d+))?(Z|[+-]\\d{2}:\\d{2})?$")
-	var matched := pattern.search(text)
+	if _calendar_pattern == null:
+		_calendar_pattern = RegEx.create_from_string("^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:\\.(\\d+))?(Z|[+-]\\d{2}:\\d{2})?$")
+	var matched := _calendar_pattern.search(text)
 	if matched == null or not _valid_calendar(text): return -1.0
 	var normalized := text.left(19).replace(" ", "T")
 	var value := float(Time.get_unix_time_from_datetime_string(normalized))

@@ -81,10 +81,23 @@ func is_unread(post: Dictionary) -> bool:
 func get_latest_unread() -> Dictionary:
 	return _latest_unread.duplicate(true)
 
+## 角色卡片点击后清空对应预览，不推进未读数量或服务端已读位置。
+func dismiss_preview(id: String = "") -> void:
+	if _latest_unread.is_empty():
+		return
+	if not id.is_empty() and str(_latest_unread.get("id", "")) != id:
+		return
+	_latest_unread.clear()
+	latest_unread_changed.emit({})
+
 func get_comments(id: String) -> Dictionary:
 	return _comments.get(id,_empty_comments()).duplicate(true)
 
 func refresh() -> void:
+	if _state.busy:
+		while _state.busy:
+			await changed
+		return
 	await _load_posts(false)
 
 func load_more() -> void:
@@ -119,6 +132,14 @@ func _store_page(result: Dictionary, more: bool) -> void:
 	_cursor = result.cursor
 	_state.has_more = result.has_more
 	_prune_comments()
+
+## 角色卡片拿到的预览来自同一动态接口；显式打开时先并入列表，
+## 让详情、评论加载和列表高亮共用同一份数据，后续整页刷新会按 ID 去重。
+func accept_post(post: Dictionary) -> void:
+	if post.is_empty() or str(post.get("id", "")).is_empty():
+		return
+	_posts = _merge([post], _posts)
+	changed.emit()
 
 
 ## 动态消失后，它的评论缓存也不该继续留在这个账号的内存里。
@@ -274,7 +295,7 @@ func _clear_latest_unread() -> void:
 func _request(path: String,method: int = HTTPClient.METHOD_GET,data: Dictionary = {},limit: int = 0,cursor: String = "") -> Dictionary:
 	if _session.is_empty() or _requests.size() >= 8:
 		return _failure("BUSY")
-	var http := Http.new(_timeout)
+	var http := Http.new(_timeout, 8*1024*1024, _logger)
 	add_child(http)
 	_requests.append(http)
 	var url: String = _session.server+path
@@ -386,7 +407,7 @@ func _notify() -> void:
 
 func _log(phase: String,code: String) -> void:
 	if _logger != null:
-		_logger.record("dynamics_state",{"phase":phase,"code":code,"count":_posts.size()})
+		_logger.log_runtime("runtime_dynamics_state",{"phase":phase,"code":code,"reason":"dynamics","count":_posts.size()})
 
 func _exit_tree() -> void:
 	stop()

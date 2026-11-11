@@ -94,6 +94,19 @@ CREATE TABLE sync_state (
 )
 """
 
+## 只用于 version=0 的不完整草稿库：按外键反序清理后整套重建。
+const DROP_V3 := """
+DROP TABLE IF EXISTS segment_members;
+DROP TABLE IF EXISTS history_segments;
+DROP TABLE IF EXISTS cached_ranges;
+DROP TABLE IF EXISTS history_positions;
+DROP TABLE IF EXISTS message_media;
+DROP TABLE IF EXISTS send_attempts;
+DROP TABLE IF EXISTS sync_state;
+DROP TABLE IF EXISTS sync_epochs;
+DROP TABLE IF EXISTS messages
+"""
+
 const SET_VERSION := "PRAGMA user_version=%d"
 
 ## 新库初始化：第一个 epoch 与 scope 绑定的 sync_state 单行。绑定参数为 scope_key。
@@ -105,7 +118,6 @@ VALUES(1,?,1,1,-1,0)
 
 const READ_VERSION := "PRAGMA user_version"
 const FOREIGN_KEY_CHECK := "PRAGMA foreign_key_check"
-const INTEGRITY_CHECK := "PRAGMA integrity_check"
 const WAL_CHECKPOINT := "PRAGMA wal_checkpoint(TRUNCATE)"
 
 const SCHEMA_TABLES := """
@@ -113,30 +125,34 @@ SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' O
 """
 const TABLE_COLUMNS := "PRAGMA table_info(%s)"
 const TABLE_INDEXES := "PRAGMA index_list(%s)"
-const COLUMN_INDEX := "PRAGMA index_info(%s)"
 
 const READ_SYNC_STATE := "SELECT * FROM sync_state WHERE singleton=1"
 const READ_ORDER_REVISION := "SELECT order_revision FROM sync_state WHERE singleton=1"
 const READ_SCOPE_KEY := "SELECT scope_key FROM sync_state WHERE singleton=1"
-const READ_MAX_ORDER := "SELECT COALESCE(MAX(timeline_order),0) AS tail FROM messages"
-const READ_MIN_ORDER := "SELECT COALESCE(MIN(timeline_order),0) AS head FROM messages"
+## 空表返回 NULL；0 是合法位置，不能与「没有行」混为一谈。
+const READ_MAX_ORDER := "SELECT MAX(timeline_order) AS tail FROM messages"
+const READ_MIN_ORDER := "SELECT MIN(timeline_order) AS head FROM messages"
 
 ## 对账落位依据：库里出现过服务器来源的行，才说明服务器时间线已经在库内延续。
 const READ_HAS_SERVER := "SELECT 1 AS present FROM messages WHERE id_source='server' LIMIT 1"
 
 ## 精确命中索引，不做全表排序：timeline_order 唯一，无需第二排序键。
-const READ_LATEST := "SELECT * FROM messages ORDER BY timeline_order DESC LIMIT ?"
+## superseded 只表示「本地副本已被服务器历史确认」，不再进入用户时间线。
+const READ_LATEST := "SELECT * FROM messages WHERE delivery_state<>'superseded' ORDER BY timeline_order DESC LIMIT ?"
 const READ_ORDER_OF := "SELECT timeline_order FROM messages WHERE message_id=?"
 const READ_BEFORE := """
-SELECT * FROM messages WHERE timeline_order < ? ORDER BY timeline_order DESC LIMIT ?
+SELECT * FROM messages WHERE delivery_state<>'superseded' AND timeline_order < ?
+ORDER BY timeline_order DESC LIMIT ?
 """
 
-## 页内已知锚点：只取这些 UUID 的顺序，用来把整页切成若干未知块。
+## 页内已知锚点：除顺序外还取身份列，历史页不得覆盖来源/角色/类型不同
+## 的同 UUID 记录（尤其本地消息）。只取这些 UUID 的顺序，用来把整页切成若干未知块。
 const READ_KNOWN := """
-SELECT message_id,timeline_order FROM messages WHERE message_id IN (%s)
+SELECT message_id,timeline_order,id_source,source,message_type FROM messages WHERE message_id IN (%s)
 """
 
-## 锚点缺一侧时用它找真实邻居，避免分配出的位置撞到已有记录。
+## 找真实邻居：缺一侧锚点时补边界；两侧锚点都在时收窄可分配区间，
+## 避免均分出来的位置撞到本页没带上的旧行。
 const READ_NEIGHBOR_BEFORE := """
 SELECT message_id,timeline_order FROM messages
 WHERE timeline_order < ? ORDER BY timeline_order DESC LIMIT 1
@@ -190,22 +206,6 @@ first_message_id=excluded.first_message_id,
 last_message_id=excluded.last_message_id
 """
 
-const UPSERT_SEGMENT := """
-INSERT INTO history_segments(segment_id,epoch,state,first_message_id,last_message_id)
-VALUES (?,?,?,?,?)
-ON CONFLICT(segment_id) DO UPDATE SET
-state=excluded.state,
-first_message_id=excluded.first_message_id,
-last_message_id=excluded.last_message_id
-"""
-
-const INSERT_SEGMENT_MEMBER := """
-INSERT INTO segment_members(segment_id,message_id,member_order) VALUES (?,?,?)
-ON CONFLICT(segment_id,message_id) DO NOTHING
-"""
-
-const DELETE_SEGMENT_MEMBERS := "DELETE FROM segment_members WHERE segment_id=?"
-
 const UPDATE_SYNC_PROGRESS := """
 UPDATE sync_state SET next_end=?,baseline_message_id=?,head_message_id=?,caught_up=?
 WHERE singleton=1
@@ -240,13 +240,6 @@ UPDATE send_attempts SET state=?,error_code=?,ever_sent=MAX(ever_sent,?)
 WHERE message_id=?
 """
 
-const UPSERT_MEDIA := """
-INSERT INTO message_media(message_id,kind,relative_path,state) VALUES (?,?,?,?)
-ON CONFLICT(message_id,kind) DO UPDATE SET
-relative_path=excluded.relative_path,
-state=excluded.state
-"""
-
 ## 重启后只影响展示，不恢复 outbox：
 ## 曾进入过发送流程且仍处于在途的记录显示「结果不确定」。
 const RECOVER_UNCERTAIN := """
@@ -256,6 +249,34 @@ WHERE message_id IN (
 	SELECT message_id FROM send_attempts
 	WHERE ever_sent=1 AND state IN ('queued','sending')
 )
+AND delivery_state NOT IN ('superseded')
+"""
+
+## 启动/历史页落库后的本地副本对账：
+## 只匹配「同正文、同角色、同类型、时间相邻」且候选唯一的文本消息。
+const RECONCILE_LOCAL_UNCERTAIN := """
+SELECT message_id,content,message_type,timestamp_json FROM messages
+WHERE id_source='local' AND delivery_state='uncertain'
+AND message_type='text' AND content<>''
+ORDER BY timeline_order
+"""
+
+const RECONCILE_SERVER_CANDIDATES := """
+SELECT message_id,timestamp_json FROM messages
+WHERE id_source='server' AND source='user' AND message_type=?
+AND content=? AND message_id<>?
+ORDER BY timeline_order
+"""
+
+const MARK_SUPERSEDED := """
+UPDATE messages
+SET delivery_state='superseded',error_code='SERVER_COPY_MATCHED',updated_at_ms=?
+WHERE message_id=? AND delivery_state='uncertain'
+"""
+
+const MARK_ATTEMPT_SUPERSEDED := """
+UPDATE send_attempts SET state='superseded',error_code='SERVER_COPY_MATCHED'
+WHERE message_id=?
 """
 
 ## 从未真正发出的排队记录退回「未发送」。
@@ -284,18 +305,6 @@ UPDATE messages SET timeline_order=(
 );
 CREATE UNIQUE INDEX messages_timeline ON messages(timeline_order);
 DROP TABLE order_rebuild
-"""
-
-## epoch 失效：仅切换位置轮次，不改显示顺序、不加 order_revision。
-const INVALIDATE_EPOCH := """
-UPDATE sync_epochs SET valid=0
-WHERE epoch=(SELECT active_epoch FROM sync_state WHERE singleton=1);
-UPDATE history_segments SET state='needs_validation'
-WHERE epoch=(SELECT active_epoch FROM sync_state WHERE singleton=1);
-INSERT INTO sync_epochs(epoch,valid) SELECT COALESCE(MAX(epoch),0)+1,1 FROM sync_epochs;
-UPDATE sync_state
-SET active_epoch=(SELECT MAX(epoch) FROM sync_epochs),next_end=-1,caught_up=0
-WHERE singleton=1
 """
 
 const REQUIRED_TABLES := [

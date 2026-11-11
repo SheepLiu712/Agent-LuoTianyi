@@ -101,7 +101,7 @@ func _check_long_text_is_capped_at_90_percent_and_grows_vertically(long: Variant
 	check(long.get_node("%Bubble").size.x <= 620*.9+1 and long.get_node("%Bubble").size.y > medium.get_node("%Bubble").size.y*3, "long text is capped at 90 percent and grows vertically")
 
 func _check_failed_delivery_retains_error_caption(own: Variant) -> void:
-	check(own.get_node("%Caption").visible and own.get_node("%Caption").text == "发送失败", "failed delivery retains error caption")
+	check(own.visible and not own.get_node("%Caption").visible and own.get_node("%Caption").text.is_empty(), "failed delivery keeps status without inline error caption")
 
 func _check_uncertain_delivery_leaves_no_trace(own: Variant) -> void:
 	check(not own.visible, "uncertain delivery leaves the bubble invisible")

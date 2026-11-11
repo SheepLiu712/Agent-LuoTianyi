@@ -17,6 +17,10 @@ class FailingStore extends Resource:
 		saves += 1
 		return ERR_FILE_CANT_WRITE if fail else OK
 
+class MissingAnchorSession extends Node:
+	func get_reading_state() -> Dictionary:
+		return {"reason":"NOT_FOUND","pending":false,"located":true,"manual":false,"target_id":""}
+
 func _initialize() -> void: run.call_deferred()
 func check(ok: bool, label: String) -> void:
 	if not ok:
@@ -44,6 +48,34 @@ func check_bubble(bubble: Control, style_mode: String) -> void:
 		check(box.corner_radius_top_left == 8, "flat bubble follows visual style")
 		check(box.shadow_size == 0, "flat bubble follows shadow style")
 	check(box.content_margin_left == 16 and box.content_margin_top == 16, "bubble padding remains unchanged")
+
+func _check_chat_surface_follows_style(chat: Variant, style_mode: String) -> void:
+	var card: StyleBoxFlat = chat.get_node("Background").get_theme_stylebox("panel")
+	if style_mode == "crystal":
+		check(card.corner_radius_top_left == 0 and card.corner_radius_top_right == 0 and card.corner_radius_bottom_left == 0 and card.corner_radius_bottom_right == 0, "crystal chat surface is square")
+		check(card.border_width_left == 0 and card.border_width_top == 0 and card.border_width_right == 0 and card.border_width_bottom == 0, "crystal chat surface has no border")
+		check(card.shadow_size == 0, "crystal chat surface has no corner shadow")
+	else:
+		check(card.corner_radius_top_left == 8 and card.corner_radius_bottom_right == 8, "flat chat surface keeps rounded corners")
+		check(card.border_width_left == 1, "flat chat surface keeps its border")
+		check(card.shadow_size == 0, "flat chat surface has no shadow")
+
+func _check_dynamic_card_shadow(style: Variant, style_mode: String) -> void:
+	var post := style._theme.get_stylebox("normal", "DynamicsPost") as StyleBoxFlat
+	check(post != null and post.shadow_size == (12 if style_mode == "crystal" else 0), "dynamic card shadow follows style")
+	var row := (load("res://scenes/ui/dynamics_post_row.tscn") as PackedScene).instantiate() as Button
+	check(not row.clip_contents, "dynamic card does not clip its shadow")
+	row.free()
+
+func _check_missing_reading_anchor_is_silent(chat: Variant) -> void:
+	var previous = chat._session
+	var fake := MissingAnchorSession.new()
+	chat._session = fake
+	chat._update_history_status({"history":{"phase":"idle","count":0}})
+	check(not chat.get_node("%HistoryRow").visible, "missing reading anchor shows no history warning")
+	check(not chat.get_node("%HistoryStatus").text.contains("原阅读位置已找不到"), "missing reading anchor has no stale copy")
+	chat._session = previous
+	fake.free()
 
 func audio_state(status: String) -> Dictionary:
 	return {"available":true,"code":"","status":status,"blocked":false,"duration":2.4,"position":0.0,"waveform":PackedFloat32Array([.2,.6,.4])}
@@ -82,6 +114,7 @@ func run() -> void:
 	check(style._icon_registry.size() <= original_count, "repeated registration does not accumulate entries")
 	own.free()
 	other.free()
+	_check_missing_reading_anchor_is_silent(chat)
 	chat.free()
 	_check_freed_controls_are_pruned_safely(style)
 	store.set_value("ui", "style", "unknown")
@@ -115,7 +148,7 @@ func check_failed_save() -> void:
 	check(not result.ok and window.is_dirty(), "failed save retains appearance draft")
 	_check_failure_does_not_change_runtime_appearance(style, changes)
 	check(store.values == {"style":"flat","icons":"svg","unrelated":"keep"}, "failure restores store values")
-	check(window.get_node("%SaveToast").last_text().contains("本地保存失败"), "window reports local persistence failure")
+	_check_failure_notice(window)
 	check(store.saves == 1, "two settings use one write")
 	window.close_requested.emit()
 	window.get_node("%UnsavedDialog").get_node("%SaveAndClose").pressed.emit()
@@ -131,8 +164,19 @@ func check_failed_save() -> void:
 	await process_frame
 	check(not is_instance_valid(window) and style.ui_style == "flat", "successful save-and-close applies appearance and closes")
 	check(style.save_preferences("flat", "svg") == OK, "restore flat shared theme after verification")
+
+func _check_failure_notice(window: Node) -> void:
+	check(window.get_node("%SaveToast").last_text().is_empty(), "failed save stays out of the main toast")
+	var dialog := _error_dialog(window)
+	check(dialog != null and dialog.get_current_text().contains("风格保存失败"), "window reports local persistence failure through the error popup")
 func _check_restart_restores_both_preferences(restored: Variant, pair: Variant) -> void:
 	check(restored.ui_style == pair[0] and restored.icon_style == pair[1], "restart restores both preferences")
+
+func _error_dialog(window: Node) -> Node:
+	for child in window.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			return child
+	return null
 
 func _check_fresh_configuration_defaults_to_flat_svg(style: Variant) -> void:
 	check(style.ui_style == "flat" and style.icon_style == "svg", "fresh configuration defaults to flat/svg")
@@ -159,6 +203,8 @@ func _check_style_combinations(style: Variant, notifications: Array, own: Varian
 		check_bubble(other, pair[0])
 		var fresh := make_bubble(style)
 		check_bubble(fresh, pair[0])
+		_check_chat_surface_follows_style(chat, pair[0])
+		_check_dynamic_card_shadow(style, pair[0])
 		fresh.queue_free()
 		check(chat.get_node("%Input").text == "未发送草稿", "switching preserves chat draft")
 		var suffix: String = "_emoji.png" if pair[1] == "emoji" else ".svg"

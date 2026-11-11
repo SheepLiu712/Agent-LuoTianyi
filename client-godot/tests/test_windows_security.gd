@@ -8,15 +8,28 @@ func check(value: bool, description: String) -> void:
 
 func _initialize() -> void:
 	if not ClassDB.class_exists("WindowsSecurity"):
-		var unavailable = load("res://src/platform/windows_secret_protection.gd").new()
-		var missing: Dictionary = unavailable.protect_secret("secret".to_utf8_buffer(), "scope".to_utf8_buffer())
-		_check_missing_security_dll_is_explicit(missing)
-		print("ENVIRONMENT: WindowsSecurity extension unavailable")
+		_report_missing_security()
 		quit(2)
 		return
 	var security = ClassDB.instantiate("WindowsSecurity")
 	var scope := "https://test.invalid/account-A".to_utf8_buffer()
 	var plain := "synthetic-secret-中文".to_utf8_buffer()
+	_check_native_protection(security, scope, plain)
+	_check_limits_and_password(security, scope)
+	_check_fixture(security)
+	_check_ime()
+	print("Windows security: ", "PASS" if failures.is_empty() else "FAIL")
+	quit(0 if failures.is_empty() else 1)
+
+
+func _report_missing_security() -> void:
+	var unavailable = load("res://src/platform/windows_secret_protection.gd").new()
+	var missing: Dictionary = unavailable.protect_secret("secret".to_utf8_buffer(), "scope".to_utf8_buffer())
+	_check_missing_security_dll_is_explicit(missing)
+	print("ENVIRONMENT: WindowsSecurity extension unavailable")
+
+
+func _check_native_protection(security, scope: PackedByteArray, plain: PackedByteArray) -> void:
 	var protected: Dictionary = security.protect_secret(plain, scope)
 	check(protected.ok, "DPAPI protection succeeds")
 	check(protected.get("stage", "") == "native_code" and protected.has("native_code"), "native result identifies implementation stage")
@@ -31,11 +44,17 @@ func _initialize() -> void:
 		var damaged: PackedByteArray = protected.data.duplicate()
 		damaged[damaged.size() - 1] ^= 255
 		check(not security.unprotect_secret(damaged, scope).ok, "tampered DPAPI blob rejected")
+
+
+func _check_limits_and_password(security, scope: PackedByteArray) -> void:
 	var large := PackedByteArray()
 	large.resize(65537)
 	check(not security.protect_secret(large, scope).ok, "secret size bounded")
 	var invalid: Dictionary = security.encrypt_password("not PEM", "test")
 	_check_bad_key_has_safe_native_error(invalid)
+
+
+func _check_fixture(security) -> void:
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--fixture="):
 			var path := argument.trim_prefix("--fixture=")
@@ -49,8 +68,18 @@ func _initialize() -> void:
 			var file := FileAccess.open(path + ".out", FileAccess.WRITE)
 			file.store_string(JSON.stringify(ciphertexts))
 			file.close()
-	print("Windows security: ", "PASS" if failures.is_empty() else "FAIL")
-	quit(0 if failures.is_empty() else 1)
+
+
+func _check_ime() -> void:
+	if ClassDB.class_exists("WindowsInputMethod"):
+		var ime = ClassDB.instantiate("WindowsInputMethod")
+		var original_layout: int = ime.get_layout()
+		var english_result: Dictionary = ime.set_english(true)
+		check(english_result.ok and ime.get_layout() == 0x04090409, "English keyboard layout can be forced")
+		var restore_result: Dictionary = ime.set_english(false)
+		check(restore_result.ok and ime.get_layout() == original_layout, "original keyboard layout is restored")
+
+
 func _check_bad_key_has_safe_native_error(invalid: Variant) -> void:
 	check(not invalid.ok and invalid.error == "INVALID_KEY" and invalid.data.is_empty() and invalid.get("stage", "") == "native_code" and invalid.has("native_code"), "bad key has safe native error")
 

@@ -133,7 +133,6 @@ func test_chat_presentation() -> void:
 	root.add_child(chat)
 	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	chat.get_node("%Status").text = "布局验收 · 本地固定消息"
-	chat.get_node("%Empty").hide()
 	chat.get_node("%Latest").hide()
 	chat.get_node("%Unread").hide()
 	chat.get_node("%Input").text = "未发送的草稿保留在这里"

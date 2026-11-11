@@ -1,5 +1,7 @@
 extends Node
 const ServerAddress = preload("res://src/domain/server_address.gd")
+const Schema = preload("res://src/storage/log_schema.gd")
+const Events = preload("res://src/storage/log_events.gd")
 signal _http_finished(response: Dictionary)
 const FIELDS := {
 	"login":["username", "password"], "register":["username", "password", "invite_code"],
@@ -9,16 +11,33 @@ var _timeout: float
 var _busy := false
 var _generation := 0
 var _http: HTTPRequest
+var _logger: RefCounted
 
-func _init(security: Object, timeout: float = 15.0) -> void:
+func _init(security: Object, timeout: float = 15.0, logger: RefCounted = null) -> void:
 	_security = security
 	_timeout = maxf(timeout, 0.05)
+	_logger = logger
 
 func request(operation: String, server: String, fields: Dictionary) -> Dictionary:
 	if _busy:
 		return _failure("BUSY")
 	var base := ServerAddress.normalize(server)
-	if not FIELDS.has(operation) or base.is_empty() or not is_inside_tree():
+	if base.is_empty() or not is_inside_tree():
+		return _failure("INVALID_INPUT")
+	if not ServerAddress.allows_insecure(base):
+		return _failure("INSECURE_SERVER")
+	var prepared := _payload_for(operation, fields)
+	if not prepared.ok:
+		return prepared
+	_busy = true
+	var generation := _generation
+	var response: Dictionary = await _perform(operation, base, prepared.data, generation)
+	_busy = false
+	return response
+
+
+func _payload_for(operation: String, fields: Dictionary) -> Dictionary:
+	if not FIELDS.has(operation):
 		return _failure("INVALID_INPUT")
 	var payload := {}
 	for field in FIELDS[operation]:
@@ -29,16 +48,13 @@ func request(operation: String, server: String, fields: Dictionary) -> Dictionar
 		if not fields.get("request_token", false) is bool:
 			return _failure("INVALID_INPUT")
 		payload.request_token = fields.get("request_token", false)
-	_busy = true
-	var generation := _generation
-	var response: Dictionary = await _perform(operation, base, payload, generation)
-	_busy = false
-	return response
+	return {"ok": true, "code": "OK", "status": 0, "data": payload}
 
 func probe_server(address: String) -> Dictionary:
 	if _busy: return _failure("BUSY")
 	var base := ServerAddress.normalize(address)
 	if base.is_empty() or not is_inside_tree(): return _failure("INVALID_INPUT")
+	if not ServerAddress.allows_insecure(base): return _failure("INSECURE_SERVER")
 	_busy = true
 	var generation := _generation
 	var response := await _exchange(base + "/auth/public_key", HTTPClient.METHOD_GET)
@@ -63,6 +79,10 @@ func _perform(operation: String, base: String, payload: Dictionary, generation: 
 		return response
 	return _validated_response(operation, response)
 func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary:
+	var started := Time.get_ticks_usec()
+	var trace_id := Schema.new_trace_id("req")
+	var route := Schema.route_for(url)
+	var method_name := Events.method_name(method)
 	var http := HTTPRequest.new()
 	_http = http
 	http.timeout = _timeout
@@ -72,23 +92,32 @@ func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary
 	http.request_completed.connect(func(result, status, _headers, body):
 		if _http != http:
 			return
+		var response: Dictionary
 		if result == HTTPRequest.RESULT_TIMEOUT:
-			_http_finished.emit(_failure("TIMEOUT"))
+			response = _failure("TIMEOUT")
 		elif result != HTTPRequest.RESULT_SUCCESS:
-			_http_finished.emit(_failure("NETWORK_ERROR", status))
+			response = _failure("NETWORK_ERROR", status)
 		elif status != 200:
-			_http_finished.emit(_failure("AUTH_REJECTED" if status == 401 else "HTTP_ERROR", status))
+			response = _failure("AUTH_REJECTED" if status == 401 else "HTTP_ERROR", status)
 		else:
 			var parser := JSON.new()
 			var valid := parser.parse(body.get_string_from_utf8()) == OK and parser.data is Dictionary
-			_http_finished.emit({"ok":true, "code":"OK", "status":status, "data":parser.data} if valid else _failure("INVALID_RESPONSE", status)))
+			response = {"ok":true, "code":"OK", "status":status, "data":parser.data} if valid else _failure("INVALID_RESPONSE", status)
+		Events.http(_logger, response, status, body.size(), started, trace_id, route, method_name)
+		response.trace_id = trace_id
+		response.duration_ms = int((Time.get_ticks_usec() - started) / 1000)
+		response.bytes = body.size()
+		_http_finished.emit(response))
 	var error := http.request(url, PackedStringArray(["Content-Type: application/json"]), method,
 		JSON.stringify(payload) if method == HTTPClient.METHOD_POST else "")
 	var response: Dictionary
 	if error != OK:
 		response = _failure("NETWORK_ERROR")
+		Events.http(_logger, response, 0, 0, started, trace_id, route, method_name)
 	else:
 		response = await _http_finished
+	response.trace_id = trace_id
+	response.duration_ms = int((Time.get_ticks_usec() - started) / 1000)
 	_http = null
 	http.queue_free()
 	return response
@@ -132,4 +161,5 @@ func _validated_response(operation: String, response: Dictionary) -> Dictionary:
 		if not response.data.get(field) is String or response.data[field].is_empty():
 			return _failure("INVALID_RESPONSE", response.status)
 		data[field] = response.data[field]
-	return {"ok":true, "code":"OK", "status":response.status, "data":data}
+	return {"ok":true, "code":"OK", "status":response.status, "data":data,
+		"trace_id":response.get("trace_id", ""), "duration_ms":response.get("duration_ms", 0)}

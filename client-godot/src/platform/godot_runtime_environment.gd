@@ -15,3 +15,8 @@ func process_running(id: int) -> bool:
 	return OS.is_process_running(id)
 func os_name() -> String:
 	return OS.get_name()
+func supports_blur() -> bool:
+	if is_headless():
+		return false
+	var renderer: String = str(ProjectSettings.get_setting("rendering/renderer/rendering_method", "gl_compatibility"))
+	return renderer in ["gl_compatibility", "mobile", "forward_plus"]

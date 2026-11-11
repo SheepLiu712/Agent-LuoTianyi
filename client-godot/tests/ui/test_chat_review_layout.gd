@@ -67,6 +67,21 @@ func run() -> void:
 	await process_frame
 	await _click_reset(reset_point)
 	check(app._avatar.avatar.transform.is_equal_approx(default_framing), "clicking floating reset restores original framing")
+	var unread_post: Dictionary = app._dynamics.get_latest_unread()
+	var heading: Control = app._avatar.get_node("%Heading")
+	var card_click := InputEventMouseButton.new()
+	card_click.button_index = MOUSE_BUTTON_LEFT
+	card_click.pressed = true
+	heading.gui_input.emit(card_click)
+	await process_frame
+	check(heading.scale.x < 1.0, "card click starts feedback animation")
+	check(await until(func():
+		var clicked_dynamics = app.find_child("DynamicsWindow", true, false)
+		return clicked_dynamics != null and clicked_dynamics.visible and clicked_dynamics.get_selected_id() == str(unread_post.id)
+	), "card click opens the matching dynamic detail")
+	check(not heading.visible, "opening the card detail hides the card")
+	var clicked_dynamics = app.find_child("DynamicsWindow", true, false)
+	_hide_if_present(clicked_dynamics)
 	chat.get_node("%Input").text = "今天忙了一整天，有点累了。"
 	chat.get_node("%Send").pressed.emit()
 	check(await until(func(): return app._chat.get_message_audio("redesign-voice").available), "real loopback reply audio cached")
@@ -83,15 +98,15 @@ func run() -> void:
 	app.get_node("%NavDynamics").pressed.emit()
 	var dynamics = app.find_child("DynamicsWindow", true, false)
 	_check_navigation_opens_independent_dynamics_window(dynamics)
-	if dynamics != null: dynamics.hide()
+	_hide_if_present(dynamics)
 	app.get_node("%NavSettings").pressed.emit()
 	var settings = app.find_child("SettingsWindow", true, false)
 	_check_settings_entry_remains_functional(settings)
-	if settings != null: settings.hide()
+	_hide_if_present(settings)
 	app.get_node("%NavLogs").pressed.emit()
 	var logs = app.find_child("LogWindow", true, false)
 	_check_logs_entry_remains_functional(logs)
-	if logs != null: logs.hide()
+	_hide_if_present(logs)
 	await capture_samples(app, chat)
 	await app._dynamics.mark_read()
 	check(not app._avatar.get_node("%Heading").visible, "explicit mark read hides the card")
@@ -100,6 +115,13 @@ func run() -> void:
 	await process_frame
 	print("Chat review layout: ", "PASS" if failures.is_empty() else "FAIL: " + str(failures))
 	quit(0 if failures.is_empty() else 1)
+
+
+func _hide_if_present(node: Variant) -> void:
+	if node != null:
+		node.hide()
+
+
 func capture(app: Control, chat: Control, label: String) -> void:
 	var started := Time.get_ticks_msec()
 	print("Chat review capture begin: ", label)
@@ -155,7 +177,6 @@ func capture_samples(app: Control, chat: Control) -> void:
 		{"id":"long", "role":"assistant", "text":"有些日子不一定要安排得满满当当。可以先喝一杯水，看看窗外，再慢慢聊今天发生的事。\n\n如果有不开心的片段，也可以一点一点说给我听。不用急着想好答案，我会在这里陪着你。", "status":"sent", "code":""}
 	]
 	chat.get_node("%Status").text = "布局样例 · 离线固定内容"
-	chat.get_node("%Empty").hide()
 	chat.get_node("%Latest").hide()
 	chat.get_node("%Unread").show()
 	chat.get_node("%Input").clear()

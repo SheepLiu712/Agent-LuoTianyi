@@ -185,11 +185,36 @@ func _apply_shadow(stylebox: StyleBoxFlat) -> void:
 		stylebox.shadow_offset = Vector2.ZERO
 
 func _apply_panel_themes() -> void:
-	for kind in ["AppSurface", "PanelContainer", "DialogSurface", "DropdownPopup", "PopupPanel", "PopupMenu", "LoginSurface", "LoginDialog", "ModelCard"]:
-		if _theme.has_stylebox("panel", kind):
-			var panel := _theme.get_stylebox("panel", kind) as StyleBoxFlat
-			if panel != null: apply_surface_style(panel)
-	for kind in ['normal', 'selected']:
-		if _theme.has_stylebox(kind, 'DynamicsPost'):
-			var post := _theme.get_stylebox(kind, 'DynamicsPost') as StyleBoxFlat
-			if post != null: apply_post_style(post, kind == 'selected')
+	_apply_surface_group("panel", ["AppSurface", "PanelContainer", "DialogSurface", "DropdownPopup",
+		"PopupPanel", "PopupMenu", "LoginSurface", "LoginDialog", "ModelCard"])
+	_apply_chat_surface()
+	_apply_surface_group("panel", ["DynamicsSurface", "DynamicsDetailSurface", "SettingsToast"])
+	_apply_surface_group("normal", ["TerminalSurface"])
+	_apply_post_group()
+
+func _apply_surface_group(property: String, kinds: Array) -> void:
+	for kind in kinds:
+		if not _theme.has_stylebox(property, kind):
+			continue
+		var panel := _theme.get_stylebox(property, kind) as StyleBoxFlat
+		if panel != null:
+			apply_surface_style(panel)
+
+## 聊天区保持原有的直角/无边框语义，只让清透模式透出背景，不改几何。
+func _apply_chat_surface() -> void:
+	if not _theme.has_stylebox("panel", "ChatSurface"):
+		return
+	var chat := _theme.get_stylebox("panel", "ChatSurface") as StyleBoxFlat
+	if chat == null:
+		return
+	var color := chat.bg_color
+	color.a = 0.92 if is_crystal() else 1.0
+	chat.bg_color = color
+
+func _apply_post_group() -> void:
+	for kind in ["normal", "selected"]:
+		if not _theme.has_stylebox(kind, "DynamicsPost"):
+			continue
+		var post := _theme.get_stylebox(kind, "DynamicsPost") as StyleBoxFlat
+		if post != null:
+			apply_post_style(post, kind == "selected")

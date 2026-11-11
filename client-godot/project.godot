@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="AgentLuo"
-config/version="0.1.5.7"
+config/version="0.1.6.2"
 run/main_scene="res://scenes/main.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="AgentLuo-Godot"

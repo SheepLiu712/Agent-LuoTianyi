@@ -8,3 +8,7 @@ func get_clipboard_image() -> Image:
 	return null
 func copy_text(_text: String) -> Error:
 	return ERR_UNAVAILABLE
+func create_ime_controller() -> Object:
+	return null
+func set_ime_active(_active: bool) -> void:
+	pass

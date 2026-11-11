@@ -64,7 +64,7 @@ func clear() -> Error:
 		return OK
 	var error := DirAccess.remove_absolute(ProjectSettings.globalize_path(path()))
 	if error != OK and _logger != null:
-		_logger.record("avatar_clear_failed", {"code": error})
+		_logger.log_error("error_avatar_clear", {"code":"AVATAR_WRITE_FAILED", "detail":error_string(error), "phase":"error"})
 	return error
 
 ## 先写临时文件再整体改名：中途失败不会留下半张头像。
@@ -85,5 +85,5 @@ func _write(image: Image) -> Error:
 
 func _result(code: String) -> Dictionary:
 	if code != "OK" and _logger != null:
-		_logger.record("avatar_save_rejected", {"code": code})
+		_logger.log_error("error_avatar_save", {"code": code, "detail": code, "phase":"error"})
 	return {"ok": false, "code": code, "texture": null}

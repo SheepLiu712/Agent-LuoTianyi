@@ -2,8 +2,8 @@ from pathlib import Path
 
 cpp = Path(ARGUMENTS["godot_cpp"]).absolute()
 env = SConscript(str(cpp / "SConstruct"))
-env.Append(LIBS=["bcrypt", "crypt32"])
+env.Append(LIBS=["bcrypt", "crypt32", "user32"])
 env.Append(CPPDEFINES=["WIN32_LEAN_AND_MEAN", "NOMINMAX"])
 env.Append(CXXFLAGS=["/utf-8"])
-binary = env.SharedLibrary("../addons/windows_security/bin/windows_security.dll", ["windows_security.cpp", "pcm_stream_decoder.cpp", "storage_volume.cpp"])
+binary = env.SharedLibrary("../addons/windows_security/bin/windows_security.dll", ["windows_security.cpp", "windows_input_method.cpp", "pcm_stream_decoder.cpp", "storage_volume.cpp"])
 Default(binary)

@@ -1,12 +1,16 @@
 extends RefCounted
 signal entry_added(entry: Dictionary)
 signal write_failed(error: int)
+
+const Schema = preload("res://src/storage/log_schema.gd")
 const Release = preload("res://src/storage/release_info.gd")
-const METRICS := ["has_audio", "audio_chars", "bytes", "frames", "sample_rate", "channels", "bits", "final", "audio_error", "queued", "volume", "latency_ms", "skips", "count", "status", "index", "duration_ms", "reason"]
-const MODULES := ["app", "account", "network", "message", "audio", "cache", "history", "settings", "dynamics", "engine"]
-const CODES := "OK UNKNOWN INVALID_INPUT INVALID_RESPONSE BUSY CANCELLED TIMEOUT NETWORK_ERROR HTTP_ERROR AUTH_REJECTED PUBLIC_KEY_ERROR ENCRYPTION_ERROR CREDENTIAL_UNAVAILABLE NO_SAVED_LOGIN LOGGED_OUT PENDING SEND_REJECTED DELIVERY_UNCERTAIN TRANSPORT_STOPPED ACK_TIMEOUT DISCONNECTED CONNECT_TIMEOUT AUTH_TIMEOUT INVALID_BASE64 AUDIO_ERROR REMOTE_AUDIO_ERROR TTS_EMPTY TTS_STREAM_ERROR TTS_CANCELLED AUDIO_TIMEOUT BUFFER_LIMIT DECODER_UNAVAILABLE PLAYBACK_FAILED REPLAY_FAILED CACHE_WRITE_FAILED CACHE_CLEAR_FAILED INVALID_WAV UNSUPPORTED_FORMAT TRUNCATED_AUDIO EMPTY_AUDIO STREAM_FINISHED STOPPED INTERRUPTED ENGINE_ERROR ENGINE_WARNING HISTORY_FAILED HISTORY_INVALID HISTORY_DUPLICATE MODEL_ERROR MODEL_DISABLED MODEL_INVALID SAVE_FAILED INVALID_JSON MODEL_BUSY UNKNOWN_MODEL_TYPE INVALID_CONFIG MODEL_KIND_MISMATCH MODEL_CAPABILITY_MISMATCH MODEL_FIELDS_REQUIRED STREAMING_NOT_SUPPORTED PLAINTEXT_CONFIRMATION_REQUIRED KEY_UNAVAILABLE NOT_FOUND COMMENT_NOT_ALLOWED INVALID_REPLY_TARGET"
-const PHASES := "saving first_loading first_failed idle connecting authenticating ready reconnecting auth_rejected signed_out signed_in busy queued sending sent failed uncertain loading complete error skipped playing paused stopped"
-const EXPLANATIONS := {"dynamics_state":"动态读取与写入状态", "settings_models":"模型配置状态", "settings_model_execution":"模型请求执行", "settings_preference":"相处偏好操作", "client_started":"客户端启动", "client_stopped":"客户端正常退出", "history_state":"历史同步状态", "history_reconcile":"送达不确定后的历史对账", "account_state":"账户操作状态", "message_queued":"消息已进入发送队列", "message_delivery":"消息投递状态", "engine_error":"引擎报告异常（原始内容不写入日志）", "connection_state":"聊天连接状态变化", "reply_received":"收到回复分片", "system_error":"操作出现错误", "cache_committed":"完整语音已保存", "cache_error":"语音未能保存", "cache_cleared":"已执行语音缓存清理", "audio_received":"收到音频数据", "audio_format":"已识别音频格式", "audio_decoded":"音频解码完成", "audio_receive_finished":"音频接收结束", "audio_error":"音频处理失败", "audio_underrun":"音频缓冲暂时不足", "audio_playback_started":"开始播放在线语音", "audio_playback_finished":"在线语音播放结束", "replay_preempted":"在线语音打断本地重放", "replay_finished":"重放结束", "replay_started":"开始重放", "replay_paused":"重放已暂停", "replay_resumed":"继续重放", "replay_stopped":"重放已停止"}
+const MODULES := Schema.MODULES
+const SCHEMA_VERSION := 2
+const DEFAULT_MAX_BYTES := 8 * 1024 * 1024
+const DEFAULT_MAX_ENTRIES := 50000
+const MAX_RUNS := 50
+const MAX_PENDING := 4096
+
 var _environment: Resource
 var _directory: String
 var _max_bytes: int
@@ -21,8 +25,18 @@ var _meta: Dictionary
 var _initialized := false
 var _closed := false
 var _archive_bytes := -1
+var _archive_handle: FileAccess
+var _archive_path := ""
+var _seq := 0
+var _debug_enabled := false
+var _pending: Array[Dictionary] = []
+var _pending_mutex := Mutex.new()
+var _dropped_debug := 0
+var _dropped_pending := 0
+var _schema_warnings := 0
+var _write_failures := 0
 
-func _init(directory: String = "user://logs", max_bytes: int = 2097152, environment: Variant = null, max_entries: int = 10000) -> void:
+func _init(directory: String = "user://logs", max_bytes: int = DEFAULT_MAX_BYTES, environment: Variant = null, max_entries: int = DEFAULT_MAX_ENTRIES) -> void:
 	_environment = environment if environment is Resource else preload("res://src/platform/godot_runtime_environment.gd").new()
 	# 保留历史三参数签名，同时允许测试与受限部署显式给出单次运行条数上限。
 	if environment is int:
@@ -35,35 +49,155 @@ func _init(directory: String = "user://logs", max_bytes: int = 2097152, environm
 	_id_pattern.compile("^[0-9]{20}_[0-9]+_[a-f0-9]{12}$")
 	_metadata_tmp_pattern.compile("^[0-9]{20}_[0-9]+_[a-f0-9]{12}\\.json\\.tmp$")
 	_id = "%020d_%d_%s" % [int(Time.get_unix_time_from_system() * 1000000), _environment.process_id(), Crypto.new().generate_random_bytes(6).hex_encode()]
+	_debug_enabled = _environment.has_method("arguments") and "--debug-log" in _environment.arguments()
 	_meta = {"id":_id, "started":Time.get_datetime_string_from_system(true) + "Z", "pid":_environment.process_id(), "closed":false, "complete":true,
-		"release":Release.get_info(), "engine":Engine.get_version_info().string, "os":_environment.os_name(), "architecture":Engine.get_architecture_name()}
+		"schema_version":SCHEMA_VERSION, "debug_enabled":_debug_enabled,
+		"release":Release.get_info(), "engine":Engine.get_version_info().string, "os":_environment.os_name(), "architecture":Engine.get_architecture_name(),
+		"retention":{"max_bytes":_max_bytes, "max_entries":_max_entries, "max_runs":MAX_RUNS}}
 
+## 兼容入口：事件名可以是旧名，category 由 schema 推导。
 func record(event: String, fields: Dictionary = {}) -> Error:
 	if _closed or _token.search(event) == null:
 		return ERR_INVALID_PARAMETER
-	var entry := {"time":Time.get_datetime_string_from_system(true) + "Z", "elapsed_ms":Time.get_ticks_msec() - _started, "event":event,
-		"level":"ERROR" if event.contains("error") else "INFO", "module":_module(event), "message":EXPLANATIONS.get(event, "客户端活动")}
-	_apply_fields(entry, fields)
+	var category := Schema.category_for(event, fields)
+	var scoped := fields.duplicate(true)
+	if not Schema.is_origin(scoped.get("origin")):
+		scoped.origin = Schema.infer_origin(event, scoped, category)
+	if category == "debug" and not _debug_enabled:
+		_dropped_debug += 1
+		return OK
+	var entry := {"time":Time.get_datetime_string_from_system(true) + "Z", "elapsed_ms":Time.get_ticks_msec() - _started,
+		"run_id":_id, "seq":_seq, "category":category, "event":event,
+		"level":Schema.default_level(category, fields), "module":Schema.module_for(event, fields), "message":Schema.explanation(event)}
+	var canonical := Schema.canonical_event(event)
+	if Schema.EVENT_REGISTRY.has(canonical):
+		entry.phase = Schema.EVENT_REGISTRY[canonical].get("phase", "unknown")
+	_seq += 1
+	_apply_fields(entry, scoped)
+	_normalize_entry(entry, category)
+	var missing := Schema.apply_defaults(entry, category)
+	if not missing.is_empty():
+		_schema_warnings += 1
+	var written := _commit_entry(entry)
+	var error: Error = written.error
+	if error != OK:
+		# 普通磁盘失败保留内存视图；超过条数上限则拒绝写入，保证本次运行有界。
+		if not written.limit_rejected:
+			_entries.append(entry)
+		_on_write_error(error)
+	entry_added.emit(entry.duplicate(true))
+	return error
+
+func _commit_entry(entry: Dictionary) -> Dictionary:
 	var serialized := JSON.stringify(entry).to_utf8_buffer()
 	var error := ERR_OUT_OF_MEMORY if _entries.size() >= _max_entries else OK
 	var limit_rejected := error == ERR_OUT_OF_MEMORY
 	if not limit_rejected:
 		error = _ensure_directory()
-	if error == OK:
-		var written := _write_entry(serialized)
-		error = written.error
-		limit_rejected = written.limit_rejected
-	if error == OK:
-		_entries.append(entry)
 	if error != OK:
-		# 普通磁盘失败保留内存视图；超过条数上限则拒绝写入，保证本次运行有界。
-		if not limit_rejected:
-			_entries.append(entry)
-		_meta.complete = false
+		return {"error":error, "limit_rejected":limit_rejected}
+	var written := _write_entry(serialized)
+	if written.error == OK:
+		_entries.append(entry)
+	return written
+
+func _on_write_error(error: int) -> void:
+	_meta.complete = false
+	_write_failures += 1
+	_save_metadata()
+	write_failed.emit(error)
+
+func record_as(category: String, event: String, fields: Dictionary = {}) -> Error:
+	var scoped := fields.duplicate(true)
+	scoped.category = category if Schema.is_category(category) else Schema.category_for(event, scoped)
+	return record(event, scoped)
+
+func log_error(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("error", event, fields)
+
+func log_warning(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("warning", event, fields)
+
+func log_info(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("info", event, fields)
+
+func log_debug(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("debug", event, fields)
+
+func log_access(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("access", event, fields)
+
+func log_security(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("security", event, fields)
+
+func log_performance(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("performance", event, fields)
+
+func log_transaction(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("transaction", event, fields)
+
+func log_runtime(event: String, fields: Dictionary = {}) -> Error:
+	return record_as("runtime", event, fields)
+
+## 工作线程只入队，主线程 drain 后统一写盘。
+func record_threadsafe(category: String, event: String, fields: Dictionary = {}) -> void:
+	if _closed:
+		return
+	var item := {"category":category, "event":event, "fields":fields.duplicate(true)}
+	_pending_mutex.lock()
+	if _pending.size() >= MAX_PENDING:
+		_pending.pop_front()
+		_dropped_pending += 1
+	_pending.append(item)
+	_pending_mutex.unlock()
+
+func drain() -> int:
+	# _process 每帧都会调用；没有后台日志时不要复制/清空整个队列。
+	if get_pending_count() == 0:
+		return 0
+	_pending_mutex.lock()
+	var items := _pending.duplicate()
+	_pending.clear()
+	_pending_mutex.unlock()
+	for item in items:
+		if _closed:
+			break
+		record_as(str(item.category), str(item.event), item.fields)
+	return items.size()
+
+func get_pending_count() -> int:
+	_pending_mutex.lock()
+	var size := _pending.size()
+	_pending_mutex.unlock()
+	return size
+
+func set_debug_enabled(enabled: bool) -> void:
+	_debug_enabled = enabled
+	_meta.debug_enabled = enabled
+	if _initialized:
 		_save_metadata()
-		write_failed.emit(error)
-	entry_added.emit(entry.duplicate(true))
-	return error
+
+func is_debug_enabled() -> bool:
+	return _debug_enabled
+
+func get_stats() -> Dictionary:
+	var by_category := {}
+	var by_level := {}
+	var by_origin := {}
+	for entry in _entries:
+		var category: String = entry.get("category", "info")
+		var level: String = entry.get("level", "INFO")
+		var origin: String = entry.get("origin", "unknown")
+		by_category[category] = int(by_category.get(category, 0)) + 1
+		by_level[level] = int(by_level.get(level, 0)) + 1
+		by_origin[origin] = int(by_origin.get(origin, 0)) + 1
+	return {"entries":_entries.size(), "by_category":by_category, "by_level":by_level, "by_origin":by_origin,
+		"dropped_debug":_dropped_debug, "dropped_pending":_dropped_pending,
+		"schema_warnings":_schema_warnings, "write_failures":_write_failures, "pending":get_pending_count()}
+
+func ensure_ready() -> Error:
+	return OK if _initialized else _ensure_directory()
+
 func get_directory() -> String:
 	return ProjectSettings.globalize_path(_directory)
 
@@ -73,11 +207,15 @@ func get_run_id() -> String:
 func finish() -> void:
 	if _closed:
 		return
-	record("client_stopped")
+	drain()
+	record("runtime_app_stopped", {"phase":"stopped", "reason":"normal", "uptime_ms":Time.get_ticks_msec() - _started, "pid":_environment.process_id()})
+	_close_archive()
 	_closed = true
 	_meta.closed = true
+	_meta.entries = _entries.size()
 	if _save_metadata() != OK:
 		_meta.complete = false
+		_write_failures += 1
 		write_failed.emit(ERR_CANT_CREATE)
 
 func list_runs() -> Array[Dictionary]:
@@ -85,19 +223,41 @@ func list_runs() -> Array[Dictionary]:
 	if not DirAccess.dir_exists_absolute(_directory):
 		return runs
 	for file in DirAccess.get_files_at(_directory):
-		var id := file.trim_suffix(".json")
-		if not file.ends_with(".json") or _id_pattern.search(id) == null:
-			continue
-		var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(_path(id, ".json")))
-		if not _valid_run_metadata(data, id):
-			continue
-		data.active = not data.get("closed",false) and _environment.process_running(int(data.pid))
-		data.complete = data.get("complete",false) and _read_archive(id).complete
-		runs.append(data)
+		var data := _read_run_metadata(file)
+		if not data.is_empty():
+			runs.append(data)
 	runs.sort_custom(func(a,b): return a.id > b.id)
 	return runs
+
+func _read_run_metadata(file: String) -> Dictionary:
+	var id := file.trim_suffix(".json")
+	if not file.ends_with(".json") or _id_pattern.search(id) == null:
+		return {}
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(_path(id, ".json")))
+	if not _valid_run_metadata(parsed, id):
+		return {}
+	var data: Dictionary = parsed
+	data.active = not data.get("closed", false) and _environment.process_running(int(data.pid))
+	_finalize_run_metadata(data, id)
+	data.schema_version = int(data.get("schema_version", 1))
+	return data
+
+func _finalize_run_metadata(data: Dictionary, id: String) -> void:
+	if id == _id:
+		data.complete = bool(_meta.complete)
+		data.entries = _entries.size()
+	elif data.has("entries"):
+		# 新格式把条数/完整性写进元数据；只确认归档仍在，不再逐行解析 8 MiB JSONL。
+		data.complete = data.get("complete", false) and FileAccess.file_exists(_path(id, ".jsonl"))
+	else:
+		# 旧归档不在列表阶段逐行解析：8 MiB × 50 份会冻结启动。
+		# 保留元数据声明并标记未校验；用户选中后再按需读取正文。
+		data.complete = data.get("complete", false)
+		data.legacy_unverified = true
+
 func read_entries(run_id: String = "") -> Array[Dictionary]:
 	if run_id.is_empty() or run_id == _id:
+		drain()
 		return _entries.duplicate(true)
 	var result: Array[Dictionary] = []
 	result.assign(_read_archive(run_id).entries)
@@ -117,14 +277,25 @@ func export_run(run_id: String, destination_zip: String) -> Error:
 	var read := _read_archive(run_id) if run_id != _id else {"entries":read_entries(), "complete":_meta.complete}
 	var events := ""
 	var readable := ""
+	var counts := {}
+	var origin_counts := {}
 	for entry in read.entries:
 		events += JSON.stringify(entry) + "\n"
-		readable += "%s [%s] [%s] %s (%s) %s\n" % [entry.time,entry.level,entry.module,entry.message,entry.event,entry.get("code", "")]
+		var origin: String = entry.get("origin", "unknown")
+		var origin_label: String = Schema.ORIGIN_LABELS.get(origin, origin)
+		readable += "%s [%s] [%s] [%s] [%s] %s (%s) %s\n" % [entry.time,entry.level,entry.get("category","info"),origin_label,entry.module,entry.message,entry.event,entry.get("code", "")]
+		var category: String = entry.get("category", "info")
+		counts[category] = int(counts.get(category, 0)) + 1
+		origin_counts[origin] = int(origin_counts.get(origin, 0)) + 1
 	# 只导出白名单摘要，不携带任意磁盘元数据、路径或环境变量。
 	var summary := {"release":metadata.get("release",Release.get_info()), "engine":Engine.get_version_info().string,
-		"os":_environment.os_name(), "architecture":Engine.get_architecture_name(), "closed":metadata.get("closed",false),
-		"complete":metadata.get("complete",false) and read.complete, "count":read.entries.size()}
+		"os":_environment.os_name(), "architecture":Engine.get_architecture_name(), "schema_version":int(metadata.get("schema_version", SCHEMA_VERSION)),
+		"closed":metadata.get("closed",false), "complete":metadata.get("complete",false) and read.complete,
+		"debug_enabled":metadata.get("debug_enabled", false), "count":read.entries.size(), "counts_by_category":counts,
+		"counts_by_origin":origin_counts,
+		"retention":metadata.get("retention", {"max_bytes":_max_bytes, "max_entries":_max_entries, "max_runs":MAX_RUNS})}
 	return _write_export(destination_zip, [["events.jsonl",events],["readable.txt",readable],["environment.json",JSON.stringify(summary)]])
+
 func _ensure_directory() -> Error:
 	if _initialized:
 		return OK
@@ -168,7 +339,7 @@ func _save_metadata() -> Error:
 
 func _prune() -> void:
 	var runs := list_runs()
-	var excess := runs.size() - 50
+	var excess := runs.size() - MAX_RUNS
 	runs.reverse()
 	for run in runs:
 		if excess <= 0:
@@ -185,6 +356,7 @@ func _prune() -> void:
 		if error == OK:
 			excess -= 1
 		else:
+			_write_failures += 1
 			write_failed.emit(error)
 
 func _path(id: String, suffix: String) -> String:
@@ -199,18 +371,6 @@ func _jsonl_size(path: String) -> int:
 	var size := file.get_length()
 	file.close()
 	return size
-
-func _module(event: String) -> String:
-	for module in MODULES:
-		if event.begins_with(module + "_"):
-			return module
-	if event.begins_with("replay_"):
-		return "audio"
-	if event == "connection_state":
-		return "network"
-	if event == "reply_received":
-		return "message"
-	return "app"
 
 func _read_archive(id: String) -> Dictionary:
 	var result := {"entries":[], "complete":true}
@@ -230,20 +390,103 @@ func _read_archive(id: String) -> Dictionary:
 		result.entries.append(safe)
 	file.close()
 	return result
-func _safe_code(key: String, value: String) -> String:
-	return value if value in (CODES if key == "code" else PHASES).split(" ") else "UNKNOWN"
 
 func _apply_fields(entry: Dictionary, fields: Dictionary) -> void:
 	_apply_metrics(entry, fields)
-	for key in ["phase", "code"]:
-		if fields.get(key) is String and _token.search(fields[key]) != null:
-			entry[key] = _safe_code(key, fields[key])
-	if fields.get("level") in ["INFO", "WARN", "ERROR"]:
+	for key in Schema.STRING_FIELDS:
+		if key in ["level", "module", "category", "event"]:
+			continue
+		var value: Variant = fields.get(key)
+		if value is String:
+			_apply_string_field(entry, key, value)
+	_apply_payload(entry, fields)
+
+func _apply_metrics(entry: Dictionary, fields: Dictionary) -> void:
+	for key in Schema.METRICS:
+		var value: Variant = fields.get(key)
+		if value is bool or value is int or (value is float and is_finite(value)):
+			entry[key] = value
+
+func _apply_payload(entry: Dictionary, fields: Dictionary) -> void:
+	if fields.get("stack") is Array:
+		entry.stack = Schema.sanitize_stack(fields.stack)
+	if fields.get("data") is Dictionary:
+		entry.data = Schema.sanitize_data(fields.data)
+	if fields.get("level") is String and Schema.is_level(fields.level):
 		entry.level = fields.level
-	if fields.get("module") in MODULES:
-		entry.module = fields.module
-	if fields.get("reply_id") is String:
-		entry.reply_id = fields.reply_id.sha256_text().left(12)
+
+func _apply_string_field(entry: Dictionary, key: String, value: String) -> void:
+	if key in ["code", "reason_code", "phase", "outcome", "channel", "scope", "origin"]:
+		_apply_enum_field(entry, key, value)
+	elif key in ["route", "method", "action", "operation"]:
+		_apply_action_field(entry, key, value)
+	elif key in ["subject", "trace_id", "transaction_id", "reply_id"]:
+		_apply_token_field(entry, key, value)
+	else:
+		_apply_detail_field(entry, key, value)
+
+func _apply_enum_field(entry: Dictionary, key: String, value: String) -> void:
+	entry[key] = _enum_value(key, value)
+
+func _enum_value(key: String, value: String) -> String:
+	if key in ["code", "reason_code"]:
+		return Schema.safe_code(value)
+	var simple := {
+		"origin": value if Schema.is_origin(value) else "unknown",
+		"phase": Schema.safe_phase(value),
+		"outcome": value if Schema.is_outcome(value) else "unknown",
+		"channel": value if Schema.is_channel(value) else "app",
+		"scope": value if Schema.is_scope(value) else "unknown",
+	}
+	return str(simple.get(key, value))
+
+func _apply_action_field(entry: Dictionary, key: String, value: String) -> void:
+	match key:
+		"route":
+			entry[key] = Schema.safe_route(value)
+		"method":
+			entry[key] = Schema.safe_method(value)
+		_:
+			entry[key] = Schema.safe_action(value)
+
+func _apply_token_field(entry: Dictionary, key: String, value: String) -> void:
+	if key == "reply_id":
+		entry[key] = value.sha256_text().left(12)
+	elif key == "trace_id":
+		entry[key] = value if Schema.is_trace_id(value) else ""
+	else:
+		entry[key] = value if Schema.is_token(value) else ""
+
+func _apply_detail_field(entry: Dictionary, key: String, value: String) -> void:
+	entry[key] = Schema.sanitize_text(value) if key == "detail" else Schema.sanitize_text(value, 128)
+
+func _normalize_entry(entry: Dictionary, category: String) -> void:
+	if not Schema.is_level(entry.get("level")):
+		entry.level = Schema.default_level(category, entry)
+	if not Schema.is_category(entry.get("category")):
+		entry.category = category
+	if not Schema.is_outcome(entry.get("outcome")):
+		entry.outcome = "unknown"
+	if not Schema.is_origin(entry.get("origin")):
+		entry.origin = "unknown"
+	_normalize_trace(entry, category)
+	_normalize_runtime(entry, category)
+
+func _normalize_trace(entry: Dictionary, category: String) -> void:
+	if category in ["access", "security", "performance", "transaction"] and not Schema.is_trace_id(entry.get("trace_id")):
+		if category == "transaction" and Schema.is_token(entry.get("transaction_id")):
+			entry.trace_id = entry.transaction_id
+		else:
+			entry.trace_id = Schema.new_trace_id(category.left(2))
+	if category == "transaction" and not Schema.is_token(entry.get("transaction_id")):
+		entry.transaction_id = Schema.new_transaction_id()
+		entry.trace_id = entry.transaction_id
+
+func _normalize_runtime(entry: Dictionary, category: String) -> void:
+	if category == "runtime":
+		entry.uptime_ms = int(entry.get("uptime_ms", entry.get("elapsed_ms", 0)))
+		entry.pid = int(entry.get("pid", _environment.process_id()))
+
 func _write_entry(serialized: PackedByteArray) -> Dictionary:
 	var error := OK
 	var limit_rejected := false
@@ -260,7 +503,12 @@ func _write_entry(serialized: PackedByteArray) -> Dictionary:
 
 func _append_entry_file(path: String, serialized: PackedByteArray) -> Error:
 	var error := OK
-	var file := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
+	var file := _archive_handle
+	if file == null or _archive_path != path:
+		_close_archive()
+		file = FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
+		_archive_handle = file
+		_archive_path = path if file != null else ""
 	if file == null:
 		error = FileAccess.get_open_error()
 		_archive_bytes = -1
@@ -270,18 +518,20 @@ func _append_entry_file(path: String, serialized: PackedByteArray) -> Error:
 		file.store_8(10)
 		file.flush()
 		error = file.get_error()
-		file.close()
 		if error == OK:
 			_archive_bytes += serialized.size() + 1
 		else:
 			_archive_bytes = -1
+			_close_archive()
 	return error
 
-func _apply_metrics(entry: Dictionary, fields: Dictionary) -> void:
-	for key in METRICS:
-		var value: Variant = fields.get(key)
-		if value is bool or value is int or (value is float and is_finite(value)):
-			entry[key] = value
+
+func _close_archive() -> void:
+	if _archive_handle != null:
+		_archive_handle.flush()
+		_archive_handle.close()
+	_archive_handle = null
+	_archive_path = ""
 
 func _valid_run_metadata(data: Variant, id: String) -> bool:
 	return data is Dictionary and data.get("id") == id and (data.get("pid") is float or data.get("pid") is int)
@@ -307,14 +557,76 @@ func _write_export(destination_zip: String, files: Array) -> Error:
 	return error
 
 func _valid_archive_entry(value: Variant) -> bool:
-	return value is Dictionary and value.get("event") is String and _token.search(value.event) != null and value.get("time") is String and value.get("level") in ["INFO","WARN","ERROR"] and value.get("module") in MODULES
+	return value is Dictionary and value.get("event") is String and _token.search(value.event) != null \
+		and value.get("time") is String and value.get("level") in Schema.LEVELS and value.get("module") in MODULES \
+		and (not value.has("category") or Schema.is_category(value.category))
 
 func _safe_archive_entry(value: Dictionary) -> Dictionary:
-	var safe := {"event":value.event,"time":value.time.left(32),"level":value.level,"module":value.module,"message":EXPLANATIONS.get(value.event,"客户端活动")}
-	for key in METRICS + ["elapsed_ms"]:
+	var event: String = value.event
+	var category := Schema.category_for(event, value)
+	if event == "engine_error" and value.get("level") == "WARN":
+		category = "warning"
+	var safe := {"event":event,"time":value.time.left(32),"level":value.level,"module":value.module,
+		"message":Schema.explanation(event),"category":category}
+	_copy_metrics(safe, value)
+	_copy_strings(safe, value)
+	_copy_identifiers(safe, value)
+	_copy_enums(safe, value)
+	_copy_actions(safe, value)
+	_copy_payload(safe, value)
+	if not safe.has("origin"):
+		safe.origin = Schema.infer_origin(event, value, category)
+	return safe
+
+func _copy_metrics(safe: Dictionary, value: Dictionary) -> void:
+	for key in Schema.METRICS + ["elapsed_ms"]:
 		if value.get(key) is bool or value.get(key) is int or value.get(key) is float:
 			safe[key] = value[key]
-	for key in ["code","phase","reply_id"]:
+
+func _copy_strings(safe: Dictionary, value: Dictionary) -> void:
+	for key in ["code","phase","reply_id","reason","schema_missing","run_id"]:
 		if value.get(key) is String and _token.search(value[key]) != null:
-			safe[key] = value[key] if key == "reply_id" else _safe_code(key, value[key])
-	return safe
+			safe[key] = _safe_archive_string(key, value[key])
+
+func _safe_archive_string(key: String, value: String) -> String:
+	if key in ["reply_id", "run_id"]:
+		return value
+	if key == "code":
+		return Schema.safe_code(value)
+	if key == "phase":
+		return Schema.safe_phase(value)
+	return Schema.sanitize_text(value, 128)
+
+func _copy_identifiers(safe: Dictionary, value: Dictionary) -> void:
+	if value.get("trace_id") is String and Schema.is_trace_id(value.trace_id):
+		safe.trace_id = value.trace_id
+	for key in ["transaction_id", "subject", "previous_run_id"]:
+		if value.get(key) is String and Schema.is_token(value[key]):
+			safe[key] = value[key]
+
+func _copy_enums(safe: Dictionary, value: Dictionary) -> void:
+	if value.get("channel") is String and Schema.is_channel(value.channel):
+		safe.channel = value.channel
+	if value.get("scope") is String and Schema.is_scope(value.scope):
+		safe.scope = value.scope
+	if value.get("outcome") is String and Schema.is_outcome(value.outcome):
+		safe.outcome = value.outcome
+	if value.get("origin") is String and Schema.is_origin(value.origin):
+		safe.origin = value.origin
+
+func _copy_actions(safe: Dictionary, value: Dictionary) -> void:
+	for key in ["action", "operation"]:
+		if value.get(key) is String:
+			safe[key] = Schema.safe_action(value[key])
+	if value.get("method") is String:
+		safe.method = Schema.safe_method(value.method)
+	if value.get("route") is String:
+		safe.route = Schema.safe_route(value.route)
+
+func _copy_payload(safe: Dictionary, value: Dictionary) -> void:
+	if value.get("detail") is String:
+		safe.detail = Schema.sanitize_text(value.detail)
+	if value.get("stack") is Array:
+		safe.stack = Schema.sanitize_stack(value.stack)
+	if value.get("data") is Dictionary:
+		safe.data = Schema.sanitize_data(value.data)

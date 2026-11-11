@@ -1,5 +1,5 @@
 extends SceneTree
-const Files = preload("res://src/storage/image_file_reader.gd")
+const Files = preload("res://src/platform/image_file_reader.gd")
 const Attachment = preload("res://src/media/image_attachment.gd")
 var failures: Array[String] = []
 func check(ok: bool, label: String) -> void:

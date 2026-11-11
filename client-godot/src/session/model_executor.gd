@@ -3,6 +3,9 @@ const ServerAddress = preload("res://src/domain/server_address.gd")
 const Attachment = preload("res://src/media/image_attachment.gd")
 signal completed(response: Dictionary)
 const Http = preload("res://src/network/json_request.gd")
+## 只缓存近期已完成的请求，避免长时间会话把全部模型正文留在内存里。
+## 在途请求用空字典占位，独立于该上限，不会被淘汰。
+const MAX_COMPLETED_RESULTS := 256
 var _settings: Node
 var _logger: RefCounted
 var _timeout: float
@@ -10,6 +13,7 @@ var _generation := 0
 var _active := false
 var _requests: Array[Node] = []
 var _results := {}
+var _result_order: Array[String] = []
 
 func _init(settings: Node,logger: RefCounted = null,timeout: float = 120.0) -> void:
 	_settings = settings
@@ -26,6 +30,7 @@ func stop() -> void:
 	for request in _requests.duplicate():
 		request.cancel()
 	_results.clear()
+	_result_order.clear()
 
 func enabled_types() -> Array[String]:
 	return _settings.enabled_types()
@@ -38,9 +43,6 @@ func submit(payload: Dictionary) -> void:
 		if not _results[id].is_empty():
 			completed.emit(_results[id].duplicate(true))
 		return
-	if _results.size() >= 4096:
-		completed.emit({"request_id":id,"error":"MODEL_BUSY"})
-		return
 	_results[id] = {}
 	var generation := _generation
 	var result := await _execute(payload.duplicate(true),_settings.get_config(str(payload.get("type",""))))
@@ -52,7 +54,23 @@ func submit(payload: Dictionary) -> void:
 	else:
 		response.error = result.code
 	_results[id] = response
+	_result_order.append(id)
+	_trim_results()
 	completed.emit(response.duplicate(true))
+
+
+## 淘汰最旧的已完成结果；只保留少量近期结果用于同一 request_id 的幂等重放。
+func _trim_results() -> void:
+	var completed_count := 0
+	for id in _results:
+		if not _results[id].is_empty():
+			completed_count += 1
+	while completed_count > MAX_COMPLETED_RESULTS and not _result_order.is_empty():
+		var oldest: String = _result_order.pop_front()
+		if not _results.has(oldest) or _results[oldest].is_empty():
+			continue
+		_results.erase(oldest)
+		completed_count -= 1
 
 func test_config(type_id: String,config: Dictionary) -> Dictionary:
 	var snapshot := config.duplicate(true)
@@ -105,7 +123,8 @@ func _failure(code: String) -> Dictionary:
 
 func _log(phase: String,code: String,type_id: String,elapsed: int) -> void:
 	if _logger != null:
-		_logger.record("settings_model_execution",{"phase":phase,"code":code,"reply_id":type_id,"duration_ms":elapsed})
+		_logger.log_performance("performance_model_execution",{"operation":"model_execution","outcome":"success" if code == "OK" else "failure",
+			"phase":phase,"code":code,"reply_id":type_id,"duration_ms":elapsed})
 
 func _exit_tree() -> void:
 	stop()

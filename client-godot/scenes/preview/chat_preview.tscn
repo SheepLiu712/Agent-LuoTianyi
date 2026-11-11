@@ -165,7 +165,6 @@ visible = false
 custom_minimum_size = Vector2(0, 240)
 theme_override_font_sizes/font_size = 20
 theme_override_colors/font_color = Color(0.5137255, 0.6117647, 0.65882355, 1)
-text = "从一句问候开始"
 horizontal_alignment = 1
 
 [node name="Latest" type="Button" parent="Split/Margin/Column"]

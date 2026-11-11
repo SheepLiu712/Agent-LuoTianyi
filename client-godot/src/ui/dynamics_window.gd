@@ -3,6 +3,7 @@ extends "res://src/ui/draft_window.gd"
 const Detail = preload("res://src/ui/dynamic_detail.gd")
 const DetailScene = preload("res://scenes/ui/dynamic_detail.tscn")
 const PostRow = preload("res://scenes/ui/dynamics_post_row.tscn")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 @onready var _unread: Label = %Unread
 @onready var _notice: Label = %Notice
 @onready var _split: HSplitContainer = %Split
@@ -18,7 +19,7 @@ var _controller: Node
 const PLACEHOLDERS := {
 	"loading": "正在加载动态…",
 	"empty": "还没有动态，发布第一条吧。",
-	"failed": "动态加载失败，点击刷新重试。",
+	"failed": "暂无动态",
 	"unselected": "选择左侧一条动态查看评论。",
 }
 var _ratio := .35
@@ -28,6 +29,8 @@ var _detail_scroll_positions := {}
 var _rows := {}
 var _publisher: Control
 var _refreshing := false
+var _last_failure_code := ""
+var _last_unread_code := ""
 var _initialized := false
 var _ui_style: RefCounted
 var _panel_style: StyleBoxFlat
@@ -101,6 +104,8 @@ func _initialize() -> void:
 		if saved is Vector2i: size = saved.max(min_size)
 		var ratio: Variant = config.get_value("window","ratio",.35)
 		if (ratio is float or ratio is int) and is_finite(ratio): _ratio = clampf(ratio,.25,.7)
+	else:
+		push_warning("Dynamics window layout could not be loaded")
 	_publish.pressed.connect(_open_publisher)
 	_refresh_button.pressed.connect(_refresh)
 	_read_all.pressed.connect(_controller.mark_read)
@@ -150,6 +155,25 @@ func select_post(id: String) -> bool:
 	_refresh_selected_comments(id)
 	return true
 
+## 角色卡片携带的是服务端预览快照：列表已加载时直接选中；
+## 否则等当前刷新完成。刷新成功仍找不到时视为已删除，
+## 只有网络失败才退回快照，避免把临时断网当成删除。
+func open_post(post: Dictionary) -> bool:
+	if _controller == null or post.is_empty():
+		return false
+	var id := str(post.get("id", ""))
+	if id.is_empty():
+		return false
+	if select_post(id):
+		return true
+	await _controller.refresh()
+	if select_post(id):
+		return true
+	if str(_controller.get_state().code) in ["", "OK"]:
+		return false
+	_controller.accept_post(post)
+	return select_post(id)
+
 func _refresh_selected_comments(id: String) -> void:
 	var state: Dictionary = _controller.get_comments(id)
 	if not state.busy: _details[id].refresh_comments()
@@ -164,12 +188,7 @@ func _update_unread(count: int) -> void:
 
 ## 只为「已有内容但加载失败」和未读失败保留横幅；首屏状态交给占位文案。
 func _notice_text(count: int, state: Dictionary) -> String:
-	var text := "有新的动态或评论，点击卡片查看最新评论，刷新可更新动态列表。" if count else ""
-	if _shows_failure(state):
-		text += " 动态刷新失败（%s），点击刷新重试。" % state.code
-	if str(state.unread_code) not in ["","OK"]:
-		text += " 未读操作失败（%s）。" % state.unread_code
-	return text.strip_edges()
+	return "有新的动态或评论，点击卡片查看最新评论，刷新可更新动态列表。" if count else ""
 
 ## 翻页失败不会把 phase 推成 failed，只看 phase 会漏报，所以以 code 兜底。
 func _shows_failure(state: Dictionary) -> bool:
@@ -178,12 +197,34 @@ func _shows_failure(state: Dictionary) -> bool:
 
 func _update() -> void:
 	var state: Dictionary = _controller.get_state()
+	_announce_failures(state)
 	_update_unread(state.unread)
 	var posts: Array = _controller.get_posts()
 	_sync_rows(posts)
 	_sync_details(posts)
 	_sync_selection(posts)
 	_refresh_placeholder(posts, state)
+
+func _announce_failures(state: Dictionary) -> void:
+	_announce_posts_failure(state)
+	_announce_unread_failure(state)
+
+func _announce_posts_failure(state: Dictionary) -> void:
+	var code := str(state.code)
+	var first_failed: bool = state.phase == "failed" and _controller.get_posts().is_empty()
+	if (_shows_failure(state) or first_failed) and code != _last_failure_code:
+		_last_failure_code = code
+		ErrorDialog.present(self, "暂时加载不出动态，点击重试。" if first_failed else "刷新失败，点击重试。")
+	elif not _shows_failure(state) and not first_failed:
+		_last_failure_code = ""
+
+func _announce_unread_failure(state: Dictionary) -> void:
+	var unread := str(state.unread_code)
+	if unread not in ["", "OK"] and unread != _last_unread_code:
+		_last_unread_code = unread
+		ErrorDialog.present(self, "未读状态同步失败。")
+	elif unread in ["", "OK"]:
+		_last_unread_code = ""
 
 ## 服务端已删除的动态必须连同行、详情和缓存一起消失，否则刷新只会越积越多。
 func _sync_rows(posts: Array) -> void:
@@ -296,4 +337,5 @@ func _save_layout() -> void:
 	var config = settings
 	config.set_value("window","size",size)
 	config.set_value("window","ratio",_ratio)
-	config.save_settings()
+	if config.save_settings() != OK:
+		push_warning("Dynamics window layout could not be saved")

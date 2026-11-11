@@ -62,4 +62,7 @@ func save_ui_style() -> Dictionary:
 	if _ui_style == null or not ui_style_dirty():
 		return {"ok": true, "results": []}
 	var error: Error = _ui_style.save_preferences(_ui_style_pending.style, _ui_style_pending.icons)
-	return {"ok": error == OK, "results": [{"section": "ui", "id": "界面与图标风格", "ok": error == OK, "code": "OK" if error == OK else "本地保存失败（%s）" % error}]}
+	var result := {"section":"ui", "id":"界面与图标风格", "ok":error == OK, "code":"OK" if error == OK else "本地保存失败"}
+	if error != OK:
+		result.message = "风格保存失败，本次仍生效，重启后恢复上次设置。"
+	return {"ok": error == OK, "results": [result]}

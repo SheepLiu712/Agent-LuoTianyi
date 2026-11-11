@@ -31,6 +31,8 @@ func run() -> void:
 		check(ServerAddress.normalize(invalid).is_empty(), "unsafe address rejected")
 	var api = Api.new(ClassDB.instantiate("WindowsSecurity"))
 	root.add_child(api)
+	var insecure: Dictionary = await api.request("login", "http://example.com", {"username":"test", "password":"synthetic-password", "request_token":false})
+	check(not insecure.ok and insecure.code == "INSECURE_SERVER", "non-loopback plaintext HTTP is rejected")
 	var login: Dictionary = await api.request("login", server, {"username":"test", "password":"synthetic-password", "request_token":true, "ignored":"field"})
 	check(login.ok and login.data.get("message_token") == "message-test", "encrypted password login succeeds")
 	var registered: Dictionary = await api.request("register", server, {"username":"test", "password":"synthetic-password", "invite_code":"invite-test"})

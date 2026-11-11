@@ -32,9 +32,9 @@ func run() -> void:
 	presenter.open_image(second,func():
 		attempts[0] += 1
 		return null if attempts[0] == 1 else texture)
-	check(image_window.get_node("%ImageError").visible,"failed load shows retryable error")
+	check(image_window.get_node("%RetryImage").visible and not image_window.get_node("%ImageError").visible,"failed load shows the retry action without inline error text")
 	image_window.get_node("%RetryImage").pressed.emit()
-	check(not image_window.get_node("%ImageError").visible and image_window.get_node("%Picture").texture == texture,"retry loads through the same source")
+	check(not image_window.get_node("%RetryImage").visible and image_window.get_node("%Picture").texture == texture,"retry loads through the same source")
 	if DisplayServer.get_name() != "headless":
 		second.mode = Window.MODE_MINIMIZED
 		await create_timer(.2).timeout

@@ -1,5 +1,6 @@
 extends Window
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 var _source: WeakRef
 var _previous_focus: WeakRef
 var _provider: Callable
@@ -8,6 +9,7 @@ var _active := false
 var _hidden_by_source := false
 var _fitting := true
 var _zoom := 1.0
+var _error_announced := false
 
 func _ready() -> void:
 	close_requested.connect(close_image)
@@ -19,7 +21,9 @@ func _ready() -> void:
 	%ZoomIn.pressed.connect(func(): _zoom_by(1.25))
 	%ConfirmImage.pressed.connect(func():
 		if _confirm.is_valid() and _confirm.call(%Picture.texture): close_image()
-		else: %Feedback.text = "图片暂时无法发送，请检查当前连接后重试。图片已保留。")
+		else:
+			%Feedback.text = ""
+			ErrorDialog.present(self, "图片暂时无法发送，请检查当前连接后重试。图片已保留。"))
 	%ImageScroll.resized.connect(func(): if _fitting: _resize_image())
 
 func present(source: Window, provider: Callable, confirm: Callable = Callable()) -> void:
@@ -32,6 +36,7 @@ func present(source: Window, provider: Callable, confirm: Callable = Callable())
 	_hidden_by_source = false
 	_fitting = true
 	_zoom = 1
+	_error_announced = false
 	%Feedback.text = ""
 	%ConfirmImage.visible = confirm.is_valid()
 	%CloseImage.text = "取消" if confirm.is_valid() else "关闭"
@@ -55,8 +60,11 @@ func _load_image() -> void:
 	var texture: Texture2D = _provider.call() if _provider.is_valid() else null
 	%Picture.texture = texture
 	%Picture.visible = texture != null
-	%ImageError.visible = texture == null
+	%ImageError.visible = false
 	%RetryImage.visible = texture == null
+	if texture == null and not _error_announced:
+		_error_announced = true
+		ErrorDialog.present(self, "图片暂时无法读取，请重试。")
 	for button in [%ZoomIn,%ZoomOut,%FitImage,%OriginalSize,%ConfirmImage]: button.disabled = texture == null
 	if texture != null: _resize_image()
 	# 重试成功后按钮会消失，焦点不能跟着消失，否则键盘用户就断了出口。

@@ -1,6 +1,7 @@
 extends Control
 signal plaintext_answer(allowed: bool)
 const Card = preload("res://scenes/ui/model_purpose_card.tscn")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 var _settings: Node
 var _executor: Node
 var _types: Array = []
@@ -8,6 +9,7 @@ var _drafts: Dictionary = {}
 var _cards: Dictionary = {}
 var _initialized := false
 var _testing := false
+var _last_error_code := ""
 var _saving := false
 var _test_snapshot: Dictionary = {}
 var _test_type := ""
@@ -60,9 +62,17 @@ func _update(state: Dictionary) -> void:
 			%Cards.add_child(card)
 			_cards[purpose.id] = card
 	if state.phase != "ready":
-		_status.text = "正在获取模型用途…" if state.phase == "loading" else "无法读取模型用途（%s），请刷新重试。" % state.code
+		_status.text = "正在获取模型用途…" if state.phase == "loading" else ""
+		if state.phase != "loading" and state.code != _last_error_code:
+			_last_error_code = state.code
+			ErrorDialog.present(self, "部分配置未能恢复，可刷新重试。")
 	elif state.code not in ["OK", ""]:
-		_status.text = "部分配置未能恢复或不满足用途要求（%s）。" % state.code
+		_status.text = ""
+		if state.code != _last_error_code:
+			_last_error_code = state.code
+			ErrorDialog.present(self, "部分配置未能恢复，可刷新重试。")
+	else:
+		_last_error_code = ""
 	_set_editable()
 
 func _set_editable() -> void:
@@ -82,7 +92,8 @@ func _reload() -> void:
 
 func _locate_error(id: String, code: String) -> void:
 	if _cards.has(id):
-		_cards[id].show_error("未保存：" + code)
+		_cards[id].show_error("")
+		ErrorDialog.present(self, "参数不是有效的 JSON，请检查后重试。" if code == "INVALID_JSON" else "未保存，请重试。")
 		_reveal_error_card.call_deferred(_cards[id])
 
 func _reveal_error_card(card: Control) -> void:
@@ -165,4 +176,8 @@ func _test() -> void:
 	_test_snapshot.clear()
 	_testing = false
 	_set_editable()
-	_status.text = "本次请求成功；不代表已全面认证模型能力。" if result.ok else "测试失败（%s）。" % result.code
+	if result.ok:
+		_status.text = "本次请求成功；不代表已全面认证模型能力。"
+	else:
+		_status.text = ""
+		ErrorDialog.present(self, "请先填写模型地址和密钥。" if result.code in ["MODEL_FIELDS_REQUIRED","INVALID_CONFIG"] else "测试未通过，请检查服务地址和密钥后重试。")

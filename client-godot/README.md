@@ -1,6 +1,6 @@
 # AgentLuo · Godot Windows 客户端
 
-当前源码版本：`0.1.5.3`（以 `release.json` 为准）。这是独立 Windows 客户端工程；现行行为与阅读入口见 [客户端说明](docs/README.md)，开发过程记录见 [WORKLOG](docs/WORKLOG.md)，最新整改验证见 [PR #186 整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。尚未替换旧端，不读取旧端凭据。
+当前源码版本：`0.1.6.2`（以 `release.json` 为准）。这是独立 Windows 客户端工程；现行行为与阅读入口见 [客户端说明](docs/README.md)，开发过程记录见 [WORKLOG](docs/WORKLOG.md)，最新整改验证见 [PR #186 整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。尚未替换旧端，不读取旧端凭据。
 
 现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；脚本清单与覆盖迁移以该入口和测试契约为准。
 
@@ -67,7 +67,7 @@ python client-godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 正式聊天自动播放服务端 WAV/PCM 分片；同 UUID 聚合，后续回复等前一句实际播完再呈现。支持口型、音量保存、停止当前语音、错误及断线清理；完整语音以临时文件接收、成功终止及原生验证后提交，提供消息重放/暂停/继续/停止，波形来自原生 RMS，进度来自混音器消耗帧。在线语音抢占重放；停止在线声音不取消后续接收和缓存。原生 `PcmStreamDecoder` 与 `WindowsSecurity` 共用 DLL，按上面的 `build_security.py` 命令重建，需分发完整目录。
 
-登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据，保留最近50次并保护仍运行实例，当前启动不截断。可搜索、筛选、复制与导出完整脱敏诊断 ZIP，不上传。用哈希 reply_id 关联 `reply_received → audio_received → audio_format/audio_decoded → audio_receive_finished → audio_playback_started/finished`（接收/播放可交错）。`audio_error` 的 code 定位错误，`audio_underrun` 记录供给不足；不会写入正文、token、密钥或 Base64。
+登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据，单次默认 8 MiB / 5 万条，保留最近50次并保护仍运行实例，当前启动不截断。日志统一分为错误、警告、信息、调试、访问、安全、性能、事务、运行九类，条目带 `category/level/module/trace_id`，可搜索、按类别/级别/模块筛选、复制与导出完整诊断 ZIP，不上传。用哈希 `reply_id`/`trace_id` 关联 HTTP、WS、音频、SQLite 与错误链路；错误原文与堆栈可保留，但不会写入正文、token、Authorization、密钥或 Base64。调试日志默认关闭，`--debug-log` 开启。完整规范见 [日志规范](docs/logging.md)。
 
 `check.ps1` 增量解码及真实混音测试默认使用合成音频；`check_network.ps1` 还验证 loopback WebSocket 到播放器链路、顺序、隐藏音频、停止及断线。Windows 输出驱动验证可运行：
 
@@ -79,7 +79,7 @@ python client-godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 未登录时显示480×690白色圆角账户窗口，登录成功后展开角色和聊天，退出再收起。默认服务器沿用旧端 release_config.base_url；已保存的自定义地址优先。账户回归含窗口切换测试，原生窗口验证可运行 `run_feature_tests.py --godot <exe> --script res://tests/test_application_window.gd --gpu`，仍仅连接本地 HTTP fixture。
 
-语音缓存在 user://audio 按规范化服务器、账户与 UUID 隔离，退出及重启保留，只能手动清理，无自动容量/时间淘汰。设置中的“语音缓存”有确认窗口；清理同时取消在途流的缓存写入，保留正在输出的声音与聊天文字。登录后全量同步历史，按 UUID 恢复新端本账号完整缓存的重放入口；不导入旧端缓存。日志记录 cache_committed/cache_error、replay_started/paused/resumed/stopped/finished/preempted，不写音频原文。
+语音缓存在 user://audio、历史图片在 user://images 按规范化服务器、账户与 UUID 隔离，退出及重启保留，只能手动清理，无自动容量/时间淘汰。设置中的“缓存与导入”页有清理确认窗口；清理同时取消在途流的缓存写入，保留正在输出的声音与聊天文字。登录后全量同步历史，按 UUID 恢复本账号完整缓存。用户可在同页选择 Python 客户端 exe，只读定位 temp/tts_output 与 temp/images，把 UUID 对齐的语音与历史图片复制进当前账号；源文件不改动、已有条目不覆盖，聊天正文仍从服务器读取（Python 端没有本地消息库）。日志记录 cache_committed/cache_error、replay_started/paused/resumed/stopped/finished/preempted 与 python_media_import 事务，不写音频原文或 Python 凭据。
 
 重放回归：`--headless --audio-driver WASAPI --path client-godot --script res://tests/test_voice_replay.gd`。真实 UI/角色截图：`tests/run_websocket_tests.py --godot <exe> --script res://tests/capture_voice_ui.gd --gpu`，只连接 loopback、使用合成语音，输出默认/最小/暂停/125%及150%内容缩放截图到 artifacts。内容缩放检查不能替代操作系统 DPI 切换与跨显示器验收。
 
@@ -111,7 +111,7 @@ $env:GODOT_TEST_PYTHON = 'D:\anaconda\python.exe'
 
 设置最小尺寸的可见滚动验收已并入`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`：验证720×640及四档内容缩放下表单底部可滚动到达且不覆盖固定操作栏。headless分支只检查状态，不能代替该GPU布局验收。
 
-历史反馈已体现在 [现行行为说明](docs/architecture.md) 与测试中。桌面使用系统窗框，内部下拉为嵌入式 Godot 圆角控件；语音缓存页提供 StorageService 占用圆环和按用户天数清理，未知容量显示“--%”。PNG/JPEG/WebP/BMP 文件及 Ctrl+V 已接入正式图片预览/发送，未提交附件仅本次运行保留。
+历史反馈已体现在 [现行行为说明](docs/architecture.md) 与测试中。桌面使用系统窗框，内部下拉为嵌入式 Godot 圆角控件；缓存与导入页提供 StorageService 占用圆环、按用户天数清理与 Python 媒体导入，未知容量显示“--%”。PNG/JPEG/WebP/BMP 文件及 Ctrl+V 已接入正式图片预览/发送，未提交附件仅本次运行保留。
 
 GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及既有本地API测试依赖；Pillow仅用于测试，不进入客户端运行依赖。磁盘查询的Windows实现已实测，移动端需复用StorageService接口并在目标构建注册容量适配，当前不宣称完成Android/iOS移植。
 
@@ -121,12 +121,12 @@ GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及�
 
 ## 聊天审阅图落地
 
-聊天页按已审阅的 HTML 方案落地到真实 Godot 场景：80px 导航栏，聊天/动态/设置为 64×64 的方形按钮，图标在上、文字在下；移除导航栏上下头像。内容区 16px 外边距及可拖动分栏，角色区取消底栏与常驻手势提示，重置位置改为右下角悬浮按钮。输入区上方保留图片和音量图标，移除停止语音按钮；音量点击展开滑条，48px 起始输入框右侧是方形发送图标，快捷键提示在下方靠右。正常发送、排队与发送中不展示状态或保留占位；失败与无法确认送达时保留异常提醒，避免重复发送。角色顶部卡片只显示最新一条未读动态，评论未读不触发；读取卡片不标记已读。默认展开画布为 1280×800，保留既有窗口几何与分栏比例设置。角色仍是实际 Live2D；原型“静态占位”说明不进入产品。扁平默认、清透独立，继续复用原 SVG/emoji 与聊天头像；不增加清空输入或业务功能。真实节点截图与定向回归入口见 `tests/README.md` 的聊天审阅图专项验收。当前源码版本为 0.1.5；本轮整改不重新打包，不能以历史 ZIP 证明当前源码已交付。
+聊天页按已审阅的 HTML 方案落地到真实 Godot 场景：80px 导航栏，聊天/动态/设置为 64×64 的方形按钮，图标在上、文字在下；移除导航栏上下头像。内容区 16px 外边距及可拖动分栏，角色区取消底栏与常驻手势提示，重置位置改为右下角悬浮按钮。输入区上方保留图片和音量图标，移除停止语音按钮；音量点击展开滑条，48px 起始输入框右侧是方形发送图标，快捷键提示在下方靠右。正常发送、排队与发送中不展示状态或保留占位；失败与无法确认送达时保留异常提醒，避免重复发送。角色顶部卡片只显示最新一条未读动态，评论未读不触发；读取卡片不标记已读。默认展开画布为 1280×800，保留既有窗口几何与分栏比例设置。角色仍是实际 Live2D；原型“静态占位”说明不进入产品。扁平默认、清透独立，继续复用原 SVG/emoji 与聊天头像；不增加清空输入或业务功能。真实节点截图与定向回归入口见 `tests/README.md` 的聊天审阅图专项验收。当前源码版本为 0.1.6.2；0.1.6.2 包按该源码构建。
 
-当前源码包含的后续审阅调整：动态列表删除“加载更多动态”，滚动到底加载下一页，失败后可继续滚动重试；点击卡片（包括当前选中项）自动刷新最新完整评论，刷新期间保留草稿和当前阅读位置，不自动清未读。发布弹层删除标题右侧关闭按钮，保留底部取消及草稿确认；聊天标题删除“此刻，慢慢来就好”。聊天、动态正文和各类输入框的文字选区统一为系统蓝底白字，扁平/清透一致。本轮仅整改源码、测试与说明，不生成新的 EXE/PCK/ZIP。
+当前源码包含的后续审阅调整：动态列表删除“加载更多动态”，滚动到底加载下一页，失败后可继续滚动重试；点击卡片（包括当前选中项）自动刷新最新完整评论，刷新期间保留草稿和当前阅读位置，不自动清未读。发布弹层删除标题右侧关闭按钮，保留底部取消及草稿确认；聊天标题删除“此刻，慢慢来就好”。聊天、动态正文和各类输入框的文字选区统一为系统蓝底白字，扁平/清透一致。0.1.6.2 的 EXE/PCK/ZIP 已由构建脚本生成；历史包仅作回退。
 
 ## 平台隔离与扩展
 
-[现行架构与接口说明](docs/architecture.md) 区分现行行为与历史迁移快照。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
+[现行架构与接口说明](docs/architecture.md) 说明当前行为边界。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
 
-三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.1.5.3，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。本轮不生成包、不覆盖任何历史包；验证边界见 [整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。
+三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.1.6.2，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。0.1.6.2 包已生成；历史包仅作回退。验证边界见 [整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。

@@ -97,7 +97,8 @@ anchor_right = 1.0
 offset_left = 18.0
 offset_top = 18.0
 offset_right = -18.0
-mouse_filter = 2
+mouse_filter = 0
+mouse_default_cursor_shape = 2
 theme_override_styles/panel = SubResource("CharacterHeading")
 
 [node name="Identity" type="VBoxContainer" parent="Heading"]

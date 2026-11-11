@@ -1,15 +1,15 @@
 extends Control
 ## 头像改动立即落盘，所以这一页不参与「保存全部修改」，也不会让窗口变脏。
 const DEFAULT_ICON := preload("res://assets/ui/tianyi_icon.png")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const OK_TEXT := "头像已更新。"
 const RESET_TEXT := "已恢复天依头像。"
-const NO_ACCOUNT_TEXT := "登录后才能设置头像。"
 const ERROR_TEXT := {
 	"NO_ACCOUNT": "登录后才能设置头像。",
 	"IMAGE_READ_FAILED": "这张图片读不出来，换一张试试。",
 	"IMAGE_TOO_LARGE": "图片超过 6 MB，请换一张小一点的。",
 	"IMAGE_FORMAT": "只支持 PNG、JPG、WebP 格式的图片。",
-	"AVATAR_WRITE_FAILED": "头像写入失败，请检查本机磁盘权限。",
+	"AVATAR_WRITE_FAILED": "头像保存失败，请重试。",
 }
 var _source: Node
 @onready var _preview: TextureRect = %Preview
@@ -55,7 +55,11 @@ func _reset_avatar() -> void:
 func _finish(result: Dictionary, ok_text: String) -> void:
 	var code := str(result.get("code", ""))
 	var ok := bool(result.get("ok", false))
-	_show(ok_text if ok else ERROR_TEXT.get(code, "头像设置失败（%s）。" % code), ok)
+	if ok:
+		_show(ok_text, true)
+	else:
+		_result.text = ""
+		ErrorDialog.present(self, ERROR_TEXT.get(code, "头像设置失败，请重试。"))
 
 func _show(text: String, ok: bool) -> void:
 	_result.text = text

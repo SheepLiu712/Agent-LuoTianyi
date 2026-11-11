@@ -1,5 +1,6 @@
 extends "res://src/platform/file_interaction.gd"
-const Images = preload("res://src/storage/image_file_reader.gd")
+const Images = preload("res://src/platform/image_file_reader.gd")
+const ExportTarget = preload("res://src/platform/log_export_target.gd")
 var _dialog: FileDialog
 var _pending := ""
 
@@ -34,4 +35,4 @@ func _selected(path: String) -> void:
 	var kind := _pending
 	_pending = ""
 	if kind == "image": image_selected.emit(Images.read(path))
-	elif kind == "export": export_selected.emit(preload("res://src/storage/log_export_target.gd").new(path))
+	elif kind == "export": export_selected.emit(ExportTarget.new(path))

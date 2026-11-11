@@ -22,11 +22,14 @@ func run() -> void:
 	await _case_live_identity()
 	await _case_history_order()
 	await _case_renumber()
+	await _case_unlisted_gap()
+	await _case_zero_order_head()
 	await _case_reopen()
 	await _case_reconcile_tail()
 	await _case_reconcile_head()
 	await _case_reconcile_conflict()
 	await _case_reconcile_closed()
+	await _case_reconcile_delivery()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(_root))
 	print("SQLite database: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
@@ -100,6 +103,14 @@ func _case_live_identity() -> void:
 	var rejected: Dictionary = database.execute("save_live", {"scope": database._scope, "message": conflict})
 	check(rejected.code == "MESSAGE_ID_CONFLICT", "cross-source id conflict is rejected")
 	check(str(_latest(database)[0].content) == "edited", "conflict keeps the original content")
+	var epoch := int(database.metadata().data.epoch)
+	var history: Dictionary = database.execute("save_history", {
+		"scope": database._scope,
+		"page": _page(0, [{"uuid":"local-1", "source":"user", "type":"text", "content":"server overwrite", "timestamp":9}]),
+		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
+	})
+	check(history.ok, "history page with a local duplicate still saves")
+	check(str(_latest(database)[0].content) == "edited", "history cannot overwrite a local message with the same UUID")
 	database.close()
 
 
@@ -185,6 +196,59 @@ func _case_reopen() -> void:
 	reopened.close()
 
 
+## 页内两个锚点之间可能还有本页没带上的旧行（本地消息、分页漂移）。
+## 分配器必须避开这些行，不能把整个锚点区间均分后正好占用旧行的槽位。
+func _case_unlisted_gap() -> void:
+	var database := _open(_scope("a7"))
+	var epoch := int(database.metadata().data.epoch)
+	var seeded: Dictionary = database.execute("save_history", {
+		"scope": database._scope,
+		"page": _page(0, _history(3, 0)),
+		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
+	})
+	check(seeded.ok, "seed page for unlisted gap")
+	var rows: Array = [
+		_server_row("m0", 1),
+		_server_row("new-in-gap", 2),
+		_server_row("m2", 3),
+	]
+	var saved: Dictionary = database.execute("save_history", {
+		"scope": database._scope,
+		"page": _page(0, rows),
+		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
+	})
+	check(saved.ok, "unlisted row between anchors is skipped (%s)" % saved.code)
+	check(_order_of(database) == ["m0", "new-in-gap", "m1", "m2"], "new row lands in a free slot between anchors")
+	database.close()
+
+
+## timeline_order=0 是合法位置，不能当成「空库」哨兵；
+## 否则更早页会从 GAP 重新起算，正面撞上已有行。
+func _case_zero_order_head() -> void:
+	var database := _open(_scope("b8"))
+	var epoch := int(database.metadata().data.epoch)
+	database.execute("save_history", {
+		"scope": database._scope,
+		"page": _page(0, _history(3, 0)),
+		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
+	})
+	database.execute("flush", {"scope": database._scope})
+	var seeded := _latest(database, 10)
+	var gap := int(seeded[1].timeline_order) - int(seeded[0].timeline_order)
+	var access = database._access
+	access.execute("UPDATE messages SET timeline_order=0 WHERE message_id='m0'")
+	access.execute("UPDATE messages SET timeline_order=%d WHERE message_id='m1'" % gap)
+	access.execute("UPDATE messages SET timeline_order=%d WHERE message_id='m2'" % (gap * 2))
+	var saved: Dictionary = database.execute("save_history", {
+		"scope": database._scope,
+		"page": _page(0, [_server_row("before-zero", 0)]),
+		"context": {"epoch": epoch, "end_index": 1, "direction": "older"},
+	})
+	check(saved.ok, "zero order is not treated as an empty database (%s)" % saved.code)
+	check(_order_of(database) == ["before-zero", "m0", "m1", "m2"], "older page prepends before zero")
+	database.close()
+
+
 # ---------------------------------------------------------------- 对账用例
 
 ## 有服务器时间线时贴尾：新增行插在尾部锚点之后、本地记录之前；
@@ -251,6 +315,43 @@ func _case_reconcile_closed() -> void:
 	database.close()
 	var saved: Dictionary = database.execute("save_reconcile", {"scope": _scope("f9"), "rows": [_server_row("a", 1)]})
 	check(not saved.ok, "closed database refuses reconcile writes (%s)" % saved.code)
+
+
+## 服务器已有同正文副本时，本地 uncertain 只软标记为 superseded：
+## 不删除消息、不占用户时间线、不让重启恢复把它重新变成 uncertain。
+func _case_reconcile_delivery() -> void:
+	var database := _open(_scope("c9"))
+	var server_text := "2023-11-14 22:13:20"
+	var server_epoch := float(Time.get_unix_time_from_datetime_string("2023-11-14T22:13:20"))
+	var local := _local("local-q", "重庆", "uncertain")
+	local.timestamp = server_epoch - Time.get_time_zone_from_system().bias * 60.0 + 30.0
+	check(database.execute("save_live", {"scope": database._scope, "message": local}).ok, "seed local uncertain")
+	check(database.execute("record_attempt", {
+		"scope": database._scope, "attempt_id": "attempt:local-q", "message_id": "local-q",
+		"wire_id": "wire-q", "state": "sending", "ever_sent": true,
+	}).ok, "seed send attempt")
+	var epoch := int(database.metadata().data.epoch)
+	var saved: Dictionary = database.execute("save_history", {
+		"scope": database._scope,
+		"page": _page(0, [{
+			"uuid": "server-q", "source": "user", "type": "text",
+			"content": "重庆", "timestamp": server_text,
+		}]),
+		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
+	})
+	check(saved.ok, "seed server copy")
+	var result: Dictionary = database.execute("reconcile_delivery", {"scope": database._scope})
+	check(result.ok and result.data.ids.has("local-q"), "server copy supersedes the local duplicate")
+	check(_order_of(database) == ["server-q"], "superseded local copy leaves the visible timeline")
+	var row: Dictionary = database._access.first_row(database._access.query(
+		"SELECT delivery_state,error_code FROM messages WHERE message_id='local-q'"
+	))
+	check(str(row.delivery_state) == "superseded" and str(row.error_code) == "SERVER_COPY_MATCHED", "local copy is marked, not deleted")
+	var attempt: Dictionary = database._access.first_row(database._access.query(
+		"SELECT state FROM send_attempts WHERE message_id='local-q'"
+	))
+	check(str(attempt.state) == "superseded", "attempt no longer recovers as uncertain")
+	database.close()
 
 
 # ---------------------------------------------------------------- 辅助
