@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/ui/dropdown_item.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[node name="DropdownItem" type="Button"]
+custom_minimum_size = Vector2(0, 42)
+alignment = 0
+theme = ExtResource("2_theme")
+theme_type_variation = &"DropdownItem"
+script = ExtResource("1_script")

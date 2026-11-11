@@ -1,0 +1,98 @@
+[gd_scene load_steps=4 format=3]
+[ext_resource type="Script" path="res://src/ui/model_purpose_card.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
+[node name="ModelPurposeCard" type="PanelContainer"]
+size_flags_horizontal = 3
+theme = ExtResource("theme")
+theme_type_variation = &"ModelCard"
+script = ExtResource("script")
+[node name="Column" type="VBoxContainer" parent="."]
+theme_override_constants/separation = 12
+[node name="Header" type="HBoxContainer" parent="Column"]
+theme_override_constants/separation = 8
+[node name="PurposeTitle" type="Label" parent="Column/Header"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+text = "模型用途"
+[node name="Enabled" type="CheckBox" parent="Column/Header"]
+unique_name_in_owner = true
+text = "使用自己的 API Key"
+[node name="Requirements" type="Label" parent="Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+[node name="Description" type="Label" parent="Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+[node name="Fields" type="VBoxContainer" parent="Column"]
+unique_name_in_owner = true
+visible = false
+theme_override_constants/separation = 8
+[node name="ProviderLabel" type="Label" parent="Column/Fields"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "服务商名称"
+
+[node name="provider" type="LineEdit" parent="Column/Fields"]
+unique_name_in_owner = true
+
+[node name="BaseUrlLabel" type="Label" parent="Column/Fields"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "Base URL（例如 https://example.com/v1）"
+
+[node name="base_url" type="LineEdit" parent="Column/Fields"]
+unique_name_in_owner = true
+
+[node name="ApiKeyLabel" type="Label" parent="Column/Fields"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "API Key"
+
+[node name="api_key" type="LineEdit" parent="Column/Fields"]
+unique_name_in_owner = true
+secret = true
+
+[node name="ModelLabel" type="Label" parent="Column/Fields"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "模型名称"
+
+[node name="ModelName" type="LineEdit" parent="Column/Fields"]
+unique_name_in_owner = true
+
+[node name="Json" type="CheckBox" parent="Column/Fields"]
+unique_name_in_owner = true
+text = "声明支持 JSON 输出"
+
+[node name="Thinking" type="CheckBox" parent="Column/Fields"]
+unique_name_in_owner = true
+text = "声明支持 thinking"
+
+[node name="ParamsLabel" type="Label" parent="Column/Fields"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "高级 JSON 参数（非流式）"
+
+[node name="Params" type="TextEdit" parent="Column/Fields"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+wrap_mode = 1
+
+[node name="CopyRow" type="HBoxContainer" parent="Column/Fields"]
+
+[node name="CopySlot" parent="Column/Fields/CopyRow" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+
+[node name="CopyButton" type="Button" parent="Column/Fields/CopyRow"]
+unique_name_in_owner = true
+text = "复制该用途配置"
+
+
+[node name="TestButton" type="Button" parent="Column/Fields"]
+unique_name_in_owner = true
+text = "手动测试当前配置"
+
+[node name="CardStatus" type="Label" parent="Column"]
+unique_name_in_owner = true
+autowrap_mode = 3

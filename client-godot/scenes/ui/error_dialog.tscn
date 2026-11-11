@@ -1,0 +1,56 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/ui/error_dialog.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+
+[node name="ErrorDialog" type="Window"]
+size = Vector2i(560, 220)
+min_size = Vector2i(460, 200)
+visible = false
+borderless = true
+unresizable = true
+transparent_bg = true
+transient = true
+exclusive = false
+theme = ExtResource("theme")
+script = ExtResource("script")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_type_variation = &"DialogSurface"
+
+[node name="Column" type="VBoxContainer" parent="Panel"]
+theme_override_constants/separation = 16
+
+[node name="Header" type="HBoxContainer" parent="Panel/Column"]
+
+[node name="ErrorTitle" type="Label" parent="Panel/Column/Header"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 19
+
+[node name="ErrorClose" type="Button" parent="Panel/Column/Header"]
+unique_name_in_owner = true
+text = "×"
+tooltip_text = "关闭"
+flat = true
+custom_minimum_size = Vector2(36,36)
+
+[node name="MessageScroll" type="ScrollContainer" parent="Panel/Column"]
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ErrorText" type="Label" parent="Panel/Column/MessageScroll"]
+unique_name_in_owner = true
+autowrap_mode = 3
+size_flags_horizontal = 3
+
+[node name="Actions" type="HBoxContainer" parent="Panel/Column"]
+alignment = 2
+
+[node name="ErrorConfirm" type="Button" parent="Panel/Column/Actions"]
+unique_name_in_owner = true
+text = "知道了"
+custom_minimum_size = Vector2(0,36)
+theme_type_variation = &"PrimaryButton"

@@ -42,3 +42,13 @@ server/config/admin_setup_token.txt
 server/config/qq_music_credential.json
 bili_cookie.txt
 config/bili_cookie.txt
+
+# godot-sqlite：只提交 Windows x86_64 预编译库，其余平台按需自行下载
+client-godot/addons/godot-sqlite/bin/*
+!client-godot/addons/godot-sqlite/bin/binaries_here.txt
+!client-godot/addons/godot-sqlite/bin/libgdsqlite.windows.template_debug.x86_64.dll
+!client-godot/addons/godot-sqlite/bin/libgdsqlite.windows.template_release.x86_64.dll
+
+# 本机性能诊断产物（1.1GB 级 ETL 与符号缓存），仅保留脚本与导出表格
+*.etl
+*.etl.NGENPDB/
