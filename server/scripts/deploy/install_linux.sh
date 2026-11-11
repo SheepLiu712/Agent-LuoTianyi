@@ -18,8 +18,9 @@ flock -n 9 || { echo "请等待安装结束或停止服务后重试。" >&2; exi
 export UV_PROJECT_ENVIRONMENT="$server_dir/.venv"
 export UV_LINK_MODE=copy
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$runtime_dir/browsers}"
-uv python install 3.10.22
-uv sync --project scripts/deploy --python 3.10.22 --locked --no-dev
+python_version=$(cat scripts/deploy/.python-version)
+uv python install "$python_version"
+uv sync --project scripts/deploy --python "$python_version" --locked --no-dev
 uv pip check --python .venv/bin/python
 .venv/bin/python -m playwright install --with-deps chromium
 ffmpeg -nostdin -v error -f lavfi -i sine=duration=0.1 -f mp3 pipe:1 >/dev/null
