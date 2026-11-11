@@ -1,115 +1,83 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://src/ui/preferences_page.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
-[ext_resource type="Texture2D" path="res://assets/ui/login_chevron.svg" id="chevron"]
 [ext_resource type="PackedScene" path="res://scenes/ui/toast_overlay.tscn" id="4_toast"]
 
-
-
-[node name="PreferencesPage" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+[node name="PreferencesPage" type="MarginContainer"]
+size_flags_horizontal = 3
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
-[node name="Margin" type="MarginContainer" parent="."]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/margin_left = 22
-theme_override_constants/margin_top = 22
-theme_override_constants/margin_right = 22
-theme_override_constants/margin_bottom = 22
-
-[node name="Scroll" type="ScrollContainer" parent="Margin"]
-layout_mode = 2
-horizontal_scroll_mode = 0
-follow_focus = true
-
-[node name="Column" type="VBoxContainer" parent="Margin/Scroll"]
-layout_mode = 2
+[node name="Column" type="VBoxContainer" parent="."]
 size_flags_horizontal = 3
-theme_override_constants/separation = 12
+theme_override_constants/separation = 16
 
-[node name="Title" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 22
+[node name="Title" type="Label" parent="Column"]
+theme_type_variation = &"SettingsPageTitle"
 text = "和天依相处的方式"
 
-[node name="RelationshipLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+[node name="RelationshipCard" type="PanelContainer" parent="Column"]
+theme_type_variation = &"SettingsCard"
+
+[node name="Content" type="VBoxContainer" parent="Column/RelationshipCard"]
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/RelationshipCard/Content"]
+theme_type_variation = &"SettingsCardTitle"
+text = "关系与表达"
+
+[node name="RelationshipLabel" type="Label" parent="Column/RelationshipCard/Content"]
+theme_type_variation = &"SettingsFieldLabel"
 text = "关系"
 
-[node name="RelationshipRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
-
-[node name="RelationshipField" type="LineEdit" parent="Margin/Scroll/Column/RelationshipRow"]
+[node name="RelationshipPresets" parent="Column/RelationshipCard/Content" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
-theme_type_variation = &"PreferenceLineEdit"
 size_flags_horizontal = 3
-placeholder_text = "请选择关系"
-editable = false
-
-[node name="RelationshipPresets" parent="Margin/Scroll/Column/RelationshipRow" instance=ExtResource("3_dropdown")]
-unique_name_in_owner = true
-theme_type_variation = &"PreferenceButton"
-custom_minimum_size = Vector2(40,40)
-show_selected_label = false
-icon = ExtResource("chevron")
-icon_alignment = 1
+custom_minimum_size = Vector2(0, 40)
+placeholder = "请选择关系"
 tooltip_text = "选择关系预设"
 
-[node name="SpeakingStyleLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+[node name="SpeakingStyleLabel" type="Label" parent="Column/RelationshipCard/Content"]
+theme_type_variation = &"SettingsFieldLabel"
 text = "表达风格"
 
-[node name="SpeakingStyleRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
-
-[node name="SpeakingStyleField" type="LineEdit" parent="Margin/Scroll/Column/SpeakingStyleRow"]
+[node name="SpeakingStylePresets" parent="Column/RelationshipCard/Content" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
-theme_type_variation = &"PreferenceLineEdit"
 size_flags_horizontal = 3
-placeholder_text = "请选择表达风格"
-editable = false
-
-[node name="SpeakingStylePresets" parent="Margin/Scroll/Column/SpeakingStyleRow" instance=ExtResource("3_dropdown")]
-unique_name_in_owner = true
-theme_type_variation = &"PreferenceButton"
-custom_minimum_size = Vector2(40,40)
-show_selected_label = false
-icon = ExtResource("chevron")
-icon_alignment = 1
+custom_minimum_size = Vector2(0, 40)
+placeholder = "请选择表达风格"
 tooltip_text = "选择表达风格预设"
 
-[node name="PersonalityLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+[node name="ContextCard" type="PanelContainer" parent="Column"]
+theme_type_variation = &"SettingsCard"
+
+[node name="Content" type="VBoxContainer" parent="Column/ContextCard"]
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/ContextCard/Content"]
+theme_type_variation = &"SettingsCardTitle"
+text = "补充设定"
+
+[node name="PersonalityLabel" type="Label" parent="Column/ContextCard/Content"]
+theme_type_variation = &"SettingsFieldLabel"
 text = "性格关键词"
 
-[node name="PersonalityField" type="TextEdit" parent="Margin/Scroll/Column"]
+[node name="PersonalityField" type="TextEdit" parent="Column/ContextCard/Content"]
 unique_name_in_owner = true
-theme_type_variation = &"PreferenceTextEdit"
+theme_type_variation = &"SettingsTextEdit"
 custom_minimum_size = Vector2(0, 80)
 placeholder_text = "用逗号、顿号或换行分隔"
 wrap_mode = 1
 
-[node name="CustomContextLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+[node name="CustomContextLabel" type="Label" parent="Column/ContextCard/Content"]
+theme_type_variation = &"SettingsFieldLabel"
 text = "补充上下文"
 
-[node name="CustomContextField" type="TextEdit" parent="Margin/Scroll/Column"]
+[node name="CustomContextField" type="TextEdit" parent="Column/ContextCard/Content"]
 unique_name_in_owner = true
-theme_type_variation = &"PreferenceTextEdit"
+theme_type_variation = &"SettingsTextEdit"
 custom_minimum_size = Vector2(0, 120)
 placeholder_text = "想让天依了解的相处背景"
 wrap_mode = 1

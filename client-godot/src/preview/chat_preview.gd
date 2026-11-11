@@ -7,6 +7,9 @@ extends Control
 const Session = preload("res://src/preview/demo_session.gd")
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
 const ImagePresenter = preload("res://src/ui/image_presenter.gd")
+const EXPRESSIONS := ["微笑脸", "温柔脸", "喜欢脸", "卖萌", "生气脸", "难过脸", "唱歌"]
+const SCENARIOS := ["conversation", "empty", "disconnected", "error", "thinking"]
+const SCENARIO_LABELS := {"conversation":"日常聊天", "empty":"空白会话", "disconnected":"网络断开", "error":"加载失败", "thinking":"正在思考"}
 var _image_presenter: Node
 var _session = Session.new()
 @onready var _avatar = %AvatarPanel
@@ -18,8 +21,8 @@ var _session = Session.new()
 @onready var _latest: Button = %Latest
 @onready var _empty: Label = %Empty
 @onready var _picker: FileDialog = %ImagePicker
-@onready var _expressions: OptionButton = %Expressions
-@onready var _scenarios: OptionButton = %Scenarios
+@onready var _expressions: Button = %Expressions
+@onready var _scenarios: Button = %Scenarios
 var _images: Dictionary = {}
 var _playing := false
 var _scenario := "conversation"
@@ -31,33 +34,10 @@ var _refresh_again := false
 func _ready() -> void:
 	_image_presenter = ImagePresenter.new(geometry_store,window_system)
 	add_child(_image_presenter)
-	_expressions.item_selected.connect(func(index): _avatar.avatar.apply_expression(_expressions.get_item_text(index)))
-	_scenarios.item_selected.connect(func(index):
-		_change_scenario(["conversation", "empty", "disconnected", "error", "thinking"][index]))
-	_latest.pressed.connect(_to_latest)
-	%PickImage.pressed.connect(_pick_image)
-	%TogglePlay.pressed.connect(_toggle_play)
-	%Send.pressed.connect(_send)
-	files.bind(_picker)
-	files.image_selected.connect(func(result):
-		var decoded: Dictionary = preload("res://src/media/image_attachment.gd").from_bytes(result.bytes,result.mime) if result.ok else result
-		_preview_image(decoded.texture.get_image() if decoded.ok else null))
-	_input.send_requested.connect(_send)
-	_input.image_pasted.connect(_preview_image)
-	_input.text_changed.connect(func():
-		var lines: int = _input.get_line_count()
-		for line in _input.get_line_count():
-			lines += _input.get_line_wrap_count(line)
-		_input.custom_minimum_size.y = clampf(lines * 24 + 30, 92, 150))
-	if settings.load_settings() == OK:
-		var ratio = settings.get_value("layout", "ratio", 0.45)
-		if (ratio is float or ratio is int) and is_finite(float(ratio)):
-			_ratio = clampf(float(ratio), 0.3, 0.6)
-	_split.dragged.connect(func(_offset):
-		_ratio = _avatar.size.x / maxf(size.x, 1)
-		settings.set_value("layout", "ratio", _ratio)
-		if settings.save_settings() != OK:
-			_status.text = "分区比例无法保存。")
+	_setup_dropdowns()
+	_bind_actions()
+	_load_ratio()
+	_split.dragged.connect(_on_split_dragged)
 	resized.connect(_resize_split)
 	_session.changed.connect(_refresh)
 	_session.select_scenario(_scenario)
@@ -67,9 +47,69 @@ func _ready() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_scroll.scroll_vertical = 0
+	_apply_scenario_argument()
+	await _handle_capture_argument()
+
+
+func _setup_dropdowns() -> void:
+	var expression_items: Array = []
+	for expression in EXPRESSIONS:
+		expression_items.append({"id":expression,"label":expression})
+	_expressions.set_items(expression_items)
+	var scenario_items: Array = []
+	for scenario in SCENARIOS:
+		scenario_items.append({"id":scenario,"label":SCENARIO_LABELS[scenario]})
+	_scenarios.set_items(scenario_items)
+	_scenarios.set_selected_id(_scenario)
+	_expressions.activated.connect(func(id): _avatar.avatar.apply_expression(id))
+	_scenarios.activated.connect(_change_scenario)
+
+
+func _bind_actions() -> void:
+	_latest.pressed.connect(_to_latest)
+	%PickImage.pressed.connect(_pick_image)
+	%TogglePlay.pressed.connect(_toggle_play)
+	%Send.pressed.connect(_send)
+	files.bind(_picker)
+	files.image_selected.connect(_on_image_selected)
+	_input.send_requested.connect(_send)
+	_input.image_pasted.connect(_preview_image)
+	_input.text_changed.connect(_update_input_height)
+
+
+func _on_image_selected(result) -> void:
+	var decoded: Dictionary = preload("res://src/media/image_attachment.gd").from_bytes(result.bytes,result.mime) if result.ok else result
+	_preview_image(decoded.texture.get_image() if decoded.ok else null)
+
+
+func _update_input_height() -> void:
+	var lines: int = _input.get_line_count()
+	for line in _input.get_line_count():
+		lines += _input.get_line_wrap_count(line)
+	_input.custom_minimum_size.y = clampf(lines * 24 + 30, 92, 150)
+
+
+func _load_ratio() -> void:
+	if settings.load_settings() == OK:
+		var ratio = settings.get_value("layout", "ratio", 0.45)
+		if (ratio is float or ratio is int) and is_finite(float(ratio)):
+			_ratio = clampf(float(ratio), 0.3, 0.6)
+
+
+func _on_split_dragged(_offset: int) -> void:
+	_ratio = _avatar.size.x / maxf(size.x, 1)
+	settings.set_value("layout", "ratio", _ratio)
+	if settings.save_settings() != OK:
+		_status.text = "分区比例无法保存。"
+
+
+func _apply_scenario_argument() -> void:
 	for argument in runtime.arguments():
 		if argument.begins_with("--scenario="):
 			_change_scenario(argument.trim_prefix("--scenario="))
+
+
+func _handle_capture_argument() -> void:
 	for argument in runtime.arguments():
 		if argument.begins_with("--capture="):
 			await get_tree().create_timer(2.0).timeout
@@ -85,6 +125,8 @@ func _change_scenario(value: String) -> void:
 	if value not in ["conversation", "empty", "disconnected", "error", "thinking"]:
 		return
 	_scenario = value
+	if is_node_ready():
+		_scenarios.set_selected_id(value)
 	_playing = false
 	_avatar.avatar.set_mouth_openness(-1)
 	_images.clear()

@@ -7,46 +7,33 @@
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
 shader = ExtResource("3_shader")
 
-[node name="ProfilePage" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+[node name="ProfilePage" type="MarginContainer"]
+size_flags_horizontal = 3
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
-[node name="Margin" type="MarginContainer" parent="."]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/margin_left = 22
-theme_override_constants/margin_top = 22
-theme_override_constants/margin_right = 22
-theme_override_constants/margin_bottom = 22
-
-[node name="Scroll" type="ScrollContainer" parent="Margin"]
-layout_mode = 2
-horizontal_scroll_mode = 0
-follow_focus = true
-
-[node name="Column" type="VBoxContainer" parent="Margin/Scroll"]
-layout_mode = 2
+[node name="Column" type="VBoxContainer" parent="."]
 size_flags_horizontal = 3
 theme_override_constants/separation = 16
 
-[node name="Title" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 22
+[node name="Title" type="Label" parent="Column"]
+theme_type_variation = &"SettingsPageTitle"
 text = "个人资料"
 
-[node name="Row" type="HBoxContainer" parent="Margin/Scroll/Column"]
-theme_override_constants/separation = 18
+[node name="ProfileCard" type="PanelContainer" parent="Column"]
+theme_type_variation = &"SettingsCard"
 
-[node name="Preview" type="TextureRect" parent="Margin/Scroll/Column/Row"]
+[node name="Content" type="VBoxContainer" parent="Column/ProfileCard"]
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/ProfileCard/Content"]
+theme_type_variation = &"SettingsCardTitle"
+text = "账号与头像"
+
+[node name="Row" type="HBoxContainer" parent="Column/ProfileCard/Content"]
+theme_override_constants/separation = 16
+
+[node name="Preview" type="TextureRect" parent="Column/ProfileCard/Content/Row"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(96, 96)
 size_flags_vertical = 0
@@ -54,46 +41,42 @@ expand_mode = 1
 stretch_mode = 5
 material = SubResource("ShaderMaterial_avatar")
 
-[node name="Info" type="VBoxContainer" parent="Margin/Scroll/Column/Row"]
+[node name="Info" type="VBoxContainer" parent="Column/ProfileCard/Content/Row"]
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="AccountLabel" type="Label" parent="Margin/Scroll/Column/Row/Info"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+[node name="AccountLabel" type="Label" parent="Column/ProfileCard/Content/Row/Info"]
+theme_type_variation = &"SettingsFieldLabel"
 text = "当前账号"
 
-[node name="Account" type="Label" parent="Margin/Scroll/Column/Row/Info"]
+[node name="Account" type="Label" parent="Column/ProfileCard/Content/Row/Info"]
 unique_name_in_owner = true
-theme_override_colors/font_color = Color(0.42, 0.5, 0.56, 1)
-theme_override_font_sizes/font_size = 13
+theme_type_variation = &"SettingsHelpText"
 text = "—"
 
-[node name="Hint" type="Label" parent="Margin/Scroll/Column/Row/Info"]
+[node name="Hint" type="Label" parent="Column/ProfileCard/Content/Row/Info"]
 unique_name_in_owner = true
-theme_override_colors/font_color = Color(0.42, 0.5, 0.56, 1)
-theme_override_font_sizes/font_size = 12
+theme_type_variation = &"SettingsHelpText"
 autowrap_mode = 3
 text = "支持 PNG、JPG、WebP，单张不超过 6 MB。选好后立即生效，只保存在本机。"
 
-[node name="Actions" type="HBoxContainer" parent="Margin/Scroll/Column/Row/Info"]
-theme_override_constants/separation = 10
+[node name="Actions" type="HBoxContainer" parent="Column/ProfileCard/Content/Row/Info"]
+theme_override_constants/separation = 8
 
-[node name="PickButton" type="Button" parent="Margin/Scroll/Column/Row/Info/Actions"]
+[node name="PickButton" type="Button" parent="Column/ProfileCard/Content/Row/Info/Actions"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 36)
+custom_minimum_size = Vector2(0, 40)
 text = "选择本地图片"
 
-[node name="ResetButton" type="Button" parent="Margin/Scroll/Column/Row/Info/Actions"]
+[node name="ResetButton" type="Button" parent="Column/ProfileCard/Content/Row/Info/Actions"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 36)
+custom_minimum_size = Vector2(0, 40)
 text = "恢复默认头像"
 
-[node name="Result" type="Label" parent="Margin/Scroll/Column"]
+[node name="Result" type="Label" parent="Column/ProfileCard/Content"]
 unique_name_in_owner = true
 visible = false
-theme_override_colors/font_color = Color(0.42, 0.5, 0.56, 1)
-theme_override_font_sizes/font_size = 12
+theme_type_variation = &"SettingsHelpText"
 autowrap_mode = 3
 
 [node name="FileDialog" type="FileDialog" parent="."]

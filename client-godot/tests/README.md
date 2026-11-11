@@ -82,7 +82,13 @@ python client-godot/tests/run_feature_tests.py --godot 'D:/godot/godot4.7.1/godo
 | 脚本（相对tests） | 启动方式 | 验证内容 |
 | --- | --- | --- |
 | ui/test_settings_control_states.gd | run_feature_tests.py --gpu | 延迟/失败读取、重试、保存、六态开关、默认/最小及100/125/150/200%缩放；包含原最小布局Reload滚动验收 |
-| ui/test_settings_export_layout.gd | 源码直接GPU运行；或同版本引擎 `--main-pack <导出PCK> --script <本脚本绝对路径>`（验证目录放置导出的DLL） | 默认/最小尺寸、隐藏页面切换后的真实尺寸及标题可见性、退出登录与侧栏对齐；release EXE不执行外部script，另用原生输入实测 |
+| ui/test_settings_export_layout.gd | 源码直接GPU运行；或同版本引擎 `--main-pack <导出PCK> --script <本脚本绝对路径>`（验证目录放置导出的DLL） | 默认/最小尺寸、五个设置模块纵向堆叠、左栏锚点滚动、缓存页流式换行与顶部/底部截图、退出登录与侧栏对齐；release EXE不执行外部script，另用原生输入实测 |
+| ui/test_settings_page_transition.gd | 直接Godot --script，可headless或GPU | 五模块同滚动容器、点击标签平滑滚动、滚轮联动选中态、快速切换后的最终锚点 |
+| ui/test_cache_usage_ring.gd | 直接Godot --script，可headless或GPU | 旧版淡蓝圆底与蓝色圆点、三段字节比例、中心客户端占比、图例数值与配色同步、极小/零/不可用状态 |
+| ui/test_audio_settings.gd | 直接Godot --script，可headless或GPU | 三卡片顺序、精简文案节点移除、导入入口和仅语音清理确认流程 |
+| ui/test_settings_prewarm.gd | 直接Godot --script，headless | 隐藏预暖不触发媒体扫描，首次可见才执行一次扫描 |
+| ui/test_modal_visual_contract.gd | 直接Godot --script；GPU时生成截图 | 确认框/错误框共用样式、无重复 X、危险按钮层级、三档宿主尺寸、扁平/清透圆角与常驻阴影 |
+| ui/test_action_and_icon_styles.gd | 直接Godot --script，GPU时验证真实 hover | 图片/音量图标灰底悬停与焦点、聊天发送键、设置底部三键、动态窗口首开/热切换及详情输入样式 |
 | ui/test_login_presentation.gd | run_feature_tests.py --gpu | 纯白透明圆角、菜单、服务器取消、账号历史、记住状态、四档缩放与小屏 |
 | ui/test_bubble_sizing.gd、ui/test_image_bubble_sizing.gd | 直接Godot --script，可headless或GPU | 实际排版宽度、90%上限、图片原比例、长图延迟加载及部分可见图片的稳定锚点 |
 | ui/test_chat_reading_buttons.gd | 直接Godot --script，可headless或GPU | “回到最新”优先消费未读目标、未读定位、缺失目标翻页重试及自动定位抑制 |
@@ -91,7 +97,9 @@ python client-godot/tests/run_feature_tests.py --godot 'D:/godot/godot4.7.1/godo
 | capture_dynamics_ui.gd | run_dynamics_tests.py --gpu | 双栏/发布浮层/缩放及Windows独立任务栏窗口 |
 | capture_voice_ui.gd | run_websocket_tests.py --gpu | 真实语音UI/角色呈现与内容缩放 |
 | capture_dropdown_ui.gd | 直接Godot --script，不加--headless | 下拉边界/键盘/移动收起、透明圆角像素及内部实底 |
+| ui/test_dropdown_consistency.gd | 直接Godot --script，可headless | 所有选择型下拉复用共享组件、触发器/弹层/选中态主题、设置页样式不覆盖下拉变体 |
 | avatar/test_avatar_interaction.gd | 直接Godot --script，不加--headless | 真实模型网格触摸、视线及反馈 |
+| avatar/test_avatar_render.gd | 直接Godot --script，不加--headless | 图集 mipmap 契约与登录态角色区非黑屏像素门槛 |
 | ui/test_decision_layout.gd | 直接Godot --script，不加--headless | 内嵌确认框可见范围与Esc取消 |
 | ui/test_native_window_controls.gd | 直接Godot --script，并设置GODOT_TEST_PYTHON | 操作其创建的测试窗口，验证系统拖拽/缩放/三键与Alt+F4 |
 

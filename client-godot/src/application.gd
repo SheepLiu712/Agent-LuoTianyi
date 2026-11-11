@@ -245,6 +245,7 @@ func _account_changed(state: Dictionary) -> void:
 				"uptime_ms":Time.get_ticks_msec() - _started_msec, "pid":runtime.process_id()})
 			_session.logout()
 			return
+		_coordinator.prewarm("settings")
 
 	else:
 		_show_signed_out()

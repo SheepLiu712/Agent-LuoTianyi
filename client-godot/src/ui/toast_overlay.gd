@@ -13,12 +13,31 @@ const LAYOUT_PASSES := 2
 var _last := ""
 var _tween: Tween
 var _kind := "info"
+var _ui_style: RefCounted
 
 
 func _ready() -> void:
 	hide()
 	_watch_parent()
 	_layout()
+
+
+## 与卡片/弹窗共用 UiStyle；未注入时仍使用主题里对齐后的 SettingsToast 兜底。
+func set_ui_style(style: RefCounted) -> void:
+	if _ui_style != null and _ui_style.style_changed.is_connected(_on_style_changed):
+		_ui_style.style_changed.disconnect(_on_style_changed)
+	_ui_style = style
+	if _ui_style != null:
+		_ui_style.style_changed.connect(_on_style_changed)
+	if is_node_ready() and visible:
+		_apply_kind_style(_kind)
+		_layout()
+
+
+func _on_style_changed() -> void:
+	if is_node_ready() and visible:
+		_apply_kind_style(_kind)
+		_layout()
 
 
 ## 舞台尺寸直接问父级要：窗口和页面在隐藏期间不重排，读自己的 rect 会拿到上一轮的旧值。
@@ -104,20 +123,23 @@ func _apply_kind_style(kind: String) -> void:
 	var style := _panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
 	if style == null:
 		return
-	match kind:
-		"success":
-			style.border_color = Color(0.18, 0.64, 0.40, 0.9)
-			style.bg_color = Color(0.94, 1.0, 0.96, 1)
-		"error":
-			style.border_color = Color(0.78, 0.24, 0.24, 0.9)
-			style.bg_color = Color(1.0, 0.95, 0.95, 1)
-		"progress":
-			style.border_color = Color(0.20, 0.52, 0.86, 0.9)
-			style.bg_color = Color(0.95, 0.98, 1.0, 1)
-		_:
-			style.border_color = Color(0.18, 0.48, 0.80, 0.9)
-			style.bg_color = Color(1, 1, 1, 1)
-	style.set_border_width_all(1)
+	if _ui_style != null:
+		_ui_style.apply_toast_style(style, kind)
+	else:
+		match kind:
+			"success":
+				style.border_color = Color(0.18, 0.64, 0.40, 0.9)
+				style.bg_color = Color(0.94, 1.0, 0.96, 1)
+			"error":
+				style.border_color = Color(0.78, 0.24, 0.24, 0.9)
+				style.bg_color = Color(1.0, 0.95, 0.95, 1)
+			"progress":
+				style.border_color = Color(0.20, 0.52, 0.86, 0.9)
+				style.bg_color = Color(0.95, 0.98, 1.0, 1)
+			_:
+				style.border_color = Color(0.18, 0.48, 0.80, 0.9)
+				style.bg_color = Color(1, 1, 1, 1)
+		style.set_border_width_all(1)
 	_panel.add_theme_stylebox_override("panel", style)
 
 

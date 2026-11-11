@@ -2,9 +2,12 @@ extends Window
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const StorageService = preload("res://src/storage/storage_service.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const SettingsStyle = preload("res://src/ui/settings_style.gd")
 ## 保存中要一直看得见，成功短留、失败留久一点；负数代表常驻。
 const NOTICE_SECONDS := {"saving": -1.0, "success": 2.0, "error": 8.0}
 const DEFAULT_NOTICE_SECONDS := 2.0
+const PAGE_ORDER := ["profile", "preferences", "models", "audio", "style"]
+const SCROLL_TRANSITION_SECONDS := 0.18
 signal saving_finished(ok: bool)
 signal logout_requested
 var _preferences: Node
@@ -13,6 +16,7 @@ var _executor: Node
 var _clear_cache: Callable
 var _storage_service: StorageService
 var _cache_directory := ""
+var _app_data_directory := ""
 var _saving := false
 var _close_after_save := false
 var _hidden_by_main := false
@@ -20,10 +24,13 @@ var _notice_kind := ""
 var _ui_style: RefCounted
 var _avatar_source: Node
 var _media_migration: Object
+var _current_page_key := ""
+var _scroll_tween: Tween
 @onready var _preferences_page = %PreferencesPage
 @onready var _model_page = %ModelPage
 @onready var _profile_page = %ProfilePage
 @onready var _toast = %SaveToast
+@onready var _content_scroll: ScrollContainer = %Content
 
 ## 头像源和动态窗口共用同一份账号态，所以设置窗只转交，不自己持有纹理。
 func set_avatar_source(source: Node) -> void:
@@ -45,22 +52,37 @@ func set_audio_migration(migration: Object) -> void:
 ## 显示前注入 UI 样式：偏好页 setup 时即读取，脏标记与保存并入统一汇总。
 func set_ui_style(ui_style: RefCounted) -> void:
 	_ui_style = ui_style
-	if is_node_ready() and _ui_style != null: %StylePage.set_ui_style(_ui_style)
+	if is_node_ready() and _ui_style != null:
+		%StylePage.set_ui_style(_ui_style)
+		%SaveToast.set_ui_style(_ui_style)
+		%PreferencesPage.set_ui_style(_ui_style)
 
-func setup(preferences: Node, models: Node, executor: Node = null, clear_cache: Callable = Callable(), storage_service: StorageService = null, cache_directory: String = "") -> void:
+func setup(
+	preferences: Node,
+	models: Node,
+	executor: Node = null,
+	clear_cache: Callable = Callable(),
+	storage_service: StorageService = null,
+	cache_directory: String = "",
+	app_data_directory: String = ""
+) -> void:
 	_preferences = preferences
 	_models = models
 	_executor = executor
 	_clear_cache = clear_cache
 	_storage_service = storage_service
 	_cache_directory = cache_directory
+	_app_data_directory = app_data_directory
 
 func _ready() -> void:
 	_profile_page.set_avatar_source(_avatar_source)
 	_preferences_page.setup(_preferences)
 	_model_page.setup(_models,_executor)
-	if _ui_style != null: %StylePage.set_ui_style(_ui_style)
-	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory, _media_migration)
+	if _ui_style != null:
+		%StylePage.set_ui_style(_ui_style)
+		%SaveToast.set_ui_style(_ui_style)
+		%PreferencesPage.set_ui_style(_ui_style)
+	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory, _media_migration, _app_data_directory)
 	%AudioTab.disabled = not _clear_cache.is_valid()
 	%AudioTab.pressed.connect(func(): select_page("audio"))
 	%StyleTab.disabled = _ui_style == null
@@ -80,20 +102,68 @@ func _ready() -> void:
 			%UnsavedDialog.hide()
 			_close_after_save = true
 			save_changes())
-	select_page("preferences" if _preferences != null or _ui_style != null else "models")
+	_content_scroll.get_v_scroll_bar().value_changed.connect(_on_settings_scroll)
+	select_page("profile")
+	SettingsStyle.apply(self)
 
 func select_page(page: String) -> void:
 	var pages: Dictionary = {"profile":_profile_page,"preferences":_preferences_page,"models":_model_page,"audio":%AudioPage,"style":%StylePage}
-	for key: String in pages:
-		var panel: Control = pages[key]
-		panel.visible = key == page
-	var tabs: Dictionary = {"profile":%ProfileTab,"preferences":%PreferencesTab,"models":%ModelsTab,"audio":%AudioTab,"style":%StyleTab}
-	for key: String in tabs:
-		var tab: Button = tabs[key]
-		tab.button_pressed = key == page
+	if not pages.has(page):
+		return
+	_current_page_key = page
+	_update_tabs(page)
+	_scroll_to_section(pages[page])
 	# 偏好页把「重新打开设置可重试」写进了浮层，重新进入这一页就该真的重试一次。
 	if _preferences_page != null and page == "preferences":
 		_preferences_page.retry_if_failed()
+
+
+func _update_tabs(page: String) -> void:
+	var tabs: Dictionary = {"profile":%ProfileTab,"preferences":%PreferencesTab,"models":%ModelsTab,"audio":%AudioTab,"style":%StyleTab}
+	for key: String in tabs:
+		var tab: Button = tabs[key]
+		var selected := key == page
+		if tab.button_pressed != selected:
+			tab.button_pressed = selected
+
+
+func _scroll_to_section(target: Control) -> void:
+	if not is_instance_valid(target) or not is_visible() or _content_scroll.size.y <= 0:
+		return
+	var bar := _content_scroll.get_v_scroll_bar()
+	var max_scroll := maxi(0, int(bar.max_value - _content_scroll.size.y))
+	var destination := clampi(int(target.position.y), 0, max_scroll)
+	if _scroll_tween != null and _scroll_tween.is_valid():
+		_scroll_tween.kill()
+	_scroll_tween = create_tween()
+	_scroll_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_scroll_tween.tween_method(
+		func(value: float): _content_scroll.scroll_vertical = int(value),
+		float(_content_scroll.scroll_vertical),
+		float(destination),
+		SCROLL_TRANSITION_SECONDS
+	)
+	_scroll_tween.finished.connect(func(): _scroll_tween = null, CONNECT_ONE_SHOT)
+
+
+func _on_settings_scroll(value: float) -> void:
+	if _scroll_tween != null and _scroll_tween.is_valid():
+		return
+	var pages: Dictionary = {"profile":_profile_page,"preferences":_preferences_page,"models":_model_page,"audio":%AudioPage,"style":%StylePage}
+	var bar := _content_scroll.get_v_scroll_bar()
+	var threshold := value + 72.0
+	var active := PAGE_ORDER[0]
+	for key in PAGE_ORDER:
+		var page: Control = pages[key]
+		if page.position.y <= threshold:
+			active = key
+		else:
+			break
+	if value >= bar.max_value - _content_scroll.size.y - 2.0:
+		active = PAGE_ORDER.back()
+	if active != _current_page_key:
+		_current_page_key = active
+		_update_tabs(active)
 
 func open() -> void:
 	_hidden_by_main = false
@@ -121,6 +191,9 @@ func is_dirty() -> bool:
 func is_saving() -> bool:
 	return _saving
 
+func is_data_settled() -> bool:
+	return _preferences_page.is_data_settled() and _model_page.is_data_settled()
+
 func _request_close() -> void:
 	if _saving:
 		_close_after_save = true
@@ -128,7 +201,7 @@ func _request_close() -> void:
 		%UnsavedDialog.popup_centered()
 		%UnsavedDialog.get_cancel_button().grab_focus()
 	else:
-		queue_free()
+		hide()
 
 func save_changes() -> Dictionary:
 	if _saving: return {"ok":false,"results":[{"section":"settings","id":"设置","code":"BUSY","ok":false}]}

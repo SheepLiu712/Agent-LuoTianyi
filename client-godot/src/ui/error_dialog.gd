@@ -2,6 +2,7 @@ extends Window
 ## 统一错误弹窗：按当前窗口懒加载，队列串行展示，重复文本短时间去重。
 const SCENE_PATH := "res://scenes/ui/error_dialog.tscn"
 const ModalStack = preload("res://src/ui/modal_stack.gd")
+const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
 const MAX_QUEUE := 8
 const DEDUPE_MS := 3000
 
@@ -10,6 +11,7 @@ var _current_text := ""
 var _last_text := ""
 var _last_at := 0
 var _return_focus: WeakRef
+var _refining := false
 static var _logger_ref
 
 
@@ -41,7 +43,6 @@ static func _find(window: Window) -> Node:
 func _ready() -> void:
 	add_to_group("error_dialog")
 	%ErrorConfirm.pressed.connect(_dismiss)
-	%ErrorClose.pressed.connect(_dismiss)
 	close_requested.connect(_dismiss)
 
 
@@ -84,9 +85,25 @@ func _show_next() -> void:
 	var owner := get_parent().get_viewport().gui_get_focus_owner() if get_parent() != null else null
 	if owner != null and (_return_focus == null or _return_focus.get_ref() == null):
 		_return_focus = weakref(owner)
-	popup_centered()
+	ModalWindowLayout.present(self, %Panel, %ErrorText)
 	ModalStack.activate(self)
 	%ErrorConfirm.grab_focus.call_deferred()
+
+
+func _refine_modal_height() -> void:
+	if _refining:
+		return
+	_refining = true
+	for _pass in 3:
+		await get_tree().process_frame
+		if not visible:
+			_refining = false
+			return
+		if %ErrorText.size.x > 1.0:
+			break
+	if visible:
+		ModalWindowLayout.refine_height(self, %Panel, %ErrorText)
+	_refining = false
 
 
 func _dismiss() -> void:

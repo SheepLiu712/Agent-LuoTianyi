@@ -21,6 +21,7 @@ func _run() -> void:
 	await _wait_frames(12)
 	check(list.find_children("*","RichTextLabel",true,false).size() < 40,"1000 messages have bounded rendered nodes")
 	check(list.get_visible_ids().has("999"),"initial history follows latest")
+	check(list.is_at_latest(),"initial history reports at latest")
 	check(list.scroll_to_message("500"),"can jump to real history UUID")
 	await _wait_frames(12)
 	var anchor: Dictionary = list.get_reading_anchor()

@@ -15,6 +15,7 @@ var log: RefCounted
 var settings: Resource
 var dynamics_settings: Resource
 var ui_style: RefCounted
+var _data_root := ""
 
 static func create_geometry(layout_path: String) -> Resource:
 	return preload("res://src/storage/window_geometry.gd").new(layout_path.get_base_dir().path_join("window-geometry.cfg"))
@@ -28,6 +29,7 @@ func _init(layout_path: String, runtime: Resource) -> void:
 
 func mount(host: Node, injected_account: Node, layout_path: String, encryption: Resource, secrets: Resource, decoder_factory: Resource) -> void:
 	var data_root := layout_path.get_base_dir()
+	_data_root = data_root
 	var credentials = preload("res://src/storage/credential_store.gd").new(secrets,data_root.path_join("accounts"),log)
 	storage = preload("res://src/storage/godot_storage_service.gd").new(data_root.path_join("account.cfg"),credentials)
 	account = injected_account
@@ -79,7 +81,7 @@ func create_settings() -> Dictionary:
 	var controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(15.0,8*1024*1024,log),log)
 	var window = preload("res://scenes/ui/settings_window.tscn").instantiate()
 	window.set_ui_style(ui_style)
-	window.setup(controller,models,executor,chat.clear_cache,storage,cache.get_directory())
+	window.setup(controller,models,executor,chat.clear_cache,storage,cache.get_directory(),_data_root)
 	window.set_media_migration(media_migration)
 	window.set_avatar_source(avatar)
 	return {"window":window,"start":func(): controller.start(account.get_session())}

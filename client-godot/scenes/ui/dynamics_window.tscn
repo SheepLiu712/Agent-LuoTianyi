@@ -94,3 +94,4 @@ unique_name_in_owner = true
 
 [node name="DiscardDialog" parent="." instance=ExtResource("Discard")]
 unique_name_in_owner = true
+destructive_action = true

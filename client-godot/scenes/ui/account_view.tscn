@@ -122,7 +122,7 @@ autowrap_mode = 3
 [node name="Form" type="VBoxContainer" parent="Column/BodyScroll/FormMargin/Body" unique_id=1175150626]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 18
+theme_override_constants/separation = 16
 
 [node name="UsernameFrame" type="PanelContainer" parent="Column/BodyScroll/FormMargin/Body/Form" unique_id=1549544162]
 custom_minimum_size = Vector2(0, 60)
@@ -236,7 +236,7 @@ text = "记住登录状态"
 
 [node name="SubmitMargin" type="MarginContainer" parent="Column/BodyScroll/FormMargin/Body/Form" unique_id=475892857]
 layout_mode = 2
-theme_override_constants/margin_top = 18
+theme_override_constants/margin_top = 16
 
 [node name="Submit" type="Button" parent="Column/BodyScroll/FormMargin/Body/Form/SubmitMargin" unique_id=1251114509]
 unique_name_in_owner = true
@@ -276,7 +276,7 @@ editable = false
 [node name="FooterMargin" type="MarginContainer" parent="Column" unique_id=1101785298]
 layout_mode = 2
 theme_override_constants/margin_top = 8
-theme_override_constants/margin_bottom = 38
+theme_override_constants/margin_bottom = 40
 
 [node name="Footer" type="HBoxContainer" parent="Column/FooterMargin" unique_id=712396159]
 unique_name_in_owner = true
@@ -307,7 +307,9 @@ text = "注册账号"
 [node name="MenuPopup" type="PopupPanel" parent="." unique_id=735255273]
 unique_name_in_owner = true
 size = Vector2i(168, 152)
+transparent_bg = true
 theme = ExtResource("theme")
+theme_type_variation = &"DropdownPopup"
 
 [node name="MenuItems" type="VBoxContainer" parent="MenuPopup" unique_id=1698619506]
 offset_left = 8.0
@@ -343,7 +345,9 @@ alignment = 0
 [node name="HistoryPopup" type="PopupPanel" parent="." unique_id=2071739284]
 unique_name_in_owner = true
 size = Vector2i(360, 220)
+transparent_bg = true
 theme = ExtResource("theme")
+theme_type_variation = &"DropdownPopup"
 
 [node name="HistoryScroll" type="ScrollContainer" parent="HistoryPopup" unique_id=1445329179]
 anchors_preset = 15
@@ -451,6 +455,7 @@ text = "验证并保存"
 
 [node name="RemoveAccountDialog" parent="." unique_id=1844888665 instance=ExtResource("decision")]
 unique_name_in_owner = true
+destructive_action = true
 title = "移除本机账号记录"
 size = Vector2i(480, 240)
 min_size = Vector2i(320, 220)

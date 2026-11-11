@@ -113,6 +113,7 @@ func _initialize() -> void:
 	_scroll.audio_action.connect(_audio_action)
 	_scroll.image_action.connect(_image_action)
 	_scroll.visible_messages.connect(_visible_audio)
+	_scroll.at_latest_changed.connect(_on_at_latest_changed)
 	_scroll.interacted.connect(_on_scroll_interacted)
 	if _session.has_method("load_older_history"):
 		_scroll.older_requested.connect(_session.load_older_history)
@@ -347,6 +348,9 @@ func _on_scroll_interacted() -> void:
 
 func _update_latest_visibility() -> void:
 	_latest.visible = not _scroll.is_at_latest()
+
+func _on_at_latest_changed(at_latest: bool) -> void:
+	_latest.visible = not at_latest
 
 func _report_reading() -> void:
 	if is_inside_tree():

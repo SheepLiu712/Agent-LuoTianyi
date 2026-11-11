@@ -65,7 +65,7 @@ material = SubResource("ShaderMaterial_avatar")
 [node name="Identity" type="VBoxContainer" parent="Margin/Column/HeaderMargin/Heading"]
 size_flags_horizontal = 3
 size_flags_vertical = 4
-theme_override_constants/separation = 3
+theme_override_constants/separation = 4
 
 [node name="Title" type="Label" parent="Margin/Column/HeaderMargin/Heading/Identity"]
 theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
@@ -125,7 +125,7 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_bottom = 16
 
 [node name="Composer" type="VBoxContainer" parent="Margin/Column/ComposerSurface/ComposerMargin"]
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="AudioControls" type="HBoxContainer" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer"]
 theme_override_constants/separation = 8
@@ -133,15 +133,17 @@ theme_override_constants/separation = 8
 [node name="ImageButton" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 32)
-flat = true
+theme_type_variation = &"ChatIconButton"
 icon = ExtResource("image_icon")
+icon_alignment = 1
 tooltip_text = "选择图片，也可以在输入框中 Ctrl+V 粘贴"
 
 [node name="VolumeButton" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 32)
-flat = true
+theme_type_variation = &"ChatIconButton"
 icon = ExtResource("volume_icon")
+icon_alignment = 1
 tooltip_text = "语音音量"
 
 [node name="Spacer" type="Control" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
@@ -190,7 +192,7 @@ autowrap_mode = 3
 theme_override_font_sizes/font_size = 12
 
 [node name="InputRow" type="HBoxContainer" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer"]
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="Input" type="TextEdit" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/InputRow"]
 unique_name_in_owner = true

@@ -70,6 +70,8 @@ func settle(frames: int = 10) -> void:
 
 
 func run() -> void:
+	root.size = Vector2i(900, 700)
+	root.content_scale_size = Vector2i.ZERO
 	var chat = load("res://scenes/ui/chat_view.tscn").instantiate()
 	root.add_child(chat)
 	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -79,8 +81,10 @@ func run() -> void:
 	for index in 40:
 		session.messages.append({"id":str(index), "role":"assistant", "text":"消息 %s" % index, "type":"text", "status":"received", "code":""})
 	chat._session = session
+	chat._scroll.at_latest_changed.connect(chat._on_at_latest_changed)
 	chat._scroll.set_messages(session.messages)
 	await settle()
+	await _check_initial_bottom_state(chat)
 	await _check_both_buttons_and_latest_wins(chat, session)
 	await _check_unread_then_latest(chat, session)
 	await _check_missing_target_retries_next_page(chat, session)
@@ -90,6 +94,28 @@ func run() -> void:
 	await process_frame
 	print("Chat reading buttons: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+
+## 登录后列表本身贴底时按钮必须隐藏；24px 阈值内的滚动不能再依赖可见 ID 变化。
+func _check_initial_bottom_state(chat: Node) -> void:
+	check(chat._scroll.is_at_latest(), "initial history starts at latest")
+	check(not chat.get_node("%Latest").visible, "latest action hidden at initial bottom")
+	check(chat._scroll.scroll_to_message("39"), "can target the newest message")
+	await settle(4)
+	check(chat._scroll.is_at_latest(), "newest target still counts as latest")
+	check(not chat.get_node("%Latest").visible, "latest action stays hidden on newest target")
+	var bottom := maxf(0.0, chat._scroll._total - chat._scroll.size.y)
+	chat._scroll.scroll_vertical = int(maxf(0.0, bottom - 5.0))
+	await settle(2)
+	check(chat._scroll.is_at_latest(), "5px from bottom is still latest")
+	check(not chat.get_node("%Latest").visible, "latest action stays hidden within threshold")
+	chat._scroll.scroll_vertical = int(maxf(0.0, bottom - 40.0))
+	await settle(2)
+	check(not chat._scroll.is_at_latest(), "40px from bottom leaves latest")
+	check(chat.get_node("%Latest").visible, "latest action appears without a visible-id change")
+	chat._scroll.scroll_to_latest()
+	await settle(4)
+	check(not chat.get_node("%Latest").visible, "returning to bottom hides latest action")
 
 
 func _check_both_buttons_and_latest_wins(chat: Node, session: FakeSession) -> void:

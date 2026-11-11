@@ -16,20 +16,20 @@ func capture(window: Window, label: String) -> void:
 	await RenderingServer.frame_post_draw
 	window.get_texture().get_image().save_png(ARTIFACTS + "/" + label + ".png")
 func readonly_fields(window: Window, label: String) -> void:
-	for name in ["RelationshipField","SpeakingStyleField","PersonalityField","CustomContextField"]:
+	for name in ["PersonalityField","CustomContextField"]:
 		var field: Control = window.get_node("%PreferencesPage").get_node("%"+name)
 		check(not field.editable,label+" keeps editing disabled: "+name)
 		var style: StyleBox = field.get_theme_stylebox("read_only")
-		check(style is StyleBoxFlat and style.bg_color.is_equal_approx(Color.WHITE),label+" keeps the same white surface while read-only: "+name)
+		check(style is StyleBoxFlat and style.bg_color.get_luminance() > .9,label+" keeps a readable settings surface while read-only: "+name)
 		if DisplayServer.get_name() != "headless":
 			var image := window.get_texture().get_image()
 			var point := window.get_final_transform() * field.get_global_transform_with_canvas() * Vector2(field.size.x-24,field.size.y*.5)
 			point = point.clamp(Vector2.ZERO,Vector2(image.get_size())-Vector2.ONE)
-			check(image.get_pixelv(Vector2i(point)).get_luminance() > .99,label+" actually renders a white field: "+name)
+			check(image.get_pixelv(Vector2i(point)).get_luminance() > .9,label+" actually renders a light settings field: "+name)
 	for name in ["RelationshipPresets","SpeakingStylePresets"]:
 		var button: Button = window.get_node("%PreferencesPage").get_node("%"+name)
 		check(button.disabled, label+" keeps presets unavailable until the server answers: "+name)
-		check(button.get_theme_stylebox("disabled").bg_color.is_equal_approx(button.get_theme_stylebox("normal").bg_color), label+" does not gray the action background: "+name)
+		check(button.get_theme_color("font_disabled_color") != button.get_theme_color("font_color"), label+" exposes a distinguishable disabled preset state: "+name)
 func run() -> void:
 	DirAccess.make_dir_recursive_absolute(ARTIFACTS)
 	FileAccess.open(ARTIFACTS+"/.gdignore",FileAccess.WRITE).close()
@@ -45,6 +45,8 @@ func run() -> void:
 	root.add_child(window)
 	window.open()
 	prefs.start(scope)
+	window.select_page("preferences")
+	await create_timer(.25).timeout
 	await capture(window,"settings-loading")
 	check(prefs.get_state().phase == "loading","fixture holds the initial loading state")
 	readonly_fields(window,"loading")
@@ -56,7 +58,7 @@ func run() -> void:
 	window.get_node("%PreferencesTab").pressed.emit()
 	check(await until(func(): return prefs.get_state().phase == "ready"),"retry restores editing")
 	check(page.get_node("%CustomContextField").editable,"loaded form becomes editable")
-	await _check_readonly_presets(page, window)
+	await _check_readonly_presets(page, window, prefs)
 	page.get_node("%RelationshipPresets").activated.emit("friend")
 	page.get_node("%SpeakingStylePresets").activated.emit("gentle")
 	_check_preset_choices_still_update_readonly_values_and_the_draft(page, prefs)
@@ -69,6 +71,7 @@ func run() -> void:
 	check(not window.get_node("%BusyBlocker").get_global_rect().intersects(window.get_node("%LogoutButton").get_global_rect()),"busy blocker never covers footer actions")
 	check(await until(func(): return not window.is_saving()),"save completes")
 	window.select_page("models")
+	await create_timer(.25).timeout
 	var card = window.get_node("%ModelPage").get_node("%Cards").get_child(0)
 	card.get_node("%Enabled").button_pressed = true
 	await process_frame
@@ -101,13 +104,11 @@ func check_minimum_preferences(window: Window, factor: float) -> void:
 	await create_timer(.2).timeout
 	var page: Control = window.get_node("%PreferencesPage")
 	var last: Control = page.get_node("%CustomContextField")
-	var scrolls := page.find_children("*", "ScrollContainer", true, false).filter(func(node): return node.is_ancestor_of(last))
-	check(not scrolls.is_empty(), "minimum preferences has a scrollable form")
-	if not scrolls.is_empty():
-		var scroll: ScrollContainer = scrolls[0]
-		scroll.ensure_control_visible(last)
-		await create_timer(.1).timeout
-		check(scroll.get_global_rect().encloses(last.get_global_rect()), "the last field is reachable at minimum size and scale %s" % factor)
+	var scroll: ScrollContainer = window.get_node("%Content")
+	check(scroll != null and scroll.get_v_scroll_bar().max_value > scroll.size.y, "minimum settings have a scrollable form")
+	scroll.ensure_control_visible(last)
+	await create_timer(.1).timeout
+	check(scroll.get_global_rect().encloses(last.get_global_rect()), "the last field is reachable at minimum size and scale %s" % factor)
 	var actions: Control = window.get_node("%SaveAll").get_parent()
 	check(last.get_global_rect().end.y <= actions.get_global_rect().position.y, "scrolled form does not overlap fixed actions at scale %s" % factor)
 	check(Rect2(Vector2.ZERO, window.get_visible_rect().size).encloses(actions.get_global_rect()), "fixed actions fit minimum window at scale %s" % factor)
@@ -122,10 +123,7 @@ func remove_folder(path: String) -> void:
 	DirAccess.remove_absolute(path)
 
 func _check_preset_choices_still_update_readonly_values_and_the_draft(page: Variant, prefs: Variant) -> void:
-	check(page.get_node("%RelationshipField").text == "朋友" and page.get_node("%SpeakingStyleField").text == "温柔可人" and prefs.get_state().dirty, "preset choices still update readonly values and the draft")
-
-func _check_run_result(preset: Variant, pair: Variant) -> void:
-	check(preset.text.is_empty() and preset.icon != null, "preference current value is shown only in the input: " + pair[0])
+	check(page.get_node("%RelationshipPresets").get_selected_id() == "friend" and page.get_node("%SpeakingStylePresets").get_selected_id() == "gentle" and prefs.get_state().dirty, "preset choices update the shared dropdown and the draft")
 
 ## 失败不再占版面：顶部浮层说完就淡出，且绝不挡住下面的表单。
 func _check_failure_explains_how_to_retry(page: Variant) -> void:
@@ -138,24 +136,18 @@ func _check_saving_retains_visible_progress(window: Variant) -> void:
 	var toast: Control = window.get_node("%SaveToast")
 	check(window.is_saving() and toast.visible and toast.last_text().contains("正在保存"),"saving retains visible progress")
 
-func _check_readonly_presets(page: Variant, window: Window) -> void:
-	for pair in [["RelationshipField","RelationshipPresets"],["SpeakingStyleField","SpeakingStylePresets"]]:
+func _check_readonly_presets(page: Variant, window: Window, prefs: Variant) -> void:
+	for pair in [["relationship","RelationshipPresets"],["speaking_style","SpeakingStylePresets"]]:
 		var preset: Button = page.get_node("%"+pair[1])
-		_check_run_result(preset, pair)
-		check(not preset.tooltip_text.is_empty(), "icon-only preset has an accessible description")
-		check(not preset.get_items().any(func(item): return item.id == "custom" or item.label == "自定义"), "preference menus contain presets only: " + pair[0])
-		check(not page.get_node("%"+pair[0]).editable, "ready relationship and style reject manual input: " + pair[0])
-		if DisplayServer.get_name() != "headless":
-			var field: LineEdit = page.get_node("%"+pair[0])
-			var previous := field.text
-			field.grab_focus()
-			var typed := InputEventKey.new()
-			typed.pressed = true
-			typed.keycode = KEY_X
-			typed.unicode = 88
-			window.push_input(typed,true)
-			await process_frame
-			check(field.text == previous, "keyboard typing cannot replace the preset: " + pair[0])
+		var expected := ""
+		for item in preset.get_items():
+			if item.label == prefs.get_state().fields.get(pair[0], ""):
+				expected = item.id
+		check(preset.get_selected_id() == expected, "preset dropdown shows the server value: " + pair[1])
+		check(preset.text.contains("▾"), "preset dropdown keeps the shared trigger caption: " + pair[1])
+		check(not preset.tooltip_text.is_empty(), "preset dropdown has an accessible description")
+		check(not preset.get_items().any(func(item): return item.id == "custom" or item.label == "自定义"), "preference menus contain presets only: " + pair[1])
+		check(not preset.disabled, "ready preset dropdown accepts changes: " + pair[1])
 
 func _capture_checkbox_states(checkbox: CheckBox, window: Window, theme: Theme) -> void:
 	for state in ["normal","pressed","hover","hover_pressed","disabled","focus"]:
@@ -169,7 +161,7 @@ func _capture_checkbox_states(checkbox: CheckBox, window: Window, theme: Theme) 
 		await capture(window,"checkbox-"+state)
 	check(checkbox.get_theme_color("font_hover_pressed_color").is_equal_approx(Color("304553")),"checked hover text stays dark")
 	if theme.has_stylebox("focus","CheckBox"):
-		check(checkbox.get_theme_stylebox("focus").border_color.is_equal_approx(Color("168ac2")),"keyboard focus uses the stronger blue outline")
+		check(checkbox.get_theme_stylebox("focus").border_color.is_equal_approx(Color(0, 0.780392, 0.941176)),"settings keyboard focus uses the shared cyan outline")
 	checkbox.disabled = false
 
 func _check_theme_states() -> Theme:

@@ -38,20 +38,16 @@ func _sync_ui_style_controls(style: String, icons: String) -> void:
 	%IconStylePresets.set_items(icon_opts)
 	%UiStylePresets.set_selected_id(style)
 	%IconStylePresets.set_selected_id(icons)
-	%UiStyleField.text = styles.get(style, styles["flat"])
-	%IconStyleField.text = icon_kinds.get(icons, icon_kinds["svg"])
 	_ui_style_pending = {"style": style, "icons": icons}
 
 func _on_ui_style_selected(id, field: String) -> void:
 	if _ui_style == null:
 		return
 	_ui_style_pending[field] = id
-	var styles := {"flat": "扁平", "crystal": "清透"}
-	var icon_kinds := {"svg": "扁平 icon", "emoji": "emoji"}
 	if field == "style":
-		%UiStyleField.text = styles.get(id, "")
+		%UiStylePresets.set_selected_id(id)
 	else:
-		%IconStyleField.text = icon_kinds.get(id, "")
+		%IconStylePresets.set_selected_id(id)
 
 func ui_style_dirty() -> bool:
 	if _ui_style == null or _ui_style_pending.is_empty():

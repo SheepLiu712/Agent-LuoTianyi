@@ -64,6 +64,7 @@ func run() -> void:
 	var logs = app.find_child("LogWindow", true, false)
 	app.get_node("%NavSettings").pressed.emit()
 	var settings = app.find_child("SettingsWindow", true, false)
+	check(await until(func(): return settings.visible), "settings opens after prewarm")
 	var field = settings.find_child("CustomContextField", true, false)
 	check(await until(func(): return field.editable), "preferences loaded")
 	field.text = "retain settings on cancel"
@@ -95,7 +96,7 @@ func run() -> void:
 	await click(dialog.get_cancel_button())
 	app.get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
-	await process_frame
+	check(await until(func(): return settings.visible), "settings reopens after prewarm")
 	await click(settings.get_node("%LogoutButton"))
 	await inspect_dialog(dialog, settings)
 	await click(dialog.get_ok_button())
@@ -104,6 +105,7 @@ func run() -> void:
 	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"fail_save", "password":"synthetic", "request_token":false}, false)
 	app.get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
+	check(await until(func(): return settings.visible), "settings opens for the second account")
 	field = settings.find_child("CustomContextField", true, false)
 	check(await until(func(): return field.editable), "second account preferences loaded")
 	field.text = "failed save must retain this"

@@ -2,6 +2,7 @@ extends Control
 signal plaintext_answer(allowed: bool)
 const Card = preload("res://scenes/ui/model_purpose_card.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const SettingsStyle = preload("res://src/ui/settings_style.gd")
 var _settings: Node
 var _executor: Node
 var _types: Array = []
@@ -41,6 +42,13 @@ func is_dirty() -> bool:
 		if _drafts[id] != _as_draft(_settings.get_config(id)): return true
 	return false
 
+func is_data_settled() -> bool:
+	if _settings == null: return true
+	var state: Dictionary = _settings.get_state()
+	if state.phase in ["idle","loading"]: return false
+	if state.phase != "ready": return true
+	return _cards.size() == _types.size()
+
 func _as_draft(config: Dictionary) -> Dictionary:
 	var draft := config.duplicate(true)
 	draft.params_text = JSON.stringify(config.get("params", {}), "  ")
@@ -60,6 +68,7 @@ func _update(state: Dictionary) -> void:
 			card.copy_requested.connect(_copy_config)
 			card.test_requested.connect(_request_test)
 			%Cards.add_child(card)
+			SettingsStyle.apply(card)
 			_cards[purpose.id] = card
 	if state.phase != "ready":
 		_status.text = "正在获取模型用途…" if state.phase == "loading" else ""
@@ -97,8 +106,20 @@ func _locate_error(id: String, code: String) -> void:
 		_reveal_error_card.call_deferred(_cards[id])
 
 func _reveal_error_card(card: Control) -> void:
-	if is_instance_valid(card) and %Scroll.is_ancestor_of(card):
-		%Scroll.ensure_control_visible(card)
+	if not is_instance_valid(card):
+		return
+	var scroll := _scroll_ancestor(card)
+	if scroll != null:
+		scroll.ensure_control_visible(card)
+
+
+func _scroll_ancestor(node: Node) -> ScrollContainer:
+	var current := node.get_parent()
+	while current != null:
+		if current is ScrollContainer:
+			return current
+		current = current.get_parent()
+	return null
 
 func validate_changes() -> Dictionary:
 	var failures: Array = []

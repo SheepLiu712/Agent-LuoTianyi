@@ -5,6 +5,58 @@ func check(ok: bool, label: String) -> void:
 	if not ok:
 		failures.append(label)
 		print("FAIL: ", label)
+
+
+func _check_contract(page: Control) -> void:
+	check(page.get_node_or_null("%OlderThanDays") is SpinBox, "user can choose cache age in days")
+	check(page.get_node_or_null("%MigrateMedia") is Button, "cache page owns a media import entry")
+	check(page.get_node_or_null("%BrowsePython") is Button, "cache page can pick a python client")
+	check(page.get_node_or_null("%PythonPath") is LineEdit, "cache page shows the selected python client")
+	check(page.get_node_or_null("%PythonPicker") is FileDialog, "cache page owns an exe picker")
+	check(page.get_node_or_null("%StorageCard") is PanelContainer, "cache page starts with the storage card")
+	check(page.get_node_or_null("%ImportCard") is PanelContainer, "cache page owns an import card")
+	check(page.get_node_or_null("%CleanupCard") is PanelContainer, "cache page owns a cleanup card")
+	var column: VBoxContainer = page.get_node("Scroll/Column")
+	check(column.get_node("StorageCard").get_index() < column.get_node("ImportCard").get_index() and column.get_node("ImportCard").get_index() < column.get_node("CleanupCard").get_index(), "cards follow storage, import, cleanup order")
+	for removed in ["MigrationHint", "Scope", "AgeHint", "Hint"]:
+		check(page.find_child(removed, true, false) == null, "redundant copy node removed: " + removed)
+	check(page.get_node("%MigrateMedia").text == "导入媒体…", "import action names its result")
+	check(page.get_node("%RefreshUsage").text == "刷新容量", "storage refresh is not confused with client scanning")
+	check(page.get_node("%ClearCache").text == "清理语音…", "cleanup action stays scoped to voice")
+
+
+func _exercise_cache(window: Window, page: Control, audio: Variant) -> void:
+	page.get_node("%ClearCache").pressed.emit()
+	await create_timer(0.3).timeout
+	var dialog: Window = page.get_node("%ClearDialog")
+	await _check_dialog_fit(window, dialog)
+	var first_height: int = dialog.size.y
+	dialog.get_cancel_button().pressed.emit()
+	check(audio.get_message_audio("cached").available and not dialog.visible, "cancel preserves cache")
+	page.get_node("%ClearCache").pressed.emit()
+	await create_timer(0.3).timeout
+	check(dialog.size.y == first_height, "cancel and reopen keeps the confirmation height")
+	check(dialog.dialog_text.contains("30"), "confirmation states the chosen day limit")
+	page.get_node("%OlderThanDays").value = 0
+	dialog.get_ok_button().pressed.emit()
+	await create_timer(0.1).timeout
+	check(not audio.get_message_audio("old").available and audio.get_message_audio("cached").available, "confirmation uses its frozen age and preserves recent cache")
+	page.get_node("%ClearCache").pressed.emit()
+	dialog.get_ok_button().pressed.emit()
+	await create_timer(0.1).timeout
+	check(not audio.get_message_audio("cached").available, "confirm clears the current scope through real audio cache")
+	check(page.get_node("%CacheStatus").text.contains("已清理"), "page reports successful clear")
+
+
+func _check_dialog_fit(window: Window, dialog: Window) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	check(Rect2i(Vector2i.ZERO, window.size).encloses(Rect2i(dialog.position, dialog.size)), "confirmation fits inside owner")
+	check(Rect2(Vector2.ZERO, Vector2(dialog.size)).encloses(dialog.get_cancel_button().get_global_rect()), "cancel button remains reachable")
+	await RenderingServer.frame_post_draw
+	window.get_texture().get_image().save_png("res://artifacts/audio-settings-confirm.png")
+
+
 func run() -> void:
 	var path := "user://audio-settings-%s" % Time.get_ticks_usec()
 	var cache = load("res://src/storage/audio_cache.gd").new(path)
@@ -22,44 +74,20 @@ func run() -> void:
 	file.close()
 	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
 	check(window.get_node_or_null("%AudioTab") is Button, "settings includes voice cache management")
-	check(window.get_node("%AudioPage").get_node_or_null("%OlderThanDays") is SpinBox, "user can choose cache age in days")
-	check(window.get_node("%AudioPage").get_node_or_null("%MigrateMedia") is Button, "cache page owns a media import entry")
-	check(window.get_node("%AudioPage").get_node_or_null("%BrowsePython") is Button, "cache page can pick a python client")
-	check(window.get_node("%AudioPage").get_node_or_null("%PythonPath") is LineEdit, "cache page shows the selected python client")
-	check(window.get_node("%AudioPage").get_node_or_null("%PythonPicker") is FileDialog, "cache page owns an exe picker")
+	var page = window.get_node("%AudioPage")
+	_check_contract(page)
 	if failures.is_empty():
 		window.setup(null, null, null, session.clear_cache)
 		root.add_child(window)
 		window.open()
 		window.get_node("%AudioTab").pressed.emit()
-		var page = window.get_node("%AudioPage")
 		check(page.visible and not window.is_dirty(), "cache page is independent of unsaved preferences")
 		check(page.get_node("%MigrateMedia").disabled, "media import entry stays disabled until a service is wired")
 		check(page.get_node("%BrowsePython").disabled, "python picker stays disabled until a service is wired")
 		check(page.get_node("%PythonPicker").file_mode == FileDialog.FILE_MODE_OPEN_FILE, "picker selects one executable")
 		check(page.get_node("%PythonPicker").filters.size() == 1 and page.get_node("%PythonPicker").filters[0].contains("*.exe"), "picker filters executables")
-		check(page.get_node("%MigrationStatus").text.is_empty(), "no migration status without a service")
-		page.get_node("%ClearCache").pressed.emit()
-		await create_timer(0.3).timeout
-		var dialog: Window = page.get_node("%ClearDialog")
-		if DisplayServer.get_name() != "headless":
-			check(Rect2i(Vector2i.ZERO, window.size).encloses(Rect2i(dialog.position, dialog.size)), "confirmation fits inside owner")
-			check(Rect2(Vector2.ZERO, Vector2(dialog.size)).encloses(dialog.get_cancel_button().get_global_rect()), "cancel button remains reachable")
-			await RenderingServer.frame_post_draw
-			window.get_texture().get_image().save_png("res://artifacts/audio-settings-confirm.png")
-		dialog.get_cancel_button().pressed.emit()
-		check(audio.get_message_audio("cached").available and not dialog.visible, "cancel preserves cache")
-		page.get_node("%ClearCache").pressed.emit()
-		check(dialog.dialog_text.contains("30"), "confirmation states the chosen day limit")
-		page.get_node("%OlderThanDays").value = 0
-		dialog.get_ok_button().pressed.emit()
-		await create_timer(0.1).timeout
-		check(not audio.get_message_audio("old").available and audio.get_message_audio("cached").available, "confirmation uses its frozen age and preserves recent cache")
-		page.get_node("%ClearCache").pressed.emit()
-		dialog.get_ok_button().pressed.emit()
-		await create_timer(0.1).timeout
-		check(not audio.get_message_audio("cached").available, "confirm clears the current scope through real audio cache")
-		check(page.get_node("%CacheStatus").text.contains("已清理"), "page reports successful clear")
+		check(page.get_node("%MigrationStatus").text.contains("暂不可用"), "status explains a missing import service")
+		await _exercise_cache(window, page, audio)
 		window.queue_free()
 	else: window.free()
 	session.queue_free()

@@ -1,5 +1,6 @@
 extends ScrollContainer
 signal visible_messages(ids: Array[String])
+signal at_latest_changed(at_latest: bool)
 signal older_requested
 signal interacted
 signal audio_action(id: String, action: String)
@@ -19,6 +20,7 @@ var _time_markers: Dictionary = {}
 var _total := 0.0
 var _width := 0.0
 var _laying := false
+var _programmatic_scroll := false
 var _visible: Array[String] = []
 var _restore_pending := false
 var _restore_queued := false
@@ -29,6 +31,7 @@ var _pending_follow := false
 var _stable_anchor: Dictionary = {}
 var _stable_follow := true
 var _stable_ready := false
+var _last_at_latest := true
 var _ui_style: RefCounted
 var _older_state := "idle"
 var _older_armed := false
@@ -44,15 +47,17 @@ func set_ui_style(style: RefCounted) -> void:
 
 func _ready() -> void:
 	get_v_scroll_bar().value_changed.connect(func(_value):
-		if not _laying and not _restore_pending:
+		if not _laying and not _restore_pending and not _programmatic_scroll:
 			_capture_stable_now()
 			_render()
+			_notify_at_latest()
 			_request_older())
 	get_v_scroll_bar().gui_input.connect(_user_input)
 	gui_input.connect(_user_input)
 	resized.connect(_resized)
 
 func set_messages(messages: Array[Dictionary]) -> void:
+	_capture_anchor_now()
 	var follow := _layout_follow()
 	var anchor := _layout_anchor()
 	var anchor_index := int(_indices.get(str(anchor.get("id", "")), -1))
@@ -94,7 +99,10 @@ func _prune_missing() -> void:
 func _resolve_anchor(anchor: Dictionary, anchor_index: int) -> Dictionary:
 	if anchor.is_empty() or _indices.has(str(anchor.get("id", ""))):
 		return anchor
-	return {"id":_messages[clampi(anchor_index, 0, _messages.size()-1)].id, "offset":0.0}
+	var replacement: Dictionary = _messages[clampi(anchor_index, 0, _messages.size()-1)]
+	var spacing := 4.0 if replacement.role == "system" else 17.0
+	var maximum := maxf(0.0,float(_heights.get(replacement.id,100))-spacing)
+	return {"id":replacement.id, "offset":clampf(float(anchor.get("offset",0.0)),0.0,maximum)}
 
 ## 不可见状态在入口就剔掉，后面的索引、偏移、可见集合才和屏幕上真正有的气泡一致。
 func _renderable(messages: Array[Dictionary]) -> Array[Dictionary]:
@@ -128,6 +136,7 @@ func scroll_to_message(id: String) -> bool:
 	_stable_follow = false
 	_stable_ready = true
 	_layout({"id":id,"offset":0.0},false)
+	_notify_at_latest()
 	return true
 
 func scroll_to_latest() -> void:
@@ -135,6 +144,7 @@ func scroll_to_latest() -> void:
 	_stable_follow = true
 	_stable_ready = true
 	_layout({},true)
+	_notify_at_latest()
 
 func get_visible_ids() -> Array[String]:
 	return _visible.duplicate()
@@ -157,18 +167,30 @@ func get_reading_anchor() -> Dictionary:
 func get_stable_anchor() -> Dictionary:
 	return _stable_anchor.duplicate(true)
 
+## 在内容重排入口同步采样；不能用延迟回调，否则图片行高变化会先于用户滚动被应用。
+func _capture_anchor_now() -> void:
+	if _laying or _restore_pending or _programmatic_scroll:
+		return
+	_capture_stable_now()
+
+func _current_anchor() -> Dictionary:
+	if _messages.is_empty() or _offsets.is_empty():
+		return {}
+	var index := _at(float(scroll_vertical))
+	return {
+		"id":_messages[index].id,
+		"offset":float(scroll_vertical)-_offsets[index],
+	}
+
 ## 只在稳定状态下采样：用户滚动后或布局恢复完成后。
 func _capture_stable_now() -> void:
-	if _messages.is_empty() or _offsets.is_empty():
+	var anchor := _current_anchor()
+	if anchor.is_empty():
 		_stable_anchor = {}
 		_stable_follow = true
 		_stable_ready = true
 		return
-	var index := _at(float(scroll_vertical))
-	_stable_anchor = {
-		"id":_messages[index].id,
-		"offset":float(scroll_vertical)-_offsets[index],
-	}
+	_stable_anchor = anchor
 	_stable_follow = float(scroll_vertical) >= _total-size.y-24
 	_stable_ready = true
 
@@ -179,39 +201,64 @@ func _layout_anchor() -> Dictionary:
 			return {"id":"", "offset":0.0}
 		if _indices.has(str(_stable_anchor.get("id", ""))):
 			return _stable_anchor.duplicate(true)
-	return get_reading_anchor()
+	return _current_anchor()
+
+## 程序化恢复滚动时屏蔽 value_changed，避免把中间位置写成新的稳定锚点。
+func _write_scroll(value: int) -> void:
+	_programmatic_scroll = true
+	scroll_vertical = value
+	_programmatic_scroll = false
 
 func _layout_follow() -> bool:
 	return _stable_follow if _stable_ready else is_at_latest()
 
 func is_at_latest() -> bool:
-	if _messages.is_empty(): return true
-	if _restore_pending: return _pending_follow
-	return float(scroll_vertical) >= _total-size.y-24
+	if _messages.is_empty() or size.y <= 0.0: return true
+	var bottom := maxf(0.0, _total-size.y)
+	if _restore_pending:
+		if _pending_follow: return true
+		var id := str(_pending_anchor.get("id", ""))
+		if not _indices.has(id): return false
+		var index := int(_indices[id])
+		if index < 0 or index >= _offsets.size(): return false
+		var target := _offsets[index]+float(_pending_anchor.get("offset", 0.0))
+		return target >= bottom-24.0
+	return float(scroll_vertical) >= bottom-24.0
+
+## 只在状态真正翻转时通知，避免滚动过程里每帧重复刷新按钮。
+func _notify_at_latest() -> void:
+	var value := is_at_latest()
+	if value == _last_at_latest:
+		return
+	_last_at_latest = value
+	at_latest_changed.emit(value)
 
 func set_audio_state(id: String, state: Dictionary) -> void:
 	if _nodes.has(id):
+		_capture_anchor_now()
 		_nodes[id].set_audio_state(state)
 
 func set_image_state(id: String, state: Dictionary) -> void:
 	if _nodes.has(id):
+		_capture_anchor_now()
 		_nodes[id].set_image_state(state)
 
 func _user_input(event: InputEvent) -> void:
 	if (event is InputEventMouseButton and event.pressed) or event is InputEventPanGesture or (event is InputEventKey and event.pressed):
 		_restore_pending = false
-		_capture_stable_now.call_deferred()
+		_capture_anchor_now()
 		interacted.emit()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP,MOUSE_BUTTON_WHEEL_DOWN] and get_global_rect().has_point(get_global_mouse_position()):
 		_restore_pending = false
-		_capture_stable_now.call_deferred()
+		_capture_anchor_now()
 		interacted.emit()
 
 func _resized() -> void:
+	# 尺寸变化后 scroll_vertical 还没被夹到新范围，不能用它反推是否贴底。
+	var follow := _stable_follow if _stable_ready else is_at_latest()
 	var anchor := _layout_anchor()
-	var follow := _layout_follow()
 	if absf(_width-size.x)>1:
 		_heights.clear()
 		_width = size.x
@@ -230,6 +277,7 @@ func _measure_heights() -> void:
 	if _laying or _messages.is_empty():
 		_queue_measure()
 		return
+	_capture_anchor_now()
 	var anchor := _layout_anchor()
 	var follow := _layout_follow()
 	var changed := false
@@ -269,11 +317,12 @@ func _layout(anchor: Dictionary, follow: bool) -> void:
 	bar.max_value = maxf(_total,size.y)
 	bar.page = size.y
 	if follow:
-		scroll_vertical = maxi(0,roundi(_total-size.y))
+		_write_scroll(maxi(0,roundi(_total-size.y)))
 	elif _indices.has(anchor.get("id","")):
-		scroll_vertical = roundi(_offsets[_indices[anchor.id]]+anchor.offset)
+		_write_scroll(roundi(_offsets[_indices[anchor.id]]+anchor.offset))
 	_laying = false
 	_render()
+	_notify_at_latest()
 	if not _restore_queued:
 		_restore_queued = true
 		_defer_scroll_restore.call_deferred()
@@ -290,13 +339,14 @@ func _finish_scroll_restore() -> void:
 	bar.max_value = maxf(_total,size.y)
 	bar.page = size.y
 	if _pending_follow:
-		scroll_vertical = maxi(0,roundi(_total-size.y))
+		_write_scroll(maxi(0,roundi(_total-size.y)))
 	elif _indices.has(_pending_anchor.get("id","")):
-		scroll_vertical = roundi(_offsets[_indices[_pending_anchor.id]]+_pending_anchor.offset)
+		_write_scroll(roundi(_offsets[_indices[_pending_anchor.id]]+_pending_anchor.offset))
 	_restore_pending = false
 	_laying = false
 	_render()
 	_capture_stable_now()
+	_notify_at_latest()
 
 func _render() -> void:
 	var wanted: Dictionary = {}

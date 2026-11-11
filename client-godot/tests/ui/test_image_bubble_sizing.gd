@@ -29,10 +29,16 @@ func run() -> void:
 		await settle()
 		var picture: TextureRect = row.get_node("%HistoryPicture")
 		_check_preview_fits_the_row(picture, row, dimensions)
-		if dimensions.y == 2400: check(picture.size.y >= 1000, "long image keeps its full height instead of a cap")
+		_check_preview_uses_fixed_bounds(picture, dimensions)
+		var settled_size := picture.size
 		row.size.x = 360
 		await settle()
 		_check_preview_fits_the_row(picture, row, dimensions)
+		check(picture.size.distance_to(settled_size) <= 1.0, "narrower row keeps the fixed preview size")
+		row.size.x = 820
+		await settle()
+		_check_preview_fits_the_row(picture, row, dimensions)
+		check(picture.size.distance_to(settled_size) <= 1.0, "wider row never rescales the fixed preview")
 		row.set_image_state({"status":"error","texture":null,"original_size":Vector2i.ZERO,"code":"NETWORK_ERROR"})
 		await settle()
 		_check_failure_retains_a_reachable_retry_action(picture, row)
@@ -68,6 +74,8 @@ func run() -> void:
 	check(list.get_visible_ids().has(anchor.id) and not list.get_visible_ids().has("19"), "visible rows agree with the restored anchor")
 	await _check_partially_visible_image_keeps_stable_anchor(list, messages)
 	await _check_pending_image_layout_does_not_capture_prepend_anchor(list, messages)
+	await _check_latest_scroll_beats_stale_image_anchor(list)
+	await _check_image_load_at_bottom_keeps_follow(list)
 	list.queue_free()
 	images.queue_free()
 	await process_frame
@@ -119,6 +127,45 @@ func _check_pending_image_layout_does_not_capture_prepend_anchor(list: Variant, 
 	check(after.id == stable.id and absf(float(after.offset) - float(stable.offset)) < 3, "prepend ignores pending image anchor")
 	check(after.id != "19" or float(after.offset) > 1.0, "prepend never snaps to the pending image top")
 
+## 延迟捕获尚未执行时，图片重排必须采用当前滚动位置，而不是上一帧的图片顶部锚点。
+func _check_latest_scroll_beats_stale_image_anchor(list: Variant) -> void:
+	var local: Array[Dictionary] = []
+	for index in 40:
+		local.append({"id":"race-%s" % index, "role":"assistant", "text":"" if index == 19 else "历史消息 %s" % index, "type":"image" if index == 19 else "text", "status":"received"})
+	list.set_messages(local)
+	await settle()
+	list.scroll_to_message("race-20")
+	await settle()
+	var target := int(list._offsets[19] + 80.0)
+	list._stable_anchor = {"id":"race-19", "offset":0.0}
+	list._stable_follow = false
+	list._stable_ready = true
+	list._restore_pending = true
+	list.scroll_vertical = target
+	list._restore_pending = false
+	var image := Image.create(100, 2400, false, Image.FORMAT_RGBA8)
+	image.fill(Color("66ccff"))
+	list.set_image_state("race-19", {"status":"ready", "texture":ImageTexture.create_from_image(image), "code":"", "original_size":Vector2i(100,2400)})
+	await settle()
+	var after: Dictionary = list.get_stable_anchor()
+	check(after.id == "race-19" and absf(float(after.offset) - 80.0) < 3, "latest scroll wins over a stale image-top anchor")
+	check(float(list.scroll_vertical) > float(list._offsets[19]) + 10.0, "image growth never snaps the viewport to its top")
+
+## 用户原本贴底时图片加载继续贴底；上翻后同一操作不改变阅读位置。
+func _check_image_load_at_bottom_keeps_follow(list: Variant) -> void:
+	var local: Array[Dictionary] = []
+	for index in 40:
+		local.append({"id":"bottom-%s" % index, "role":"assistant", "text":"" if index == 39 else "历史消息 %s" % index, "type":"image" if index == 39 else "text", "status":"received"})
+	list.set_messages(local)
+	await settle()
+	list.scroll_to_latest()
+	await settle()
+	var image := Image.create(100, 2400, false, Image.FORMAT_RGBA8)
+	image.fill(Color("66ccff"))
+	list.set_image_state("bottom-39", {"status":"ready", "texture":ImageTexture.create_from_image(image), "code":"", "original_size":Vector2i(100,2400)})
+	await settle()
+	check(list.is_at_latest(), "image load at the bottom keeps follow")
+
 func _check_failure_retains_a_reachable_retry_action(picture: Variant, row: Variant) -> void:
 	check(not picture.visible and not row.get_node("%ImageButton").disabled and row.get_node("%ImageButton").text.contains("重试"), "failure retains a reachable retry action")
 
@@ -139,3 +186,10 @@ func _check_preview_fits_the_row(picture: Variant, row: Variant, original: Vecto
 	check(picture.size.x <= source.x + 1 and picture.size.y <= source.y + 1, "small images are never upscaled")
 	check(absf(picture.size.x / maxf(picture.size.y, 1.0) - source.x / source.y) <= 0.03, "preview keeps the original aspect ratio")
 	check(row.get_node("%Bubble").size.x <= row.size.x + 1, "image panel fits its row")
+
+## 缩略图只由原图决定：严格落在 250×250 内，小图不放大。
+func _check_preview_uses_fixed_bounds(picture: Variant, original: Vector2i) -> void:
+	var scale := minf(1.0, minf(250.0 / float(original.x), 250.0 / float(original.y)))
+	var expected := Vector2(original) * scale
+	check(picture.size.x <= 250.0 + 1.0 and picture.size.y <= 250.0 + 1.0, "preview stays inside the fixed 250x250 bounds")
+	check(picture.size.distance_to(expected) <= 1.0, "preview uses the fixed original-size-derived bounds")

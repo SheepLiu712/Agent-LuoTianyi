@@ -25,6 +25,9 @@ func _run() -> void:
 	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"ui","password":"synthetic-password","request_token":false},false)
 	await process_frame
 	check(app.get_node_or_null("%AccountMenu") == null,"main navigation no longer owns account actions")
+	var prewarmed = await _wait_for_prewarmed_settings(app)
+	_check_settings_prewarm(prewarmed)
+	await _check_settings_clean_reopen(app, prewarmed)
 	var dynamics = app.get_node("%NavDynamics")
 	var unread: Control = app.get_node("%DynamicsUnread")
 	await _check_navigation_unread(dynamics, unread)
@@ -42,6 +45,7 @@ func _run() -> void:
 	await process_frame
 	var window = app.find_child("SettingsWindow",true,false)
 	check(window != null,"settings navigation opens unified window")
+	check(window == prewarmed,"settings navigation reuses the prewarmed window")
 	check(window.get_node_or_null("%LogoutButton") is Button,"settings provides logout action")
 	if window.get_node_or_null("%LogoutButton") == null:
 		app.queue_free()
@@ -136,3 +140,27 @@ func _check_navigation_unread(dynamics: Button, unread: Control) -> void:
 
 func _wait_editable(input: TextEdit, deadline: int) -> void:
 	while not input.editable and Time.get_ticks_msec()<deadline: await process_frame
+
+func _wait_for_prewarmed_settings(app: Variant) -> Variant:
+	var deadline := Time.get_ticks_msec() + 5000
+	while Time.get_ticks_msec() < deadline:
+		var window = app.find_child("SettingsWindow",true,false)
+		if window != null and window.is_data_settled(): return window
+		await process_frame
+	return null
+
+func _check_settings_prewarm(window: Variant) -> void:
+	check(window != null and not window.visible,"settings window is prewarmed hidden during login")
+	check(window != null and window.is_data_settled(),"settings data settle before the user opens the window")
+	check(window != null and window.get_node("%ModelPage").get_node("%Cards").get_child_count() > 0,"model cards are built during login prewarm")
+
+func _check_settings_clean_reopen(app: Variant, window: Variant) -> void:
+	app.get_node("%NavSettings").pressed.emit()
+	await process_frame
+	check(window.visible,"prewarmed settings opens")
+	window.close_requested.emit()
+	await process_frame
+	check(not window.visible and is_instance_valid(window),"clean close keeps the settings cache")
+	app.get_node("%NavSettings").pressed.emit()
+	await process_frame
+	check(window.visible and app.find_children("SettingsWindow","Window",true,false).size() == 1,"reopen reuses the settled settings window")

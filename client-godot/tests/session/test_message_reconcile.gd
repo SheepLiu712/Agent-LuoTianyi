@@ -18,6 +18,19 @@ class QuietMedia extends Node:
 	func play_reply(_id: String) -> void: pass
 
 
+class FakeHistory extends Node:
+	signal page_received(messages: Array[Dictionary])
+	signal older_page(messages: Array[Dictionary])
+	signal restore_page(messages: Array[Dictionary])
+	signal boundary_ready
+	signal state_changed(state: Dictionary)
+	func get_state() -> Dictionary: return {"storage":"closed", "count":0, "incomplete":false}
+	func start(_session: Dictionary) -> void: pass
+	func stop() -> void: pass
+	func load_older() -> void: pass
+	func pause_catchup(_paused: bool) -> void: pass
+
+
 func _initialize() -> void:
 	run.call_deferred()
 
@@ -32,6 +45,11 @@ func run() -> void:
 	_case_local_state_kept(session)
 	await _case_restore_keeps_pending_local(session)
 	_case_idle_ignores(session)
+	_case_latest_page_keeps_window_order()
+	_case_latest_page_anchors_unknown_rows()
+	_case_latest_page_appends_newer_window()
+	_case_latest_page_prepends_before_local_only()
+	_case_page_received_uses_in_place_merge()
 	session.queue_free()
 	await process_frame
 	print("Message reconcile: ", "PASS" if failures.is_empty() else "FAIL")
@@ -100,6 +118,94 @@ func _case_idle_ignores(session: Node) -> void:
 	check(session.get_messages().size() == before, "reconcile is ignored outside a live session")
 
 
+## 重新登录时，首屏最新页只更新已有 UUID 的时间，不把缓存窗口重新排序。
+## 回归：本地发送记录（图片 + 文字）曾被整页前插顶到最新位置。
+func _case_latest_page_keeps_window_order() -> void:
+	var session := _session()
+	var window := [
+		_message("s-old", "user", "更早的服务器消息"),
+		_message("s-img", "user", ""),
+		_message("s-text", "user", "给你看我的电脑壁纸哦"),
+		_local("local-img", "image", ""),
+		_local("local-text", "text", "给你看我的电脑壁纸哦"),
+		_message("s-new", "assistant", "服务器最新回复"),
+	]
+	session._restore_page(_typed(window))
+	session._latest_page(_typed([
+		_message("s-old", "user", "更早的服务器消息"),
+		_message("s-img", "user", ""),
+		_message("s-text", "user", "给你看我的电脑壁纸哦"),
+		_message("s-new", "assistant", "服务器最新回复"),
+	]))
+	check(_ids(session) == ["s-old", "s-img", "s-text", "local-img", "local-text", "s-new"], "latest page merges in place instead of prepending")
+	check(_find(session, "local-text").status == "sent" and _find(session, "local-text").text == "给你看我的电脑壁纸哦", "latest page keeps the local send record untouched")
+	session.queue_free()
+
+
+## 缓存窗口缺了几条时，未知行插到下一个已知锚点之前，仍然贴着库里的顺序。
+func _case_latest_page_anchors_unknown_rows() -> void:
+	var session := _session()
+	session._restore_page(_typed([
+		_message("s1", "user", "一"),
+		_message("s3", "assistant", "三"),
+	]))
+	session._latest_page(_typed([
+		_message("s1", "user", "一"),
+		_message("s2", "user", "二"),
+		_message("s3", "assistant", "三"),
+	]))
+	check(_ids(session) == ["s1", "s2", "s3"], "unknown rows land before the next cached anchor")
+	session.queue_free()
+
+
+## 缓存里只有更旧的服务器窗口时，最新页接在窗口之后，而不是压到最前面。
+func _case_latest_page_appends_newer_window() -> void:
+	var session := _session()
+	session._restore_page(_typed([
+		_message("old-1", "user", "旧一"),
+		_message("old-2", "assistant", "旧二"),
+	]))
+	session._latest_page(_typed([
+		_message("new-1", "user", "新一"),
+		_message("new-2", "assistant", "新二"),
+	]))
+	check(_ids(session) == ["old-1", "old-2", "new-1", "new-2"], "a newer page follows the cached window")
+	session.queue_free()
+
+
+## 缓存里只有本机待发记录时，服务器历史仍排在本机记录之前。
+func _case_latest_page_prepends_before_local_only() -> void:
+	var session := _session()
+	session._restore_page(_typed([_local("local-1", "text", "本机记录")]))
+	session._latest_page(_typed([
+		_message("h1", "assistant", "历史一"),
+		_message("h2", "user", "历史二"),
+	]))
+	check(_ids(session) == ["h1", "h2", "local-1"], "history still precedes local-only records")
+	session.queue_free()
+
+
+## 接线回归：page_received 必须走原位合并，older_page 仍贴头。
+func _case_page_received_uses_in_place_merge() -> void:
+	var history := FakeHistory.new()
+	var session = Session.new(Transport.new(), null, QuietMedia.new(), history)
+	root.add_child(session)
+	session._connection_changed({"phase": "ready", "code": ""})
+	session._restore_page(_typed([
+		_message("s1", "user", "一"),
+		_local("local-1", "text", "本机"),
+		_message("s2", "assistant", "二"),
+	]))
+	history.page_received.emit(_typed([
+		_message("s1", "user", "一"),
+		_message("s2", "assistant", "二"),
+	]))
+	check(_ids(session) == ["s1", "local-1", "s2"], "page_received merges in place")
+	history.older_page.emit(_typed([_message("h0", "user", "更早")]))
+	check(_ids(session) == ["h0", "s1", "local-1", "s2"], "older_page is still prepended")
+	session.queue_free()
+
+
 ## 等待历史期间已产生的本地消息不能因为 restore_page 替换视图而消失。
 func _case_restore_keeps_pending_local(session: Node) -> void:
 	var local := _message("local-pending", "user", "发送中的消息")
@@ -124,6 +230,20 @@ func _message(id: String, role: String, text: String) -> Dictionary:
 		"id": id, "role": role, "type": "text", "text": text,
 		"timestamp": 1700000000, "status": "received", "code": "",
 	}
+
+
+func _local(id: String, kind: String, text: String) -> Dictionary:
+	return {
+		"id": id, "id_source": "local", "role": "user", "type": kind, "text": text,
+		"timestamp": 1700000000, "status": "sent", "code": "",
+	}
+
+
+func _session() -> Node:
+	var session = Session.new(Transport.new(), null, QuietMedia.new())
+	root.add_child(session)
+	session._connection_changed({"phase": "ready", "code": ""})
+	return session
 
 
 func _typed(rows: Array) -> Array[Dictionary]:

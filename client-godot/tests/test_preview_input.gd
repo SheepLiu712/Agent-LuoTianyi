@@ -49,14 +49,15 @@ func run() -> void:
 		editor.text = " \n "
 		await key(false)
 		check(not editor.text.is_empty(), "blank input retained")
-		var scenarios: OptionButton = scene.get_node("%Scenarios")
-		for index in [1, 2, 3, 4, 0]:
-			scenarios.select(index)
-			scenarios.item_selected.emit(index)
+		var scenarios = scene.get_node("%Scenarios")
+		for id in ["empty", "disconnected", "error", "thinking", "conversation"]:
+			check(scenarios.set_selected_id(id), "scenario dropdown accepts " + id)
+			scenarios.activated.emit(id)
 			await process_frame
 			await process_frame
-			check(scene.get_node("%Empty").visible == (index in [2, 3]), "empty state visibility for scenario " + str(index))
-			if index in [2, 3]:
+			check(scene.get_node("%Empty").visible == (id in ["disconnected", "error"]), "empty state visibility for scenario " + id)
+			check(scenarios.get_selected_id() == id, "scenario dropdown reflects " + id)
+			if id in ["disconnected", "error"]:
 				editor.text = "失败时保留草稿"
 				await key(false)
 				check(editor.text == "失败时保留草稿", "unavailable scenario retains draft")

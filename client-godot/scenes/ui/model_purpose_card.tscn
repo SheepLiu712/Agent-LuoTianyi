@@ -5,7 +5,7 @@
 [node name="ModelPurposeCard" type="PanelContainer"]
 size_flags_horizontal = 3
 theme = ExtResource("theme")
-theme_type_variation = &"ModelCard"
+theme_type_variation = &"SettingsCard"
 script = ExtResource("script")
 [node name="Column" type="VBoxContainer" parent="."]
 theme_override_constants/separation = 12
@@ -14,6 +14,7 @@ theme_override_constants/separation = 8
 [node name="PurposeTitle" type="Label" parent="Column/Header"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
+theme_type_variation = &"SettingsCardTitle"
 text = "模型用途"
 [node name="Enabled" type="CheckBox" parent="Column/Header"]
 unique_name_in_owner = true
@@ -21,6 +22,7 @@ text = "使用自己的 API Key"
 [node name="Requirements" type="Label" parent="Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
+theme_type_variation = &"SettingsHelpText"
 [node name="Description" type="Label" parent="Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
@@ -29,24 +31,21 @@ unique_name_in_owner = true
 visible = false
 theme_override_constants/separation = 8
 [node name="ProviderLabel" type="Label" parent="Column/Fields"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+theme_type_variation = &"SettingsFieldLabel"
 text = "服务商名称"
 
 [node name="provider" type="LineEdit" parent="Column/Fields"]
 unique_name_in_owner = true
 
 [node name="BaseUrlLabel" type="Label" parent="Column/Fields"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+theme_type_variation = &"SettingsFieldLabel"
 text = "Base URL（例如 https://example.com/v1）"
 
 [node name="base_url" type="LineEdit" parent="Column/Fields"]
 unique_name_in_owner = true
 
 [node name="ApiKeyLabel" type="Label" parent="Column/Fields"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+theme_type_variation = &"SettingsFieldLabel"
 text = "API Key"
 
 [node name="api_key" type="LineEdit" parent="Column/Fields"]
@@ -54,8 +53,7 @@ unique_name_in_owner = true
 secret = true
 
 [node name="ModelLabel" type="Label" parent="Column/Fields"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+theme_type_variation = &"SettingsFieldLabel"
 text = "模型名称"
 
 [node name="ModelName" type="LineEdit" parent="Column/Fields"]
@@ -70,8 +68,7 @@ unique_name_in_owner = true
 text = "声明支持 thinking"
 
 [node name="ParamsLabel" type="Label" parent="Column/Fields"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
+theme_type_variation = &"SettingsFieldLabel"
 text = "高级 JSON 参数（非流式）"
 
 [node name="Params" type="TextEdit" parent="Column/Fields"]
@@ -80,6 +77,7 @@ custom_minimum_size = Vector2(0, 120)
 wrap_mode = 1
 
 [node name="CopyRow" type="HBoxContainer" parent="Column/Fields"]
+theme_override_constants/separation = 8
 
 [node name="CopySlot" parent="Column/Fields/CopyRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
@@ -96,3 +94,4 @@ text = "手动测试当前配置"
 [node name="CardStatus" type="Label" parent="Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
+theme_type_variation = &"SettingsHelpText"

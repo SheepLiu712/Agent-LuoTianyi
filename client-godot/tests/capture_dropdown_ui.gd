@@ -16,6 +16,19 @@ func click(point: Vector2) -> void:
 		root.push_input(event,true)
 		await process_frame
 	await create_timer(.15).timeout
+func double_click(point: Vector2) -> void:
+	for press in 2:
+		for down in [true,false]:
+			var event := InputEventMouseButton.new()
+			event.button_index = MOUSE_BUTTON_LEFT
+			event.pressed = down
+			event.double_click = press == 1
+			event.position = point
+			event.global_position = point
+			root.push_input(event,true)
+			await process_frame
+		await process_frame
+	await create_timer(.12).timeout
 func _run() -> void:
 	if DisplayServer.get_name() == "headless":
 		print("Dropdown visual checks require a GPU window")
@@ -33,6 +46,18 @@ func _run() -> void:
 		await click(Vector2(70,50))
 		check(menu.is_menu_open() == expected, "repeated trigger clicks alternate open and closed")
 	check(menu.get_selected_id() == "a", "trigger toggling never activates an item")
+	await click(Vector2(70,50))
+	check(menu.is_menu_open(), "menu reopens before the double-click check")
+	await double_click(Vector2(70,50))
+	check(not menu.is_menu_open(), "double click closes the menu without reopening")
+	check(not menu.button_pressed, "double click clears the pressed trigger state")
+	check(menu.has_theme_stylebox_override("focus"), "pointer close suppresses the residual focus ring")
+	var away := InputEventMouseMotion.new()
+	away.position = Vector2(480,300)
+	root.push_input(away,true)
+	await process_frame
+	await RenderingServer.frame_post_draw
+	check(root.get_texture().get_image().save_png("res://artifacts/agentluo-011-dropdown-closed.png") == OK, "closed trigger screenshot saved")
 	await click(Vector2(70,50))
 	await click(Vector2(480,300))
 	check(not menu.is_menu_open(), "outside click closes menu")

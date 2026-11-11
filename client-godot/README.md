@@ -1,12 +1,14 @@
 # AgentLuo · Godot Windows 客户端
 
-当前源码版本：`0.1.6.2`（以 `release.json` 为准）。这是独立 Windows 客户端工程；现行行为与阅读入口见 [客户端说明](docs/README.md)，开发过程记录见 [WORKLOG](docs/WORKLOG.md)，最新整改验证见 [PR #186 整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。尚未替换旧端，不读取旧端凭据。
+当前源码版本：`0.1.7.4`（以 `release.json` 为准）。这是独立 Windows 客户端工程；现行行为与阅读入口见 [客户端说明](docs/README.md)，最新整改验证见 [PR #186 整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。尚未替换旧端，不读取旧端凭据。
 
 现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；脚本清单与覆盖迁移以该入口和测试契约为准。
 
 ## 构建
 
 使用 Godot **4.7.1 standard / Windows x64**。通过 Godot 的 Manage Export Templates 安装同版本模板，或将锁定模板包中的 Windows x64 文件和 version.txt 放入 `%APPDATA%/Godot/export_templates/4.7.1.stable/`。依赖来源和 SHA-256 见 `dependencies.lock.json`。
+
+目录版、ZIP 与单文件自解压 EXE 的完整规范、版本字段、图标要求和发布验证见 [打包规范](docs/packaging.md)。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File client-godot/scripts/build.ps1
@@ -98,7 +100,7 @@ release.json 是版本单一来源，界面/诊断/目录/ZIP 使用同一版本
 
 所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括确认按钮和24段语音波形；登录后桌面窗框与三键使用系统原生实现，未登录采用透明窗口与Godot白色圆角面板。左侧仅聊天、动态、设置、日志四个居中入口；退出登录位于设置底部左侧，右侧关闭/保存全部修改，失败项留稿。退出应用使用主窗系统关闭按钮，统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
 
-现行窗口行为见 [架构与界面说明](docs/architecture.md)，验证入口见 [测试说明](docs/testing.md)。桌面恢复系统标题栏、拖拽/缩放；内部下拉使用 Godot 圆角控件，正文保持清晰。系统文件选择器继续使用原生控件。
+现行窗口行为见 [客户端说明](docs/README.md)，验证入口见 [测试说明](docs/testing.md)。桌面恢复系统标题栏、拖拽/缩放；内部下拉使用 Godot 圆角控件，正文保持清晰。系统文件选择器继续使用原生控件。
 
 原生鼠标/键盘验收（会操作其创建的测试窗口）：
 
@@ -111,22 +113,22 @@ $env:GODOT_TEST_PYTHON = 'D:\anaconda\python.exe'
 
 设置最小尺寸的可见滚动验收已并入`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`：验证720×640及四档内容缩放下表单底部可滚动到达且不覆盖固定操作栏。headless分支只检查状态，不能代替该GPU布局验收。
 
-历史反馈已体现在 [现行行为说明](docs/architecture.md) 与测试中。桌面使用系统窗框，内部下拉为嵌入式 Godot 圆角控件；缓存与导入页提供 StorageService 占用圆环、按用户天数清理与 Python 媒体导入，未知容量显示“--%”。PNG/JPEG/WebP/BMP 文件及 Ctrl+V 已接入正式图片预览/发送，未提交附件仅本次运行保留。
+历史反馈已体现在现行行为说明与测试中。桌面使用系统窗框，内部下拉为嵌入式 Godot 圆角控件；缓存与导入页提供 StorageService 占用圆环、按用户天数清理与 Python 媒体导入，未知容量显示“--%”。PNG/JPEG/WebP/BMP 文件及 Ctrl+V 已接入正式图片预览/发送，未提交附件仅本次运行保留。
 
 GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及既有本地API测试依赖；Pillow仅用于测试，不进入客户端运行依赖。磁盘查询的Windows实现已实测，移动端需复用StorageService接口并在目标构建注册容量适配，当前不宣称完成Android/iOS移植。
 
-界面精简与状态修正见 [现行行为说明](docs/architecture.md)。读取/保存中的设置输入框保持浅色只读；API/JSON/thinking开关采用浅蓝选中底、深色文字和深蓝焦点。可运行`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`复验延迟/失败加载与100/125/150/200%内容缩放，证据保存在`artifacts/ui-refinement/`。
+界面精简与状态修正见 [客户端说明](docs/README.md)。读取/保存中的设置输入框保持浅色只读；API/JSON/thinking开关采用浅蓝选中底、深色文字和深蓝焦点。可运行`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`复验延迟/失败加载与100/125/150/200%内容缩放，证据保存在`artifacts/ui-refinement/`。
 
-登录与气泡的当前说明见 [架构与界面说明](docs/architecture.md)，实际验收范围见 [测试说明](docs/testing.md)。登录 GPU 验收使用 `run_feature_tests.py --godot <exe> --script res://tests/ui/test_login_presentation.gd --gpu`；气泡使用 `--script res://tests/ui/test_bubble_sizing.gd` 与 `test_image_bubble_sizing.gd`，可独立 headless/GPU 运行。
+登录与气泡的当前说明见 [客户端说明](docs/README.md)，实际验收范围见 [测试说明](docs/testing.md)。登录 GPU 验收使用 `run_feature_tests.py --godot <exe> --script res://tests/ui/test_login_presentation.gd --gpu`；气泡使用 `--script res://tests/ui/test_bubble_sizing.gd` 与 `test_image_bubble_sizing.gd`，可独立 headless/GPU 运行。
 
 ## 聊天审阅图落地
 
-聊天页按已审阅的 HTML 方案落地到真实 Godot 场景：80px 导航栏，聊天/动态/设置为 64×64 的方形按钮，图标在上、文字在下；移除导航栏上下头像。内容区 16px 外边距及可拖动分栏，角色区取消底栏与常驻手势提示，重置位置改为右下角悬浮按钮。输入区上方保留图片和音量图标，移除停止语音按钮；音量点击展开滑条，48px 起始输入框右侧是方形发送图标，快捷键提示在下方靠右。正常发送、排队与发送中不展示状态或保留占位；失败与无法确认送达时保留异常提醒，避免重复发送。角色顶部卡片只显示最新一条未读动态，评论未读不触发；读取卡片不标记已读。默认展开画布为 1280×800，保留既有窗口几何与分栏比例设置。角色仍是实际 Live2D；原型“静态占位”说明不进入产品。扁平默认、清透独立，继续复用原 SVG/emoji 与聊天头像；不增加清空输入或业务功能。真实节点截图与定向回归入口见 `tests/README.md` 的聊天审阅图专项验收。当前源码版本为 0.1.6.2；0.1.6.2 包按该源码构建。
+聊天页按已审阅的 HTML 方案落地到真实 Godot 场景：80px 导航栏，聊天/动态/设置为 64×64 的方形按钮，图标在上、文字在下；移除导航栏上下头像。内容区 16px 外边距及可拖动分栏，角色区取消底栏与常驻手势提示，重置位置改为右下角悬浮按钮。输入区上方保留图片和音量图标，移除停止语音按钮；音量点击展开滑条，48px 起始输入框右侧是方形发送图标，快捷键提示在下方靠右。正常发送、排队与发送中不展示状态或保留占位；失败与无法确认送达时保留异常提醒，避免重复发送。角色顶部卡片只显示最新一条未读动态，评论未读不触发；读取卡片不标记已读。默认展开画布为 1280×800，保留既有窗口几何与分栏比例设置。角色仍是实际 Live2D；原型“静态占位”说明不进入产品。扁平默认、清透独立，继续复用原 SVG/emoji 与聊天头像；不增加清空输入或业务功能。真实节点截图与定向回归入口见 `tests/README.md` 的聊天审阅图专项验收。当前源码版本为 0.1.7.4；0.1.7.4 包按该源码构建。
 
-当前源码包含的后续审阅调整：动态列表删除“加载更多动态”，滚动到底加载下一页，失败后可继续滚动重试；点击卡片（包括当前选中项）自动刷新最新完整评论，刷新期间保留草稿和当前阅读位置，不自动清未读。发布弹层删除标题右侧关闭按钮，保留底部取消及草稿确认；聊天标题删除“此刻，慢慢来就好”。聊天、动态正文和各类输入框的文字选区统一为系统蓝底白字，扁平/清透一致。0.1.6.2 的 EXE/PCK/ZIP 已由构建脚本生成；历史包仅作回退。
+当前源码包含的后续审阅调整：动态列表删除“加载更多动态”，滚动到底加载下一页，失败后可继续滚动重试；点击卡片（包括当前选中项）自动刷新最新完整评论，刷新期间保留草稿和当前阅读位置，不自动清未读。发布弹层删除标题右侧关闭按钮，保留底部取消及草稿确认；聊天标题删除“此刻，慢慢来就好”。聊天、动态正文和各类输入框的文字选区统一为系统蓝底白字，扁平/清透一致。0.1.7.4 的 EXE/PCK/ZIP 已由构建脚本生成；历史包仅作回退。
 
 ## 平台隔离与扩展
 
-[现行架构与接口说明](docs/architecture.md) 说明当前行为边界。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
+[客户端说明](docs/README.md) 说明当前行为边界。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
 
-三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.1.6.2，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。0.1.6.2 包已生成；历史包仅作回退。验证边界见 [整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。
+三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.1.7.4，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。0.1.7.4 包已生成；历史包仅作回退。验证边界见 [整改记录](../archive/worklog/pr-186/review-186-4th-round.md)。

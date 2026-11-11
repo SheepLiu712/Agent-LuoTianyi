@@ -64,6 +64,7 @@ custom_minimum_size = Vector2(0,36)
 
 [node name="DiscardDialog" parent="." instance=ExtResource("decision")]
 unique_name_in_owner = true
+destructive_action = true
 title = "放弃这条动态？"
 dialog_text = "关闭后，当前尚未发布的内容不会保留。"
 ok_button_text = "放弃并关闭"

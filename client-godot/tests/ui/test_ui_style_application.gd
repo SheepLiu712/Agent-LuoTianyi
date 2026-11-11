@@ -97,7 +97,7 @@ func run() -> void:
 	await app._session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual","password":"synthetic","request_token":false}, false)
 	app.get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
-	check(settings.get_node("%StylePage").get_node("%UiStyleField").text == "清透", "reopened settings shows persisted choice")
+	check(settings.get_node("%StylePage").get_node("%UiStylePresets").get_selected_id() == "crystal", "reopened settings shows persisted choice")
 	check_icon(app._chat_view, "Send", "action_send", true)
 	check(app._services.ui_style.save_preferences("flat", "svg") == OK, "reset fixture to defaults")
 	app.queue_free()
@@ -132,7 +132,10 @@ func _check_avatar_border_hot_switch(app: Variant, crystal: bool) -> void:
 	if app._avatar == null:
 		check(false, "avatar exists for border check")
 		return
-	check(app._avatar.get_node("Border").visible == (not crystal), "avatar border follows style")
+	check(app._avatar.get_node_or_null("Border") == null, "avatar never draws a separate rounded border")
+	check(app._avatar.clip_contents and app._avatar.get_node("%Stage").clip_contents, "avatar keeps its content clipping")
+	var background: TextureRect = app._avatar.get_node("Stage/Background")
+	check(is_equal_approx(background.material.get_shader_parameter("corner_radius"), 12.0 if crystal else 8.0), "avatar background keeps its rounded corner mask")
 
 func _check_application_defaults_to_flat_svg(app: Variant) -> void:
 	check(app._services.ui_style.ui_style == "flat" and app._services.ui_style.icon_style == "svg", "application defaults to flat/svg")
@@ -177,7 +180,7 @@ func _check_style_combinations(app: Variant, settings: Variant, chat: Variant, d
 			_check_existing_message_changes_without_rebuilding_chat(panel, crystal)
 		check(chat.get_node("%Input").text == "切换风格后保留的草稿", "application preserves composer draft")
 		var label: String = pair[0] + "-" + pair[1]
-		var form_scroll: ScrollContainer = page.find_child("Scroll", true, false)
+		var form_scroll: ScrollContainer = settings.get_node("%Content")
 		await create_timer(.2).timeout
 		form_scroll.ensure_control_visible(page.get_node("%IconStylePresets"))
 		await process_frame

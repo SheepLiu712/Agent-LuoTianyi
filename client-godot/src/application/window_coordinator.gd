@@ -11,6 +11,8 @@ var _dynamics_factory: Callable
 var _chat_dirty: Callable
 var _logger: RefCounted
 var _windows: Dictionary = {}
+var _starters: Dictionary = {}
+var _started: Dictionary = {}
 var _action := ""
 var _waiting_save := false
 var _disposed := false
@@ -29,21 +31,52 @@ func _init(host: Control, dialog: Window, images: Node, geometry: Resource, sett
 
 func open(kind: String) -> void:
 	if _disposed or kind not in ["settings","dynamics"]: return
-	if is_instance_valid(_windows.get(kind)):
-		_windows[kind].open()
+	var existing = _windows.get(kind)
+	if is_instance_valid(existing) and existing.visible:
+		existing.open()
 		return
+	var window := _ensure_window(kind)
+	if not is_instance_valid(window): return
+	_start_window(kind)
+	if kind == "settings" and not window.is_data_settled(): await _wait_for_settings(window)
+	if not is_instance_valid(window): return
+	window.open()
+	_log("access", kind, "open", "success", 0)
+	_log("runtime", kind, "open", "success", 0)
+
+## 登录成功后预先构建设置窗并启动偏好加载；用户打开时只负责显示。
+func prewarm(kind: String) -> void:
+	if _disposed or kind != "settings": return
+	if is_instance_valid(_windows.get(kind)): return
+	_ensure_window(kind)
+
+func _ensure_window(kind: String) -> Window:
+	var existing = _windows.get(kind)
+	if is_instance_valid(existing): return existing
 	var built: Dictionary = (_settings_factory if kind == "settings" else _dynamics_factory).call()
 	var window: Window = built.window
 	_windows[kind] = window
+	_starters[kind] = built.get("start", Callable())
 	if kind == "settings": window.logout_requested.connect(func(): request_close("logout"))
 	_host.add_child(window)
 	window.get_node("%Chrome").configure(_geometry,kind)
 	window.tree_exited.connect(func():
-		if _windows.get(kind) == window: _windows.erase(kind))
-	window.open()
-	_log("access", kind, "open", "success", 0)
-	_log("runtime", kind, "open", "success", 0)
-	if built.start.is_valid(): built.start.call()
+		if _windows.get(kind) == window:
+			_windows.erase(kind)
+			_started.erase(kind)
+			_starters.erase(kind))
+	return window
+
+func _start_window(kind: String) -> void:
+	if _started.get(kind,false): return
+	_started[kind] = true
+	var start: Callable = _starters.get(kind,Callable())
+	if start.is_valid(): start.call()
+
+func _wait_for_settings(window: Window) -> void:
+	var deadline := Time.get_ticks_msec() + 20000
+	while is_instance_valid(window) and not window.is_data_settled() and Time.get_ticks_msec() < deadline:
+		await _host.get_tree().process_frame
 
 ## 打开或复用动态窗口，并让窗口选中角色卡片对应的动态。
 func open_post(post: Dictionary) -> bool:
@@ -99,6 +132,8 @@ func close_all() -> void:
 			window.hide()
 			window.queue_free()
 	_windows.clear()
+	_starters.clear()
+	_started.clear()
 
 func _return_dialog() -> void:
 	_dialog.hide()

@@ -10,6 +10,7 @@ custom_minimum_size = Vector2(140, 40)
 alignment = 0
 clip_text = true
 theme = ExtResource("2_theme")
+theme_type_variation = &"DropdownTrigger"
 script = ExtResource("1_script")
 
 window_system = ExtResource("isolation_window_system")

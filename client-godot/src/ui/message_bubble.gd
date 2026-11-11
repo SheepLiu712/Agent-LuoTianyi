@@ -6,6 +6,7 @@ const USER_ICON := preload("res://assets/ui/user_icon.png")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
 const AudioRow = preload("res://scenes/ui/message_audio.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const IMAGE_PREVIEW_MAX := 250.0
 ## 送达结果不确定的消息不呈现任何气泡；列表层已先过滤，这里是兜底。
 const HIDDEN_STATUSES: Array[String] = ["uncertain", "superseded"]
 @export var own_style: StyleBoxFlat
@@ -131,16 +132,30 @@ func _resize_bubble() -> void:
 	var has_picture := _is_image or _picture.visible
 	var width := minf(maximum, ceilf(natural + padding))
 	if has_picture and _original_size.x > 0 and _original_size.y > 0:
-		var factor := minf(1, maxf(1,maximum-padding) / _original_size.x)
-		var preview_size := Vector2(_original_size) * factor
-		_history_picture.custom_minimum_size = preview_size
-		_picture.custom_minimum_size = preview_size
+		var preview_size := _fixed_preview_size()
+		var available := maxf(1.0, maximum - padding)
+		if preview_size.x > available:
+			preview_size *= available / preview_size.x
+		_apply_preview_size(preview_size)
 		width = minf(maximum,maxf(width,preview_size.x+padding))
 	_text.visible = not _text.text.is_empty()
 	_bubble.visible = _text.visible or has_picture
 	_bubble.size_flags_horizontal = Control.SIZE_SHRINK_END if _own else Control.SIZE_SHRINK_BEGIN
 	_bubble.custom_minimum_size.x = width
 	_sync_height()
+
+## 缩略图尺寸只由原图决定：严格限制在 250×250 内，小图保持原像素且永不放大。
+func _fixed_preview_size() -> Vector2:
+	if _original_size.x <= 0 or _original_size.y <= 0:
+		return Vector2.ZERO
+	var scale := minf(1.0, minf(
+		IMAGE_PREVIEW_MAX / float(_original_size.x),
+		IMAGE_PREVIEW_MAX / float(_original_size.y)))
+	return Vector2(_original_size) * scale
+
+func _apply_preview_size(value: Vector2) -> void:
+	_history_picture.custom_minimum_size = value
+	_picture.custom_minimum_size = value
 
 func _queue_layout() -> void:
 	if not is_node_ready() or _layout_pending: return
@@ -185,16 +200,34 @@ func set_audio_state(state: Dictionary) -> void:
 func set_image_state(state: Dictionary) -> void:
 	if not _is_image:
 		return
+	var next_size := _resolved_original_size(state)
+	if _image_state_unchanged(state,next_size):
+		return
+	_apply_image_state(state,next_size)
+
+func _resolved_original_size(state: Dictionary) -> Vector2i:
+	var size: Vector2i = state.get("original_size",Vector2i.ZERO)
+	if size == Vector2i.ZERO and state.texture != null:
+		size = Vector2i(state.texture.get_size())
+	return size
+
+## 可见集合每次变化都会重放同一状态；没有实际变化时不再触发一次重排。
+func _image_state_unchanged(state: Dictionary, next_size: Vector2i) -> bool:
+	return _image_status == state.status and _history_picture.texture == state.texture and _original_size == next_size
+
+func _apply_image_state(state: Dictionary, next_size: Vector2i) -> void:
 	var previous_status := _image_status
 	_image_status = state.status
 	_history_picture.texture = state.texture
-	_original_size = state.get("original_size",Vector2i.ZERO)
-	if _original_size == Vector2i.ZERO and state.texture != null:
-		_original_size = Vector2i(state.texture.get_size())
+	_original_size = next_size
 	_history_picture.visible = state.status == "ready"
 	_image_button.visible = state.status != "ready"
 	_image_button.disabled = state.status in ["idle","loading"]
 	_image_button.text = {"idle":"加载图片…","loading":"正在下载图片…","ready":"打开原图","error":"重试"}.get(state.status,"")
 	if state.status == "error" and previous_status != "error":
 		ErrorDialog.present(self, "图片未加载，点击重试。")
+	if state.status == "ready":
+		var preview_size := _fixed_preview_size()
+		if preview_size != Vector2.ZERO:
+			_apply_preview_size(preview_size)
 	_queue_layout()

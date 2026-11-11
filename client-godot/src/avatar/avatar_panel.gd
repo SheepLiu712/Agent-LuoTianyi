@@ -43,10 +43,6 @@ func _apply_ui_style() -> void:
 	heading.bg_color = Color(1, 1, 1, 0.82 if _ui_style.is_crystal() else 0.94)
 	for reset_style in _reset_styles:
 		_ui_style.apply_surface_style(reset_style)
-	var border := get_node("Border").get_theme_stylebox("panel") as StyleBoxFlat
-	_ui_style.apply_surface_style(border)
-	border.bg_color = Color(0, 0, 0, 0)
-	get_node("Border").visible = not _ui_style.is_crystal()
 	get_node("Stage/Background").material.set_shader_parameter("corner_radius", 12.0 if _ui_style.is_crystal() else 8.0)
 
 

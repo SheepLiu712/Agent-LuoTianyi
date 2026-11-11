@@ -79,6 +79,7 @@ func setup(controller: Node,post: Dictionary) -> void:
 
 func _ready() -> void:
 	set_process(false)
+	_apply_ui_style()
 	if _controller == null: return
 	_initialize()
 

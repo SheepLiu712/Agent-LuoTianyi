@@ -12,7 +12,7 @@ shader = ExtResource("3_shader")
 [node name="MessageBubble" type="VBoxContainer"]
 size_flags_horizontal = 3
 theme = ExtResource("2_theme")
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 script = ExtResource("1_script")
 
 [node name="TimeMarker" type="CenterContainer" parent="."]
@@ -34,7 +34,7 @@ horizontal_alignment = 1
 
 [node name="Row" type="HBoxContainer" parent="."]
 unique_name_in_owner = true
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="System" type="Label" parent="Row"]
 unique_name_in_owner = true
@@ -61,7 +61,7 @@ mouse_filter = 2
 [node name="MessageColumn" type="VBoxContainer" parent="Row/Body"]
 unique_name_in_owner = true
 anchor_right = 1.0
-theme_override_constants/separation = 5
+theme_override_constants/separation = 4
 mouse_filter = 2
 
 [node name="Bubble" type="PanelContainer" parent="Row/Body/MessageColumn"]

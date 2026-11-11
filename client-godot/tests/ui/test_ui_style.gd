@@ -205,6 +205,7 @@ func _check_style_combinations(style: Variant, notifications: Array, own: Varian
 		check_bubble(fresh, pair[0])
 		_check_chat_surface_follows_style(chat, pair[0])
 		_check_dynamic_card_shadow(style, pair[0])
+		_check_settings_surfaces(style, pair[0])
 		fresh.queue_free()
 		check(chat.get_node("%Input").text == "未发送草稿", "switching preserves chat draft")
 		var suffix: String = "_emoji.png" if pair[1] == "emoji" else ".svg"
@@ -224,3 +225,30 @@ func _check_style_combinations(style: Variant, notifications: Array, own: Varian
 		var restored := Style.new()
 		restored.configure(Store.new(path))
 		_check_restart_restores_both_preferences(restored, pair)
+
+
+func _check_settings_surfaces(style: Variant, style_mode: String) -> void:
+	_check_settings_card(style, style_mode)
+	_check_settings_dialog(style, style_mode)
+	_check_settings_toast(style, style_mode)
+
+
+func _check_settings_card(style: Variant, style_mode: String) -> void:
+	var card := style._theme.get_stylebox("panel", "SettingsCard") as StyleBoxFlat
+	check(card != null and card.corner_radius_top_left == (12 if style_mode == "crystal" else 8), "settings card radius follows appearance mode")
+	check(card != null and card.shadow_size == (12 if style_mode == "crystal" else 0), "settings card elevation follows appearance mode")
+	check(card != null and card.content_margin_left == 16 and card.content_margin_top == 16, "settings card keeps its 16px padding")
+
+
+func _check_settings_dialog(style: Variant, style_mode: String) -> void:
+	var dialog := style._theme.get_stylebox("panel", "SettingsDialogSurface") as StyleBoxFlat
+	check(dialog != null and dialog.corner_radius_top_left == (12 if style_mode == "crystal" else 8), "settings dialog radius follows appearance mode")
+	check(dialog != null and dialog.shadow_size > 0, "settings dialog keeps elevation in both modes")
+	check(dialog != null and dialog.border_width_left == 0 and dialog.border_width_top == 0 and dialog.border_width_right == 0 and dialog.border_width_bottom == 0, "settings dialog has no outer border")
+
+
+func _check_settings_toast(style: Variant, style_mode: String) -> void:
+	var toast := style._theme.get_stylebox("panel", "SettingsToast") as StyleBoxFlat
+	check(toast != null and toast.corner_radius_top_left == (12 if style_mode == "crystal" else 8), "settings toast follows surface radius")
+	check(toast != null and toast.content_margin_left == 16 and toast.content_margin_top == 8, "settings toast uses the 16x8 spacing step")
+	check(toast != null and toast.border_width_left == 1 and toast.border_width_top == 1, "settings toast uses the shared one-pixel border")

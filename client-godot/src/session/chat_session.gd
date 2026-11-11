@@ -68,7 +68,7 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 	_history = history
 	if history != null:
 		add_child(history)
-		history.page_received.connect(_history_page)
+		history.page_received.connect(_latest_page)
 		history.older_page.connect(_history_page)
 		history.restore_page.connect(_restore_page)
 		# 旧夹具可能还没有对账信号；缺了就不接，避免整个 _init 中断。
@@ -632,6 +632,42 @@ func _history_page(messages: Array[Dictionary]) -> void:
 	_messages = prepend + _messages
 	_request_missing_audio(messages)
 	changed.emit()
+
+
+## 首屏最新页并入缓存窗口：库里的 timeline_order 已经是权威顺序，已存在的 UUID
+## 只原位更新时间，未知行贴到页内下一个锚点之前。整页前插会把更新的本地发送记录和
+## 后续回复挤到这一页之前，重启后看起来就像旧消息一直停在最新位置。
+func _latest_page(messages: Array[Dictionary]) -> void:
+	var pending: Array[Dictionary] = []
+	for message in messages:
+		if not _by_id.has(message.id):
+			pending.append(message)
+			continue
+		var existing: Dictionary = _by_id[message.id]
+		existing.timestamp = message.timestamp
+		_insert_pending(pending, _message_index(str(message.id)))
+		pending.clear()
+	_insert_pending(pending, _latest_tail())
+	_request_missing_audio(messages)
+	changed.emit()
+
+
+## 页内未知的连续一段贴在下一个已知锚点之前；没有后续锚点时落到窗口尾部。
+func _insert_pending(pending: Array[Dictionary], index: int) -> void:
+	var cursor := maxi(index, 0)
+	for message in pending:
+		_by_id[message.id] = message
+		_messages.insert(cursor, message)
+		cursor += 1
+
+
+## 无锚点时：窗口里已有服务器消息，说明最新页排在缓存之后；只有本机记录
+## （首屏跳过或历史失败）时，服务器历史仍在本机记录之前。
+func _latest_tail() -> int:
+	for message in _messages:
+		if str(message.get("id_source", "server")) != "local":
+			return _messages.size()
+	return 0
 
 
 ## 增量迁移的触发点：只针对刚进入视野的这一页里、属于对方的消息。

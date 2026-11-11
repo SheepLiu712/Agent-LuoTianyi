@@ -9,13 +9,13 @@ const SCENES := {
 		"root":"ProfilePage","type":"Control","setup":"set_avatar_source","unique":["Preview","Account","Hint","PickButton","ResetButton","Result","FileDialog"]
 	},
 	"res://scenes/ui/preferences_page.tscn": {
-		"root":"PreferencesPage","type":"Control","setup":"setup","unique":["RelationshipField","RelationshipPresets","SpeakingStyleField","SpeakingStylePresets","PersonalityField","CustomContextField","Toast"]
+		"root":"PreferencesPage","type":"Control","setup":"setup","unique":["RelationshipPresets","SpeakingStylePresets","PersonalityField","CustomContextField","Toast"]
 	},
 	"res://scenes/ui/toast_overlay.tscn": {
 		"root":"Toast","type":"Control","setup":"","unique":["Panel","Text"]
 	},
 	"res://scenes/ui/model_page.tscn": {
-		"root":"ModelPage","type":"Control","setup":"setup","unique":["Scroll","Cards","RefreshTypes","Status","PlainDialog","TestDialog"]
+		"root":"ModelPage","type":"Control","setup":"setup","unique":["Cards","RefreshTypes","Status","PlainDialog","TestDialog"]
 	},
 	"res://scenes/ui/model_purpose_card.tscn": {
 		"root":"ModelPurposeCard","type":"PanelContainer","setup":"setup","unique":["PurposeTitle","Enabled","Requirements","Description","Fields","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","CardStatus"]
@@ -34,7 +34,7 @@ const SCENES := {
 		"root":"DropdownItem","type":"Button","setup":"setup","unique":[]
 	},
 	"res://scenes/ui/log_window.tscn": {
-		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","CategoryDropdown","LevelDropdown","ModuleDropdown","Search","Text","Follow","CopyButton","ExportButton","Status","Picker"]
+		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","CategoryDropdown","LevelDropdown","ModuleDropdown","OriginDropdown","Search","Text","Follow","CopyButton","ExportButton","Status","Picker"]
 	},
 	"res://scenes/ui/message_audio.tscn": {
 		"root":"MessageAudio","type":"VBoxContainer","setup":"","unique":["Row","Play","Wave","Time","Stop","Error"]
@@ -88,10 +88,10 @@ const PROPERTIES := {
 	"message_audio": {"%Stop":{"text":"停止"},"%Error":{"text":"语音未能保存"}},
 	"profile_page": {"%PickButton":{"text":"选择本地图片"},"%ResetButton":{"text":"恢复默认头像"},"%FileDialog":{"file_mode":FileDialog.FILE_MODE_OPEN_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
 }
-const DROPDOWNS := {"preferences_page":["RelationshipPresets","SpeakingStylePresets"],"model_purpose_card":["CopySlot"]}
+const DROPDOWNS := {"preferences_page":["RelationshipPresets","SpeakingStylePresets"],"model_purpose_card":["CopySlot"],"log_window":["RunsDropdown","CategoryDropdown","LevelDropdown","ModuleDropdown","OriginDropdown"]}
 const INPUT_HINTS := {
 	"account_view":["Server","Username","Password","Confirm","Invite"],
-	"preferences_page":["RelationshipField","SpeakingStyleField","PersonalityField","CustomContextField"],
+	"preferences_page":["PersonalityField","CustomContextField"],
 	"publish_overlay":["PublishDraft"], "log_window":["Search"],
 	"chat_view":["Input"], "dynamic_detail":["CommentDraft","ReplyDraft"],
 }

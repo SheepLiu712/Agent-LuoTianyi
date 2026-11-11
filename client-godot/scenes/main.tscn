@@ -203,6 +203,7 @@ autowrap_mode = 3
 
 [node name="ExitDialog" parent="." unique_id=769923390 instance=ExtResource("Decision")]
 unique_name_in_owner = true
+destructive_action = true
 title = "放弃未保存的内容？"
 dialog_text = "退出将关闭所有窗口；尚未提交的内容不会保留。"
 ok_button_text = "放弃并继续"

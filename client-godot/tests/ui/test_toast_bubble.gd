@@ -26,6 +26,9 @@ func run() -> void:
 	await create_timer(0.4).timeout
 	check(is_equal_approx(panel.modulate.a, 1.0), "the fade-in settles at full opacity")
 	_check_shape(toast, panel)
+	if DisplayServer.get_name() != "headless":
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png("res://artifacts/toast-bubble.png")
 	toast.show_message("已保存", 0.05)
 	await create_timer(0.9).timeout
 	check(not toast.visible, "the toast fades out on its own")
@@ -47,6 +50,10 @@ func _check_shape(toast: Control, panel: Control) -> void:
 	check(rect.size.x > 200.0 and rect.size.y < 60.0, "the bubble is a horizontal rectangle: " + str(rect.size))
 	check(absf(rect.get_center().x - frame.get_center().x) < 1.0, "the bubble is horizontally centred")
 	check(absf(rect.get_center().y - frame.get_center().y) < 1.0, "the bubble is vertically centred")
+	var style := panel.get_theme_stylebox("panel") as StyleBoxFlat
+	check(style != null and style.corner_radius_top_left == 8, "the bubble uses the shared 8px surface radius")
+	check(style != null and style.content_margin_left == 16 and style.content_margin_top == 8, "the bubble uses the 16x8 spacing step")
+	check(style != null and style.border_width_left == 1 and style.border_width_top == 1, "the bubble uses the shared one-pixel border")
 
 
 ## 换屏幕尺寸（窗口被拉大或压小）之后仍然要落在正中，不能跟着父级漂。

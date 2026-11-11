@@ -84,6 +84,7 @@ func _apply_ui_style() -> void:
 	_ui_style.apply_surface_style(_right_style)
 	get_node('Panel').add_theme_stylebox_override('panel', _panel_style)
 	_right.add_theme_stylebox_override("panel", _right_style)
+	_select_style()
 
 func setup(controller: Node,settings_store: Resource = null) -> void:
 	_controller = controller
@@ -92,6 +93,7 @@ func setup(controller: Node,settings_store: Resource = null) -> void:
 
 func _ready() -> void:
 	super._ready()
+	_apply_ui_style()
 	if _controller == null: return
 	_initialize()
 

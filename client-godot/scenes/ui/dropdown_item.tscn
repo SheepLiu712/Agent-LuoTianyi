@@ -4,7 +4,7 @@
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 
 [node name="DropdownItem" type="Button"]
-custom_minimum_size = Vector2(0, 42)
+custom_minimum_size = Vector2(0, 36)
 alignment = 0
 theme = ExtResource("2_theme")
 theme_type_variation = &"DropdownItem"
