@@ -1,16 +1,24 @@
 /**
- * Android 中文两端对齐（issue #313）的纯排版计算。
+ * Android 字符级两端对齐（issue #313）。
  *
- * 背景：React Native 的 `textAlign: 'justify'` 在 Android 上映射到
- * `Layout.JUSTIFICATION_MODE_INTER_WORD`，只拉伸普通空格。连续中文没有空格，
- * 右边缘不会贴齐。Android 15 的系统实现（`TextLine.justify` 的
- * `JUSTIFICATION_MODE_INTER_CHARACTER`）用字间距补齐：
+ * 本模块逐行复刻 AOSP `android-15.0.0_r1` 的字符级 justification：
  *
- *   letterSpacing = (justifyWidth - naturalWidth) / (clusterCount - 1)
+ * 1. `TextLine.isLineEndSpace(char)`（TextLine.java:1872-1877）
+ *    —— 行尾空格的精确字符集；
+ * 2. `Layout.getLineVisibleEnd(..., trailingSpaceAtLastLineIsVisible=true)`
+ *    （Layout.java:793-794、2753-2776）——段落末行保留行尾空格，
+ *    其余可见行裁掉行尾空格；
+ * 3. `TextLine.justify` 的 `JUSTIFICATION_MODE_LETTER_SPACING` 分支
+ *    （TextLine.java:293-329）——裁剪后测量、字形簇计数、
+ *    `(justifyWidth - width) / (lettersCount - 1)`，以及 0.03 阈值。
  *
- * 本模块复刻这套算法：先由 RN 的 `onTextLayout` 取得自然折行和每行自然宽度，
- * 再按字符间隙均分剩余宽度，交给 RN `Text` 的 `letterSpacing` 渲染。
- * 这里只做纯计算，不依赖 React Native，便于单测覆盖边界。
+ * 平台差异：AOSP 在 `mAddedLetterSpacingInPx > 0.03` 时关闭连字
+ * （`"liga" off, "cliga" off`）并重新测量；RN `Text` 不暴露 OpenType
+ * feature 设置，无法执行该重测。中文正文没有连字，该差异只影响含连字的
+ * 拉丁文本；`justifyLine` 用 `ligatureDisabled` 如实标记该分支已命中。
+ *
+ * 本模块只做纯计算，不依赖 React Native；宽度与字号由调用方换算成
+ * 与 AOSP 一致的像素单位传入。
  */
 
 export interface JustifyRun {
@@ -20,33 +28,93 @@ export interface JustifyRun {
 
 export interface MeasuredLineLike {
   text: string;
-  width?: number;
 }
 
 export interface LineDescriptor {
-  /** 该显示行的 runs 与文本；折行处的空格是原文的一部分，参与字间距分配。 */
+  /** 该显示行的 runs（已按可见行尾裁剪）。 */
   runs: JustifyRun[];
+  /** 该显示行的可见文本；末行按 AOSP 保留行尾空格。 */
   text: string;
+  /** 是否为该段落的最后一个显示行。 */
   isLast: boolean;
 }
 
-export interface JustifiedLine extends LineDescriptor {
-  /** 传给 RN Text 的 letterSpacing（dp）；已按 fontScale 折算。 */
-  letterSpacing: number;
-  /** 可拉伸的字符间隙数；用于测试和诊断。 */
-  gapCount: number;
+export interface JustifyLineInput {
+  /** 该行文本（调用方可先裁剪；本函数会按 AOSP 再裁剪一次）。 */
+  text: string;
+  /** `measure(end)` 的结果，单位与 AOSP 一致（像素）。 */
+  widthPx: number;
+  /** 行可用宽度（像素）。 */
+  justifyWidthPx: number;
+  /** 文本字号（像素，含系统字号缩放）。 */
+  textSizePx: number;
 }
 
-export function runsToText(runs: readonly JustifyRun[]): string {
-  return runs.map((run) => run.text).join('');
+export interface JustifyLineResult {
+  /** 裁剪行尾空格后的可见文本。 */
+  text: string;
+  /** `LineInfo.getClusterCount()` 的字形簇数。 */
+  lettersCount: number;
+  /** `mAddedLetterSpacingInPx`。 */
+  spacingPx: number;
+  /** `mAddedLetterSpacingInPx / textSize`（em）。 */
+  spacingEm: number;
+  /** AOSP 的 >0.03 分支是否命中；RN 无法执行其连字关闭重测。 */
+  ligatureDisabled: boolean;
+}
+
+export interface JustifiedLine extends LineDescriptor {
+  /** 传给 RN Text 的 letterSpacing（dp）；已按 fontScale 与屏幕密度折算。 */
+  letterSpacing: number;
+  /** AOSP 的 mAddedLetterSpacingInPx。 */
+  spacingPx: number;
+  /** 字形簇数。 */
+  lettersCount: number;
+  /** 是否命中 AOSP 的连字关闭分支（RN 未执行其重测）。 */
+  ligatureDisabled: boolean;
 }
 
 /**
- * 统计可拉伸的字符数。
+ * `TextLine.isLineEndSpace(char)` 的逐字复刻。
  *
- * Android 的 `LineInfo.getClusterCount()` 按字形簇计数；协议正文以中日韩文字和
- * ASCII 为主，每个码点就是一个字形簇。这里用码点计数即可覆盖契约范围；
- * 组合附加符号或 ZWJ emoji 会多算，最坏结果是该行略短，不会越界。
+ * AOSP 使用 UTF-16 `char`；这里同样只取第一个 code unit，不按码点处理。
+ */
+export function isLineEndSpace(ch: string): boolean {
+  const code = ch.charCodeAt(0);
+  return (
+    code === 0x20 ||
+    code === 0x09 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a && code !== 0x2007) ||
+    code === 0x205f ||
+    code === 0x3000
+  );
+}
+
+/** 按 AOSP 的行尾字符集裁掉行尾空格。 */
+export function trimLineEndSpaces(text: string): string {
+  let end = text.length;
+  while (end > 0 && isLineEndSpace(text.charAt(end - 1))) {
+    end -= 1;
+  }
+  return text.slice(0, end);
+}
+
+/**
+ * `Layout.getLineVisibleEnd(..., trailingSpaceAtLastLineIsVisible=true)`。
+ *
+ * 段落最后一个显示行保留行尾空格；其余行裁掉行尾空格。
+ */
+export function visibleLineText(text: string, isLastLineOfParagraph: boolean): string {
+  return isLastLineOfParagraph ? text : trimLineEndSpaces(text);
+}
+
+/**
+ * `LineInfo.getClusterCount()` 的复刻。
+ *
+ * Android 按字形簇计数；协议正文以中日韩文字和 ASCII 为主，每个码点即一个
+ * 字形簇，因此这里用码点计数。若正文引入组合附加符号或 ZWJ emoji，需要
+ * 替换为 UAX #29 字形簇分割才能保持与系统一致。
  */
 export function countClusters(text: string): number {
   return Array.from(text).length;
@@ -76,14 +144,17 @@ export function sliceRuns(
   return sliced;
 }
 
+export function runsToText(runs: readonly JustifyRun[]): string {
+  return runs.map((run) => run.text).join('');
+}
+
 /**
- * 把 RN 给出的自然折行映射回原始 runs。
+ * 把 RN 给出的自然折行映射回原始 runs，并应用 AOSP 的可见行尾规则。
  *
- * `onTextLayout` 只返回每行文本，不返回行列 span；这里按顺序在原文里定位每行。
- * 协议正文以中文为主，折行多发生在字符之间；折行点也可能落在空格上
- * （如纯英文段落）。该空格属于原文：平台若未把它计入某一行，按原文
- * 把它归到前一行；行尾剩余的空格并入最后一行。
- * 定位失败（文本被平台改写、行数异常）时返回 null，由调用方回退到系统 justify。
+ * `onTextLayout` 按平台折行返回每行文本；这里按顺序在原文里定位每行。
+ * 非末行裁掉行尾空格（Layout.getLineVisibleEnd），末行保留（同 AOSP 的
+ * `trailingSpaceAtLastLineIsVisible=true`）。
+ * 定位失败（文本被平台改写、行数异常）时返回 null，由调用方回退。
  */
 export function buildLineDescriptors(
   runs: readonly JustifyRun[],
@@ -130,98 +201,118 @@ export function buildLineDescriptors(
     if (!last || rest.trim().length > 0) {
       return null;
     }
-    // 末尾剩余空白字符：并入最后一行，原文不丢。
     last.end = fullText.length;
   }
 
-  return drafts.map((draft) => ({
-    runs: sliceRuns(runs, draft.start, draft.end),
-    text: fullText.slice(draft.start, draft.end),
-    isLast: draft.isLast,
-  }));
+  return drafts.map((draft) => {
+    const raw = fullText.slice(draft.start, draft.end);
+    const text = visibleLineText(raw, draft.isLast);
+    return {
+      runs: sliceRuns(runs, draft.start, draft.start + text.length),
+      text,
+      isLast: draft.isLast,
+    };
+  });
 }
 
 /**
- * 把行尾最后一个字符从 runs 中分离出来。
+ * `TextLine.justify` 的 `JUSTIFICATION_MODE_LETTER_SPACING` 分支复刻。
  *
- * 字间距只存在于相邻字符之间的间隙里；行尾字符之后没有"下一个字符"，
- * 不需要间距。把它单独成 span 后，行宽精确等于
- * 自然行宽 + 间距 × (字符数 − 1) = 容器宽度。
- * 整行只有一个字符时无需拆分，返回 tail 为 null。
+ * 行尾空格先按 `isLineEndSpace` 裁掉；少于 2 个字形簇时 AOSP 直接返回
+ * （不设置间距），这里返回 null。间距公式与 0.03 阈值逐行对应：
+ *
+ *   mAddedLetterSpacingInPx = (justifyWidth - width) / (lettersCount - 1)
+ *   if (mAddedLetterSpacingInPx > 0.03) { 关闭连字并重测 }
  */
-export function splitTrailingChar(
-  runs: readonly JustifyRun[],
-): { head: JustifyRun[]; tail: JustifyRun | null } {
-  const text = runsToText(runs);
-  const chars = Array.from(text);
-  if (chars.length <= 1) {
-    return { head: [], tail: null };
+export function justifyLine(input: JustifyLineInput): JustifyLineResult | null {
+  const text = trimLineEndSpaces(input.text);
+  const lettersCount = countClusters(text);
+  if (lettersCount < 2) {
+    return null;
   }
-  const tailChar = chars[chars.length - 1];
-  const tailStart = text.length - tailChar.length;
+  const spacingPx = (input.justifyWidthPx - input.widthPx) / (lettersCount - 1);
   return {
-    head: sliceRuns(runs, 0, tailStart),
-    tail: sliceRuns(runs, tailStart, text.length)[0] ?? null,
+    text,
+    lettersCount,
+    spacingPx,
+    spacingEm: spacingPx / input.textSizePx,
+    ligatureDisabled: spacingPx > 0.03,
   };
 }
 
 /**
- * 计算一行需要追加的 letterSpacing。
+ * 按 AOSP 公式为每一行生成最终排版参数。
  *
- * `fontScale` 的折算来自 RN 的实现：`letterSpacing` prop 会按 SP 缩放
- * （`PixelUtil.toPixelFromSP`），而 `onTextLayout` 的宽度已经包含系统字号缩放。
- * 因此要让屏幕上的实际间距为 `extra / gapCount` dp，需要再除以 fontScale。
- */
-export function computeLetterSpacing(
-  naturalWidth: number,
-  targetWidth: number,
-  gapCount: number,
-  fontScale: number,
-): number {
-  if (gapCount < 1 || !(fontScale > 0)) {
-    return 0;
-  }
-  const extra = targetWidth - naturalWidth;
-  if (!Number.isFinite(extra) || extra <= 0) {
-    return 0;
-  }
-  return extra / gapCount / fontScale;
-}
-
-/**
- * 由 `onTextLayout` 得到的自然行宽生成最终排版。
- *
- * 返回 null 表示测量结果不可信（行数/宽度异常）；自然行宽超过容器时
- * 不压缩字形，spacing 置 0，交给最终 Text 的宽度余量处理。
+ * - 末行不参与 justification（Layout.isJustificationRequired 为 false）；
+ * - 非末行调用 `justifyLine`；`lettersCount < 2` 时 AOSP 直接返回，
+ *   对应 spacing 0；
+ * - `fontScale`/`density` 用于把 AOSP 的像素间距换算成 RN `letterSpacing`
+ *   prop（RN 的 prop 按 SP 缩放，实际 em = prop / fontSize）。
  */
 export function buildJustifiedLines(
   descriptors: readonly LineDescriptor[],
-  naturalWidths: readonly number[],
-  targetWidth: number,
+  naturalWidthsPx: readonly number[],
+  justifyWidthPx: number,
+  textSizePx: number,
   fontScale: number,
+  density: number,
 ): JustifiedLine[] | null {
-  if (descriptors.length !== naturalWidths.length) {
+  if (descriptors.length !== naturalWidthsPx.length) {
     return null;
   }
-  if (!Number.isFinite(targetWidth) || targetWidth <= 0) {
+  if (
+    !Number.isFinite(justifyWidthPx) ||
+    justifyWidthPx <= 0 ||
+    !(textSizePx > 0) ||
+    !(fontScale > 0) ||
+    !(density > 0)
+  ) {
     return null;
   }
 
   const result: JustifiedLine[] = [];
   for (let index = 0; index < descriptors.length; index += 1) {
     const descriptor = descriptors[index];
-    const width = naturalWidths[index];
-    if (!Number.isFinite(width) || width < 0) {
+    const widthPx = naturalWidthsPx[index];
+    if (!Number.isFinite(widthPx) || widthPx < 0) {
       return null;
     }
 
-    const gapCount = Math.max(0, countClusters(descriptor.text) - 1);
+    if (descriptor.isLast) {
+      result.push({
+        ...descriptor,
+        letterSpacing: 0,
+        spacingPx: 0,
+        lettersCount: countClusters(descriptor.text),
+        ligatureDisabled: false,
+      });
+      continue;
+    }
+
+    const justified = justifyLine({
+      text: descriptor.text,
+      widthPx,
+      justifyWidthPx,
+      textSizePx,
+    });
+    if (!justified) {
+      result.push({
+        ...descriptor,
+        letterSpacing: 0,
+        spacingPx: 0,
+        lettersCount: countClusters(descriptor.text),
+        ligatureDisabled: false,
+      });
+      continue;
+    }
+
     result.push({
       ...descriptor,
-      gapCount,
-      letterSpacing: descriptor.isLast
-        ? 0
-        : computeLetterSpacing(width, targetWidth, gapCount, fontScale),
+      text: justified.text,
+      letterSpacing: justified.spacingPx / (fontScale * density),
+      spacingPx: justified.spacingPx,
+      lettersCount: justified.lettersCount,
+      ligatureDisabled: justified.ligatureDisabled,
     });
   }
   return result;

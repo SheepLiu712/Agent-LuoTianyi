@@ -20,6 +20,7 @@ import { THEMES } from '../utils/theme';
 
 jest.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
+  PixelRatio: { get: () => 1 },
   // RichAgreement 在非 Android 平台走 RN Text；OS 固定 'ios' 保持非 Android 路径。
   // useWindowDimensions 供 AndroidJustifiedText 模块导入，Android 用例不在本文件覆盖。
   Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios },
