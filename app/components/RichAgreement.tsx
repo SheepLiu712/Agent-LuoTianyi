@@ -12,14 +12,17 @@
  * - 末行与显式换行前的行不拉伸：把 \n 拆成独立 <Text>，让每个显示行自成一个块，
  *   块的末行天然不参与两端对齐的拉伸；
  * - 不执行 HTML：HTML 会折叠连续空格，也会引入协议未允许的标记与交互；
- * - 系统字号或窗口宽度变化时由 RN 布局自动重排。
+ * - 系统字号或窗口宽度变化时由 RN 布局自动重排；
+ * - Android 的 justify 段落统一由 AndroidJustifiedText 做字符级两端对齐（#313），
+ *   包括纯英文/中英混合行；center 与其它平台保持原渲染路径。
  *
  * 与桌面 render_agreement_document 同契约：字段取值、默认值、\n 拆分、字号回退一致。
  */
 
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TextStyle, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextStyle, View } from 'react-native';
 
+import { AndroidJustifiedText } from './AndroidJustifiedText';
 import {
   ALIGN_CENTER,
   ALIGN_JUSTIFY,
@@ -88,21 +91,38 @@ function BlockView({ block, textColor }: BlockViewProps) {
   const lineHeight = blockLineHeight(block);
   const textAlign = blockTextAlign(block);
   const lines = splitRunsOnNewline(block.runs);
+  // Android 的 justify 只能拉伸空格；Android 上所有 justify 行统一交给字符级
+  // 对齐组件。纯英文/中英混合行也会加字间距，与 Android 15 的
+  // JUSTIFICATION_MODE_INTER_CHARACTER 行为一致。
+  const useAndroidJustify = Platform.OS === 'android' && textAlign === 'justify';
 
   return (
     <View style={styles.block}>
-      {lines.map((line, lineIndex) => (
-        <Text
-          key={lineIndex}
-          style={{ fontSize, lineHeight, textAlign, color: textColor }}
-        >
-          {line.map(([text, bold], runIndex) => (
-            <Text key={runIndex} style={bold ? styles.bold : undefined}>
-              {text}
-            </Text>
-          ))}
-        </Text>
-      ))}
+      {lines.map((line, lineIndex) => {
+        if (useAndroidJustify && line.length > 0) {
+          return (
+            <AndroidJustifiedText
+              key={lineIndex}
+              runs={line}
+              fontSize={fontSize}
+              lineHeight={lineHeight}
+              color={textColor}
+            />
+          );
+        }
+        return (
+          <Text
+            key={lineIndex}
+            style={{ fontSize, lineHeight, textAlign, color: textColor }}
+          >
+            {line.map(([text, bold], runIndex) => (
+              <Text key={runIndex} style={bold ? styles.bold : undefined}>
+                {text}
+              </Text>
+            ))}
+          </Text>
+        );
+      })}
     </View>
   );
 }
