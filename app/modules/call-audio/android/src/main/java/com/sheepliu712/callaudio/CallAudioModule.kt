@@ -10,7 +10,7 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.ToneGenerator
+import android.media.MediaPlayer
 import android.media.AudioFocusRequest
 import android.media.AudioRecord
 import android.media.AudioTrack
@@ -36,6 +36,7 @@ private const val CHANNELS = 1
 private const val MAX_CAPTURE_BUFFER_BYTES = CAPTURE_RATE * 2 * 3
 private const val MAX_PLAYBACK_BUFFER_BYTES = PLAYBACK_RATE * 2 * 4
 private const val MAX_CAPTURE_IN_FLIGHT = 30
+private const val RINGTONE_VOLUME = 0.22f
 class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private val captureRunning = AtomicBoolean(false)
   private val playbackRunning = AtomicBoolean(false)
@@ -51,7 +52,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private val playbackState = PlaybackState(queue)
   private var captureThread: Thread? = null
   private var playbackThread: Thread? = null
-  private var ringtone: ToneGenerator? = null
+  private var ringtone: MediaPlayer? = null
   private var sessionReady = false
   private var audioRecord: AudioRecord? = null
   private var audioTrack: AudioTrack? = null
@@ -117,22 +118,45 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     OnDestroy { closeSession() }
   }
 
+  // 铃声源：《心印》专辑完整版（2012-12-22 随《Miles;Smile》发行，取自网易云音乐购买的无损版），截取开头 35 秒。
+  // Issue #386：循环播放由 isLooping 承担；每次 startRingtone 新建实例，保证从头开始播放。
   @Synchronized
   private fun startRingtone() {
     check(sessionReady && audioFocusGranted) { "call_audio_unavailable" }
     if (ringtone != null) return
-    val tone = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 22)
-    if (!tone.startTone(ToneGenerator.TONE_SUP_RINGTONE)) {
-      tone.release()
-      error("ringtone_start_failed")
+    val player = MediaPlayer()
+    try {
+      applyRingtoneSource(player)
+      player.isLooping = true
+      player.setVolume(RINGTONE_VOLUME, RINGTONE_VOLUME)
+      player.start()
+    } catch (error: Exception) {
+      runCatching { player.release() }
+      throw IllegalStateException("ringtone_start_failed", error)
     }
-    ringtone = tone
+    ringtone = player
+  }
+
+  private fun applyRingtoneSource(player: MediaPlayer) {
+    val context = requireContext()
+    player.setAudioAttributes(
+      AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+        .build(),
+    )
+    context.resources.openRawResourceFd(R.raw.xinyin_ringtone).use { descriptor ->
+      player.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
+    }
+    player.prepare()
   }
 
   @Synchronized
   private fun stopRingtone() {
-    ringtone?.stopTone()
-    ringtone?.release()
+    ringtone?.let { player ->
+      runCatching { player.stop() }
+      player.release()
+    }
     ringtone = null
   }
 

@@ -133,5 +133,10 @@ versionName: 0.5.0
 8. **时延采样**
    - 分别记录有效用户轮次到首个 CALL PCM、首个 PCM 到设备开始播放、final 入队到实际 completion、用户打断到停止确认
    - 至少记录设备、Android 版本、网络、样本数、P50/P95；不得用模拟器或单样本代替 P95
+9. **响铃铃声（Issue #386）**
+   - 发起通话进入响铃阶段，确认《心印》铃声从资源开头播放；响铃维持超过截段时长后确认循环衔接正常；分别验证接通、对端拒接/超时失败、响铃中返回退出三条路径，铃声均即刻停止且无残声
+   - 循环验证前提：服务端呼叫建立超时 `call_setup_timeout` 默认 10 秒（`server/src/stage/stage_manager.py`），小于铃声截段时长，默认配置下响铃不会维持到循环点；验证循环需把该超时配置调到大于截段时长（如 45 秒）后重试
+   - 铃声资源为模块内 `res/raw/xinyin_ringtone.mp3`（《心印》专辑完整版截取段，来源见 `CallAudioModule.kt` 注释），播放音量固定 `RINGTONE_VOLUME`；铃声与通话 PCM 播放、失败提示音不叠加
+   - 预期：铃声仅复用会话已持有的音频焦点，不创建第二焦点所有者；停止后 `MediaPlayer` 已 `release`，logcat 无泄漏或 `IllegalStateException`
 
 审查员应提交原始命令、脱敏 logcat、设备矩阵、失败复现步骤和结果摘要。真实 provider/P95 仍是独立未验证范围；离线 fake provider 或设备本地音频 smoke 不能替代它们。
