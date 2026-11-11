@@ -65,8 +65,8 @@ if ($destination.Equals(([System.IO.Path]::GetPathRoot($destinationFull)).TrimEn
 }
 
 $runtimeFiles = @(
-    'server_main.py', 'pyproject.toml', 'README.md', 'scripts/deploy/install_windows.bat',
-    'scripts/deploy/start_server.bat', 'scripts/deploy/windows-conda.yml'
+    'server_main.py', 'pyproject.toml', 'README.md', 'scripts/deploy/environment/install_windows.bat',
+    'scripts/deploy/startup/start_server.bat', 'scripts/deploy/environment/windows-conda.yml'
 )
 $requiredPaths = $runtimeFiles + @(
     'src', 'config/config.json',

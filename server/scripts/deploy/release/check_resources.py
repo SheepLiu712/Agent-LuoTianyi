@@ -32,7 +32,7 @@ def verify(root: Path, manifest: Path) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--server-root", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--server-root", type=Path, default=Path(__file__).resolve().parents[3])
     parser.add_argument("--assets-root", type=Path)
     args = parser.parse_args()
     manifests = Path(__file__).resolve().parent

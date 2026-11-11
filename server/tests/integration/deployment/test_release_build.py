@@ -23,11 +23,21 @@ def repo(tmp_path):
     for path in ("server_main.py", "README.md", "pyproject.toml", "src/server_runtime.py"):
         (server / path).parent.mkdir(exist_ok=True)
         shutil.copyfile(SERVER / path, server / path)
+    for path in (
+        "config/config.json.template",
+        "src/utils/database_schema.json",
+        "src/utils/database_schema.py",
+        "src/utils/server_paths.py",
+        "src/infrastructure/persistence/database/sql_database.py",
+        "src/infrastructure/persistence/song_knowledge.py",
+    ):
+        (server / path).parent.mkdir(exist_ok=True, parents=True)
+        shutil.copyfile(SERVER / path, server / path)
     resource = "res/agent/prompts/example.txt"
     (server / resource).parent.mkdir(parents=True)
     (server / resource).write_bytes(b"original")
     resources = {"files": [{"path": resource, "sha256": hashlib.sha256(b"original").hexdigest(), "size": 8}]}
-    (server / "scripts/deploy/resources.lock.json").write_text(json.dumps(dict(schema_version=1, **resources)))
+    (server / "scripts/deploy/release/resources.lock.json").write_text(json.dumps(dict(schema_version=1, **resources)))
     for path in ("app/secret", "server/config/config.json", "server/res/tts/model.bin", "server/data/music.wav"):
         target = tmp_path / path
         target.parent.mkdir(exist_ok=True, parents=True)
@@ -62,7 +72,11 @@ def test_build_from_commit_with_dirty_worktree_and_existing_package(repo):
         files = {row["path"]: row for row in manifest["files"]}
         assert set(archive.getnames()) == set(files) | {"release.json"}
         assert {"server_main.py", "src/server_runtime.py", "scripts/deploy/deploy.py"} <= set(files)
-        assert not {"config/config.json", "data/music.wav", "res/tts/model.bin", "src/untracked.py"} & set(files)
+        assert json.loads(archive.extractfile("config/config.json").read()) == json.loads(
+            (SERVER / "config/config.json.template").read_text()
+        )
+        assert manifest["databases"]["main"]["version"] == 1
+        assert not {"data/music.wav", "res/tts/model.bin", "src/untracked.py"} & set(files)
         assert not any(path.startswith("app/") for path in files)
         for path, row in files.items():
             content = archive.extractfile(path).read()
@@ -91,4 +105,16 @@ def test_build_rejects_commit_with_modified_or_missing_resource(repo, missing):
     failed = build(repo, "HEAD")
     assert failed.returncode != 0
     assert b"res/agent/prompts/example.txt" in failed.stderr
+    assert not (repo / "dist").exists()
+
+
+def test_build_rejects_inline_secret_in_release_template(repo):
+    template = repo / "server/config/config.json.template"
+    config = json.loads(template.read_text())
+    config["llm_service"]["available_llms"]["dsv4-flash"]["api_key"] = "never-publish-this-secret"
+    template.write_text(json.dumps(config))
+    git(repo, "commit", "-qam", "unsafe template")
+    result = build(repo, "HEAD")
+    assert result.returncode != 0
+    assert b"never-publish-this-secret" not in result.stderr
     assert not (repo / "dist").exists()

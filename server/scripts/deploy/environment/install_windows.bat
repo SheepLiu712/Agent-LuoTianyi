@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-cd /d "%~dp0..\.." || exit /b 1
+cd /d "%~dp0..\..\.." || exit /b 1
 set "method=%~1"
 if not defined method set "method=uv"
 set "build=%~2"

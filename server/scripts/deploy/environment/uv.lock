@@ -51,7 +51,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentluo-server", extras = ["speech", "song-learning"], editable = "../../" },
+    { name = "agentluo-server", extras = ["speech", "song-learning"], editable = "../../../" },
     { name = "gsv-tts-lite", specifier = "==0.4.7" },
     { name = "setuptools", specifier = ">=80,<81" },
     { name = "torch", specifier = "==2.9.1", index = "https://download.pytorch.org/whl/cu128" },
@@ -63,7 +63,7 @@ requires-dist = [
 [[package]]
 name = "agentluo-server"
 version = "0.1.0"
-source = { editable = "../../" }
+source = { editable = "../../../" }
 dependencies = [
     { name = "bcrypt", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "beautifulsoup4", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
