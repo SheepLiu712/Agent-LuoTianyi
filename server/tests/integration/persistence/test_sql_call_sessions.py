@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from support.legacy_users import create_legacy_users
 
 from src.domain.call import CallEndReason, CallOutcome, CallState
 from src.infrastructure.persistence.call_sessions import (
@@ -700,14 +701,13 @@ def test_schema_is_privacy_allowlisted_and_has_nonnegative_constraints(tmp_path)
 def test_init_adds_call_table_to_old_database_and_is_repeatable(tmp_path):
     database = tmp_path / "legacy.db"
     with sqlite3.connect(database) as connection:
-        connection.execute("CREATE TABLE legacy_marker (value VARCHAR PRIMARY KEY)")
-        connection.execute("INSERT INTO legacy_marker VALUES ('preserved')")
+        create_legacy_users(connection)
 
     init_sql_db(str(tmp_path), database.name)
     init_sql_db(str(tmp_path), database.name)
 
     with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT value FROM legacy_marker").fetchone() == ("preserved",)
+        assert connection.execute("SELECT username FROM users WHERE uuid = 'user'").fetchone() == ("existing user",)
         columns = {row[1] for row in connection.execute("PRAGMA table_info(call_sessions)")}
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(call_sessions)")}
     assert columns == {field.name for field in fields(CallSessionRecord)}
