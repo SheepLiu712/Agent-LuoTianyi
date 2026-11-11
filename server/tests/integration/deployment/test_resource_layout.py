@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts/deploy/migrate_resource_layout.py"
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts/deploy/release/migrate_resource_layout.py"
 spec = importlib.util.spec_from_file_location("migrate_resource_layout", SCRIPT)
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)

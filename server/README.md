@@ -56,23 +56,23 @@ chmod 700 . config
 touch config/secrets.local.env
 chmod 600 config/secrets.local.env
 if [ -f config/admin_auth.json ]; then chmod 600 config/admin_auth.json; fi
-bash scripts/deploy/install_linux.sh
+bash scripts/deploy/environment/install_linux.sh
 ```
 
-安装脚本使用 Python 3.10.22 创建 `.venv/`，按 [Linux 依赖锁文件](scripts/deploy/uv.lock) 安装 PyTorch 2.9.1、torchaudio 2.9.1 和 torchvision 0.24.1 的 CUDA 12.8 构建，以及语音合成和学歌依赖。随后安装 Chromium 的系统库和浏览器，浏览器文件保存在 `.runtime/browsers/`。安装结束前会检查 Python 依赖、显卡矩阵运算、音频重采样、MP3 编码和浏览器页面渲染。
+安装脚本使用 Python 3.10.22 创建 `.venv/`，按 [Linux 依赖锁文件](scripts/deploy/environment/uv.lock) 安装 PyTorch 2.9.1、torchaudio 2.9.1 和 torchvision 0.24.1 的 CUDA 12.8 构建，以及语音合成和学歌依赖。随后安装 Chromium 的系统库和浏览器，浏览器文件保存在 `.runtime/browsers/`。安装结束前会检查 Python 依赖、显卡矩阵运算、音频重采样、MP3 编码和浏览器页面渲染。
 
 **3. 前台启动并验收。**
 
 ```bash
-bash scripts/deploy/start_linux.sh
+bash scripts/deploy/startup/start_linux.sh
 ```
 
 启动日志应出现“配置校验通过，ServerRuntime 已自动启动”。在服务器上打开 `http://127.0.0.1:15673/admin`（端口以配置为准），确认业务运行时已启动，再通过客户端发送一条消息并试听语音回复。前台运行时可用 Ctrl+C 停止服务。
 
-**4. 需要后台运行时，交给 systemd 管理。** 先停止前台实例，复制 [systemd 模板](scripts/deploy/agentluo.service.example) 并编辑：
+**4. 需要后台运行时，交给 systemd 管理。** 先停止前台实例，复制 [systemd 模板](scripts/deploy/startup/agentluo.service.example) 并编辑：
 
 ```bash
-cp scripts/deploy/agentluo.service.example /tmp/agentluo.service
+cp scripts/deploy/startup/agentluo.service.example /tmp/agentluo.service
 nano /tmp/agentluo.service
 ```
 
@@ -96,28 +96,28 @@ sudo journalctl -u agentluo -n 100 --no-pager
 **方案一：uv（默认）。** 准备 uv 和 FFmpeg，使 `uv --version` 和 `ffmpeg -version` 能在终端运行。可分别通过 `winget install --id astral-sh.uv -e` 和 `winget install --id Gyan.FFmpeg -e` 安装，安装后重新打开终端。一行命令安装项目环境到 `.venv`：
 
 ```bat
-.\scripts\deploy\install_windows.bat uv
+.\scripts\deploy\environment\install_windows.bat uv
 ```
 
-随后运行以下命令，或双击 `scripts\deploy\start_server.bat`：
+随后运行以下命令，或双击 `scripts\deploy\startup\start_server.bat`：
 
 ```bat
-.\scripts\deploy\start_server.bat
+.\scripts\deploy\startup\start_server.bat
 ```
 
 **方案二：Conda。** 安装 Miniconda 或 Anaconda，在 Anaconda Prompt 中执行以下命令。脚本创建或更新名为 `lty` 的环境，并在该环境中安装 FFmpeg：
 
 ```bat
-.\scripts\deploy\install_windows.bat conda
+.\scripts\deploy\environment\install_windows.bat conda
 ```
 
 在 Anaconda Prompt 中使用同一启动脚本：
 
 ```bat
-.\scripts\deploy\start_server.bat conda
+.\scripts\deploy\startup\start_server.bat conda
 ```
 
-**选择显卡和环境名。** 安装命令的第二个参数选择 PyTorch 构建，默认值为 `cpu`。使用 NVIDIA 显卡时，按驱动支持的 CUDA 版本选择 `cu126`、`cu128` 或 `cu130`。例如，`.\scripts\deploy\install_windows.bat uv cu128` 安装 CUDA 12.8 构建。Conda 可通过第三个参数指定环境名，例如用 `.\scripts\deploy\install_windows.bat conda cu128 agentluo` 安装，再用 `.\scripts\deploy\start_server.bat conda agentluo` 启动。
+**选择显卡和环境名。** 安装命令的第二个参数选择 PyTorch 构建，默认值为 `cpu`。使用 NVIDIA 显卡时，按驱动支持的 CUDA 版本选择 `cu126`、`cu128` 或 `cu130`。例如，`.\scripts\deploy\environment\install_windows.bat uv cu128` 安装 CUDA 12.8 构建。Conda 可通过第三个参数指定环境名，例如用 `.\scripts\deploy\environment\install_windows.bat conda cu128 agentluo` 安装，再用 `.\scripts\deploy\startup\start_server.bat conda agentluo` 启动。
 
 Windows 和 Linux 启动脚本都会保留已有的代理例外，并将本机、模型接口、高德地图和 VCPedia 的主机名加入 `NO_PROXY`，使这些连接直接访问目标主机。启动后按终端显示的地址进入管理后台，确认业务运行时已启动。
 

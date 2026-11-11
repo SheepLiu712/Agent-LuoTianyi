@@ -16,7 +16,7 @@ dependencies = [
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 
 [tool.uv.sources]
-agentluo-server = { path = "../..", editable = true }
+agentluo-server = { path = "../../..", editable = true }
 torch = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }

@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from support.legacy_users import create_legacy_users
 
 from src.agent.context import ConversationCompaction, ConversationSummary
 from src.domain import ConversationItem
@@ -44,8 +45,8 @@ def _item(entry_id: str, timestamp: str) -> ConversationItem:
 def test_sqlite_migration_preserves_old_context_state_and_leaves_progress_null(tmp_path):
     database_path = tmp_path / "legacy.db"
     with sqlite3.connect(database_path) as connection:
+        create_legacy_users(connection)
         connection.executescript("""
-            CREATE TABLE users (uuid VARCHAR PRIMARY KEY, username VARCHAR, password VARCHAR);
             CREATE TABLE conversation_contexts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id VARCHAR NOT NULL,

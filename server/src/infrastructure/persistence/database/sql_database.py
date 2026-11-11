@@ -21,6 +21,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
+from src.utils.database_schema import guard_version, stamp
+
 Base = declarative_base()
 
 
@@ -522,6 +524,8 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
     global engine, SessionLocal
     DATABASE_URL = f"sqlite:///{os.path.join(db_folder, db_file)}"
 
+    schema_version = guard_version(os.path.join(db_folder, db_file), "main")
+
     # Create engine and session factory globally
     if not os.path.exists(db_folder):
         os.makedirs(db_folder, exist_ok=True)
@@ -544,8 +548,11 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         cursor.close()
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    _migrate_sqlite_schema(engine)
+    if schema_version == 0:
+        Base.metadata.create_all(bind=engine)
+        _migrate_sqlite_schema(engine)
+        with engine.begin() as connection:
+            stamp(connection.connection.driver_connection, "main")
     # 迁移：为已存在的数据库添加新列
 
 

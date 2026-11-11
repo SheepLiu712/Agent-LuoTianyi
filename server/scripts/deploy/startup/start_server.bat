@@ -1,13 +1,13 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-cd /d "%~dp0..\.." || exit /b 1
+cd /d "%~dp0..\..\.." || exit /b 1
 if not "%~3"=="" goto :usage
 if /i "%~1"=="conda" goto :conda
 if not "%~2"=="" goto :usage
 if not "%~1"=="" if /i not "%~1"=="uv" goto :usage
 set "python=.venv\Scripts\python.exe"
 if not exist "%python%" (
-    echo Run scripts\deploy\install_windows.bat uv first. 1>&2
+    echo Run scripts\deploy\environment\install_windows.bat uv first. 1>&2
     exit /b 1
 )
 set "VIRTUAL_ENV=%CD%\.venv"

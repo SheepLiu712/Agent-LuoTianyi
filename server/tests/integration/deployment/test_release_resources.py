@@ -7,14 +7,14 @@ import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-spec = importlib.util.spec_from_file_location("check_resources", ROOT / "scripts/deploy/check_resources.py")
+spec = importlib.util.spec_from_file_location("check_resources", ROOT / "scripts/deploy/release/check_resources.py")
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 
 
 class ReleaseResourcesTests(unittest.TestCase):
     def test_all_release_resources_match_manifest(self):
-        self.assertEqual(checker.verify(ROOT, ROOT / "scripts/deploy/resources.lock.json"), [])
+        self.assertEqual(checker.verify(ROOT, ROOT / "scripts/deploy/release/resources.lock.json"), [])
 
     def test_prepared_audio_manifest_references_nonempty_wave_files(self):
         manifest = ROOT / "res/agent/prepared_speech/luotianyi/manifest.json"

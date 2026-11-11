@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.."
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.."
 umask 077
 server_dir=$(pwd -P)
 python_bin="${AGENTLUO_PYTHON:-$server_dir/.venv/bin/python}"

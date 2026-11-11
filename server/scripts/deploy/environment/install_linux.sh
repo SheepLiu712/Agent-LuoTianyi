@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.."
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.."
 server_dir=$(pwd -P)
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 || $EUID == 0 ]]; then
     echo "请在 Linux x86_64 上以服务运行账号执行安装脚本。" >&2
@@ -18,8 +18,9 @@ flock -n 9 || { echo "请等待安装结束或停止服务后重试。" >&2; exi
 export UV_PROJECT_ENVIRONMENT="$server_dir/.venv"
 export UV_LINK_MODE=copy
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$runtime_dir/browsers}"
-uv python install 3.10.22
-uv sync --project scripts/deploy --python 3.10.22 --locked --no-dev
+python_version=$(cat scripts/deploy/environment/.python-version)
+uv python install "$python_version"
+uv sync --project scripts/deploy/environment --python "$python_version" --locked --no-dev
 uv pip check --python .venv/bin/python
 .venv/bin/python -m playwright install --with-deps chromium
 ffmpeg -nostdin -v error -f lavfi -i sine=duration=0.1 -f mp3 pipe:1 >/dev/null

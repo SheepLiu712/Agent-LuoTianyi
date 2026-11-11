@@ -41,7 +41,7 @@ class UnifiedStartupTests(unittest.TestCase):
     def test_python_and_shell_launchers_use_same_instance_without_starting_services(self):
         commands = [
             [sys.executable, str(ROOT / "server_main.py"), "--check-startup"],
-            ["bash", str(ROOT / "scripts/deploy/start_linux.sh"), "--check-startup"],
+            ["bash", str(ROOT / "scripts/deploy/startup/start_linux.sh"), "--check-startup"],
             ["bash", str(ROOT / "scripts/start_production.sh"), "--check-startup"],
         ]
         for command in commands:

@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "databases": {
+    "main": {
+      "version": 1,
+      "tables": {
+        "memory_event_batches": {
+          "identity": "VARCHAR",
+          "subject_user_id": "VARCHAR",
+          "envelope": "TEXT",
+          "candidates": "TEXT"
+        },
+        "users": {
+          "uuid": "VARCHAR",
+          "username": "VARCHAR",
+          "password": "VARCHAR",
+          "created_at": "DATETIME",
+          "last_login": "DATETIME",
+          "nickname": "VARCHAR",
+          "description": "TEXT",
+          "context_summary": "TEXT",
+          "context_memory_count": "INTEGER",
+          "all_memory_count": "INTEGER",
+          "auth_token": "VARCHAR",
+          "preferences": "TEXT",
+          "affection_score": "INTEGER",
+          "affection_total_gained": "INTEGER"
+        },
+        "call_sessions": {
+          "call_id": "VARCHAR",
+          "client_request_id": "VARCHAR",
+          "user_id": "VARCHAR",
+          "character_id": "VARCHAR",
+          "state": "VARCHAR",
+          "outcome": "VARCHAR",
+          "end_reason": "VARCHAR",
+          "requested_at": "DATETIME",
+          "connected_at": "DATETIME",
+          "disconnected_at": "DATETIME",
+          "ended_at": "DATETIME",
+          "active_duration_ms": "INTEGER",
+          "summary_status": "VARCHAR",
+          "maintenance_status": "VARCHAR",
+          "conversation_id": "VARCHAR",
+          "maintenance_turn_seq": "INTEGER",
+          "settlement_input_digest": "VARCHAR",
+          "created_at": "DATETIME",
+          "updated_at": "DATETIME"
+        },
+        "call_maintenance_batches": {
+          "maintenance_id": "VARCHAR",
+          "call_id": "VARCHAR",
+          "user_id": "VARCHAR",
+          "character_id": "VARCHAR",
+          "previous_turn_seq": "INTEGER",
+          "target_turn_seq": "INTEGER",
+          "settlement_input_digest": "VARCHAR",
+          "candidates": "TEXT",
+          "proposed_profile": "TEXT",
+          "status": "VARCHAR",
+          "created_at": "DATETIME",
+          "updated_at": "DATETIME"
+        },
+        "agent_memory_records": {
+          "id": "VARCHAR",
+          "owner_character_id": "VARCHAR",
+          "subject_user_id": "VARCHAR",
+          "memory_type": "VARCHAR",
+          "visibility": "VARCHAR",
+          "source": "VARCHAR",
+          "content": "TEXT",
+          "summary": "TEXT",
+          "importance": "FLOAT",
+          "confidence": "FLOAT",
+          "emotional_valence": "FLOAT",
+          "happened_at": "DATETIME",
+          "created_at": "DATETIME",
+          "last_accessed_at": "DATETIME",
+          "meta_data": "TEXT"
+        },
+        "events": {
+          "id": "VARCHAR",
+          "character": "VARCHAR",
+          "event_type": "VARCHAR",
+          "title": "VARCHAR",
+          "description": "TEXT",
+          "user_id": "VARCHAR",
+          "date_type": "VARCHAR",
+          "date_mmdd": "VARCHAR",
+          "start_datetime": "DATETIME",
+          "end_datetime": "DATETIME",
+          "duration_minutes": "INTEGER",
+          "trigger_conditions": "TEXT",
+          "is_recurring": "BOOLEAN",
+          "is_personal": "BOOLEAN",
+          "target_user_id": "VARCHAR",
+          "source": "VARCHAR",
+          "source_url": "VARCHAR",
+          "source_platform": "VARCHAR",
+          "is_active": "BOOLEAN",
+          "created_at": "DATETIME",
+          "updated_at": "DATETIME"
+        },
+        "invite_codes": {
+          "code": "VARCHAR",
+          "is_used": "BOOLEAN",
+          "disabled": "BOOLEAN",
+          "created_at": "DATETIME",
+          "used_at": "DATETIME",
+          "user_id": "VARCHAR"
+        },
+        "conversations": {
+          "uuid": "VARCHAR",
+          "user_id": "VARCHAR",
+          "character_id": "VARCHAR",
+          "timestamp": "DATETIME",
+          "source": "VARCHAR",
+          "type": "VARCHAR",
+          "content": "TEXT",
+          "meta_data": "TEXT"
+        },
+        "conversation_contexts": {
+          "id": "INTEGER",
+          "user_id": "VARCHAR",
+          "character_id": "VARCHAR",
+          "context_summary": "TEXT",
+          "context_memory_count": "INTEGER",
+          "maintenance_entry_id": "VARCHAR",
+          "updated_at": "DATETIME"
+        },
+        "cognitive_maintenance_batches": {
+          "maintenance_id": "VARCHAR",
+          "user_id": "VARCHAR",
+          "character_id": "VARCHAR",
+          "previous_progress_key": "VARCHAR",
+          "previous_entry_id": "VARCHAR",
+          "target_entry_id": "VARCHAR",
+          "covered_entry_ids": "TEXT",
+          "maintained_entry_ids": "TEXT",
+          "candidates": "TEXT",
+          "proposed_profile": "TEXT",
+          "input_digest": "VARCHAR",
+          "compaction_previous_summary": "TEXT",
+          "compaction_covered_entry_ids": "TEXT",
+          "compaction_summary": "TEXT",
+          "compaction_expected_count": "INTEGER",
+          "created_at": "DATETIME"
+        },
+        "memory_records": {
+          "uuid": "VARCHAR",
+          "user_id": "VARCHAR",
+          "type": "VARCHAR",
+          "content": "TEXT",
+          "meta_data": "TEXT",
+          "created_at": "DATETIME"
+        },
+        "memory_update_records": {
+          "update_cmd_uuid": "VARCHAR",
+          "user_id": "VARCHAR",
+          "update_command": "TEXT",
+          "created_at": "DATETIME"
+        },
+        "memory_chunks": {
+          "id": "VARCHAR",
+          "memory_record_id": "VARCHAR",
+          "chunk_text": "TEXT",
+          "chunk_type": "VARCHAR",
+          "embedding_id": "VARCHAR",
+          "created_at": "DATETIME",
+          "meta_data": "TEXT"
+        },
+        "memory_edges": {
+          "id": "VARCHAR",
+          "from_memory_id": "VARCHAR",
+          "to_memory_id": "VARCHAR",
+          "relation_type": "VARCHAR",
+          "weight": "FLOAT",
+          "created_at": "DATETIME",
+          "meta_data": "TEXT"
+        },
+        "knowledge_buffers": {
+          "uuid": "VARCHAR",
+          "user_id": "VARCHAR",
+          "content": "TEXT",
+          "created_at": "DATETIME"
+        },
+        "affection_logs": {
+          "uuid": "VARCHAR",
+          "user_id": "VARCHAR",
+          "delta": "INTEGER",
+          "score_after": "INTEGER",
+          "reason": "VARCHAR",
+          "created_at": "DATETIME"
+        },
+        "event_notifications": {
+          "id": "INTEGER",
+          "event_id": "VARCHAR",
+          "user_id": "VARCHAR",
+          "character_id": "VARCHAR",
+          "trigger_key": "VARCHAR",
+          "notified_at": "DATETIME"
+        },
+        "dynamic_posts": {
+          "id": "VARCHAR",
+          "author_type": "VARCHAR",
+          "author_id": "VARCHAR",
+          "owner_user_id": "VARCHAR",
+          "visibility": "VARCHAR",
+          "content": "TEXT",
+          "image_refs": "TEXT",
+          "source_type": "VARCHAR",
+          "source_id": "VARCHAR",
+          "allow_comment": "BOOLEAN",
+          "memory_policy": "VARCHAR",
+          "memory_status": "VARCHAR",
+          "memory_error": "TEXT",
+          "reply_status": "VARCHAR",
+          "reply_error": "TEXT",
+          "status": "VARCHAR",
+          "created_at": "DATETIME",
+          "updated_at": "DATETIME"
+        },
+        "dynamic_read_states": {
+          "user_id": "VARCHAR",
+          "last_read_dynamic_at": "DATETIME",
+          "last_read_comment_at": "DATETIME",
+          "updated_at": "DATETIME"
+        },
+        "dynamic_comments": {
+          "id": "VARCHAR",
+          "dynamic_id": "VARCHAR",
+          "author_type": "VARCHAR",
+          "author_id": "VARCHAR",
+          "owner_user_id": "VARCHAR",
+          "parent_comment_id": "VARCHAR",
+          "content": "TEXT",
+          "memory_policy": "VARCHAR",
+          "memory_status": "VARCHAR",
+          "memory_error": "TEXT",
+          "reply_status": "VARCHAR",
+          "reply_error": "TEXT",
+          "status": "VARCHAR",
+          "created_at": "DATETIME",
+          "updated_at": "DATETIME"
+        },
+        "schema_migrations": {
+          "name": "VARCHAR",
+          "applied_at": "DATETIME"
+        }
+      }
+    },
+    "songs": {
+      "version": 1,
+      "tables": {
+        "songs": {
+          "uuid": "VARCHAR",
+          "name": "VARCHAR",
+          "safe_name": "VARCHAR",
+          "uploader": "VARCHAR",
+          "singers": "VARCHAR",
+          "introduction": "TEXT",
+          "lyrics": "TEXT"
+        }
+      }
+    }
+  }
+}
