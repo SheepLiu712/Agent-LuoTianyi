@@ -193,10 +193,10 @@ class NetworkClient:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
 
-    def get_preferences(self) -> dict:
-        """从服务器获取偏好设置。"""
+    def get_preferences(self) -> dict | None:
+        """读取偏好；成功的空偏好返回 {}，读取失败返回 None。"""
         if not self.user_id:
-            return {}
+            return None
         try:
             resp = self.session.post(
                 f"{self.base_url}/preference/get",
@@ -206,16 +206,20 @@ class NetworkClient:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return data.get("preferences", data)
+                preferences = data.get("preferences", data)
+                if not isinstance(preferences, dict):
+                    self.logger.warning("获取偏好设置失败: 响应格式无效")
+                    return None
+                return preferences
             elif resp.status_code == 401:
                 self.logger.warning("获取偏好设置失败: 未授权")
-                return {}
+                return None
             else:
                 self.logger.warning(f"获取偏好设置失败: HTTP {resp.status_code}")
-                return {}
+                return None
         except Exception as exc:
             self.logger.error(f"获取偏好设置失败: {exc}")
-            return {}
+            return None
 
     def overwrite_preferences(self, preferences: dict) -> dict:
         """覆盖保存偏好设置到服务器。"""
