@@ -28,7 +28,7 @@ func check(ok: bool, label: String) -> void:
 func _run() -> void:
 	var host := Control.new()
 	root.add_child(host)
-	var page = load("res://scenes/ui/audio_settings_page.tscn").instantiate() as Control
+	var page = load("res://scenes/ui/settings/audio_settings_page.tscn").instantiate() as Control
 	host.add_child(page)
 	await process_frame
 	host.hide()

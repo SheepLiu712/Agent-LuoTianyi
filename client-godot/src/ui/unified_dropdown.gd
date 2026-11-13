@@ -2,8 +2,8 @@ extends Button
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 ## 共享的稳定 ID 选择器/动作菜单；弹层细节不对外暴露。
 signal activated(id: String)
-const Item = preload("res://scenes/ui/dropdown_item.tscn")
-const SeparatorScene = preload("res://scenes/ui/dropdown_separator.tscn")
+const ItemScene = preload("res://scenes/ui/components/dropdown_item.tscn")
+const SeparatorScene = preload("res://scenes/ui/components/dropdown_separator.tscn")
 const DEFAULT_VARIATION := &"DropdownItem"
 const SELECTED_VARIATION := &"DropdownItemSelected"
 @export var show_selected_label := true
@@ -100,7 +100,7 @@ func _build() -> void:
 		if item.get("separator",false):
 			_rows.add_child(SeparatorScene.instantiate())
 			continue
-		var row = Item.instantiate()
+		var row = ItemScene.instantiate()
 		row.setup(item)
 		row.gui_input.connect(_key_input)
 		row.pressed.connect(func(): _activate(item.id))

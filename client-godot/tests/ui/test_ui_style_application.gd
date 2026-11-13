@@ -49,20 +49,21 @@ func run() -> void:
 	_check_application_defaults_to_flat_svg(app)
 	await capture(root, "login-flat")
 	await app._session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual","password":"synthetic","request_token":false}, false)
-	check(await until(func(): return app._chat_view != null and app._chat.get_state().phase == "ready"), "local fixture login and chat ready")
-	if app._chat_view == null:
+	check(await until(func(): return app.get_workspace() != null and app._chat.get_state().phase == "ready"), "local fixture login and chat ready")
+	if app.get_workspace() == null:
 		app.queue_free()
 		await process_frame
 		quit(1)
 		return
-	var chat = app._chat_view
+	var workspace: Control = app.get_workspace()
+	var chat: Control = workspace.get_chat_view()
 	chat.get_node("%Input").text = "今天也一起慢慢来吧。"
 	chat.get_node("%Send").pressed.emit()
 	check(await until(func(): return chat.find_child("MessageAudio", true, false) != null), "real reply creates audio controls")
 	chat.get_node("%Input").text = "切换风格后保留的草稿"
-	app.get_node("%NavSettings").pressed.emit()
-	app.get_node("%NavLogs").pressed.emit()
-	app.get_node("%NavDynamics").pressed.emit()
+	workspace.get_node("%NavSettings").pressed.emit()
+	workspace.get_node("%NavLogs").pressed.emit()
+	workspace.get_node("%NavDynamics").pressed.emit()
 	var settings = app.find_child("SettingsWindow", true, false)
 	var logs = app.find_child("LogWindow", true, false)
 	var dynamics = app.find_child("DynamicsWindow", true, false)
@@ -74,11 +75,11 @@ func run() -> void:
 	viewer.hide()
 	logs.hide()
 	dynamics.hide()
-	await _check_style_combinations(app, settings, chat, dynamics, logs, viewer, image)
+	await _check_style_combinations(app, workspace, settings, chat, dynamics, logs, viewer, image)
 	dynamics.close_requested.emit()
 	viewer.queue_free()
 	await process_frame
-	app.get_node("%NavDynamics").pressed.emit()
+	workspace.get_node("%NavDynamics").pressed.emit()
 	dynamics = app.find_child("DynamicsWindow", true, false)
 	check_icon(dynamics, "Refresh", "action_refresh", true)
 	viewer = app._images_presenter.open_image(root, func(): return image)
@@ -92,13 +93,14 @@ func run() -> void:
 	app = make_app(directory)
 	await create_timer(.3).timeout
 	_check_new_application_restores_appearance_before_login(app)
-	check_icon(app, "NavChat", "nav_chat", true)
 	await capture(root, "login-restored-crystal")
 	await app._session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual","password":"synthetic","request_token":false}, false)
-	app.get_node("%NavSettings").pressed.emit()
+	workspace = app.get_workspace()
+	check_icon(workspace, "NavChat", "nav_chat", true)
+	workspace.get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
 	check(settings.get_node("%StylePage").get_node("%UiStylePresets").get_selected_id() == "crystal", "reopened settings shows persisted choice")
-	check_icon(app._chat_view, "Send", "action_send", true)
+	check_icon(workspace.get_chat_view(), "Send", "action_send", true)
 	check(app._services.ui_style.save_preferences("flat", "svg") == OK, "reset fixture to defaults")
 	app.queue_free()
 	await process_frame
@@ -128,13 +130,14 @@ func _check_chat_surface_hot_switch(chat: Variant, crystal: bool) -> void:
 	check(card.border_width_left == (0 if crystal else 1), "chat surface border follows style")
 	check(card.shadow_size == 0, "chat surface has no corner shadow")
 
-func _check_avatar_border_hot_switch(app: Variant, crystal: bool) -> void:
-	if app._avatar == null:
+func _check_avatar_border_hot_switch(workspace: Variant, crystal: bool) -> void:
+	var avatar: Control = workspace.get_avatar_panel()
+	if avatar == null:
 		check(false, "avatar exists for border check")
 		return
-	check(app._avatar.get_node_or_null("Border") == null, "avatar never draws a separate rounded border")
-	check(app._avatar.clip_contents and app._avatar.get_node("%Stage").clip_contents, "avatar keeps its content clipping")
-	var background: TextureRect = app._avatar.get_node("Stage/Background")
+	check(avatar.get_node_or_null("Border") == null, "avatar never draws a separate rounded border")
+	check(avatar.clip_contents and avatar.get_node("%Stage").clip_contents, "avatar keeps its content clipping")
+	var background: TextureRect = avatar.get_node("Stage/Background")
 	check(is_equal_approx(background.material.get_shader_parameter("corner_radius"), 12.0 if crystal else 8.0), "avatar background keeps its rounded corner mask")
 
 func _check_application_defaults_to_flat_svg(app: Variant) -> void:
@@ -143,7 +146,7 @@ func _check_application_defaults_to_flat_svg(app: Variant) -> void:
 func _check_new_application_restores_appearance_before_login(app: Variant) -> void:
 	check(app._services.ui_style.ui_style == "crystal" and app._services.ui_style.icon_style == "emoji", "new application restores appearance before login")
 
-func _check_style_combinations(app: Variant, settings: Variant, chat: Variant, dynamics: Variant, logs: Variant, viewer: Variant, image: Texture2D) -> void:
+func _check_style_combinations(app: Variant, workspace: Variant, settings: Variant, chat: Variant, dynamics: Variant, logs: Variant, viewer: Variant, image: Texture2D) -> void:
 	for pair in [["flat","svg"],["flat","emoji"],["crystal","svg"],["crystal","emoji"]]:
 		settings.open()
 		settings.select_page("style")
@@ -155,10 +158,10 @@ func _check_style_combinations(app: Variant, settings: Variant, chat: Variant, d
 		var emoji: bool = pair[1] == "emoji"
 		var crystal: bool = pair[0] == "crystal"
 		for entry in [["NavChat","nav_chat"],["NavDynamics","nav_at"],["NavSettings","nav_settings"],["NavLogs","nav_scroll"]]:
-			check_icon(app, entry[0], entry[1], emoji)
+			check_icon(workspace, entry[0], entry[1], emoji)
 		for frame in 2: await process_frame
 		for name in ["NavChat", "NavDynamics", "NavSettings"]:
-			check(app.get_node("%" + name).size.is_equal_approx(Vector2(64, 64)), "square navigation in " + str(pair) + ": " + name)
+			check(workspace.get_node("%" + name).size.is_equal_approx(Vector2(64, 64)), "square navigation in " + str(pair) + ": " + name)
 		for entry in [["Send","action_send"],["ImageButton","action_image"],["Latest","action_arrow_down"],["VolumeButton","media_volume"]]:
 			check_icon(chat, entry[0], entry[1], emoji)
 		for entry in [["Publish","action_edit"],["Refresh","action_refresh"],["ReadAll","action_check_all"]]:
@@ -174,7 +177,7 @@ func _check_style_combinations(app: Variant, settings: Variant, chat: Variant, d
 			check(theme.get_color("font_selected_color", kind).is_equal_approx(Color.WHITE), "selected text stays white in " + str(pair) + ": " + kind)
 		_check_open_surfaces_hot_switch_shadows(theme, crystal)
 		_check_chat_surface_hot_switch(chat, crystal)
-		_check_avatar_border_hot_switch(app, crystal)
+		_check_avatar_border_hot_switch(workspace, crystal)
 		for bubble in chat.get_node("%Scroll").get_node("%Canvas").get_children():
 			var panel: StyleBoxFlat = bubble.get_node("%Bubble").get_theme_stylebox("panel")
 			_check_existing_message_changes_without_rebuilding_chat(panel, crystal)

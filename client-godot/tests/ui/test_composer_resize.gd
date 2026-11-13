@@ -2,7 +2,7 @@ extends SceneTree
 ## 输入区上沿那条分隔线的拖动契约：只有贴着线的 6px 带能抓，带外的点击必须照旧落到输入框和按钮上。
 ## 移动/松开走 `_input`：真实拖动会跑出这条带，只测 `_gui_input` 掩盖不了这个问题。
 ## 另外用真实指针事件走一遍 viewport 命中，确认抓的确实是「那条线」而不是别的控件。
-const SCENE := "res://scenes/ui/chat_view.tscn"
+const SCENE := "res://scenes/ui/chat/chat_view.tscn"
 var failures: Array[String] = []
 var _changes: Array[float] = []
 

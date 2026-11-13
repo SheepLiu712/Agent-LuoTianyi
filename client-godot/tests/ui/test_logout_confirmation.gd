@@ -59,10 +59,11 @@ func run() -> void:
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"ui", "password":"synthetic", "request_token":false}, false)
-	app.find_child("ChatView", true, false).get_node("%Input").text = "retain chat on cancel"
-	app.get_node("%NavLogs").pressed.emit()
+	var workspace = app.get_workspace()
+	workspace.get_chat_view().get_node("%Input").text = "retain chat on cancel"
+	workspace.get_node("%NavLogs").pressed.emit()
 	var logs = app.find_child("LogWindow", true, false)
-	app.get_node("%NavSettings").pressed.emit()
+	workspace.get_node("%NavSettings").pressed.emit()
 	var settings = app.find_child("SettingsWindow", true, false)
 	check(await until(func(): return settings.visible), "settings opens after prewarm")
 	var field = settings.find_child("CustomContextField", true, false)
@@ -94,7 +95,7 @@ func run() -> void:
 	root.close_requested.emit()
 	await inspect_dialog(dialog, root)
 	await click(dialog.get_cancel_button())
-	app.get_node("%NavSettings").pressed.emit()
+	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
 	check(await until(func(): return settings.visible), "settings reopens after prewarm")
 	await click(settings.get_node("%LogoutButton"))
@@ -103,7 +104,7 @@ func run() -> void:
 	await process_frame
 	_check_discard_logs_out_preserves_logs_and_reusable_decision(session, logs, dialog)
 	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"fail_save", "password":"synthetic", "request_token":false}, false)
-	app.get_node("%NavSettings").pressed.emit()
+	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
 	check(await until(func(): return settings.visible), "settings opens for the second account")
 	field = settings.find_child("CustomContextField", true, false)

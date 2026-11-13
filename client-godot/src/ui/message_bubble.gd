@@ -4,7 +4,7 @@ signal image_opened(texture: Texture2D)
 signal image_action(action: String)
 const USER_ICON := preload("res://assets/ui/user_icon.png")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
-const AudioRow = preload("res://scenes/ui/message_audio.tscn")
+const AudioRow = preload("res://scenes/ui/chat/message_audio.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const IMAGE_PREVIEW_MAX := 250.0
 ## 送达结果不确定的消息不呈现任何气泡；列表层已先过滤，这里是兜底。

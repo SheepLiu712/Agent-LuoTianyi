@@ -1,0 +1,313 @@
+[gd_scene format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+[ext_resource type="Script" path="res://src/ui/chat_view.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+[ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
+[ext_resource type="Script" path="res://src/ui/composer_input.gd" id="5_composer"]
+[ext_resource type="Script" path="res://src/ui/composer_resize_handle.gd" id="6_resize"]
+[ext_resource type="PackedScene" path="res://scenes/ui/chat/virtual_message_list.tscn" id="7_messages"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
+[ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_image.svg" id="image_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_send.svg" id="send_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/media_volume.svg" id="volume_icon"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[node name="ChatView" type="MarginContainer"]
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+files = ExtResource("isolation_files")
+window_system = ExtResource("isolation_window_system")
+
+[node name="Background" type="Panel" parent="."]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"ChatSurface"
+
+[node name="Margin" type="MarginContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/margin_left = 1
+theme_override_constants/margin_top = 1
+theme_override_constants/margin_right = 1
+theme_override_constants/margin_bottom = 1
+
+[node name="Column" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="HeaderMargin" type="MarginContainer" parent="Margin/Column"]
+custom_minimum_size = Vector2(0, 72)
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 12
+
+[node name="Heading" type="HBoxContainer" parent="Margin/Column/HeaderMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Avatar" type="TextureRect" parent="Margin/Column/HeaderMargin/Heading"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+size_flags_vertical = 4
+texture = ExtResource("4_avatar")
+expand_mode = 1
+stretch_mode = 5
+material = SubResource("ShaderMaterial_avatar")
+
+[node name="Identity" type="VBoxContainer" parent="Margin/Column/HeaderMargin/Heading"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 2
+
+[node name="Title" type="Label" parent="Margin/Column/HeaderMargin/Heading/Identity"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.1882353, 0.27058825, 0.3254902, 1)
+theme_override_font_sizes/font_size = 20
+text = "和天依聊聊"
+
+[node name="Status" type="Label" parent="Margin/Column/HeaderMargin/Heading/Identity"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.30980393, 0.40392157, 0.45882353, 1)
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+
+[node name="SepTop" type="HSeparator" parent="Margin/Column"]
+layout_mode = 2
+
+[node name="MessagesMargin" type="MarginContainer" parent="Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 12
+
+[node name="Messages" type="VBoxContainer" parent="Margin/Column/MessagesMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HistoryBanner" type="PanelContainer" parent="Margin/Column/MessagesMargin/Messages"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"StatusBannerSurface"
+
+[node name="HistoryRow" type="HBoxContainer" parent="Margin/Column/MessagesMargin/Messages/HistoryBanner"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HistoryStatus" type="Label" parent="Margin/Column/MessagesMargin/Messages/HistoryBanner/HistoryRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+
+[node name="HistoryRetry" type="Button" parent="Margin/Column/MessagesMargin/Messages/HistoryBanner/HistoryRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "重试历史"
+
+[node name="HistorySkip" type="Button" parent="Margin/Column/MessagesMargin/Messages/HistoryBanner/HistoryRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "跳过本次"
+
+[node name="Scroll" parent="Margin/Column/MessagesMargin/Messages" instance=ExtResource("7_messages")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ComposerSurface" type="PanelContainer" parent="Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 1
+theme_type_variation = &"ChatComposer"
+script = ExtResource("6_resize")
+
+[node name="ComposerMargin" type="MarginContainer" parent="Margin/Column/ComposerSurface"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 16
+
+[node name="Composer" type="VBoxContainer" parent="Margin/Column/ComposerSurface/ComposerMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AudioControls" type="HBoxContainer" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ImageButton" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 32)
+layout_mode = 2
+tooltip_text = "选择图片，也可以在输入框中 Ctrl+V 粘贴"
+theme_type_variation = &"ChatIconButton"
+icon = ExtResource("image_icon")
+icon_alignment = 1
+
+[node name="VolumeButton" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 32)
+layout_mode = 2
+tooltip_text = "语音音量"
+theme_type_variation = &"ChatIconButton"
+icon = ExtResource("volume_icon")
+icon_alignment = 1
+
+[node name="Spacer" type="Control" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Latest" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"ChatPillButton"
+text = "回到最新"
+
+[node name="Unread" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AudioControls"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"ChatPillButton"
+text = "定位未读"
+
+[node name="AttachmentBar" type="HBoxContainer" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AttachmentThumbnail" type="TextureRect" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AttachmentBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="AttachmentLabel" type="Label" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AttachmentBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "待发送图片"
+
+[node name="PreviewImage" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AttachmentBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "查看"
+
+[node name="RemoveImage" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/AttachmentBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "移除"
+
+[node name="ImageStatus" type="Label" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+
+[node name="InputRow" type="HBoxContainer" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Input" type="TextEdit" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/InputRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+placeholder_text = "想说什么，都可以慢慢说…"
+wrap_mode = 1
+script = ExtResource("5_composer")
+input_service = ExtResource("isolation_input_service")
+
+[node name="Send" type="Button" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer/InputRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+size_flags_vertical = 8
+tooltip_text = "发送消息"
+theme_type_variation = &"PrimaryButton"
+icon = ExtResource("send_icon")
+icon_alignment = 1
+
+[node name="Hint" type="Label" parent="Margin/Column/ComposerSurface/ComposerMargin/Composer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.41960785, 0.50980395, 0.5647059, 1)
+theme_override_font_sizes/font_size = 12
+text = "Enter 发送 · Shift + Enter 换行"
+horizontal_alignment = 2
+autowrap_mode = 3
+
+[node name="VolumePopup" type="PopupPanel" parent="."]
+unique_name_in_owner = true
+size = Vector2i(228, 72)
+visible = false
+transparent_bg = true
+unresizable = true
+theme = ExtResource("2_theme")
+theme_type_variation = &"DropdownPopup"
+
+[node name="VolumeMargin" type="MarginContainer" parent="VolumePopup"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 8
+
+[node name="Column" type="VBoxContainer" parent="VolumePopup/VolumeMargin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="VolumeLabel" type="Label" parent="VolumePopup/VolumeMargin/Column"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "语音音量"
+
+[node name="Volume" type="HSlider" parent="VolumePopup/VolumeMargin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(188, 24)
+layout_mode = 2
+tooltip_text = "回复语音自动播放；拖到最左侧静音"
+max_value = 1.0
+step = 0.01
+
+[node name="ImagePicker" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "选择要发送的图片"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.png,*.jpg,*.jpeg,*.webp,*.bmp ; 图片")
+use_native_dialog = true

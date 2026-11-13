@@ -23,13 +23,15 @@ func _check_settings_variations(theme: Theme) -> void:
 			["SettingsLineEdit", "LineEdit"], ["SettingsTextEdit", "TextEdit"], ["SettingsCheckBox", "CheckBox"],
 			["SettingsCard", "PanelContainer"], ["SettingsDialogSurface", "PanelContainer"], ["SettingsToast", "PanelContainer"],
 			["SettingsPageTitle", "Label"], ["SettingsCardTitle", "Label"], ["SettingsFieldLabel", "Label"],
-			["SettingsHelpText", "Label"], ["SettingsDialogTitle", "Label"], ["ChatIconButton", "Button"]]:
+			["SettingsHelpText", "Label"], ["SettingsDialogTitle", "Label"], ["ChatIconButton", "Button"],
+			["WindowShellSurface", "PanelContainer"], ["StatusBannerSurface", "PanelContainer"],
+			["InlineLinkButton", "Button"], ["ChatPillButton", "Button"]]:
 		check(theme.get_type_variation_base(entry[0]) == StringName(entry[1]), "settings variation keeps base control: " + entry[0])
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		check(theme.has_stylebox(state, "ChatIconButton"), "chat icon declares hover/focus state: " + state)
 	var settings_primary := flat_style(theme, "SettingsPrimaryButton", "normal")
 	if settings_primary != null:
-		check(settings_primary.bg_color.is_equal_approx(Color(0, 0.780392, 0.941176)), "settings primary uses ring cyan")
+		check(settings_primary.bg_color.is_equal_approx(ACCENT), "settings primary uses Tianyi blue")
 	var settings_dialog := flat_style(theme, "SettingsDialogSurface", "panel")
 	if settings_dialog != null:
 		check(settings_dialog.shadow_size > 0, "settings dialogs always keep elevation")
@@ -107,19 +109,23 @@ func _check_surface_variations(theme: Theme) -> void:
 			["DynamicsDetailSurface", "panel", 8], ["DropdownItem", "normal", 6], ["DropdownItem", "hover", 6],
 			["DynamicInput", "normal", 8], ["MessageBubbleOwn", "panel", 8], ["MessageBubbleOther", "panel", 8],
 			["MessageTimeChip", "panel", 8], ["TerminalPanel", "panel", 0], ["ImageEntry", "focus", 8],
-			["ChatIconButton", "hover", 8], ["SettingsToast", "panel", 8]]:
+			["ChatIconButton", "hover", 8], ["SettingsToast", "panel", 8],
+			["WindowShellSurface", "panel", 0], ["StatusBannerSurface", "panel", 8]]:
 		var style := flat_style(theme, entry[0], entry[1])
 		if style != null:
 			check(maxi(style.corner_radius_top_left, style.corner_radius_bottom_left) == entry[2], "surface radius: " + entry[0])
 		check(theme.get_type_variation_base(entry[0]) != &"", "surface keeps a base control: " + entry[0])
+	var shell := flat_style(theme, "WindowShellSurface", "panel")
+	if shell != null:
+		check(shell.bg_color.a == 1.0 and shell.shadow_size == 0, "window shell surface defaults to solid and flat")
 
 
 func _check_styles_are_centralised() -> void:
 	var source := FileAccess.get_file_as_string(THEME_PATH)
 	check(not source.is_empty(), "theme source readable")
 	check(not source.contains('id="StyleBoxFlat_'), "no anonymous stylebox in the theme")
-	for path in ["res://scenes/ui/message_bubble.tscn", "res://scenes/ui/chat_view.tscn", "res://scenes/ui/dynamics_window.tscn",
-			"res://scenes/ui/dynamic_detail.tscn", "res://scenes/ui/dropdown_item.tscn", "res://scenes/ui/log_window.tscn"]:
+	for path in ["res://scenes/ui/chat/message_bubble.tscn", "res://scenes/ui/chat/chat_view.tscn", "res://scenes/ui/windows/dynamics_window.tscn",
+			"res://scenes/ui/dynamics/dynamic_detail.tscn", "res://scenes/ui/components/dropdown_item.tscn", "res://scenes/ui/windows/log_window.tscn"]:
 		check(not FileAccess.get_file_as_string(path).contains("StyleBoxFlat"), "shared surfaces come from the theme: " + path)
 
 func flat_style(theme: Theme, kind: String, state: String) -> StyleBoxFlat:

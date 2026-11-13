@@ -29,8 +29,8 @@ func _check_application(directory: String) -> void:
 	app.setup(account,directory+"/layout.cfg")
 	root.add_child(app)
 	await process_frame
-	app.get_node("%AccountForm").get_node("%MenuButton").pressed.emit()
-	var open_button: Button = app.get_node("%AccountForm").get_node("%Logs")
+	app.get_login_page().get_node("%MenuButton").pressed.emit()
+	var open_button: Button = app.get_login_page().get_node("%Logs")
 	check(open_button != null,"login has open logs action")
 	if open_button != null:
 		open_button.pressed.emit()
@@ -63,12 +63,12 @@ func _check_viewer(directory: String) -> void:
 	var logger = Log.new(directory+"/logs")
 	logger.set_debug_enabled(true)
 	logger.record("runtime_app_started", {"phase":"starting", "reason":"normal", "uptime_ms":0, "pid":1})
-	if not ResourceLoader.exists("res://scenes/ui/log_window.tscn"):
+	if not ResourceLoader.exists("res://scenes/ui/windows/log_window.tscn"):
 		check(false,"log window scene available")
 		logger.finish()
 		quit(1)
 		return
-	var viewer = load("res://scenes/ui/log_window.tscn").instantiate()
+	var viewer = load("res://scenes/ui/windows/log_window.tscn").instantiate()
 	viewer.setup(logger)
 	root.add_child(viewer)
 	viewer.open()

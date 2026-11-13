@@ -22,7 +22,7 @@ func _ready() -> void:
 	%ConfirmImage.pressed.connect(func():
 		if _confirm.is_valid() and _confirm.call(%Picture.texture): close_image()
 		else:
-			%Feedback.text = ""
+			_set_feedback("")
 			ErrorDialog.present(self, "图片暂时无法发送，请检查当前连接后重试。图片已保留。"))
 	%ImageScroll.resized.connect(func(): if _fitting: _resize_image())
 
@@ -37,7 +37,7 @@ func present(source: Window, provider: Callable, confirm: Callable = Callable())
 	_fitting = true
 	_zoom = 1
 	_error_announced = false
-	%Feedback.text = ""
+	_set_feedback("")
 	%ConfirmImage.visible = confirm.is_valid()
 	%CloseImage.text = "取消" if confirm.is_valid() else "关闭"
 	_load_image()
@@ -46,12 +46,12 @@ func present(source: Window, provider: Callable, confirm: Callable = Callable())
 	_resize_image.call_deferred()
 
 
-## 打开后键盘焦点必须落在可用动作上：失败时是重试，正常时是关闭。
+## 打开后键盘焦点必须落在可用动作上：失败时是重试，正常时是适应窗口。
 func _focus_action() -> void:
 	if %RetryImage.visible:
 		%RetryImage.grab_focus()
 	else:
-		%CloseImage.grab_focus()
+		%FitImage.grab_focus()
 
 func _reveal() -> void:
 	%Chrome.open_window()
@@ -60,6 +60,7 @@ func _load_image() -> void:
 	var texture: Texture2D = _provider.call() if _provider.is_valid() else null
 	%Picture.texture = texture
 	%Picture.visible = texture != null
+	%Backdrop.visible = texture != null
 	%ImageError.visible = false
 	%RetryImage.visible = texture == null
 	if texture == null and not _error_announced:
@@ -68,7 +69,11 @@ func _load_image() -> void:
 	for button in [%ZoomIn,%ZoomOut,%FitImage,%OriginalSize,%ConfirmImage]: button.disabled = texture == null
 	if texture != null: _resize_image()
 	# 重试成功后按钮会消失，焦点不能跟着消失，否则键盘用户就断了出口。
-	if not %RetryImage.visible and %RetryImage.has_focus(): %CloseImage.grab_focus()
+	if not %RetryImage.visible and %RetryImage.has_focus(): %FitImage.grab_focus()
+
+func _set_feedback(text: String) -> void:
+	%Feedback.text = text
+	%Feedback.visible = not text.is_empty()
 
 func _resize_image() -> void:
 	var texture: Texture2D = %Picture.texture

@@ -19,14 +19,14 @@ func test_details() -> void:
 	root.add_child(controller)
 	await controller.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"detail","message_token":"fixture-token"})
 	await controller.refresh()
-	if not ResourceLoader.exists("res://scenes/ui/dynamics_window.tscn"):
+	if not ResourceLoader.exists("res://scenes/ui/windows/dynamics_window.tscn"):
 		check(false,"dynamics window scene exists")
 		controller.queue_free()
 		await process_frame
 		quit(1)
 		return
 	var layout_path := "user://detail-test-%s.cfg" % Time.get_ticks_usec()
-	var scene: PackedScene = load("res://scenes/ui/dynamics_window.tscn")
+	var scene: PackedScene = load("res://scenes/ui/windows/dynamics_window.tscn")
 	var window = scene.instantiate()
 	window.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(layout_path))
 	root.add_child(window)
@@ -152,7 +152,8 @@ func _check_empty_and_failure_placeholders() -> void:
 	check(failing.get_state().phase == "failed","first page failure is reported as failed")
 	var failing_window = _open_dynamics_window(failing)
 	await process_frame
-	check(failing_window.get_node("%Empty").text.contains("失败"),"failure placeholder explains the state")
+	var fail_dialog := _error_dialog(failing_window)
+	check(fail_dialog != null and fail_dialog.visible and fail_dialog.get_current_text().contains("加载不出动态"),"failure placeholder explains the state")
 	check(not failing_window.get_node("%Refresh").disabled,"failure keeps an explicit retry action")
 	failing_window.queue_free()
 	failing.queue_free()
@@ -191,7 +192,7 @@ func test_open_post_from_card() -> void:
 
 func _open_dynamics_window(controller: Node) -> Node:
 	var layout_path := "user://dynamics-states-%s.cfg" % Time.get_ticks_usec()
-	var window = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
 	window.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(layout_path))
 	root.add_child(window)
 	window.open()
@@ -224,39 +225,56 @@ func test_publish_failure() -> void:
 	await controller.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"fail-write","message_token":"fixture-token"})
 	await controller.refresh()
 	var layout_path := "user://dynamics-window-test-%s.cfg"%Time.get_ticks_usec()
-	var window = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
 	window.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(layout_path))
 	root.add_child(window)
 	window.open()
 	await process_frame
-	for button in window.find_children("*","Button",true,false):
-		if button.text == "发布动态": button.pressed.emit()
+	_open_publisher(window)
 	await process_frame
 	var draft = window.find_child("PublishDraft",true,false)
 	var send = window.find_child("PublishButton",true,false)
 	check(draft != null and send != null,"publish controls visible")
 	if draft != null:
 		check(draft.get_window() == window,"publishing stays inside its dynamics window")
-	if draft != null:
 		draft.text = "keep my draft"
 		draft.text_changed.emit()
 		send.pressed.emit()
-		await create_timer(0.2).timeout
+		await _wait_publish_done(send)
 		check(draft.text == "keep my draft" and window.is_dirty(),"failed publication preserves draft")
+		var err_dialog := _error_dialog(window)
+		check(err_dialog != null and err_dialog.visible and err_dialog.get_current_text().contains("发布失败"),"publication error shown")
+		_dismiss_error(err_dialog)
 		window.close_requested.emit()
 		await process_frame
 		check(is_instance_valid(window),"draft closure requires explicit confirmation")
-		var statuses = window.find_children("*","Label",true,false)
-		var noted := false
-		for label in statuses:
-			noted = noted or label.text.contains("HTTP_ERROR")
-		check(noted,"publication error shown")
 	window.queue_free()
 	await process_frame
 	check(controller.get_posts().size()==10,"window does not own application controller")
 	DirAccess.remove_absolute(layout_path)
 	controller.queue_free()
 	await process_frame
+
+func _open_publisher(window: Node) -> void:
+	for button in window.find_children("*","Button",true,false):
+		if button.text == "发布动态":
+			button.pressed.emit()
+
+func _wait_publish_done(send: Button) -> void:
+	var deadline := Time.get_ticks_msec() + 3000
+	while send.disabled and Time.get_ticks_msec() < deadline:
+		await process_frame
+	await process_frame
+
+func _dismiss_error(dialog: Node) -> void:
+	if dialog != null and dialog.visible:
+		dialog.get_node("%ErrorConfirm").pressed.emit()
+
+func _error_dialog(host: Node) -> Node:
+	for child in host.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			return child
+	return null
 
 func _check_cancel_target_keeps_reply_text(reply: Variant, window: Variant) -> void:
 	check(reply.text == "reply draft" and window.is_dirty(),"cancel target keeps reply text")

@@ -1,0 +1,98 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/publish_overlay.gd" id="1_publish"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/frost_surface.tscn" id="3_frost"]
+[ext_resource type="Material" path="res://theme/frost_popup.tres" id="4_material"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="5_decision"]
+
+[node name="PublishOverlay" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_publish")
+
+[node name="Shade" parent="." instance=ExtResource("3_frost")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.3, 0.36, 0.42, 1)
+material = ExtResource("4_material")
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(560, 400)
+layout_mode = 2
+theme_type_variation = &"DialogSurface"
+
+[node name="Column" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Header" type="HBoxContainer" parent="Center/Panel/Column"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Center/Panel/Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SettingsDialogTitle"
+text = "分享此刻的想法"
+
+[node name="PublishDraft" type="TextEdit" parent="Center/Panel/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 160)
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"SettingsTextEdit"
+placeholder_text = "想和天依分享些什么？"
+wrap_mode = 1
+
+[node name="PublishStatus" type="Label" parent="Center/Panel/Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+autowrap_mode = 3
+
+[node name="Actions" type="HBoxContainer" parent="Center/Panel/Column"]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 2
+
+[node name="CancelPublish" type="Button" parent="Center/Panel/Column/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(80, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "取消"
+
+[node name="PublishButton" type="Button" parent="Center/Panel/Column/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"PrimaryButton"
+text = "发布文字动态"
+
+[node name="DiscardDialog" parent="." instance=ExtResource("5_decision")]
+unique_name_in_owner = true
+title = "放弃这条动态？"
+dialog_text = "关闭后，当前尚未发布的内容不会保留。"
+ok_button_text = "放弃并关闭"
+destructive_action = true

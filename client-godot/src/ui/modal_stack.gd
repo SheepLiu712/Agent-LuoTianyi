@@ -8,8 +8,21 @@ static func activate(window: Window) -> void:
 	var parent := window.get_parent()
 	if parent == null:
 		return
+	var host := parent.get_window()
+	if host == null:
+		return
 	window.exclusive = false
-	for child in parent.get_children():
-		if child is Window and child != window and child.visible and child.exclusive:
-			return
+	if _has_exclusive_child(host, window):
+		return
 	window.exclusive = true
+
+
+static func _has_exclusive_child(node: Node, ignore: Window) -> bool:
+	for child in node.get_children():
+		if child is Window:
+			if child != ignore and child.visible and child.exclusive:
+				return true
+			continue
+		if _has_exclusive_child(child, ignore):
+			return true
+	return false

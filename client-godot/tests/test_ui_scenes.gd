@@ -2,65 +2,71 @@ extends SceneTree
 const THEME_PATH := "res://theme/app_theme.tres"
 # Public scene entrypoints; no internal container paths or script implementation snapshots.
 const SCENES := {
-	"res://scenes/ui/publish_overlay.tscn": {
+	"res://scenes/ui/dynamics/publish_overlay.tscn": {
 		"root":"PublishOverlay","type":"Control","setup":"setup","unique":["PublishDraft","PublishButton","PublishStatus","CancelPublish","DiscardDialog"]
 	},
-	"res://scenes/ui/profile_page.tscn": {
+	"res://scenes/ui/settings/profile_page.tscn": {
 		"root":"ProfilePage","type":"Control","setup":"set_avatar_source","unique":["Preview","Account","Hint","PickButton","ResetButton","Result","FileDialog"]
 	},
-	"res://scenes/ui/preferences_page.tscn": {
+	"res://scenes/ui/settings/preferences_page.tscn": {
 		"root":"PreferencesPage","type":"Control","setup":"setup","unique":["RelationshipPresets","SpeakingStylePresets","PersonalityField","CustomContextField","Toast"]
 	},
-	"res://scenes/ui/toast_overlay.tscn": {
+	"res://scenes/ui/components/toast_overlay.tscn": {
 		"root":"Toast","type":"Control","setup":"","unique":["Panel","Text"]
 	},
-	"res://scenes/ui/model_page.tscn": {
+	"res://scenes/ui/settings/model_page.tscn": {
 		"root":"ModelPage","type":"Control","setup":"setup","unique":["Cards","RefreshTypes","Status","PlainDialog","TestDialog"]
 	},
-	"res://scenes/ui/model_purpose_card.tscn": {
+	"res://scenes/ui/settings/model_purpose_card.tscn": {
 		"root":"ModelPurposeCard","type":"PanelContainer","setup":"setup","unique":["PurposeTitle","Enabled","Requirements","Description","Fields","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","CardStatus"]
 	},
-	"res://scenes/ui/account_view.tscn": {
+	"res://scenes/ui/pages/account_view.tscn": {
 		"root":"AccountForm","type":"PanelContainer","setup":"setup","unique":["Form","Server","Username","Password","Confirm","Invite","Remember","AutoLogin","Submit","Cancel","Status","Logs","MenuButton","RegisterLink","ResetLink","HistoryButton","ServerDialog","SavedLogin","UsePassword"]
 	},
 	"res://scenes/main.tscn": {
-		"root":"AgentLuo","type":"Control","setup":"setup","unique":["Split","Center","AccountForm","LogProblem","ExitDialog"],
+		"root":"AgentLuo","type":"Control","setup":"setup","unique":["PageSlot","LogProblem","ExitDialog","SecurityError","AccountStorageWarning","Chrome"],
 		"inject_layout":true
 	},
-	"res://scenes/ui/unified_dropdown.tscn": {
+	"res://scenes/ui/pages/chat_workspace.tscn": {
+		"root":"ChatWorkspace","type":"Control","setup":"setup","unique":["Background","Navigation","NavChat","NavDynamics","DynamicsUnread","NavSettings","NavLogs","Split","AvatarPanel","ChatView"]
+	},
+	"res://scenes/ui/components/window_chrome.tscn": {
+		"root":"WindowChrome","type":"Control","setup":"","unique":[]
+	},
+	"res://scenes/ui/components/unified_dropdown.tscn": {
 		"root":"UnifiedDropdown","type":"Button","setup":"","unique":["Menu","Scroll","Rows"]
 	},
-	"res://scenes/ui/dropdown_item.tscn": {
+	"res://scenes/ui/components/dropdown_item.tscn": {
 		"root":"DropdownItem","type":"Button","setup":"setup","unique":[]
 	},
-	"res://scenes/ui/log_window.tscn": {
+	"res://scenes/ui/windows/log_window.tscn": {
 		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","CategoryDropdown","LevelDropdown","ModuleDropdown","OriginDropdown","Search","Text","Follow","CopyButton","ExportButton","Status","Picker"]
 	},
-	"res://scenes/ui/message_audio.tscn": {
+	"res://scenes/ui/chat/message_audio.tscn": {
 		"root":"MessageAudio","type":"VBoxContainer","setup":"","unique":["Row","Play","Wave","Time","Stop","Error"]
 	},
-	"res://scenes/ui/message_bubble.tscn": {
+	"res://scenes/ui/chat/message_bubble.tscn": {
 		"root":"MessageBubble","type":"VBoxContainer","setup":"","unique":["Row","TimeMarker","TimeText","System","Avatar","Body","Bubble","Content","Text","HistoryPicture","ImageButton","Picture","Caption"]
 	},
-	"res://scenes/ui/virtual_message_list.tscn": {
+	"res://scenes/ui/chat/virtual_message_list.tscn": {
 		"root":"VirtualMessageList","type":"ScrollContainer","setup":"","unique":["Canvas"]
 	},
-	"res://scenes/ui/chat_view.tscn": {
+	"res://scenes/ui/chat/chat_view.tscn": {
 		"root":"ChatView","type":"MarginContainer","setup":"setup","unique":["Margin","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Latest","Unread","Volume","VolumeButton","VolumePopup","ImageButton","Input","Send","ComposerSurface"]
 	},
-	"res://scenes/ui/image_window.tscn": {
+	"res://scenes/ui/windows/image_window.tscn": {
 		"root":"ImageWindow","type":"Window","setup":"","unique":["ImageScroll","Picture","ImageError","RetryImage","ZoomIn","ZoomOut","FitImage","OriginalSize","CloseImage","ConfirmImage","Chrome"]
 	},
-	"res://scenes/ui/dynamics_window.tscn": {
+	"res://scenes/ui/windows/dynamics_window.tscn": {
 		"root":"DynamicsWindow","type":"Window","setup":"setup","unique":["Unread","Publish","Refresh","ReadAll","Notice","Split","ListScroll","List","Right","Empty"]
 	},
-	"res://scenes/ui/dynamics_post_row.tscn": {
+	"res://scenes/ui/dynamics/dynamics_post_row.tscn": {
 		"root":"DynamicsPostRow","type":"Button","setup":"setup","unique":["Avatar","Author","Meta","Excerpt","UnreadDot"]
 	},
-	"res://scenes/ui/dynamic_comment_row.tscn": {
+	"res://scenes/ui/dynamics/dynamic_comment_row.tscn": {
 		"root":"DynamicCommentRow","type":"VBoxContainer","setup":"setup","unique":["Avatar","Author","Body","Time","Reply"]
 	},
-	"res://scenes/ui/dynamic_detail.tscn": {
+	"res://scenes/ui/dynamics/dynamic_detail.tscn": {
 		"root":"DynamicDetail","type":"ScrollContainer","setup":"setup","unique":["Column","Avatar","Author","CreatedAt","Body","Notice","CommentDraft","Send","Comments","ReplyBox","ReplyLabel","ReplyDraft","CancelReply","ReplySend","Status"]
 	},
 	"res://scenes/avatar/avatar_panel.tscn": {
@@ -113,7 +119,7 @@ func run() -> void:
 	for path: String in SCENES:
 		await check_scene(path, SCENES[path])
 	await check_settings_nav()
-	var separator: PackedScene = load("res://scenes/ui/dropdown_separator.tscn")
+	var separator: PackedScene = load("res://scenes/ui/components/dropdown_separator.tscn")
 	check(separator != null, "dropdown separator scene loads")
 	if separator != null:
 		var node := separator.instantiate()
@@ -125,7 +131,7 @@ func run() -> void:
 
 ## 分组标题是「父」，导航项是「子」：缩进、引导线与更小字号一起表达从属关系。
 func check_settings_nav() -> void:
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	var heading: Label = window.get_node("%Heading")
 	check(heading.text == "偏好与配置", "sidebar heading is a plain group title")
 	check(heading.get_theme_type_variation() == &"SettingsNavHeading", "sidebar heading no longer looks like a nav item")
@@ -194,7 +200,7 @@ func _check_check_scene_result(control: Variant, name: Variant, path: Variant) -
 	check(control != null and control.unique_name_in_owner, "authored public control %" + name + ": " + path)
 
 func _check_check_scene_result_2(dropdown: Variant, name: Variant) -> void:
-	check(dropdown is Button and dropdown.scene_file_path == "res://scenes/ui/unified_dropdown.tscn", "editable dropdown before ready: " + name)
+	check(dropdown is Button and dropdown.scene_file_path == "res://scenes/ui/components/unified_dropdown.tscn", "editable dropdown before ready: " + name)
 
 func _check_check_scene_result_3(instance: Variant, spec: Variant, path: Variant) -> void:
 	check(instance.name == spec.root and instance.is_class(spec.type), "public root name and type: " + path)

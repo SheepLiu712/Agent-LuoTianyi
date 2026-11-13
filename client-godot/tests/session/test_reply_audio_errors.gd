@@ -86,7 +86,7 @@ func check_remote_diagnostics(logger: RefCounted) -> void:
 	check(terminals.all(func(entry): return entry.get("code") == "TTS_STREAM_ERROR"), "known upstream failure code survives diagnostic sanitization")
 
 func check_remote_status(session: Node) -> void:
-	var view: Control = load("res://scenes/ui/chat_view.tscn").instantiate()
+	var view: Control = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
 	root.add_child(view)
 	view.setup(session)
 	check(not view._status.text.contains("服务端语音生成失败") and not view._status.text.contains("服务器暂时无法处理请求"), "chat keeps remote audio failure out of the main status line")

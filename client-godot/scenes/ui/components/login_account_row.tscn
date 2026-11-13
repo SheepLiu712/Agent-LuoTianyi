@@ -1,0 +1,26 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/login_account_row.gd" id="1_row"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[node name="LoginAccountRow" type="HBoxContainer"]
+theme = ExtResource("2_theme")
+theme_override_constants/separation = 4
+script = ExtResource("1_row")
+
+[node name="Choose" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 0
+clip_text = true
+theme_type_variation = &"LoginMenuItem"
+
+[node name="Remove" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 42)
+layout_mode = 2
+tooltip_text = "移除此账号的本地记录和登录状态"
+text = "×"
+theme_type_variation = &"LoginIcon"

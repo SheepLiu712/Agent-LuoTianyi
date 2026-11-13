@@ -1,0 +1,86 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/decision_dialog.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[node name="DecisionDialog" type="Window"]
+title = "确认操作"
+size = Vector2i(520, 260)
+visible = false
+wrap_controls = false
+transient = true
+exclusive = true
+unresizable = true
+borderless = true
+transparent = true
+transparent_bg = true
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Panel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"SettingsDialogSurface"
+
+[node name="Column" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="DecisionTitle" type="Label" parent="Panel/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsDialogTitle"
+text = "确认操作"
+autowrap_mode = 3
+
+[node name="MessageScroll" type="ScrollContainer" parent="Panel/Column"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Message" type="Label" parent="Panel/Column/MessageScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.1882353, 0.27058825, 0.3254902, 1)
+theme_override_font_sizes/font_size = 15
+autowrap_mode = 3
+
+[node name="Actions" type="HFlowContainer" parent="Panel/Column"]
+layout_mode = 2
+alignment = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 8
+
+[node name="Cancel" type="Button" parent="Panel/Column/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "取消"
+
+[node name="SaveAndClose" type="Button" parent="Panel/Column/Actions"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsPrimaryButton"
+text = "保存并关闭"
+
+[node name="Confirm" type="Button" parent="Panel/Column/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsPrimaryButton"
+text = "确认"

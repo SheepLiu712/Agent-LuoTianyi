@@ -1,6 +1,6 @@
 extends SceneTree
 var failures: Array[String] = []
-const Bubble = preload("res://scenes/ui/message_bubble.tscn")
+const Bubble = preload("res://scenes/ui/chat/message_bubble.tscn")
 func _initialize() -> void: run.call_deferred()
 func check(ok: bool, label: String) -> void:
 	if not ok:
@@ -54,7 +54,7 @@ func run() -> void:
 	check(direct.get_node("%Picture").size == Vector2(40,20), "offline direct texture follows the same no-upscale rule")
 	direct.queue_free()
 	# A late image above the current reading point must not move that point.
-	var list = load("res://scenes/ui/virtual_message_list.tscn").instantiate()
+	var list = load("res://scenes/ui/chat/virtual_message_list.tscn").instantiate()
 	root.add_child(list)
 	list.size = Vector2(620,500)
 	var messages: Array[Dictionary] = []

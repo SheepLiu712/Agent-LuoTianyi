@@ -6,14 +6,16 @@ signal dynamic_requested(post: Dictionary)
 const Driver = preload("res://src/avatar/avatar_driver.gd")
 const Framing = preload("res://src/avatar/avatar_framing.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const Tokens = preload("res://src/ui/design_tokens.gd")
 @export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
-const Ripple := preload("res://scenes/avatar/touch_ripple.tscn")
+const Ripple := preload("res://src/avatar/touch_ripple.gd")
 @onready var avatar: Driver = %Driver
 @onready var _error_label: Label = %Error
 @onready var _reset_button: Button = %Reset
 var framing: RefCounted
 var _dragging := false
 var _ui_style: RefCounted
+var _heading_style: StyleBoxFlat
 var _reset_styles: Array[StyleBoxFlat] = []
 var _dynamic_post: Dictionary = {}
 var _dynamic_opening := false
@@ -38,22 +40,24 @@ func set_ui_style(style: RefCounted) -> void:
 
 func _apply_ui_style() -> void:
 	if _ui_style == null or not is_node_ready(): return
-	var heading := %Heading.get_theme_stylebox("panel") as StyleBoxFlat
-	_ui_style.apply_surface_style(heading)
-	heading.bg_color = Color(1, 1, 1, 0.82 if _ui_style.is_crystal() else 0.94)
+	if _heading_style == null:
+		_heading_style = %Heading.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+		%Heading.add_theme_stylebox_override("panel", _heading_style)
+	_ui_style.apply_surface_style(_heading_style)
+	_heading_style.bg_color = Tokens.AVATAR_HEADING_CRYSTAL if _ui_style.is_crystal() else Tokens.AVATAR_HEADING_FLAT
 	for reset_style in _reset_styles:
 		_ui_style.apply_surface_style(reset_style)
-	get_node("Stage/Background").material.set_shader_parameter("corner_radius", 12.0 if _ui_style.is_crystal() else 8.0)
+	get_node("Stage/Background").material.set_shader_parameter("corner_radius", float(Tokens.surface_radius(_ui_style.is_crystal())))
 
 
 func _ready() -> void:
 	for state in ["normal", "hover", "pressed"]:
 		var reset_style := _reset_button.get_theme_stylebox(state).duplicate() as StyleBoxFlat
-		reset_style.content_margin_left = 12
-		reset_style.content_margin_right = 12
-		reset_style.content_margin_top = 8
-		reset_style.content_margin_bottom = 8
-		reset_style.bg_color = {"normal":Color(1, 1, 1, 0.94), "hover":Color(0.94, 0.98, 1, 1), "pressed":Color(0.86, 0.95, 1, 1)}[state]
+		reset_style.content_margin_left = Tokens.SPACE_MD
+		reset_style.content_margin_right = Tokens.SPACE_MD
+		reset_style.content_margin_top = Tokens.SPACE_SM
+		reset_style.content_margin_bottom = Tokens.SPACE_SM
+		reset_style.bg_color = Tokens.AVATAR_RESET_STATES[state]
 		_reset_button.add_theme_stylebox_override(state, reset_style)
 		_reset_styles.append(reset_style)
 	_apply_ui_style()
@@ -153,7 +157,7 @@ func _handle_touch(event: InputEventMouseButton) -> void:
 	var local := avatar.to_local(get_global_transform() * event.position)
 	var areas: Array[String] = avatar.hit_test(local)
 	if not areas.is_empty():
-		var ripple := Ripple.instantiate() as Control
+		var ripple := Ripple.new() as Control
 		ripple.position = event.position - Vector2(60, 60)
 		add_child(ripple)
 		touched.emit(areas)

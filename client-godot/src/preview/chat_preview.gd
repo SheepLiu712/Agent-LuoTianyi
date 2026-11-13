@@ -5,7 +5,7 @@ extends Control
 @export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
 @export var geometry_store: Resource
 const Session = preload("res://src/preview/demo_session.gd")
-const Bubble = preload("res://scenes/ui/message_bubble.tscn")
+const Bubble = preload("res://scenes/ui/chat/message_bubble.tscn")
 const ImagePresenter = preload("res://src/ui/image_presenter.gd")
 const EXPRESSIONS := ["微笑脸", "温柔脸", "喜欢脸", "卖萌", "生气脸", "难过脸", "唱歌"]
 const SCENARIOS := ["conversation", "empty", "disconnected", "error", "thinking"]

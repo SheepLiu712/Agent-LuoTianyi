@@ -1,6 +1,6 @@
 # Godot Windows 客户端现行说明
 
-当前源码版本为 **0.1.7.4**，版本权威为 `release.json`、`project.godot` 与 `export_presets.cfg`。文档及测试保存在客户端内，不依赖上游已移除的进度/spec 目录；历史 `docs-godot/` 仅作参考，不作为现行依据。
+当前源码版本为 **0.1.8.2**，版本权威为 `release.json`、`project.godot` 与 `export_presets.cfg`。文档及测试保存在客户端内，不依赖上游已移除的进度/spec 目录；历史 `docs-godot/` 仅作参考，不作为现行依据。
 
 ## 阅读入口
 

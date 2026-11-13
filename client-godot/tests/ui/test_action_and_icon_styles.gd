@@ -21,17 +21,17 @@ func run() -> void:
 	style.configure(Store.new(style_path))
 	check(style.save_preferences("crystal", "svg") == OK, "crystal style enabled")
 
-	var chat = load("res://scenes/ui/chat_view.tscn").instantiate()
+	var chat = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
 	chat.set_ui_style(style)
 	root.add_child(chat)
-	var settings = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var settings = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	settings.set_ui_style(style)
 	settings.setup(null, null, null, func(_days): return OK)
 	root.add_child(settings)
-	var detail = load("res://scenes/ui/dynamic_detail.tscn").instantiate()
+	var detail = load("res://scenes/ui/dynamics/dynamic_detail.tscn").instantiate()
 	detail.set_ui_style(style)
 	root.add_child(detail)
-	var dynamics = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	var dynamics = load("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
 	dynamics.set_ui_style(style)
 	root.add_child(dynamics)
 	await process_frame
@@ -100,8 +100,8 @@ func _check_detail_styles(detail: Node, crystal: bool) -> void:
 func _check_dynamics_styles(window: Window, crystal: bool) -> void:
 	var panel := window.get_node("Panel").get_theme_stylebox("panel") as StyleBoxFlat
 	var right := window.get_node("%Right").get_theme_stylebox("panel") as StyleBoxFlat
-	check(panel.corner_radius_top_left == (12 if crystal else 8), "dynamics main panel applies the mode on first open")
-	check(panel.shadow_size == (12 if crystal else 0), "dynamics main panel shadow follows mode on first open")
+	check(panel.corner_radius_top_left == 0, "dynamics outer window shell stays square")
+	check(panel.shadow_size == 0 and is_equal_approx(panel.bg_color.a, 1.0), "dynamics outer window shell stays flat and opaque")
 	check(right.corner_radius_top_left == (12 if crystal else 8), "dynamics detail panel applies the mode on first open")
 
 

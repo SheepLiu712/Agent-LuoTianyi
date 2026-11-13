@@ -86,7 +86,7 @@ func _check_window(style_name: String, dimensions: Vector2i) -> void:
 	var style := preload("res://src/application/ui_style.gd").new()
 	style.configure(store)
 	style.save_preferences(style_name, "svg")
-	var window = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
 	window.setup(controller, store)
 	window.set_ui_style(style)
 	root.add_child(window)
@@ -240,7 +240,16 @@ func _check_failed_refresh(window: Window, controller: ControlledFeed, first: Sc
 	await _wait_restored(first)
 	check(first.scroll_vertical == 70, "failed refresh restores cached reading position")
 	check(first._rows.size() == count and first.get_node("%CommentDraft").text == "失败也保留评论草稿", "failed refresh preserves content and draft")
-	check(first.get_node("%Status").text.contains("HTTP_ERROR"), "failed refresh remains visible")
+	var error_dialog := _error_dialog(window)
+	check(error_dialog != null and error_dialog.visible and error_dialog.get_current_text().contains("评论加载失败"), "failed refresh remains visible")
+	if error_dialog != null and error_dialog.visible:
+		error_dialog.get_node("%ErrorConfirm").pressed.emit()
+
+func _error_dialog(host: Node) -> Node:
+	for child in host.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			return child
+	return null
 
 func _capture(window: Window, style_name: String, dimensions: Vector2i) -> void:
 	if DisplayServer.get_name() == "headless": return

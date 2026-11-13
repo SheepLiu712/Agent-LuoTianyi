@@ -1,10 +1,14 @@
 extends "res://src/ui/draft_window.gd"
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const Detail = preload("res://src/ui/dynamic_detail.gd")
-const DetailScene = preload("res://scenes/ui/dynamic_detail.tscn")
-const PostRow = preload("res://scenes/ui/dynamics_post_row.tscn")
+const DetailScene = preload("res://scenes/ui/dynamics/dynamic_detail.tscn")
+const PostRow = preload("res://scenes/ui/dynamics/dynamics_post_row.tscn")
+const PublishOverlay = preload("res://scenes/ui/dynamics/publish_overlay.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const StatusBanner = preload("res://src/ui/status_banner.gd")
+const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
 @onready var _unread: Label = %Unread
+@onready var _notice_banner: PanelContainer = %NoticeBanner
 @onready var _notice: Label = %Notice
 @onready var _split: HSplitContainer = %Split
 @onready var _list_scroll: ScrollContainer = %ListScroll
@@ -33,7 +37,6 @@ var _last_failure_code := ""
 var _last_unread_code := ""
 var _initialized := false
 var _ui_style: RefCounted
-var _panel_style: StyleBoxFlat
 var _right_style: StyleBoxFlat
 var _avatar_source: Node
 var _custom_avatar: Texture2D
@@ -76,14 +79,12 @@ func set_ui_style(style: RefCounted) -> void:
 
 func _apply_ui_style() -> void:
 	if _ui_style == null or not is_node_ready(): return
-	if _panel_style == null:
-		_panel_style = (get_node('Panel').get_theme_stylebox('panel') as StyleBoxFlat).duplicate() as StyleBoxFlat
 	if _right_style == null:
 		_right_style = _right.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	_ui_style.apply_surface_style(_panel_style)
 	_ui_style.apply_surface_style(_right_style)
-	get_node('Panel').add_theme_stylebox_override('panel', _panel_style)
 	_right.add_theme_stylebox_override("panel", _right_style)
+	if _notice_banner.visible:
+		StatusBanner.apply_surface_status(_notice_banner, _notice, "info", _ui_style)
 	_select_style()
 
 func setup(controller: Node,settings_store: Resource = null) -> void:
@@ -110,7 +111,9 @@ func _initialize() -> void:
 		push_warning("Dynamics window layout could not be loaded")
 	_publish.pressed.connect(_open_publisher)
 	_refresh_button.pressed.connect(_refresh)
-	_read_all.pressed.connect(_controller.mark_read)
+	_read_all.pressed.connect(func():
+		_controller.mark_read()
+		ToastOverlay.present_in(self, "已全部标为已读。", "success", 2.0, _ui_style))
 	_list_scroll.get_v_scroll_bar().value_changed.connect(func(_value): _at_bottom())
 	_list_scroll.gui_input.connect(_list_input)
 	_split.resized.connect(_resize_split)
@@ -186,7 +189,11 @@ func is_dirty() -> bool:
 
 func _update_unread(count: int) -> void:
 	_unread.text = "动态"+(" · "+("99+" if count>99 else str(count)) if count else "")
-	_notice.text = _notice_text(count, _controller.get_state())
+	var text := _notice_text(count, _controller.get_state())
+	_notice.text = text
+	_notice_banner.visible = not text.is_empty()
+	if _notice_banner.visible:
+		StatusBanner.apply_surface_status(_notice_banner, _notice, "info", _ui_style)
 
 ## 只为「已有内容但加载失败」和未读失败保留横幅；首屏状态交给占位文案。
 func _notice_text(count: int, state: Dictionary) -> String:
@@ -310,7 +317,7 @@ func _refresh() -> void:
 
 func _open_publisher() -> void:
 	if not is_instance_valid(_publisher):
-		_publisher = load("res://scenes/ui/publish_overlay.tscn").instantiate()
+		_publisher = PublishOverlay.instantiate()
 		if _ui_style != null:
 			_ui_style.apply_view(_publisher, {"PublishButton":"action_send", "CancelPublish":"action_close"})
 		_publisher.setup(_controller)

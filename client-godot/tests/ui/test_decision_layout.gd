@@ -6,7 +6,7 @@ func run() -> void:
 		return
 	root.size = Vector2i(800, 640)
 	root.gui_embed_subwindows = true
-	var dialog = load("res://scenes/ui/decision_dialog.tscn").instantiate()
+	var dialog = load("res://scenes/ui/components/decision_dialog.tscn").instantiate()
 	dialog.title = "清理语音缓存"
 	dialog.dialog_text = "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。"
 	root.add_child(dialog)

@@ -1,9 +1,10 @@
 extends VBoxContainer
 signal action(value: String)
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+
 @onready var _row: HBoxContainer = %Row
 @onready var _play: Button = %Play
-@onready var _wave = %Wave
+@onready var _wave: HBoxContainer = %Wave
 @onready var _time: Label = %Time
 @onready var _stop: Button = %Stop
 @onready var _error: Label = %Error
@@ -11,18 +12,21 @@ var _status := "idle"
 var _ui_style: RefCounted
 var _last_code := ""
 
+
 func set_ui_style(style: RefCounted) -> void:
 	_ui_style = style
 	style.apply_view(self, {"Stop":"media_stop"})
 	_update_icon()
 
 func _update_icon() -> void:
-	if _ui_style != null:
-		_ui_style.register_icon(get_node("%Play"), "media_pause" if _status == "playing" else "media_play")
+	var play := _play if _play != null else get_node_or_null("%Play") as Button
+	if _ui_style != null and play != null:
+		_ui_style.register_icon(play, "media_pause" if _status == "playing" else "media_play")
 
 func _ready() -> void:
 	_play.pressed.connect(func(): action.emit({"idle":"play","playing":"pause","paused":"resume"}[_status]))
 	_stop.pressed.connect(func(): action.emit("stop"))
+	_update_icon()
 
 func update_state(state: Dictionary) -> void:
 	visible = state.available

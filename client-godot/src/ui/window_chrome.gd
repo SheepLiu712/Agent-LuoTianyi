@@ -1,6 +1,19 @@
 extends Control
+
+const DEFAULT_HOST := preload("res://resources/platform/window_host.tres")
+
 @export var login_mode := false
-@export var host: Resource = preload("res://src/platform/window_host.gd").new()
+@export var host: Resource
+
+
+func _init() -> void:
+	name = "WindowChrome"
+	visible = false
+	mouse_filter = MOUSE_FILTER_IGNORE
+	if host == null:
+		host = DEFAULT_HOST.duplicate()
+
+
 func _enter_tree() -> void:
 	host.attach(get_window(),login_mode)
 func set_login_mode(enabled: bool) -> void:

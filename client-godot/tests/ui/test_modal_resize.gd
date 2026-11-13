@@ -35,7 +35,7 @@ func run() -> void:
 	host.size = Vector2i(880, 760)
 	root.add_child(host)
 	host.show()
-	var dialog = load("res://scenes/ui/decision_dialog.tscn").instantiate()
+	var dialog = load("res://scenes/ui/components/decision_dialog.tscn").instantiate()
 	dialog.title = "导入媒体"
 	dialog.dialog_text = TEXT
 	dialog.ok_button_text = "开始导入"

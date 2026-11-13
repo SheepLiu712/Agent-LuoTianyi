@@ -49,7 +49,7 @@ func _run() -> void:
 	await capture(root,"agentluo-redesign-chat-minimum")
 	root.size = Vector2i(1200,800)
 	await _capture_business_windows(app)
-	app.get_node("%NavDynamics").pressed.emit()
+	app.get_workspace().get_node("%NavDynamics").pressed.emit()
 	await create_timer(.4).timeout
 	var window: Window = app.find_children("*","Window",true,false).filter(func(n): return n.title == "天依的动态")[0]
 	window.select_post("visual-post")
@@ -62,8 +62,8 @@ func _run() -> void:
 		await capture(window,"agentluo-011-dynamics-scale-%s"%int(factor*100))
 	window.content_scale_factor = 1
 	window.size = Vector2i(1000,780)
-	app.get_node("%NavLogs").pressed.emit()
-	app.get_node("%NavSettings").pressed.emit()
+	app.get_workspace().get_node("%NavLogs").pressed.emit()
+	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	var logs: Window = app.find_child("LogWindow",true,false)
 	var settings: Window = app.find_child("SettingsWindow",true,false)
 	var settings_handle := DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE,settings.get_window_id())
@@ -110,7 +110,7 @@ func remove_folder(path: String) -> void:
 
 func _capture_business_windows(app: Control) -> void:
 	for item in [["logs","客户端日志","logs"],["preferences","设置","preferences"],["models","设置","models"]]:
-		app.get_node("%NavLogs" if item[0] == "logs" else "%NavSettings").pressed.emit()
+		app.get_workspace().get_node("%NavLogs" if item[0] == "logs" else "%NavSettings").pressed.emit()
 		await create_timer(.4).timeout
 		var windows: Array = app.find_children("*","Window",true,false).filter(func(n): return n.name == ("LogWindow" if item[0] == "logs" else "SettingsWindow"))
 		if windows.is_empty():

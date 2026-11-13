@@ -12,7 +12,7 @@ func run() -> void:
 	root.always_on_top = true
 	root.min_size = Vector2i(480,360)
 	root.size = Vector2i(800,600)
-	root.add_child(load("res://scenes/ui/window_chrome.tscn").instantiate())
+	root.add_child(load("res://scenes/ui/components/window_chrome.tscn").instantiate())
 	root.close_requested.connect(func(): close_requests += 1)
 	await create_timer(.3).timeout
 	root.grab_focus()

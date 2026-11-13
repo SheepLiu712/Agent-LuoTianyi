@@ -2,6 +2,7 @@ extends Control
 ## 头像改动立即落盘，所以这一页不参与「保存全部修改」，也不会让窗口变脏。
 const DEFAULT_ICON := preload("res://assets/ui/tianyi_icon.png")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const StatusBanner = preload("res://src/ui/status_banner.gd")
 const OK_TEXT := "头像已更新。"
 const RESET_TEXT := "已恢复天依头像。"
 const ERROR_TEXT := {
@@ -64,4 +65,4 @@ func _finish(result: Dictionary, ok_text: String) -> void:
 func _show(text: String, ok: bool) -> void:
 	_result.text = text
 	_result.visible = not text.is_empty()
-	_result.add_theme_color_override("font_color", Color(.42, .5, .56) if ok else Color(.78, .29, .29))
+	StatusBanner.apply_surface_status(null, _result, "success" if ok else "error")

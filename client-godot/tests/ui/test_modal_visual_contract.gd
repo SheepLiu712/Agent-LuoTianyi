@@ -37,7 +37,7 @@ func run() -> void:
 
 
 func _check_decision(mode: String, host_size: Vector2i) -> void:
-	var dialog = load("res://scenes/ui/decision_dialog.tscn").instantiate()
+	var dialog = load("res://scenes/ui/components/decision_dialog.tscn").instantiate()
 	dialog.title = "退出登录前请确认"
 	dialog.dialog_text = "将结束本机登录。聊天记录和已保存的设置不会删除；未提交的内容不会自动保存。"
 	dialog.ok_button_text = "放弃并继续"
@@ -75,7 +75,7 @@ func _check_decision_surface(dialog: Window, mode: String) -> void:
 func _check_error(mode: String, host_size: Vector2i) -> void:
 	root.size = host_size
 	await process_frame
-	var dialog = load("res://scenes/ui/error_dialog.tscn").instantiate()
+	var dialog = load("res://scenes/ui/components/error_dialog.tscn").instantiate()
 	root.add_child(dialog)
 	dialog.show_error("本次操作未完成，请稍后重试。", "提示")
 	await create_timer(.1).timeout

@@ -1,6 +1,8 @@
 extends Window
 const Schema = preload("res://src/storage/log_schema.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const StatusBanner = preload("res://src/ui/status_banner.gd")
+const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
 @export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
 @export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _logger: RefCounted
@@ -13,6 +15,7 @@ var _incomplete_announced := false
 @onready var _search: LineEdit = %Search
 @onready var _follow: CheckBox = %Follow
 @onready var _text: RichTextLabel = %Text
+@onready var _status_banner: PanelContainer = %StatusBanner
 @onready var _status: Label = %Status
 @onready var _picker: FileDialog = %Picker
 @onready var _copy: Button = %CopyButton
@@ -70,8 +73,10 @@ func _initialize() -> void:
 			_text.scroll_to_line(maxi(0,_text.get_line_count()-1)))
 	_text.scroll_following = true
 	_copy.pressed.connect(func():
-		if input_service.copy_text(_text.get_parsed_text()) != OK:
-			_status.text = ""
+		if input_service.copy_text(_text.get_parsed_text()) == OK:
+			ToastOverlay.present_in(self, "已复制当前显示的日志。", "success")
+		else:
+			_set_status("", "muted")
 			ErrorDialog.present(self, "复制失败，请手动选择文本。"))
 	files.bind(_picker)
 	_export.pressed.connect(func():
@@ -80,16 +85,17 @@ func _initialize() -> void:
 	files.export_selected.connect(func(target):
 		var error: Error = target.export_log(_logger,_export_id)
 		if error == OK:
-			_status.text = "所选启动的完整诊断已导出（未上传）。"
+			_set_status("所选启动的完整诊断已导出（未上传）。", "success")
+			ToastOverlay.present_in(self, "完整诊断包已导出。", "success")
 		else:
-			_status.text = ""
+			_set_status("", "muted")
 			ErrorDialog.present(self, "导出失败：目标文件已存在或不可写，请换一个路径。"))
 	close_requested.connect(hide)
 	_logger.entry_added.connect(func(entry):
 		if visible and _selected == _logger.get_run_id() and _matches(entry):
 			_append(entry))
 	_logger.write_failed.connect(func(_error):
-		_status.text = ""
+		_set_status("", "muted")
 		ErrorDialog.present(self, "归档可能不完整，当前窗口仍可查看本次记录。"))
 func open() -> void:
 	_logger.drain()
@@ -135,9 +141,17 @@ func _update_status_summary(entries: Array) -> void:
 		var count := int(counts.get(category, 0))
 		if count > 0:
 			parts.append("%s %s" % [Schema.CATEGORY_LABELS[category], count])
-	_status.text = "共 %s 条记录；筛选只影响显示，导出包含整次启动。" % entries.size()
+	var summary := "共 %s 条记录；筛选只影响显示，导出包含整次启动。" % entries.size()
 	if not parts.is_empty():
-		_status.text = "共 %s 条记录（%s）；筛选只影响显示，导出包含整次启动。" % [entries.size(), " / ".join(parts)]
+		summary = "共 %s 条记录（%s）；筛选只影响显示，导出包含整次启动。" % [entries.size(), " / ".join(parts)]
+	_set_status(summary, "muted")
+
+
+func _set_status(text: String, kind: String) -> void:
+	_status.text = text
+	_status_banner.visible = not text.is_empty()
+	if _status_banner.visible:
+		StatusBanner.apply_surface_status(_status_banner, _status, kind)
 
 func _announce_incomplete() -> void:
 	if _incomplete_announced:

@@ -14,18 +14,6 @@
 resource_local_to_scene = true
 shader = ExtResource("card_background")
 
-[sub_resource type="StyleBoxFlat" id="CharacterHeading"]
-resource_local_to_scene = true
-content_margin_left = 16.0
-content_margin_top = 16.0
-content_margin_right = 16.0
-content_margin_bottom = 16.0
-bg_color = Color(1, 1, 1, 0.94)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
-
 [node name="AvatarPanel" type="Control"]
 clip_contents = true
 layout_mode = 3
@@ -81,12 +69,12 @@ unique_name_in_owner = true
 visible = false
 layout_mode = 1
 anchor_right = 1.0
-offset_left = 18.0
-offset_top = 18.0
-offset_right = -18.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
 mouse_filter = 0
 mouse_default_cursor_shape = 2
-theme_override_styles/panel = SubResource("CharacterHeading")
+theme_type_variation = &"AvatarHeadingSurface"
 
 [node name="Identity" type="VBoxContainer" parent="Heading"]
 layout_mode = 2
@@ -102,7 +90,7 @@ text = "未读动态"
 [node name="Companion" type="Label" parent="Heading/Identity"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(0.408, 0.514, 0.576, 1)
+theme_override_colors/font_color = Color(0.30980393, 0.40392157, 0.45882353, 1)
 theme_override_font_sizes/font_size = 12
 autowrap_mode = 3
 max_lines_visible = 3

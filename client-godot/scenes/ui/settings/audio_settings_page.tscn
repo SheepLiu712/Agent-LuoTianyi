@@ -1,0 +1,390 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/audio_settings_page.gd" id="1_audio"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Script" path="res://src/ui/storage_usage_ring.gd" id="3_ring"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="4_decision"]
+
+[node name="AudioPage" type="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme = ExtResource("2_theme")
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+script = ExtResource("1_audio")
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"SettingsPageTitle"
+text = "缓存与导入"
+
+[node name="Description" type="Label" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "媒体缓存保存在本机；此页操作立即生效。"
+autowrap_mode = 3
+
+[node name="StorageCard" type="PanelContainer" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsCard"
+
+[node name="Content" type="VBoxContainer" parent="Column/StorageCard"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Header" type="HBoxContainer" parent="Column/StorageCard/Content"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/StorageCard/Content/Header"]
+layout_mode = 2
+theme_type_variation = &"SettingsCardTitle"
+text = "存储占用"
+
+[node name="Spacer" type="Control" parent="Column/StorageCard/Content/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="StorageTotal" type="Label" parent="Column/StorageCard/Content/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "整盘 --"
+
+[node name="RefreshUsage" type="Button" parent="Column/StorageCard/Content/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 40)
+layout_mode = 2
+tooltip_text = "重新测量 Godot 客户端数据与所在磁盘容量。"
+theme_type_variation = &"SettingsButton"
+text = "刷新容量"
+
+[node name="UsageFlow" type="HFlowContainer" parent="Column/StorageCard/Content"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 24
+theme_override_constants/v_separation = 16
+alignment = 1
+
+[node name="UsageRing" type="Control" parent="Column/StorageCard/Content/UsageFlow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(232, 232)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 4
+mouse_filter = 2
+script = ExtResource("3_ring")
+
+[node name="Center" type="CenterContainer" parent="Column/StorageCard/Content/UsageFlow/UsageRing"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Labels" type="VBoxContainer" parent="Column/StorageCard/Content/UsageFlow/UsageRing/Center"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="UsagePercent" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageRing/Center/Labels"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "--%"
+horizontal_alignment = 1
+
+[node name="UsageState" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageRing/Center/Labels"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "容量数据扫描中"
+horizontal_alignment = 1
+
+[node name="UsageLegend" type="VBoxContainer" parent="Column/StorageCard/Content/UsageFlow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 12
+
+[node name="ClientRow" type="HBoxContainer" parent="Column/StorageCard/Content/UsageFlow/UsageLegend"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ClientSwatch" type="Panel" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/ClientRow"]
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"StorageSwatchClient"
+
+[node name="Name" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/ClientRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "客户端数据"
+
+[node name="ClientValue" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/ClientRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "--"
+horizontal_alignment = 2
+
+[node name="ClientPercent" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/ClientRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "--"
+horizontal_alignment = 2
+
+[node name="AccountNote" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "其中本账号语音缓存：--"
+autowrap_mode = 3
+
+[node name="OtherRow" type="HBoxContainer" parent="Column/StorageCard/Content/UsageFlow/UsageLegend"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="OtherSwatch" type="Panel" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/OtherRow"]
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"StorageSwatchOther"
+
+[node name="Name" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/OtherRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "其他程序已用"
+
+[node name="OtherValue" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/OtherRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "--"
+horizontal_alignment = 2
+
+[node name="OtherPercent" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/OtherRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "--"
+horizontal_alignment = 2
+
+[node name="FreeRow" type="HBoxContainer" parent="Column/StorageCard/Content/UsageFlow/UsageLegend"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="FreeSwatch" type="Panel" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/FreeRow"]
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"StorageSwatchFree"
+
+[node name="Name" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/FreeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "磁盘可用"
+
+[node name="FreeValue" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/FreeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "--"
+horizontal_alignment = 2
+
+[node name="FreePercent" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageLegend/FreeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "--"
+horizontal_alignment = 2
+
+[node name="ImportCard" type="PanelContainer" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsCard"
+
+[node name="Content" type="VBoxContainer" parent="Column/ImportCard"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="MigrationTitle" type="Label" parent="Column/ImportCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsCardTitle"
+text = "从 Python 客户端导入"
+
+[node name="MigrationDescription" type="Label" parent="Column/ImportCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "仅复制能匹配消息的语音与历史图片；聊天文字仍从服务器读取。"
+autowrap_mode = 3
+
+[node name="PythonPathRow" type="HBoxContainer" parent="Column/ImportCard/Content"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PythonPathLabel" type="Label" parent="Column/ImportCard/Content/PythonPathRow"]
+layout_mode = 2
+theme_type_variation = &"SettingsFieldLabel"
+text = "客户端程序"
+
+[node name="PythonPath" type="LineEdit" parent="Column/ImportCard/Content/PythonPathRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SettingsLineEdit"
+placeholder_text = "尚未选择"
+editable = false
+
+[node name="BrowsePython" type="Button" parent="Column/ImportCard/Content/PythonPathRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(88, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "选择…"
+
+[node name="MigrationStatusPanel" type="PanelContainer" parent="Column/ImportCard/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"StatusBannerSurface"
+
+[node name="MigrationStatus" type="Label" parent="Column/ImportCard/Content/MigrationStatusPanel"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+text = "尚未选择客户端程序。"
+autowrap_mode = 3
+
+[node name="MigrationActions" type="HBoxContainer" parent="Column/ImportCard/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Spacer" type="Control" parent="Column/ImportCard/Content/MigrationActions"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="MigrateMedia" type="Button" parent="Column/ImportCard/Content/MigrationActions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(112, 40)
+layout_mode = 2
+size_flags_horizontal = 0
+tooltip_text = "只新增不覆盖；Python 客户端源文件保持不变。"
+theme_type_variation = &"SettingsPrimaryButton"
+text = "导入媒体…"
+
+[node name="CleanupCard" type="PanelContainer" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsCard"
+
+[node name="Content" type="VBoxContainer" parent="Column/CleanupCard"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/CleanupCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsCardTitle"
+text = "清理当前账号语音"
+
+[node name="AgeRow" type="HBoxContainer" parent="Column/CleanupCard/Content"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="AgeLabel" type="Label" parent="Column/CleanupCard/Content/AgeRow"]
+layout_mode = 2
+text = "删除"
+
+[node name="OlderThanDays" type="SpinBox" parent="Column/CleanupCard/Content/AgeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(116, 40)
+layout_mode = 2
+tooltip_text = "依据本机缓存保存时间；旧记录使用文件修改时间，时间未知则保留。"
+max_value = 36500.0
+value = 30.0
+rounded = true
+allow_greater = true
+alignment = 1
+
+[node name="AgeSuffix" type="Label" parent="Column/CleanupCard/Content/AgeRow"]
+layout_mode = 2
+text = "天前的语音缓存"
+
+[node name="Spacer" type="Control" parent="Column/CleanupCard/Content/AgeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="ClearCache" type="Button" parent="Column/CleanupCard/Content/AgeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 40)
+layout_mode = 2
+size_flags_horizontal = 0
+tooltip_text = "仅清理当前服务器与账号的语音；聊天文字和历史图片保留。"
+theme_type_variation = &"SettingsButton"
+text = "清理语音…"
+
+[node name="CleanupHint" type="Label" parent="Column/CleanupCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "仅影响当前服务器与账号；0 天表示全部。"
+autowrap_mode = 3
+
+[node name="CacheStatusPanel" type="PanelContainer" parent="Column/CleanupCard/Content"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"StatusBannerSurface"
+
+[node name="CacheStatus" type="Label" parent="Column/CleanupCard/Content/CacheStatusPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3
+
+[node name="ClearDialog" parent="." instance=ExtResource("4_decision")]
+unique_name_in_owner = true
+title = "清理语音缓存"
+dialog_text = "清理当前服务器、本账号保存的全部语音？\n聊天文字与历史图片保留；已清理的语音将无法重放。"
+ok_button_text = "清理"
+cancel_button_text = "取消"
+destructive_action = true
+
+[node name="MigrationDialog" parent="." instance=ExtResource("4_decision")]
+unique_name_in_owner = true
+title = "导入媒体"
+dialog_text = "把本机 Python 客户端保存的语音与历史图片复制到当前账号？"
+ok_button_text = "开始导入"
+cancel_button_text = "取消"
+
+[node name="PythonPicker" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "选择 Python 客户端程序"
+size = Vector2i(720, 480)
+ok_button_text = "使用这个程序"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.exe ; Windows 可执行文件")
+use_native_dialog = true

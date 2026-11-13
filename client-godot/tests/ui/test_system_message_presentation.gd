@@ -4,7 +4,7 @@ func _initialize() -> void:
 	run.call_deferred()
 
 func run() -> void:
-	var bubble = load("res://scenes/ui/message_bubble.tscn").instantiate()
+	var bubble = load("res://scenes/ui/chat/message_bubble.tscn").instantiate()
 	root.add_child(bubble)
 	bubble.configure({"id":"notice", "role":"system", "text":"连接已恢复", "status":"received"})
 	await process_frame

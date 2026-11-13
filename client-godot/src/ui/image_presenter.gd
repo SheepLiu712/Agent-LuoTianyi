@@ -1,5 +1,5 @@
 extends Node
-const ImageScene = preload("res://scenes/ui/image_window.tscn")
+const ImageScene = preload("res://scenes/ui/windows/image_window.tscn")
 var _window: Window
 var _geometry: Resource
 var _window_system: Resource

@@ -10,15 +10,15 @@ func run() -> void:
 	var theme: Theme = load("res://theme/app_theme.tres")
 	check(theme.has_stylebox("panel","AppSurface"),"application surfaces use theme resources")
 	check(theme.has_stylebox("normal","TerminalSurface"),"log terminal has a dark content surface")
-	check(ResourceLoader.exists("res://scenes/ui/frost_surface.tscn"),"frost is a scene-authored control")
-	if ResourceLoader.exists("res://scenes/ui/frost_surface.tscn"):
-		var frost = load("res://scenes/ui/frost_surface.tscn").instantiate()
+	check(ResourceLoader.exists("res://scenes/ui/components/frost_surface.tscn"),"frost is a scene-authored control")
+	if ResourceLoader.exists("res://scenes/ui/components/frost_surface.tscn"):
+		var frost = load("res://scenes/ui/components/frost_surface.tscn").instantiate()
 		check(frost is ColorRect and frost.material is ShaderMaterial,"frost uses a Godot control and material")
 		frost.blur_enabled = false
 		root.add_child(frost)
 		check(frost.material == null and frost.color.a == 1.0,"disabled blur falls back to readable solid color")
 		frost.queue_free()
-	var audio = load("res://scenes/ui/message_audio.tscn").instantiate()
+	var audio = load("res://scenes/ui/chat/message_audio.tscn").instantiate()
 	root.add_child(audio)
 	var wave = audio.get_node("%Wave")
 	check(wave.get_child_count() == 24,"waveform bars exist in scene before data")

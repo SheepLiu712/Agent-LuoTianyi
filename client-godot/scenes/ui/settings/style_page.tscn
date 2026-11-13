@@ -1,0 +1,60 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/style_page.gd" id="1_style"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/unified_dropdown.tscn" id="3_dropdown"]
+
+[node name="StylePage" type="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme = ExtResource("2_theme")
+script = ExtResource("1_style")
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"SettingsPageTitle"
+text = "外观与风格"
+
+[node name="StyleCard" type="PanelContainer" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"SettingsCard"
+
+[node name="Content" type="VBoxContainer" parent="Column/StyleCard"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/StyleCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsCardTitle"
+text = "界面与图标"
+
+[node name="UiStyleLabel" type="Label" parent="Column/StyleCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsFieldLabel"
+text = "界面风格"
+
+[node name="UiStylePresets" parent="Column/StyleCard/Content" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "选择界面风格"
+placeholder = "请选择界面风格"
+
+[node name="IconStyleLabel" type="Label" parent="Column/StyleCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsFieldLabel"
+text = "图标风格"
+
+[node name="IconStylePresets" parent="Column/StyleCard/Content" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "选择图标风格"
+placeholder = "请选择图标风格"

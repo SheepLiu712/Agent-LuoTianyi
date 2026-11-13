@@ -10,7 +10,7 @@ func run() -> void:
 	var settings = load("res://src/session/model_settings.gd").new(load("res://src/network/json_request.gd").new(), load("res://src/storage/model_store.gd").new(ClassDB.instantiate("WindowsSecurity"), path))
 	root.add_child(settings)
 	await settings.start({"server":OS.get_environment("GODOT_TEST_SERVER"), "username":"cards", "message_token":"test"})
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	window.setup(null, settings)
 	root.add_child(window)
 	window.open()
@@ -33,7 +33,7 @@ func run() -> void:
 		first.get_node("%Enabled").button_pressed = true
 		_check_collapsing_retains_unsaved_fields(first, window)
 		var result: Dictionary = await window.save_changes()
-		_check_invalid_enabled_card_is_located_before_any_write(result, first)
+		_check_invalid_enabled_card_is_located_before_any_write(result, window)
 		var config: Dictionary = settings.get_config("vision-purpose")
 		config.merge({"enabled":true,"provider":"","base_url":"https://example.test/v1","api_key":"synthetic","model":"vision"},true)
 		check(not settings.validate("vision-purpose",config).ok, "provider is required like the original client")
@@ -72,5 +72,12 @@ func _check_checkbox_expands_only_its_own_purpose(first: Variant, second: Varian
 func _check_collapsing_retains_unsaved_fields(first: Variant, window: Variant) -> void:
 	check(first.get_node("%ModelName").text == "draft-kept" and window.is_dirty(), "collapsing retains unsaved fields")
 
-func _check_invalid_enabled_card_is_located_before_any_write(result: Variant, first: Variant) -> void:
-	check(not result.ok and first.get_node("%CardStatus").text.contains("MODEL_FIELDS_REQUIRED"), "invalid enabled card is located before any write")
+func _check_invalid_enabled_card_is_located_before_any_write(result: Variant, window: Variant) -> void:
+	var dialog: Node = null
+	for child in window.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			dialog = child
+			break
+	check(not result.ok and dialog != null and dialog.visible and dialog.get_current_text().contains("未保存，请重试"), "invalid enabled card is located before any write")
+	if dialog != null and dialog.visible:
+		dialog.get_node("%ErrorConfirm").pressed.emit()

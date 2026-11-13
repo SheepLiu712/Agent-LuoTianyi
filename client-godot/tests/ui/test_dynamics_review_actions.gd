@@ -143,7 +143,7 @@ func run() -> void:
 	var store := preload("res://src/storage/godot_settings_store.gd").new(path)
 	var style := preload("res://src/application/ui_style.gd").new()
 	style.configure(store)
-	var window = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
 	window.setup(controller, store)
 	window.set_ui_style(style)
 	root.add_child(window)
@@ -186,10 +186,12 @@ func run() -> void:
 	var prior_count: int = controller.get_comments("review-0").items.size()
 	await click(window, window._rows["review-0"])
 	await settle()
-	_check_failed_auto_refresh_preserves_comments_and_reports_failure(controller, prior_count, detail)
+	var comment_err := _error_dialog(window)
+	_check_failed_auto_refresh_preserves_comments_and_reports_failure(controller, prior_count, comment_err)
+	await _dismiss_error(comment_err)
 	await click(window, window._rows["review-0"])
 	await settle()
-	_check_another_click_retries_failed_comments(detail, draft)
+	_check_another_click_retries_failed_comments(window, draft)
 	check(controller.refresh_calls == 0 and controller.state.unread == 1, "card refresh needs no manual feed refresh and opening only advances the local read mark")
 	var list_scroll: ScrollContainer = window.get_node("%ListScroll")
 	controller.fail_next_page = true
@@ -197,47 +199,17 @@ func run() -> void:
 		await wheel_down(window, list_scroll)
 		if controller.page_calls > 0: break
 	await settle()
-	check(controller.page_calls == 1 and window.get_node("%Notice").text.contains("HTTP_ERROR"), "wheel reaching bottom loads next page and exposes failure")
+	var feed_err := _error_dialog(window)
+	_check_feed_page_failure(controller, feed_err)
+	await _dismiss_error(feed_err)
 	await wheel_down(window, list_scroll)
 	await settle()
 	check(controller.page_calls == 2 and controller.get_posts().size() == 24, "wheel retries pagination without a load-more button")
 	list_scroll.scroll_vertical = 0
 	detail.scroll_vertical = 0
 	await settle()
-	for variant in ["flat", "crystal"]:
-		check(style.save_preferences(variant, "svg") == OK, "switch style " + variant)
-		await settle()
-		await capture(window, "dynamics-actions-" + variant + "-1100x800")
-		var body: RichTextLabel = detail.get_node("%Body")
-		body.select_all()
-		_check_run_result(body, variant)
-		await capture(window, "dynamics-selection-" + variant + "-1100x800")
-		body.deselect()
-		await click(window, window.get_node("%Publish"))
-		await settle()
-		var publisher: Control = window._publisher
-		check(publisher.get_node_or_null("%ClosePublish") == null, "publisher has no header close button")
-		check(publisher.get_node("Center/Panel/Column/Header").find_children("*", "Button", true, false).is_empty(), "publisher title has no cross glyph actions")
-		await capture(window, "dynamics-publish-clean-" + variant + "-1100x800")
-		await click(window, publisher.get_node("%CancelPublish"))
-		await settle()
-		check(not is_instance_valid(publisher), "empty publisher closes using bottom cancel")
-	await click(window, window.get_node("%Publish"))
-	await settle()
-	var publisher: Control = window._publisher
-	publisher.get_node("%PublishDraft").text = "尚未发布的草稿"
-	await click(window, publisher.get_node("%CancelPublish"))
-	await settle()
-	var discard: Window = publisher.get_node("%DiscardDialog")
-	check(discard.visible and publisher.is_dirty(), "bottom cancel protects unsent draft")
-	discard.get_cancel_button().pressed.emit()
-	await settle()
-	check(publisher.get_node("%PublishDraft").text == "尚未发布的草稿", "cancel discard keeps publish draft")
-	await click(window, publisher.get_node("%CancelPublish"))
-	await settle()
-	discard.get_ok_button().pressed.emit()
-	await settle()
-	check(not is_instance_valid(publisher), "confirmed discard closes publish overlay")
+	await _check_style_variants(window, detail, style)
+	await _check_publish_discard_flow(window)
 	window.size = Vector2i(960, 640)
 	await settle()
 	await capture(window, "dynamics-actions-compact-960x640")
@@ -259,8 +231,61 @@ func _check_refresh_preserves_draft_and_reading_position(draft: Variant, detail:
 func _check_switching_posts_refreshes_without_discarding_drafts(controller: Variant, draft: Variant) -> void:
 	check(controller.comment_calls["review-1"] == 1 and draft.text == "保留我的评论草稿", "switching posts refreshes without discarding drafts")
 
-func _check_failed_auto_refresh_preserves_comments_and_reports_failure(controller: Variant, prior_count: Variant, detail: Variant) -> void:
-	check(controller.get_comments("review-0").items.size() == prior_count and detail.get_node("%Status").text.contains("HTTP_ERROR"), "failed auto-refresh preserves comments and reports failure")
+func _error_dialog(window: Window) -> Node:
+	for child in window.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			return child
+	return null
 
-func _check_another_click_retries_failed_comments(detail: Variant, draft: Variant) -> void:
-	check(detail.get_node("%Status").text.is_empty() and draft.text == "保留我的评论草稿", "another click retries failed comments")
+func _check_failed_auto_refresh_preserves_comments_and_reports_failure(controller: Variant, prior_count: Variant, err_dialog: Variant) -> void:
+	check(controller.get_comments("review-0").items.size() == prior_count and err_dialog != null and err_dialog.visible and err_dialog.get_current_text().contains("评论加载失败"), "failed auto-refresh preserves comments and reports failure")
+
+func _check_another_click_retries_failed_comments(window: Variant, draft: Variant) -> void:
+	var err_dialog := _error_dialog(window)
+	check((err_dialog == null or not err_dialog.visible) and draft.text == "保留我的评论草稿", "another click retries failed comments")
+
+func _dismiss_error(dialog: Node) -> void:
+	if dialog != null and dialog.visible:
+		dialog.get_node("%ErrorConfirm").pressed.emit()
+		await settle()
+
+func _check_feed_page_failure(controller: Variant, feed_err: Variant) -> void:
+	check(controller.page_calls == 1 and feed_err != null and feed_err.visible and feed_err.get_current_text().contains("刷新失败"), "wheel reaching bottom loads next page and exposes failure")
+
+func _check_style_variants(window: Window, detail: Control, style: RefCounted) -> void:
+	for variant in ["flat", "crystal"]:
+		check(style.save_preferences(variant, "svg") == OK, "switch style " + variant)
+		await settle()
+		await capture(window, "dynamics-actions-" + variant + "-1100x800")
+		var body: RichTextLabel = detail.get_node("%Body")
+		body.select_all()
+		_check_run_result(body, variant)
+		await capture(window, "dynamics-selection-" + variant + "-1100x800")
+		body.deselect()
+		await click(window, window.get_node("%Publish"))
+		await settle()
+		var publisher: Control = window._publisher
+		check(publisher.get_node_or_null("%ClosePublish") == null, "publisher has no header close button")
+		check(publisher.get_node("Center/Panel/Column/Header").find_children("*", "Button", true, false).is_empty(), "publisher title has no cross glyph actions")
+		await capture(window, "dynamics-publish-clean-" + variant + "-1100x800")
+		await click(window, publisher.get_node("%CancelPublish"))
+		await settle()
+		check(not is_instance_valid(publisher), "empty publisher closes using bottom cancel")
+
+func _check_publish_discard_flow(window: Window) -> void:
+	await click(window, window.get_node("%Publish"))
+	await settle()
+	var publisher: Control = window._publisher
+	publisher.get_node("%PublishDraft").text = "尚未发布的草稿"
+	await click(window, publisher.get_node("%CancelPublish"))
+	await settle()
+	var discard: Window = publisher.get_node("%DiscardDialog")
+	check(discard.visible and publisher.is_dirty(), "bottom cancel protects unsent draft")
+	discard.get_cancel_button().pressed.emit()
+	await settle()
+	check(publisher.get_node("%PublishDraft").text == "尚未发布的草稿", "cancel discard keeps publish draft")
+	await click(window, publisher.get_node("%CancelPublish"))
+	await settle()
+	discard.get_ok_button().pressed.emit()
+	await settle()
+	check(not is_instance_valid(publisher), "confirmed discard closes publish overlay")

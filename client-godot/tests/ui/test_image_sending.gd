@@ -16,7 +16,7 @@ func run() -> void:
 	var images = load("res://src/storage/history_images.gd").new(directory)
 	var chat = load("res://src/session/chat_session.gd").new(load("res://src/network/websocket_transport.gd").new(),null,null,history,null,images)
 	root.add_child(chat)
-	var view = load("res://scenes/ui/chat_view.tscn").instantiate()
+	var view = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
 	view.setup(chat)
 	root.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

@@ -1,8 +1,8 @@
 extends Control
 signal plaintext_answer(allowed: bool)
-const Card = preload("res://scenes/ui/model_purpose_card.tscn")
+const Card = preload("res://scenes/ui/settings/model_purpose_card.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
-const SettingsStyle = preload("res://src/ui/settings_style.gd")
+const StatusBanner = preload("res://src/ui/status_banner.gd")
 var _settings: Node
 var _executor: Node
 var _types: Array = []
@@ -68,21 +68,26 @@ func _update(state: Dictionary) -> void:
 			card.copy_requested.connect(_copy_config)
 			card.test_requested.connect(_request_test)
 			%Cards.add_child(card)
-			SettingsStyle.apply(card)
 			_cards[purpose.id] = card
 	if state.phase != "ready":
-		_status.text = "正在获取模型用途…" if state.phase == "loading" else ""
+		_set_status("正在获取模型用途…" if state.phase == "loading" else "", "info")
 		if state.phase != "loading" and state.code != _last_error_code:
 			_last_error_code = state.code
 			ErrorDialog.present(self, "部分配置未能恢复，可刷新重试。")
 	elif state.code not in ["OK", ""]:
-		_status.text = ""
+		_set_status("", "muted")
 		if state.code != _last_error_code:
 			_last_error_code = state.code
 			ErrorDialog.present(self, "部分配置未能恢复，可刷新重试。")
 	else:
 		_last_error_code = ""
 	_set_editable()
+
+
+func _set_status(text: String, kind: String) -> void:
+	_status.text = text
+	if not text.is_empty():
+		StatusBanner.apply_surface_status(null, _status, kind)
 
 func _set_editable() -> void:
 	var ready: bool = _settings != null and _settings.get_state().phase == "ready" and not _testing and not _saving
@@ -173,7 +178,7 @@ func _copy_config(id: String, source_id: String) -> void:
 	if not _drafts.has(source_id): return
 	_drafts[id] = _settings.copy_config(_drafts[source_id], id)
 	_cards[id].set_draft(_drafts[id])
-	_status.text = "已复制为草稿；保存时按目标用途重新校验。"
+	_set_status("已复制为草稿；保存时按目标用途重新校验。", "info")
 	_set_editable()
 
 func _request_test(id: String, draft: Dictionary) -> void:
@@ -192,13 +197,13 @@ func _test() -> void:
 	if _testing or _executor == null: return
 	_testing = true
 	_set_editable()
-	_status.text = "正在测试…"
+	_set_status("正在测试…", "progress")
 	var result: Dictionary = await _executor.test_config(_test_type, _test_snapshot)
 	_test_snapshot.clear()
 	_testing = false
 	_set_editable()
 	if result.ok:
-		_status.text = "本次请求成功；不代表已全面认证模型能力。"
+		_set_status("本次请求成功；不代表已全面认证模型能力。", "success")
 	else:
-		_status.text = ""
+		_set_status("", "muted")
 		ErrorDialog.present(self, "请先填写模型地址和密钥。" if result.code in ["MODEL_FIELDS_REQUIRED","INVALID_CONFIG"] else "测试未通过，请检查服务地址和密钥后重试。")

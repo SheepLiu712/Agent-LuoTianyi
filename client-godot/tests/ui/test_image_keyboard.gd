@@ -1,7 +1,7 @@
 extends SceneTree
 ## #189：图片入口必须能用键盘到达并激活，预览关闭后焦点回到来源。
-const Bubble = preload("res://scenes/ui/message_bubble.tscn")
-const SourceScene = preload("res://scenes/ui/dynamics_window.tscn")
+const Bubble = preload("res://scenes/ui/chat/message_bubble.tscn")
+const SourceScene = preload("res://scenes/ui/windows/dynamics_window.tscn")
 var failures: Array[String] = []
 
 func check(ok: bool, label: String) -> void:
@@ -118,6 +118,6 @@ func _check_failure_keeps_a_keyboard_exit(presenter: Node, source: Window, image
 	check(image_window.get_node("%RetryImage").has_focus(), "failure puts keyboard focus on retry")
 	await press(image_window, KEY_ENTER)
 	check(image_window.get_node("%Picture").texture == texture, "Enter retries the image")
-	check(image_window.get_node("%CloseImage").has_focus(), "retry leaves focus on a usable action")
+	check(image_window.get_node("%FitImage").has_focus(), "retry leaves focus on a usable action")
 	await press(image_window, KEY_ESCAPE)
 	check(not image_window.visible, "Esc closes a preview that was retried")

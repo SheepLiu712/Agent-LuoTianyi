@@ -12,7 +12,7 @@ func run() -> void:
 	root.add_child(app)
 	await process_frame
 	check(app.get_node("%SecurityError").visible, "missing encryption blocks authentication explicitly")
-	app.get_node("%AccountForm").log_requested.emit()
+	app.get_login_page().log_requested.emit()
 	var logs: Array = app.get_children().filter(func(node): return node is Window and node.title.begins_with("客户端日志"))
 	check(logs.size() == 1 and logs[0].visible, "diagnostics remain available without authentication")
 	app.queue_free()

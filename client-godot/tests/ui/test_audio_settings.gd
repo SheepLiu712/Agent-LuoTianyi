@@ -16,7 +16,7 @@ func _check_contract(page: Control) -> void:
 	check(page.get_node_or_null("%StorageCard") is PanelContainer, "cache page starts with the storage card")
 	check(page.get_node_or_null("%ImportCard") is PanelContainer, "cache page owns an import card")
 	check(page.get_node_or_null("%CleanupCard") is PanelContainer, "cache page owns a cleanup card")
-	var column: VBoxContainer = page.get_node("Scroll/Column")
+	var column: VBoxContainer = page.get_node("Column")
 	check(column.get_node("StorageCard").get_index() < column.get_node("ImportCard").get_index() and column.get_node("ImportCard").get_index() < column.get_node("CleanupCard").get_index(), "cards follow storage, import, cleanup order")
 	for removed in ["MigrationHint", "Scope", "AgeHint", "Hint"]:
 		check(page.find_child(removed, true, false) == null, "redundant copy node removed: " + removed)
@@ -72,7 +72,7 @@ func run() -> void:
 	var file := FileAccess.open(meta_path, FileAccess.WRITE)
 	file.store_string(JSON.stringify(meta))
 	file.close()
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	check(window.get_node_or_null("%AudioTab") is Button, "settings includes voice cache management")
 	var page = window.get_node("%AudioPage")
 	_check_contract(page)

@@ -56,7 +56,7 @@ func run() -> void:
 	var style_path := "user://settings-layout-style-%s.cfg" % Time.get_ticks_usec()
 	var style = Style.new()
 	style.configure(Store.new(style_path))
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	window.setup(null, null, null, func(_days): return OK)
 	window.set_ui_style(style)
 	root.add_child(window)

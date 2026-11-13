@@ -8,7 +8,7 @@ func _initialize() -> void:
 	run.call_deferred()
 func run() -> void:
 	auto_accept_quit = false
-	const SCENE := "res://scenes/ui/window_chrome.tscn"
+	const SCENE := "res://scenes/ui/components/window_chrome.tscn"
 	check(ResourceLoader.exists(SCENE), "shared window frame is available")
 	if not failures.is_empty():
 		quit(1)

@@ -1,0 +1,62 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/model_page.gd" id="1_model"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="3_decision"]
+
+[node name="ModelPage" type="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme = ExtResource("2_theme")
+script = ExtResource("1_model")
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="Header" type="HBoxContainer" parent="Column"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SettingsPageTitle"
+text = "LLM 模型设置"
+
+[node name="RefreshTypes" type="Button" parent="Column/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "刷新需求列表"
+
+[node name="Description" type="Label" parent="Column"]
+layout_mode = 2
+text = "服务端只规定每类调用需要的模型和能力。服务商、Base URL、模型和 Key 由你配置，Key 不会上传到服务器。"
+autowrap_mode = 3
+
+[node name="Status" type="Label" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+autowrap_mode = 3
+
+[node name="Cards" type="VBoxContainer" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="PlainDialog" parent="." instance=ExtResource("3_decision")]
+unique_name_in_owner = true
+title = "密钥保护失败"
+dialog_text = "Windows 未能保护 API Key。是否明确选择在本机以明文保存？默认取消保存。"
+ok_button_text = "明文保存"
+cancel_button_text = "取消保存"
+
+[node name="TestDialog" parent="." instance=ExtResource("3_decision")]
+unique_name_in_owner = true
+title = "测试可能消耗供应商额度"
+dialog_text = "将使用当前草稿发送一次固定短输入，不发送聊天历史。成功仅表示本次请求可用。"
+cancel_button_text = "取消"

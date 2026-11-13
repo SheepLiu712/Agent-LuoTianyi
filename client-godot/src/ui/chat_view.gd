@@ -8,6 +8,7 @@ signal attachment_cleared
 signal composer_height_changed(height: float)
 const Attachment = preload("res://src/media/image_attachment.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const StatusBanner = preload("res://src/ui/status_banner.gd")
 const MIN_COMPOSER_HEIGHT := 48.0
 const MAX_COMPOSER_HEIGHT := 320.0
 const AUTO_MAX_HEIGHT := 128.0
@@ -54,22 +55,12 @@ func set_ui_style(style: RefCounted) -> void:
 	if is_node_ready(): _apply_ui_style()
 
 func _apply_ui_style() -> void:
-	if _ui_style == null or not is_node_ready(): return
-	_ui_style.apply_surface_style(_card_style)
-	_card_style.bg_color = Color(1, 1, 1, 0.82 if _ui_style.is_crystal() else 1.0)
-	if _ui_style.is_crystal():
-		_card_style.set_corner_radius_all(0)
-		_card_style.border_width_left = 0
-		_card_style.border_width_top = 0
-		_card_style.border_width_right = 0
-		_card_style.border_width_bottom = 0
-		_card_style.shadow_size = 0
-		_card_style.shadow_offset = Vector2.ZERO
-	_composer_style.bg_color = Color(1, 1, 1, 0.45 if _ui_style.is_crystal() else 1.0)
-	_composer_style.set_corner_radius_all(12 if _ui_style.is_crystal() else 8)
-	_composer_style.corner_radius_top_left = 0
-	_composer_style.corner_radius_top_right = 0
+	if _ui_style == null or not is_node_ready():
+		return
+	_ui_style.apply_chat_card_style(_card_style)
+	_ui_style.apply_composer_style(_composer_style)
 	_ui_style.apply_input_style(_input_style)
+	_sync_history_banner(_last_history_phase)
 
 func setup(session: Node) -> void:
 	_session = session
@@ -87,14 +78,6 @@ func _ready() -> void:
 	_composer.add_theme_stylebox_override("panel", _composer_style)
 	_input_style = _input.get_theme_stylebox("normal").duplicate() as StyleBoxFlat
 	_input.add_theme_stylebox_override("normal", _input_style)
-	for button in [_latest, _unread]:
-		for state in ["normal", "hover", "pressed"]:
-			var button_style := button.get_theme_stylebox(state).duplicate() as StyleBoxFlat
-			button_style.content_margin_left = 8
-			button_style.content_margin_right = 8
-			button_style.content_margin_top = 4
-			button_style.content_margin_bottom = 4
-			button.add_theme_stylebox_override(state, button_style)
 	_apply_ui_style()
 	resized.connect(_update_density)
 	_update_density()
@@ -391,8 +374,16 @@ func _update_history_status(state: Dictionary) -> void:
 			_history_incomplete_announced = true
 			ErrorDialog.present(self, "部分历史可能缺失。")
 	_apply_reading()
-	var reading: Dictionary = _session.get_reading_state()
-	%HistoryRow.visible = not _history_status.text.is_empty() or _history_retry.visible or _history_skip.visible
+	_sync_history_banner(str(history.phase))
+
+
+func _sync_history_banner(phase: String) -> void:
+	var shown := not _history_status.text.is_empty() or _history_retry.visible or _history_skip.visible
+	%HistoryRow.visible = shown
+	%HistoryBanner.visible = shown
+	if shown:
+		var kind := "info" if phase in ["first_loading", "loading"] else "muted"
+		StatusBanner.apply_surface_status(%HistoryBanner, _history_status, kind, _ui_style)
 
 func _announce_chat_code(code: String) -> void:
 	if code == "":

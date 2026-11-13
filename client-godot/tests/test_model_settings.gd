@@ -51,9 +51,9 @@ func _run() -> void:
 	check(store.save("vision-purpose",malformed).ok,"fixture writes malformed stored configuration")
 	await settings.start(scope)
 	_check_bad_persisted_configuration_safely_disabled(settings)
-	check(ResourceLoader.exists("res://scenes/ui/settings_window.tscn"),"model settings window available")
-	if ResourceLoader.exists("res://scenes/ui/settings_window.tscn"):
-		var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	check(ResourceLoader.exists("res://scenes/ui/windows/settings_window.tscn"),"model settings window available")
+	if ResourceLoader.exists("res://scenes/ui/windows/settings_window.tscn"):
+		var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 		window.setup(null,settings)
 		root.add_child(window)
 		window.open()

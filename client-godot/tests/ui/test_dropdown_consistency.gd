@@ -1,12 +1,12 @@
 extends SceneTree
 
-const DROPDOWN_SCENE := "res://scenes/ui/unified_dropdown.tscn"
-const SETTINGS_STYLE := preload("res://src/ui/settings_style.gd")
+const DROPDOWN_SCENE := "res://scenes/ui/components/unified_dropdown.tscn"
+const UI_STYLE := preload("res://src/application/ui_style.gd")
 const SELECTOR_SCENES := [
-	"res://scenes/ui/log_window.tscn",
-	"res://scenes/ui/preferences_page.tscn",
-	"res://scenes/ui/style_page.tscn",
-	"res://scenes/ui/model_purpose_card.tscn",
+	"res://scenes/ui/windows/log_window.tscn",
+	"res://scenes/ui/settings/preferences_page.tscn",
+	"res://scenes/ui/settings/style_page.tscn",
+	"res://scenes/ui/settings/model_purpose_card.tscn",
 	"res://scenes/preview/chat_preview.tscn",
 ]
 var failures: Array[String] = []
@@ -31,11 +31,11 @@ func _check_selector_scenes_use_the_shared_control() -> void:
 	for path in SELECTOR_SCENES:
 		var source := FileAccess.get_file_as_string(path)
 		check(not source.contains('type="OptionButton"'), "no native selector remains: " + path)
-	for path in ["res://scenes/ui/log_window.tscn", "res://scenes/ui/preferences_page.tscn",
-			"res://scenes/ui/style_page.tscn", "res://scenes/ui/model_purpose_card.tscn",
+	for path in ["res://scenes/ui/windows/log_window.tscn", "res://scenes/ui/settings/preferences_page.tscn",
+			"res://scenes/ui/settings/style_page.tscn", "res://scenes/ui/settings/model_purpose_card.tscn",
 			"res://scenes/preview/chat_preview.tscn"]:
 		check(FileAccess.get_file_as_string(path).contains(DROPDOWN_SCENE), "selector scene reuses the shared dropdown: " + path)
-	var account := FileAccess.get_file_as_string("res://scenes/ui/account_view.tscn")
+	var account := FileAccess.get_file_as_string("res://scenes/ui/pages/account_view.tscn")
 	check(account.count('theme_type_variation = &"DropdownPopup"') >= 2, "account action and history popups reuse the dropdown surface")
 	check(account.count("transparent_bg = true") >= 2, "account popups keep transparent rounded corners")
 
@@ -74,8 +74,9 @@ func _check_trigger_and_selected_rows() -> void:
 	dropdown.set_items([{"id":"a","label":"全部类别"},{"id":"b","label":"错误"}])
 	await process_frame
 	check(dropdown.theme_type_variation == &"DropdownTrigger", "shared scene starts on the trigger variation")
-	SETTINGS_STYLE.apply(dropdown)
-	check(dropdown.theme_type_variation == &"DropdownTrigger", "settings styling never overwrites the dropdown trigger")
+	var style = UI_STYLE.new()
+	style.apply_view(dropdown, {})
+	check(dropdown.theme_type_variation == &"DropdownTrigger", "ui styling never overwrites the dropdown trigger")
 	dropdown.open_menu()
 	await process_frame
 	var popup: Window = dropdown.find_children("*", "Window", true, false)[0]

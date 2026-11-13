@@ -47,7 +47,7 @@ func run() -> void:
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await create_timer(.1).timeout
-	var view: Control = app.get_node("%AccountForm")
+	var view: Control = app.get_login_page()
 	check(not view.get_node("%Server").is_visible_in_tree(), "server address is not part of the login form")
 	_check_bottom_register_and_forgotten_password_links_are_visible(view)
 	var password: LineEdit = view.get_node("%Password")
@@ -119,7 +119,7 @@ func run() -> void:
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await create_timer(.1).timeout
-	view = app.get_node("%AccountForm")
+	view = app.get_login_page()
 	_check_remembered_account_shows_an_honest_status_without_fake_password_dots(session, view)
 	await capture("login-remembered")
 	press(view,"UsePassword")
@@ -239,7 +239,7 @@ func _check_failed_remember_storage_stays_visible_after_the_login_page_is_hidden
 	check(warning != null and warning.is_visible_in_tree(), "failed remember storage stays visible after the login page is hidden")
 
 func _check_authored_login() -> bool:
-	var scene: PackedScene = load("res://scenes/ui/account_view.tscn")
+	var scene: PackedScene = load("res://scenes/ui/pages/account_view.tscn")
 	var candidate := scene.instantiate()
 	for name in ["MenuButton","RegisterLink","ResetLink","AutoLogin","Remember","SavedLogin","UsePassword","HistoryButton","ServerDialog","ServerSave","ServerCancel","Feedback","FeedbackAddress"]:
 		check(candidate.get_node_or_null("%" + name) != null, "scene authors " + name)

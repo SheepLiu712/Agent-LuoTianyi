@@ -2,12 +2,12 @@ extends MarginContainer
 
 const StorageService = preload("res://src/storage/storage_service.gd")
 const MigrationPort = preload("res://src/storage/python_media_migration_port.gd")
+const StatusBanner = preload("res://src/ui/status_banner.gd")
 const USAGE_REFRESH_MS := 2000
-const STATUS_INFO := Color(0.117647, 0.407843, 0.6, 1)
-const STATUS_SUCCESS := Color(0.117647, 0.431373, 0.286275, 1)
-const STATUS_WARNING := Color(0.611765, 0.341176, 0, 1)
-const STATUS_ERROR := Color(0.717647, 0.164706, 0.164706, 1)
-const STATUS_MUTED := Color(0.42, 0.5, 0.56, 1)
+
+var _ui_style: RefCounted
+var _migration_kind := "muted"
+var _cache_kind := "muted"
 
 var _clear_cache: Callable
 var _clearing := false
@@ -61,7 +61,25 @@ func set_audio_migration(migration: MigrationPort) -> void:
 	set_media_migration(migration)
 
 
+func set_ui_style(ui_style: RefCounted) -> void:
+	if _ui_style != null and _ui_style.style_changed.is_connected(_reapply_banner_styles):
+		_ui_style.style_changed.disconnect(_reapply_banner_styles)
+	_ui_style = ui_style
+	if _ui_style != null:
+		_ui_style.style_changed.connect(_reapply_banner_styles)
+	if is_node_ready():
+		_reapply_banner_styles()
+
+
+func _reapply_banner_styles() -> void:
+	StatusBanner.apply_surface_status(%MigrationStatusPanel, %MigrationStatus, _migration_kind, _ui_style)
+	if %CacheStatusPanel.visible:
+		StatusBanner.apply_surface_status(%CacheStatusPanel, %CacheStatus, _cache_kind, _ui_style)
+
+
 func _ready() -> void:
+	%OlderThanDays.custom_minimum_size.y = maxf(%OlderThanDays.custom_minimum_size.y, 40.0)
+	%OlderThanDays.get_line_edit().theme_type_variation = &"SettingsLineEdit"
 	%ClearCache.disabled = not _clear_cache.is_valid()
 	%ClearCache.pressed.connect(_request_clear)
 	%MigrateMedia.pressed.connect(_request_migrate)
@@ -119,7 +137,8 @@ func _apply_scan(result: Dictionary) -> void:
 	_update_import_button(false)
 	if not _scan_ok:
 		var code := str(result.get("code", "TARGET_MISSING"))
-		_set_migration_status(_scan_failure(code), "warning" if code == "TARGET_MISSING" else "error")
+		var kind := "muted" if code == "TARGET_MISSING" and %PythonPath.text.is_empty() else ("warning" if code == "TARGET_MISSING" else "error")
+		_set_migration_status(_scan_failure(code), kind)
 		return
 	var mismatch := _migration != null and bool(_migration.get_state().get("mismatch", false))
 	var kind := "warning" if mismatch or not _importable else "success"
@@ -390,28 +409,18 @@ func _set_usage_legend(
 
 
 func _set_migration_status(text: String, kind: String) -> void:
+	_migration_kind = kind
 	%MigrationStatus.text = text
-	%MigrationStatus.add_theme_color_override("font_color", _status_color(kind))
+	StatusBanner.apply_surface_status(%MigrationStatusPanel, %MigrationStatus, kind, _ui_style)
 
 
 func _set_cache_status(text: String, kind: String) -> void:
-	%CacheStatus.visible = not text.is_empty()
+	_cache_kind = kind
+	var active := not text.is_empty()
+	%CacheStatusPanel.visible = active
 	%CacheStatus.text = text
-	%CacheStatus.add_theme_color_override("font_color", _status_color(kind))
-
-
-func _status_color(kind: String) -> Color:
-	match kind:
-		"success":
-			return STATUS_SUCCESS
-		"warning":
-			return STATUS_WARNING
-		"error":
-			return STATUS_ERROR
-		"info":
-			return STATUS_INFO
-		_:
-			return STATUS_MUTED
+	if active:
+		StatusBanner.apply_surface_status(%CacheStatusPanel, %CacheStatus, kind, _ui_style)
 
 
 func _format_share(bytes: int, total: int) -> String:

@@ -27,12 +27,12 @@ func _focus_is_hidden(dropdown: Variant) -> bool:
 func _focus_ring_visible(dropdown: Variant) -> bool:
 	return dropdown.has_focus() and not _focus_is_hidden(dropdown)
 func _run() -> void:
-	if not ResourceLoader.exists("res://scenes/ui/unified_dropdown.tscn"):
+	if not ResourceLoader.exists("res://scenes/ui/components/unified_dropdown.tscn"):
 		check(false,"shared dropdown scene available")
 		quit(1)
 		return
 	root.size = Vector2i(700,500)
-	var dropdown = load("res://scenes/ui/unified_dropdown.tscn").instantiate()
+	var dropdown = load("res://scenes/ui/components/unified_dropdown.tscn").instantiate()
 	dropdown.window_system = preload("res://src/platform/window_system.gd").new()
 	root.add_child(dropdown)
 	dropdown.position = Vector2(30,30)
@@ -69,7 +69,7 @@ func _run() -> void:
 	quit(0 if failures.is_empty() else 1)
 
 func _check_pointer_close_and_focus() -> void:
-	var dropdown = load("res://scenes/ui/unified_dropdown.tscn").instantiate()
+	var dropdown = load("res://scenes/ui/components/unified_dropdown.tscn").instantiate()
 	dropdown.window_system = preload("res://src/platform/window_system.gd").new()
 	root.add_child(dropdown)
 	dropdown.position = Vector2(300,30)

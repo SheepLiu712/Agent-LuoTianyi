@@ -1,5 +1,7 @@
 extends "res://src/platform/window_system.gd"
 func minimized(window: Window) -> bool:
+	if DisplayServer.get_name() == "headless":
+		return false
 	return window.mode == Window.MODE_MINIMIZED
 func windowed(window: Window) -> bool:
 	return window.mode == Window.MODE_WINDOWED

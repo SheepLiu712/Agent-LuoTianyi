@@ -39,7 +39,7 @@ func _check_anchor_navigation(window: Window, scroll: ScrollContainer, preferenc
 
 
 func run() -> void:
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	window.setup(null, null, null, func(_days): return OK)
 	root.add_child(window)
 	window.open()

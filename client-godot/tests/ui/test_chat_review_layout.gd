@@ -40,25 +40,27 @@ func run() -> void:
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	print("Chat review layout: mounted actual application")
 	await account.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual", "password":"synthetic", "request_token":false}, false)
-	check(await until(func(): return app._chat_view != null and app._chat.get_state().phase == "ready"), "actual application login reaches chat")
-	if app._chat_view == null:
+	check(await until(func(): return app.get_workspace() != null and app._chat.get_state().phase == "ready"), "actual application login reaches chat")
+	if app.get_workspace() == null:
 		quit(1)
 		return
 	print("Chat review layout: actual application signed in")
-	var chat: Control = app._chat_view
-	var split: HSplitContainer = app.get_node("%Split")
-	check(app._avatar.avatar.get_status().loaded, "real Live2D model loaded")
+	var workspace: Control = app.get_workspace()
+	var chat: Control = workspace.get_chat_view()
+	var avatar: Control = workspace.get_avatar_panel()
+	var split: HSplitContainer = workspace.get_node("%Split")
+	check(avatar.avatar.get_status().loaded, "real Live2D model loaded")
 	check(await until(func(): return not app._dynamics.get_latest_unread().is_empty()), "actual unread dynamic fetched")
-	check(app._avatar.get_node("%Heading").visible, "unread dynamic card is shown")
-	check(app._avatar.get_node("Heading/Identity/Companion").text == app._dynamics.get_latest_unread().content, "card displays actual latest unread content")
+	check(avatar.get_node("%Heading").visible, "unread dynamic card is shown")
+	check(avatar.get_node("Heading/Identity/Companion").text == app._dynamics.get_latest_unread().content, "card displays actual latest unread content")
 	check(app._dynamics.get_state().unread == 123, "displaying the card does not mark it read")
 	for frame in 4: await process_frame
-	var default_framing: Transform2D = app._avatar.avatar.transform
-	app._avatar.framing.zoom_by(1.25)
-	app._avatar.framing.pan_by(Vector2(24, 16), app._avatar.get_node("%Stage").size)
-	app._avatar._layout_avatar()
-	check(not app._avatar.avatar.transform.is_equal_approx(default_framing), "framing changes before floating reset")
-	var reset: Button = app._avatar.get_node("%Reset")
+	var default_framing: Transform2D = avatar.avatar.transform
+	avatar.framing.zoom_by(1.25)
+	avatar.framing.pan_by(Vector2(24, 16), avatar.get_node("%Stage").size)
+	avatar._layout_avatar()
+	check(not avatar.avatar.transform.is_equal_approx(default_framing), "framing changes before floating reset")
+	var reset: Button = avatar.get_node("%Reset")
 	var reset_point := reset.get_global_rect().get_center()
 	var motion := InputEventMouseMotion.new()
 	motion.position = reset_point
@@ -66,9 +68,9 @@ func run() -> void:
 	Input.parse_input_event(motion)
 	await process_frame
 	await _click_reset(reset_point)
-	check(app._avatar.avatar.transform.is_equal_approx(default_framing), "clicking floating reset restores original framing")
+	check(avatar.avatar.transform.is_equal_approx(default_framing), "clicking floating reset restores original framing")
 	var unread_post: Dictionary = app._dynamics.get_latest_unread()
-	var heading: Control = app._avatar.get_node("%Heading")
+	var heading: Control = avatar.get_node("%Heading")
 	var card_click := InputEventMouseButton.new()
 	card_click.button_index = MOUSE_BUTTON_LEFT
 	card_click.pressed = true
@@ -88,29 +90,29 @@ func run() -> void:
 	app._chat.stop_voice()
 	chat.get_node("%Input").text = "切换风格后仍然保留的草稿"
 	chat.get_node("%Input").text_changed.emit()
-	await _check_style_layouts(app, chat, split)
+	await _check_style_layouts(app, workspace, chat, split)
 	chat.get_node("%Input").text = "第一行\n第二行\n第三行\n第四行\n第五行\n第六行"
 	chat.get_node("%Input").text_changed.emit()
 	chat._attach({"ok":false, "code":"IMAGE_TOO_LARGE"})
-	await capture(app, chat, "compact-long-input-error")
+	await capture(workspace, chat, "compact-long-input-error")
 	chat.get_node("%ImageStatus").hide()
 	chat.get_node("%Input").clear()
-	app.get_node("%NavDynamics").pressed.emit()
+	workspace.get_node("%NavDynamics").pressed.emit()
 	var dynamics = app.find_child("DynamicsWindow", true, false)
 	_check_navigation_opens_independent_dynamics_window(dynamics)
 	_hide_if_present(dynamics)
-	app.get_node("%NavSettings").pressed.emit()
+	workspace.get_node("%NavSettings").pressed.emit()
 	var settings = app.find_child("SettingsWindow", true, false)
 	_check_settings_entry_remains_functional(settings)
 	_hide_if_present(settings)
-	app.get_node("%NavLogs").pressed.emit()
+	workspace.get_node("%NavLogs").pressed.emit()
 	var logs = app.find_child("LogWindow", true, false)
 	_check_logs_entry_remains_functional(logs)
 	_hide_if_present(logs)
-	await capture_samples(app, chat)
+	await capture_samples(app, workspace, chat)
 	await app._dynamics.mark_read()
-	check(not app._avatar.get_node("%Heading").visible, "explicit mark read hides the card")
-	await capture(app, chat, "review-no-unread-960x640")
+	check(not avatar.get_node("%Heading").visible, "explicit mark read hides the card")
+	await capture(workspace, chat, "review-no-unread-960x640")
 	app.queue_free()
 	await process_frame
 	print("Chat review layout: ", "PASS" if failures.is_empty() else "FAIL: " + str(failures))
@@ -122,7 +124,8 @@ func _hide_if_present(node: Variant) -> void:
 		node.hide()
 
 
-func capture(app: Control, chat: Control, label: String) -> void:
+func capture(workspace: Control, chat: Control, label: String) -> void:
+	var avatar: Control = workspace.get_avatar_panel()
 	var started := Time.get_ticks_msec()
 	print("Chat review capture begin: ", label)
 	await create_timer(0.15).timeout
@@ -145,15 +148,15 @@ func capture(app: Control, chat: Control, label: String) -> void:
 	var composer: Control = chat.get_node("Margin/Column/ComposerSurface")
 	check(chat.get_node("%Scroll").get_global_rect().end.y <= composer.get_global_rect().position.y + 1, label + ": composer does not cover messages")
 	check(chat.get_node("%Scroll").size.y >= 160, label + ": message area remains usable")
-	check(absf(app.get_node("%Navigation").size.x - 80) < 1, label + ": 80px navigation")
+	check(absf(workspace.get_node("%Navigation").size.x - 80) < 1, label + ": 80px navigation")
 	for name in ["NavChat", "NavDynamics", "NavSettings"]:
-		check(app.get_node("%" + name).size.is_equal_approx(Vector2(64, 64)), label + ": square " + name)
-	check(app.get_node("%Navigation").find_children("*", "TextureRect", true, false).is_empty(), label + ": navigation avatars removed")
+		check(workspace.get_node("%" + name).size.is_equal_approx(Vector2(64, 64)), label + ": square " + name)
+	check(workspace.get_node("%Navigation").find_children("*", "TextureRect", true, false).is_empty(), label + ": navigation avatars removed")
 	check(chat.get_node_or_null("%StopVoice") == null, label + ": stop voice removed")
-	check(app._avatar.get_node_or_null("%Footer") == null and app._avatar.find_child("GestureHint", true, false) == null, label + ": avatar footer and hint removed")
-	var stage: Control = app._avatar.get_node("%Stage")
-	var reset: Button = app._avatar.get_node("%Reset")
-	check(stage.size.is_equal_approx(app._avatar.size), label + ": full-height avatar stage")
+	check(avatar.get_node_or_null("%Footer") == null and avatar.find_child("GestureHint", true, false) == null, label + ": avatar footer and hint removed")
+	var stage: Control = avatar.get_node("%Stage")
+	var reset: Button = avatar.get_node("%Reset")
+	check(stage.size.is_equal_approx(avatar.size), label + ": full-height avatar stage")
 	check(stage.get_global_rect().encloses(reset.get_global_rect()), label + ": reset floats inside avatar stage")
 	check(reset.z_index > stage.z_index and reset.mouse_filter == Control.MOUSE_FILTER_STOP, label + ": reset overlays stage without passing through clicks")
 	check(reset.size.is_equal_approx(Vector2(88, 36)), label + ": compact floating reset")
@@ -162,7 +165,7 @@ func capture(app: Control, chat: Control, label: String) -> void:
 	check(root.get_texture().get_image().save_png(ARTIFACTS.path_join(label + ".png")) == OK, "native capture " + label)
 	print("Chat review capture: ", label, " ", Time.get_ticks_msec() - started, "ms")
 
-func capture_samples(app: Control, chat: Control) -> void:
+func capture_samples(app: Control, workspace: Control, chat: Control) -> void:
 	print("Chat review samples: begin")
 	var audio: Dictionary = app._chat.get_message_audio("redesign-voice")
 	app._chat.stop()
@@ -186,8 +189,8 @@ func capture_samples(app: Control, chat: Control) -> void:
 	var photo_texture := ImageTexture.create_from_image(photo)
 	for dimensions in [Vector2i(1280, 800)]:
 		root.size = dimensions
-		app._ratio = 1.0 / 3.0
-		app._resize_split()
+		workspace._ratio = 1.0 / 3.0
+		workspace._resize_split()
 		await process_frame
 		scroll.set_messages(samples)
 		check(scroll.scroll_to_message("date"), "sample starts at the first message")
@@ -199,16 +202,16 @@ func capture_samples(app: Control, chat: Control) -> void:
 			check(app._services.ui_style.save_preferences(pair[0], pair[1]) == OK, "sample theme switches")
 			for frame in 4: await process_frame
 			check(scroll.scroll_to_message("date"), "sample framing starts at date after content settles")
-			await capture(app, chat, "review-%s-%sx%s" % [pair[0], dimensions.x, dimensions.y])
+			await capture(workspace, chat, "review-%s-%sx%s" % [pair[0], dimensions.x, dimensions.y])
 			check(chat.find_child("CompanionHint", true, false) == null, "decorative chat header hint removed")
 			var selected_text: RichTextLabel = scroll.get_node("%Canvas").get_children().filter(func(bubble): return bubble.get_node("%Text").text == "回来啦。今天过得怎么样？")[0].get_node("%Text")
 			selected_text.select_all()
 			check(selected_text.get_selected_text() == selected_text.text, "chat text remains selectable")
-			await capture(app, chat, "review-selection-%s-%sx%s" % [pair[0], dimensions.x, dimensions.y])
+			await capture(workspace, chat, "review-selection-%s-%sx%s" % [pair[0], dimensions.x, dimensions.y])
 			selected_text.deselect()
 	check(scroll.scroll_to_message("long"), "long sample remains scrollable")
 	root.size = Vector2i(960, 640)
-	await capture(app, chat, "review-long-message-960x640")
+	await capture(workspace, chat, "review-long-message-960x640")
 
 func _click_reset(reset_point: Vector2) -> void:
 	for pressed in [true, false]:
@@ -235,7 +238,7 @@ func _check_settings_entry_remains_functional(settings: Variant) -> void:
 func _check_logs_entry_remains_functional(logs: Variant) -> void:
 	check(logs != null and logs.visible, "logs entry remains functional")
 
-func _check_style_layouts(app: Variant, chat: Variant, split: HSplitContainer) -> void:
+func _check_style_layouts(app: Variant, workspace: Variant, chat: Variant, split: HSplitContainer) -> void:
 	for dimensions in [Vector2i(1280, 800), Vector2i(960, 640)]:
 		root.size = dimensions
 		await process_frame
@@ -251,7 +254,7 @@ func _check_style_layouts(app: Variant, chat: Variant, split: HSplitContainer) -
 			check(chat.get_node("%Scroll").get_reading_anchor().get("id") == anchor.get("id"), "theme switch preserves reading message")
 			check(chat.get_node("%Input").text == "切换风格后仍然保留的草稿", "theme switch preserves input")
 			var label: String = "%s-%s-%sx%s" % [pair[0], pair[1], dimensions.x, dimensions.y]
-			await capture(app, chat, label)
+			await capture(workspace, chat, label)
 		check(app._services.ui_style.save_preferences("crystal", "emoji") == OK, "emoji switch saves")
 		check(chat.get_node("%Send").icon.resource_path.ends_with("action_send_emoji.png"), "original emoji icon applied")
 		check(chat.get_node("%VolumeButton").icon.resource_path.ends_with("media_volume_emoji.png"), "original volume emoji applied")
@@ -272,7 +275,7 @@ func _check_style_layouts(app: Variant, chat: Variant, split: HSplitContainer) -
 		await process_frame
 		split.dragged.emit(split.split_offset)
 		await process_frame
-		check(absf(app._ratio - app._avatar.size.x / split.size.x) < 0.01, "native splitter updates persisted ratio")
-		app._ratio = 1.0 / 3.0
-		app._resize_split()
+		check(absf(workspace.get_split_ratio() - workspace.get_avatar_panel().size.x / split.size.x) < 0.01, "native splitter updates persisted ratio")
+		workspace._ratio = 1.0 / 3.0
+		workspace._resize_split()
 		await process_frame

@@ -1,5 +1,5 @@
 extends SceneTree
-const VIEW_SCENE := "res://scenes/ui/account_view.tscn"
+const VIEW_SCENE := "res://scenes/ui/pages/account_view.tscn"
 const Session = preload("res://src/session/account_session.gd")
 const Store = preload("res://src/storage/credential_store.gd")
 const Api = preload("res://src/network/account_api.gd")

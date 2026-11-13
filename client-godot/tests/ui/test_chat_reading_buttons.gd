@@ -72,7 +72,7 @@ func settle(frames: int = 10) -> void:
 func run() -> void:
 	root.size = Vector2i(900, 700)
 	root.content_scale_size = Vector2i.ZERO
-	var chat = load("res://scenes/ui/chat_view.tscn").instantiate()
+	var chat = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
 	root.add_child(chat)
 	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await settle()

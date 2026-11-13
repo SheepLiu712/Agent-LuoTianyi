@@ -1,0 +1,43 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/message_audio.gd" id="1_audio"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/chat/waveform_strip.tscn" id="3_wave"]
+
+[node name="MessageAudio" type="VBoxContainer"]
+theme = ExtResource("2_theme")
+script = ExtResource("1_audio")
+
+[node name="Row" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Play" type="Button" parent="Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+theme_type_variation = &"InlineLinkButton"
+
+[node name="Wave" parent="Row" instance=ExtResource("3_wave")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Time" type="Label" parent="Row"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.1882353, 0.27058825, 0.3254902, 1)
+theme_override_font_sizes/font_size = 12
+
+[node name="Stop" type="Button" parent="Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+theme_type_variation = &"InlineLinkButton"
+text = "停止"
+
+[node name="Error" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "语音未能保存"

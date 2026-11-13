@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="avatar"]
-[ext_resource type="PackedScene" path="res://scenes/ui/chat_view.tscn" id="chat"]
+[ext_resource type="PackedScene" path="res://scenes/ui/chat/chat_view.tscn" id="chat"]
 [node name="VoiceCapture" type="HSplitContainer"]
 anchor_right = 1.0
 anchor_bottom = 1.0

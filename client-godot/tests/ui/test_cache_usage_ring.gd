@@ -96,7 +96,7 @@ func _check_states(window: Window, page: Control, ring: Control, storage: FakeSt
 
 
 func run() -> void:
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	var page = window.get_node("%AudioPage")
 	var ring = page.get_node("%UsageRing")
 	var storage := FakeStorage.new()

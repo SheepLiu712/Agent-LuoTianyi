@@ -1,5 +1,6 @@
 extends VBoxContainer
-## 动态的一条评论：静态外观在场景里，setup() 只注入数据。
+## 动态的一条评论：节点由 dynamic_comment_row.tscn 定义，脚本负责数据填充。
+
 @onready var _avatar: TextureRect = %Avatar
 @onready var _author: Label = %Author
 @onready var _body: RichTextLabel = %Body
@@ -14,7 +15,8 @@ var _tooltip := ""
 var _allow_comment := false
 var _reply_action := Callable()
 
-func setup(avatar_texture: Texture2D,author: String,body: String,time_text: String,created_at: String,allow_comment: bool,reply_action: Callable) -> void:
+
+func setup(avatar_texture: Texture2D, author: String, body: String, time_text: String, created_at: String, allow_comment: bool, reply_action: Callable) -> void:
 	_avatar_texture = avatar_texture
 	_author_name = author
 	_body_text = body
@@ -25,15 +27,18 @@ func setup(avatar_texture: Texture2D,author: String,body: String,time_text: Stri
 	_configured = true
 	if is_node_ready(): _apply()
 
+
 func set_avatar(texture: Texture2D) -> void:
 	if _avatar_texture == texture:
 		return
 	_avatar_texture = texture
 	if is_node_ready(): _avatar.texture = _avatar_texture
 
+
 func _ready() -> void:
 	if not _configured: return
 	_apply()
+
 
 func _apply() -> void:
 	_avatar.texture = _avatar_texture

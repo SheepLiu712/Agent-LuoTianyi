@@ -1,7 +1,7 @@
 extends SceneTree
 
 const ChatTime = preload("res://src/ui/chat_time.gd")
-const List = preload("res://scenes/ui/virtual_message_list.tscn")
+const List = preload("res://scenes/ui/chat/virtual_message_list.tscn")
 const Style = preload("res://src/application/ui_style.gd")
 const Store = preload("res://src/storage/godot_settings_store.gd")
 const ARTIFACTS := "res://artifacts/ui-redraw-client"
@@ -128,7 +128,7 @@ func test_chat_presentation() -> void:
 	var path := "user://chat-time-%s.cfg" % Time.get_ticks_usec()
 	var style := Style.new()
 	style.configure(Store.new(path))
-	var chat = load("res://scenes/ui/chat_view.tscn").instantiate()
+	var chat = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
 	chat.set_ui_style(style)
 	root.add_child(chat)
 	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

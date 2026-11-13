@@ -1,7 +1,7 @@
 extends SceneTree
 const Style = preload("res://src/application/ui_style.gd")
 const Store = preload("res://src/storage/godot_settings_store.gd")
-const Bubble = preload("res://scenes/ui/message_bubble.tscn")
+const Bubble = preload("res://scenes/ui/chat/message_bubble.tscn")
 var failures: Array[String] = []
 
 class FailingStore extends Resource:
@@ -63,7 +63,7 @@ func _check_chat_surface_follows_style(chat: Variant, style_mode: String) -> voi
 func _check_dynamic_card_shadow(style: Variant, style_mode: String) -> void:
 	var post := style._theme.get_stylebox("normal", "DynamicsPost") as StyleBoxFlat
 	check(post != null and post.shadow_size == (12 if style_mode == "crystal" else 0), "dynamic card shadow follows style")
-	var row := (load("res://scenes/ui/dynamics_post_row.tscn") as PackedScene).instantiate() as Button
+	var row := (load("res://scenes/ui/dynamics/dynamics_post_row.tscn") as PackedScene).instantiate() as Button
 	check(not row.clip_contents, "dynamic card does not clip its shadow")
 	row.free()
 
@@ -95,7 +95,7 @@ func run() -> void:
 	var own := make_bubble(style, true)
 	var other := make_bubble(style)
 	var source: StyleBoxFlat = own.get_theme_stylebox("panel", "MessageBubbleOwn")
-	var chat = load("res://scenes/ui/chat_view.tscn").instantiate()
+	var chat = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
 	chat.set_ui_style(style)
 	root.add_child(chat)
 	chat.size = Vector2(620, 600)
@@ -132,7 +132,7 @@ func check_failed_save() -> void:
 	style.configure(store)
 	var changes: Array[bool] = []
 	style.style_changed.connect(func(): changes.append(true))
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	window.set_ui_style(style)
 	window.setup(null, null)
 	root.add_child(window)

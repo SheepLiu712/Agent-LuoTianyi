@@ -1,5 +1,5 @@
 extends SceneTree
-const Bubble = preload("res://scenes/ui/message_bubble.tscn")
+const Bubble = preload("res://scenes/ui/chat/message_bubble.tscn")
 var failures: Array[String] = []
 
 func _initialize() -> void: run.call_deferred()

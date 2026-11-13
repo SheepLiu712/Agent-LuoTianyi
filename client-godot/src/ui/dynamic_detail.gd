@@ -1,8 +1,9 @@
 extends ScrollContainer
-const CommentRow = preload("res://scenes/ui/dynamic_comment_row.tscn")
+const CommentRow = preload("res://scenes/ui/dynamics/dynamic_comment_row.tscn")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
 const USER_ICON := preload("res://assets/ui/user_icon.png")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+
 @onready var _column: VBoxContainer = %Column
 @onready var _avatar: TextureRect = %Avatar
 @onready var _author: Label = %Author
@@ -193,7 +194,7 @@ func _place_reply() -> void:
 	var destination: Node = _column if _parent.is_empty() else _rows.get(_parent,_column)
 	if _reply_box.get_parent() != destination: _reply_box.reparent(destination)
 	if _parent.is_empty():
-		_column.move_child(_reply_box,_comments.get_index())
+		_column.move_child(_reply_box, _draft.get_index())
 		_reply_label.text = "已取消回复对象，文字保留为留言草稿"
 	_cancel.visible = not _parent.is_empty()
 	_reply_send.text = "发送评论" if _parent.is_empty() else "发送回复"

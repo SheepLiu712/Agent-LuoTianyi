@@ -19,11 +19,14 @@ func field(view: Node, hint: String) -> LineEdit:
 
 func button(view: Node, caption: String) -> void:
 	if caption == "退出登录":
-		view.get_node("%NavSettings").pressed.emit()
+		view.get_workspace().get_node("%NavSettings").pressed.emit()
 		var settings = view.find_child("SettingsWindow",true,false)
 		check(settings != null and settings.get_node_or_null("%LogoutButton") != null,"logout exists in settings")
 		if settings != null and settings.get_node_or_null("%LogoutButton") != null:
 			settings.get_node("%LogoutButton").pressed.emit()
+			var dialog = view.find_child("ExitDialog", true, false)
+			if dialog != null and dialog.visible:
+				dialog.get_ok_button().pressed.emit()
 		return
 	for node in view.find_children("*", "Button", true, false):
 		if node.text == caption and node.is_visible_in_tree():
@@ -79,7 +82,7 @@ func _run() -> void:
 	check(await until(func(): return not session.get_session().is_empty()), "real account login succeeds")
 	await process_frame
 	_check_successful_login_expands_window()
-	var composers: Array = app.find_children("*", "TextEdit", true, false)
+	var composers: Array = app.get_workspace().find_children("*", "TextEdit", true, false)
 	_check_expanded_window_shows_chat(composers)
 	check(app.find_children("Driver", "", true, false).size() == 1, "expanded window renders avatar panel from scene")
 	check(not field(app, "服务器地址").is_visible_in_tree(), "expanded window hides account form")
@@ -94,6 +97,7 @@ func _run() -> void:
 	await process_frame
 	var windowed := root.mode == Window.MODE_WINDOWED
 	button(app, "退出登录")
+	await until(func(): return session.get_session().is_empty())
 	await process_frame
 	check(root.size == Vector2i(480, 690) and field(app, "用户名").is_visible_in_tree(), "logout returns compact account window")
 	check(app.find_children("*", "Node2D", true, false).is_empty(), "logout releases avatar drawing resources")
@@ -105,6 +109,7 @@ func _run() -> void:
 	else:
 		print("SKIP: native window size restoration requires windowed display")
 	button(app, "退出登录")
+	await until(func(): return session.get_session().is_empty())
 	app.queue_free()
 	await process_frame
 	var restored = Session.new(Api.new(security), load("res://src/storage/godot_storage_service.gd").new(settings_path, store))
@@ -119,6 +124,7 @@ func _run() -> void:
 	volumes = restored_app.find_children("*", "HSlider", true, false)
 	check(volumes.size() == 1 and is_equal_approx(volumes[0].value,.35), "restarted application restores saved volume")
 	button(restored_app, "退出登录")
+	await until(func(): return restored.get_session().is_empty())
 	restored_app.queue_free()
 	await process_frame
 	var file := FileAccess.open(settings_path, FileAccess.WRITE)

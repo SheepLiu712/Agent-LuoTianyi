@@ -40,7 +40,7 @@ func run() -> void:
 	root.add_child(models)
 	await models.start(scope)
 	var prefs = load("res://src/session/preferences_controller.gd").new(load("res://src/network/json_request.gd").new())
-	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	window.setup(prefs,models)
 	root.add_child(window)
 	window.open()
@@ -57,6 +57,7 @@ func run() -> void:
 	await _check_failure_explains_how_to_retry(page)
 	window.get_node("%PreferencesTab").pressed.emit()
 	check(await until(func(): return prefs.get_state().phase == "ready"),"retry restores editing")
+	check(not page.get_node("%LoadErrorBanner").visible, "recovery hides persistent failure banner")
 	check(page.get_node("%CustomContextField").editable,"loaded form becomes editable")
 	await _check_readonly_presets(page, window, prefs)
 	page.get_node("%RelationshipPresets").activated.emit("friend")
@@ -125,8 +126,10 @@ func remove_folder(path: String) -> void:
 func _check_preset_choices_still_update_readonly_values_and_the_draft(page: Variant, prefs: Variant) -> void:
 	check(page.get_node("%RelationshipPresets").get_selected_id() == "friend" and page.get_node("%SpeakingStylePresets").get_selected_id() == "gentle" and prefs.get_state().dirty, "preset choices update the shared dropdown and the draft")
 
-## 失败不再占版面：顶部浮层说完就淡出，且绝不挡住下面的表单。
+## 失败时保留顶部常驻重试横幅，同时顶部浮层提示不遮挡下面的表单。
 func _check_failure_explains_how_to_retry(page: Variant) -> void:
+	var banner: Control = page.get_node("%LoadErrorBanner")
+	check(banner.visible and banner.get_node("%Action").visible, "failure displays persistent retry banner")
 	var toast: Control = page.get_node("%Toast")
 	check(toast.last_text().contains("相处偏好加载失败") and toast.last_text().contains("重新打开设置"), "failure explains how to retry")
 	check(toast.visible and toast.mouse_filter == Control.MOUSE_FILTER_IGNORE, "failure toast never blocks input")
@@ -161,7 +164,7 @@ func _capture_checkbox_states(checkbox: CheckBox, window: Window, theme: Theme) 
 		await capture(window,"checkbox-"+state)
 	check(checkbox.get_theme_color("font_hover_pressed_color").is_equal_approx(Color("304553")),"checked hover text stays dark")
 	if theme.has_stylebox("focus","CheckBox"):
-		check(checkbox.get_theme_stylebox("focus").border_color.is_equal_approx(Color(0, 0.780392, 0.941176)),"settings keyboard focus uses the shared cyan outline")
+		check(checkbox.get_theme_stylebox("focus").border_color.is_equal_approx(Color("66ccff")),"settings keyboard focus uses the shared Tianyi blue outline")
 	checkbox.disabled = false
 
 func _check_theme_states() -> Theme:

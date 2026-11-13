@@ -1,5 +1,5 @@
 extends SceneTree
-const WINDOW_SCENE := "res://scenes/ui/dynamics_window.tscn"
+const WINDOW_SCENE := "res://scenes/ui/windows/dynamics_window.tscn"
 var failures: Array[String] = []
 func check(ok: bool,label: String) -> void:
 	if not ok:

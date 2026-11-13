@@ -1,6 +1,6 @@
 extends SceneTree
 ## 头像页的核心契约：选完立刻落盘、失败按码给文案、不登录时不给点。
-const Scene = preload("res://scenes/ui/profile_page.tscn")
+const Scene = preload("res://scenes/ui/settings/profile_page.tscn")
 const AvatarProfile = preload("res://src/session/avatar_profile.gd")
 const AvatarStore = preload("res://src/storage/avatar_store.gd")
 var failures: Array[String] = []

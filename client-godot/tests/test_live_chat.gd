@@ -1,7 +1,7 @@
 extends SceneTree
 const Transport = preload("res://src/network/websocket_transport.gd")
 const Session = preload("res://src/session/chat_session.gd")
-const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
+const VIEW_SCENE := "res://scenes/ui/chat/chat_view.tscn"
 const Log = preload("res://src/storage/client_log.gd")
 var failures: Array[String] = []
 var expressions: Array[String] = []

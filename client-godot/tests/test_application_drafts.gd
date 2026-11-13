@@ -24,12 +24,13 @@ func _run() -> void:
 	await process_frame
 	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"ui","password":"synthetic-password","request_token":false},false)
 	await process_frame
-	check(app.get_node_or_null("%AccountMenu") == null,"main navigation no longer owns account actions")
+	var workspace: Control = app.get_workspace()
+	check(workspace.get_node_or_null("%AccountMenu") == null,"main navigation no longer owns account actions")
 	var prewarmed = await _wait_for_prewarmed_settings(app)
 	_check_settings_prewarm(prewarmed)
 	await _check_settings_clean_reopen(app, prewarmed)
-	var dynamics = app.get_node("%NavDynamics")
-	var unread: Control = app.get_node("%DynamicsUnread")
+	var dynamics = workspace.get_node("%NavDynamics")
+	var unread: Control = workspace.get_node("%DynamicsUnread")
 	await _check_navigation_unread(dynamics, unread)
 	dynamics.pressed.emit()
 	await process_frame
@@ -39,9 +40,9 @@ func _run() -> void:
 	check(draft != null,"publishing opens from dynamic navigation")
 	draft.text = "unsaved dynamic"
 	draft.text_changed.emit()
-	app.get_node("%NavLogs").pressed.emit()
+	workspace.get_node("%NavLogs").pressed.emit()
 	var logs = app.find_child("LogWindow",true,false)
-	app.get_node("%NavSettings").pressed.emit()
+	workspace.get_node("%NavSettings").pressed.emit()
 	await process_frame
 	var window = app.find_child("SettingsWindow",true,false)
 	check(window != null,"settings navigation opens unified window")
@@ -54,7 +55,7 @@ func _run() -> void:
 		quit(1)
 		return
 	window.get_node("%ModelsTab").pressed.emit()
-	app.get_node("%NavSettings").pressed.emit()
+	workspace.get_node("%NavSettings").pressed.emit()
 	_check_reopen_preserves_selected_settings_page_and_singleton(app, window)
 	window.get_node("%PreferencesTab").pressed.emit()
 	var input: TextEdit = window.find_child("CustomContextField",true,false)
@@ -63,7 +64,7 @@ func _run() -> void:
 	input.text = "new draft"
 	input.text_changed.emit()
 	check(window.is_dirty(),"loaded form accepts draft edit")
-	var chat = app.find_child("ChatView",true,false)
+	var chat = workspace.get_chat_view()
 	chat.get_node("%Input").text = "unsent chat draft"
 	var image := Image.create(4,4,false,Image.FORMAT_RGB8)
 	chat.get_node("%Input").image_pasted.emit(image)
@@ -81,7 +82,8 @@ func _run() -> void:
 	check(session.get_session().is_empty(),"confirmed discard completes logout")
 	_check_logout_closes_business_windows_but_preserves_logs(window, logs)
 	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"slow_save","password":"synthetic-password","request_token":false},false)
-	app.get_node("%NavSettings").pressed.emit()
+	workspace = app.get_workspace()
+	workspace.get_node("%NavSettings").pressed.emit()
 	window = app.find_child("SettingsWindow",true,false)
 	input = window.find_child("CustomContextField",true,false)
 	deadline = Time.get_ticks_msec()+2500
@@ -155,12 +157,12 @@ func _check_settings_prewarm(window: Variant) -> void:
 	check(window != null and window.get_node("%ModelPage").get_node("%Cards").get_child_count() > 0,"model cards are built during login prewarm")
 
 func _check_settings_clean_reopen(app: Variant, window: Variant) -> void:
-	app.get_node("%NavSettings").pressed.emit()
+	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	await process_frame
 	check(window.visible,"prewarmed settings opens")
 	window.close_requested.emit()
 	await process_frame
 	check(not window.visible and is_instance_valid(window),"clean close keeps the settings cache")
-	app.get_node("%NavSettings").pressed.emit()
+	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	await process_frame
 	check(window.visible and app.find_children("SettingsWindow","Window",true,false).size() == 1,"reopen reuses the settled settings window")

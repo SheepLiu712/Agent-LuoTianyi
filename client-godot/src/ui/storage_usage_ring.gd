@@ -1,10 +1,11 @@
 extends Control
+## Multi-segment donut usage ring backed by unified design tokens.
 
-## 圆环与图例共用同一组颜色，避免两处各写一份后逐渐漂移。
-const BACKDROP_COLOR := Color(0.921569, 0.956863, 0.984314, 1)
-const CLIENT_COLOR := Color(0, 0.780392, 0.941176, 1)
-const OTHER_COLOR := Color(0.784314, 0.823529, 0.862745, 1)
-const FREE_COLOR := Color(1, 1, 1, 1)
+const Tokens = preload("res://src/ui/design_tokens.gd")
+const BACKDROP_COLOR := Tokens.RING_BACKDROP
+const CLIENT_COLOR := Tokens.RING_CLIENT
+const OTHER_COLOR := Tokens.RING_OTHER
+const FREE_COLOR := Tokens.RING_FREE
 const TRACK_COLOR := Color(1, 1, 1, 1)
 const MARKER_RADIUS := 17.0
 
@@ -23,9 +24,9 @@ func set_usage(client_bytes: int, total_bytes: int, free_bytes: int) -> void:
 	var other := used - client
 	_total = total_bytes
 	_segments = [
-		{"kind":"client", "bytes":client, "color":CLIENT_COLOR},
-		{"kind":"other", "bytes":other, "color":OTHER_COLOR},
-		{"kind":"free", "bytes":free_bytes, "color":FREE_COLOR},
+		{"kind": "client", "bytes": client, "color": CLIENT_COLOR},
+		{"kind": "other", "bytes": other, "color": OTHER_COLOR},
+		{"kind": "free", "bytes": free_bytes, "color": FREE_COLOR},
 	]
 	_marker_visible = client > 0
 	_marker_angle = -PI * 0.5 + TAU * float(client) / float(total_bytes)
@@ -51,9 +52,8 @@ func get_marker_position() -> Vector2:
 	if not _marker_visible:
 		return Vector2(-1, -1)
 	var geometry := _ring_geometry()
-	var radius: float = geometry.radius
 	var center: Vector2 = size * 0.5
-	return center + Vector2(cos(_marker_angle), sin(_marker_angle)) * radius
+	return center + Vector2(cos(_marker_angle), sin(_marker_angle)) * geometry.radius
 
 
 func _draw() -> void:
@@ -82,7 +82,7 @@ func _ring_geometry() -> Dictionary:
 	var width := clampf(extent * 0.115, 18.0, 28.0)
 	var outer_radius := extent * 0.5 - 8.0
 	return {
-		"width":width,
-		"outer_radius":outer_radius,
-		"radius":maxf(0.0, outer_radius - width * 0.5),
+		"width": width,
+		"outer_radius": outer_radius,
+		"radius": maxf(0.0, outer_radius - width * 0.5),
 	}

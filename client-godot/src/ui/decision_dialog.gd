@@ -1,10 +1,13 @@
 extends Window
+## Reusable decision confirmation dialog with deterministic open/reopen sizing and zero clipping.
 
 const ModalStack = preload("res://src/ui/modal_stack.gd")
 const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
+
 signal confirmed
 signal canceled
 signal custom_action(action: String)
+
 @export_multiline var dialog_text := ""
 @export var ok_button_text := "确认"
 @export var cancel_button_text := "取消"
@@ -12,7 +15,7 @@ signal custom_action(action: String)
 @export var destructive_action := false
 
 var _fitting := false
-var _refining := false
+var _refine_nonce := 0
 
 
 func _ready() -> void:
@@ -32,6 +35,7 @@ func _display() -> void:
 	%SaveAndClose.visible = show_save
 	_apply_action_hierarchy()
 	if visible:
+		_refine_nonce += 1
 		ModalStack.activate(self)
 		if not _fitting:
 			_fitting = true
@@ -47,19 +51,16 @@ func _apply_action_hierarchy() -> void:
 
 
 func _refine_modal_height() -> void:
-	if _refining:
-		return
-	_refining = true
-	for _pass in 3:
+	var token := _refine_nonce
+	for _pass in 4:
 		await get_tree().process_frame
-		if not visible:
-			_refining = false
+		if not visible or token != _refine_nonce:
 			return
-		if %Message.size.x > 1.0:
+		var expected_width := float(size.x - ModalWindowLayout.DIALOG_GUTTER * 2)
+		if absf(%Panel.size.x - expected_width) <= 2.0 and %Message.size.x > 1.0:
 			break
-	if visible:
+	if visible and token == _refine_nonce:
 		ModalWindowLayout.refine_height(self, %Panel, %Message)
-	_refining = false
 
 
 func _cancel() -> void:

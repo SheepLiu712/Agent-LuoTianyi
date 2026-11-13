@@ -1,34 +1,16 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene format=3]
 
 [ext_resource type="Resource" path="res://resources/platform/geometry.tres" id="isolation_geometry_store"]
-
 [ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
-
 [ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
-
 [ext_resource type="Resource" path="res://resources/platform/preview.tres" id="isolation_settings"]
-
 [ext_resource type="Script" path="res://src/preview/chat_preview.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="3_avatar"]
 [ext_resource type="Script" path="res://src/ui/composer_input.gd" id="4_composer"]
 [ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
 [ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
-[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="5_dropdown"]
-
-
-[sub_resource type="StyleBoxFlat" id="SendStyle"]
-content_margin_left = 10.0
-content_margin_top = 10.0
-content_margin_right = 10.0
-content_margin_bottom = 10.0
-bg_color = Color(0.7411765, 0.8980392, 0.9294118, 1)
-corner_radius_top_left = 9
-corner_radius_top_right = 9
-corner_radius_bottom_right = 9
-corner_radius_bottom_left = 9
-
-
+[ext_resource type="PackedScene" path="res://scenes/ui/components/unified_dropdown.tscn" id="5_dropdown"]
 
 [node name="ChatPreview" type="Control"]
 layout_mode = 3
@@ -39,15 +21,10 @@ grow_horizontal = 2
 grow_vertical = 2
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
-
 files = ExtResource("isolation_files")
-
 settings = ExtResource("isolation_settings")
-
 runtime = ExtResource("isolation_runtime")
-
 window_system = ExtResource("isolation_window_system")
-
 geometry_store = ExtResource("isolation_geometry_store")
 
 [node name="Background" type="ColorRect" parent="."]
@@ -66,6 +43,10 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 8
@@ -81,112 +62,117 @@ offset_top = 24.0
 offset_right = 24.0
 offset_bottom = 24.0
 mouse_filter = 2
+theme_override_constants/separation = 4
 
 [node name="Name" type="Label" parent="Split/AvatarPanel/Header"]
-theme_override_font_sizes/font_size = 25
 theme_override_colors/font_color = Color(0.1882353, 0.3019608, 0.3764706, 1)
+theme_override_font_sizes/font_size = 25
 text = "洛天依"
 
 [node name="Subtitle" type="Label" parent="Split/AvatarPanel/Header"]
-theme_override_font_sizes/font_size = 13
 theme_override_colors/font_color = Color(0.3215686, 0.4196078, 0.4901961, 1)
+theme_override_font_sizes/font_size = 13
 text = "把平凡的日子，慢慢说给我听。"
 
 [node name="Expressions" parent="Split/AvatarPanel/Header" instance=ExtResource("5_dropdown")]
 unique_name_in_owner = true
-size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
 tooltip_text = "选择角色表情"
 
-[node name="Margin" type="MarginContainer" parent="Split"]
+[node name="ChatCard" type="PanelContainer" parent="Split"]
 custom_minimum_size = Vector2(410, 0)
 size_flags_horizontal = 3
+theme_type_variation = &"ChatSurface"
+
+[node name="Margin" type="MarginContainer" parent="Split/ChatCard"]
 theme_override_constants/margin_left = 24
-theme_override_constants/margin_right = 24
 theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
 theme_override_constants/margin_bottom = 24
 
-[node name="Column" type="VBoxContainer" parent="Split/Margin"]
+[node name="Column" type="VBoxContainer" parent="Split/ChatCard/Margin"]
 theme_override_constants/separation = 12
 
-[node name="Heading" type="HBoxContainer" parent="Split/Margin/Column"]
+[node name="Heading" type="HBoxContainer" parent="Split/ChatCard/Margin/Column"]
+theme_override_constants/separation = 8
 
-[node name="Title" type="Label" parent="Split/Margin/Column/Heading"]
+[node name="Title" type="Label" parent="Split/ChatCard/Margin/Column/Heading"]
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 23
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 23
 text = "和天依聊聊"
 
-[node name="Scenarios" parent="Split/Margin/Column/Heading" instance=ExtResource("5_dropdown")]
+[node name="Scenarios" parent="Split/ChatCard/Margin/Column/Heading" instance=ExtResource("5_dropdown")]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 40)
 tooltip_text = "选择离线演示场景"
 
-[node name="Offline" type="Label" parent="Split/Margin/Column"]
-theme_override_font_sizes/font_size = 12
+[node name="Offline" type="Label" parent="Split/ChatCard/Margin/Column"]
 theme_override_colors/font_color = Color(0.5019608, 0.60784316, 0.654902, 1)
+theme_override_font_sizes/font_size = 12
 text = "离线样板 · 未连接服务器"
 
-[node name="Scroll" type="ScrollContainer" parent="Split/Margin/Column"]
+[node name="Scroll" type="ScrollContainer" parent="Split/ChatCard/Margin/Column"]
 unique_name_in_owner = true
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="Messages" type="VBoxContainer" parent="Split/Margin/Column/Scroll"]
+[node name="Messages" type="VBoxContainer" parent="Split/ChatCard/Margin/Column/Scroll"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 theme_override_constants/separation = 16
 
-[node name="Empty" type="Label" parent="Split/Margin/Column/Scroll/Messages"]
+[node name="Empty" type="Label" parent="Split/ChatCard/Margin/Column/Scroll/Messages"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(0, 240)
-theme_override_font_sizes/font_size = 20
 theme_override_colors/font_color = Color(0.5137255, 0.6117647, 0.65882355, 1)
+theme_override_font_sizes/font_size = 20
 horizontal_alignment = 1
 
-[node name="Latest" type="Button" parent="Split/Margin/Column"]
+[node name="Latest" type="Button" parent="Split/ChatCard/Margin/Column"]
 unique_name_in_owner = true
 visible = false
 text = "回到最新 ↓"
 
-[node name="Status" type="Label" parent="Split/Margin/Column"]
+[node name="Status" type="Label" parent="Split/ChatCard/Margin/Column"]
 unique_name_in_owner = true
-theme_override_font_sizes/font_size = 12
 theme_override_colors/font_color = Color(0.4862745, 0.5882353, 0.62352943, 1)
+theme_override_font_sizes/font_size = 12
 
-[node name="Tools" type="HBoxContainer" parent="Split/Margin/Column"]
+[node name="Tools" type="HBoxContainer" parent="Split/ChatCard/Margin/Column"]
 theme_override_constants/separation = 8
 
-[node name="PickImage" type="Button" parent="Split/Margin/Column/Tools"]
+[node name="PickImage" type="Button" parent="Split/ChatCard/Margin/Column/Tools"]
 unique_name_in_owner = true
 text = "＋ 图片"
 
-[node name="TogglePlay" type="Button" parent="Split/Margin/Column/Tools"]
+[node name="TogglePlay" type="Button" parent="Split/ChatCard/Margin/Column/Tools"]
 unique_name_in_owner = true
 text = "▷ 模拟口型 / 停止"
 
-[node name="Input" type="TextEdit" parent="Split/Margin/Column"]
+[node name="Input" type="TextEdit" parent="Split/ChatCard/Margin/Column"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 92)
 placeholder_text = "想说些什么？"
 wrap_mode = 1
 script = ExtResource("4_composer")
-
 input_service = ExtResource("isolation_input_service")
 
-[node name="Footer" type="HBoxContainer" parent="Split/Margin/Column"]
+[node name="Footer" type="HBoxContainer" parent="Split/ChatCard/Margin/Column"]
+theme_override_constants/separation = 8
 
-[node name="Hint" type="Label" parent="Split/Margin/Column/Footer"]
+[node name="Hint" type="Label" parent="Split/ChatCard/Margin/Column/Footer"]
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
 theme_override_colors/font_color = Color(0.5803922, 0.64705884, 0.6862745, 1)
+theme_override_font_sizes/font_size = 11
 text = "Enter 发送 · Shift + Enter 换行"
 
-[node name="Send" type="Button" parent="Split/Margin/Column/Footer"]
+[node name="Send" type="Button" parent="Split/ChatCard/Margin/Column/Footer"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(96, 0)
-theme_override_styles/normal = SubResource("SendStyle")
+custom_minimum_size = Vector2(96, 40)
+theme_type_variation = &"PrimaryButton"
 text = "发送  ↑"
 
 [node name="ImagePicker" type="FileDialog" parent="."]

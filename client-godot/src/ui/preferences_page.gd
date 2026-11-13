@@ -5,6 +5,7 @@ var _controller: Node
 var _fields: Dictionary = {}
 var _selector_values: Dictionary = {}
 @onready var _toast = %Toast
+@onready var _load_banner = %LoadErrorBanner
 var _initialized := false
 var _refreshing := false
 var _presets: Array[Button] = []
@@ -28,11 +29,13 @@ func set_ui_style(ui_style: RefCounted) -> void:
 func _apply_ui_style() -> void:
 	if _ui_style != null:
 		_toast.set_ui_style(_ui_style)
+		_load_banner.set_ui_style(_ui_style)
 
 func _initialize() -> void:
 	if _initialized: return
 	_initialized = true
 	add_child(_controller)
+	_load_banner.action_pressed.connect(_controller.reload)
 	var selectors := {"relationship":%RelationshipPresets,"speaking_style":%SpeakingStylePresets}
 	var blocks := {"personality_text":%PersonalityField,"custom_context":%CustomContextField}
 	for pair in [["relationship","关系"],["speaking_style","表达风格"],["personality_text","性格关键词"],["custom_context","补充上下文"]]:
@@ -95,8 +98,10 @@ func _update_notice(state: Dictionary) -> void:
 	_toast.clear()
 	if state.phase == "error":
 		push_warning("Preferences failed to load")
+		_load_banner.set_status("相处偏好加载失败，可点击重试或重新打开设置。", "error", "重试加载")
 		_toast.show_kind("相处偏好加载失败，请重新打开设置重试。", "error", 3.5)
 		return
+	_load_banner.clear_status()
 	if state.phase == "ready" and state.code != "OK":
 		if state.code != _last_error_code:
 			_last_error_code = state.code

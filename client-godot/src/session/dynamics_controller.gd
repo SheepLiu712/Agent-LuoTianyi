@@ -350,7 +350,6 @@ func _write(id: String,content: String,parent: String) -> Dictionary:
 		result = _failure("INVALID_RESPONSE")
 	if result.ok:
 		_accept_written_item(id, result.data.item)
-	_state.code = result.code
 	_notify()
 	return {"ok":result.ok,"code":result.code,"item_id":result.data.item.id if result.ok else ""}
 func _page(data: Dictionary,cursor: String,comments: bool,id: String = "") -> Dictionary:

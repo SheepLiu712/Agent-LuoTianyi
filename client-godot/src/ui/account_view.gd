@@ -2,8 +2,10 @@ extends PanelContainer
 signal log_requested
 signal feedback_requested
 const Session = preload("res://src/session/account_session.gd")
-const HistoryRow = preload("res://scenes/ui/login_account_row.tscn")
+const HistoryRow = preload("res://scenes/ui/components/login_account_row.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const ModalStack = preload("res://src/ui/modal_stack.gd")
+const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
 const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
 @export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _password_drafts := {"password":"", "confirm":""}
@@ -87,8 +89,8 @@ func select_mode(mode: String) -> void:
 	if _busy or mode not in ["login","register","reset"]: return
 	_mode = mode
 	_clear_secrets()
-	_status.text = ""
 	%FeedbackAddress.hide()
+	_set_status("")
 	_manual_password = false
 	_apply_mode()
 
@@ -116,6 +118,7 @@ func _apply_mode() -> void:
 	%Footer.get_parent().visible = login and not signed_in
 	_form.visible = not signed_in
 	_submit.text = {"login":"登录","register":"注册","reset":"重置账号"}[_mode]
+	_sync_status_area()
 	_update_focus_chain()
 	_queue_ime_sync()
 
@@ -242,6 +245,7 @@ func _send() -> void:
 	if not _validate_passwords(operation):
 		return
 	%FeedbackAddress.hide()
+	_sync_status_area()
 	var response: Dictionary
 	if operation == "login" and %SavedLogin.visible:
 		response = await _session.login_saved(_fields.username.text)
@@ -263,7 +267,7 @@ func _update_state(state: Dictionary) -> void:
 		if _is_error_code(state.code):
 			_show_error(state.code)
 		else:
-			_status.text = _error_text(state.code)
+			_set_status(_error_text(state.code))
 		if state.storage_error:
 			push_warning("Account storage failed during %s" % state.phase)
 	_apply_mode()
@@ -318,8 +322,9 @@ func _open_server() -> void:
 	if _busy: return
 	%Server.text = _session.get_login_defaults().server
 	%ServerStatus.text = "验证连接成功后才使用新地址。"
-	var available := Vector2i(get_window().get_visible_rect().size)-Vector2i(24,24)
-	%ServerDialog.popup_centered(Vector2i(mini(416,available.x),mini(280,available.y)))
+	%ServerDialog.exclusive = false
+	ModalWindowLayout.present(%ServerDialog, %ServerDialog/Panel, null, 220, Vector2i(416, 260))
+	ModalStack.activate(%ServerDialog)
 	%Server.grab_focus()
 
 func _save_server() -> void:
@@ -338,9 +343,9 @@ func _cancel_server() -> void:
 
 func report_feedback_result(error: Error) -> void:
 	if error == OK: return
-	_status.text = ""
-	ErrorDialog.present(self, "浏览器没有打开，请手动复制下面的地址。")
 	%FeedbackAddress.show()
+	_set_status("")
+	ErrorDialog.present(self, "浏览器没有打开，请手动复制下面的地址。")
 
 func _layout_form() -> void:
 	%FormMargin.theme_type_variation = &"LoginCompactMargin" if size.x < 440 else &"LoginFormMargin"
@@ -355,12 +360,12 @@ func _password_changed(field: String, value: String) -> void:
 		_password_drafts[field] = value
 		_password_carets[field] = _fields[field].caret_column
 		if _status.text == PASSWORD_HINT:
-			_status.text = ""
+			_set_status("")
 	else:
 		_fields[field].text = _password_drafts[field]
 		_fields[field].caret_column = _password_carets[field]
 		# 直接回退输入会让用户以为按键失效；在页面上说明只接受英文符号。
-		_status.text = PASSWORD_HINT
+		_set_status(PASSWORD_HINT)
 
 static func _ascii_password(value: String) -> bool:
 	for index in value.length():
@@ -380,18 +385,26 @@ static func _error_text(code: String, status: int = 0) -> String:
 func _is_error_code(code: String) -> bool:
 	return code in ["AUTH_REJECTED","INVALID_INPUT","INSECURE_SERVER","TIMEOUT","NETWORK_ERROR","PUBLIC_KEY_ERROR","ENCRYPTION_ERROR","INVALID_RESPONSE","CREDENTIAL_UNAVAILABLE","HTTP_ERROR","NO_SAVED_LOGIN","BUSY"]
 
+func _set_status(text: String) -> void:
+	_status.text = text
+	_sync_status_area()
+
+func _sync_status_area() -> void:
+	_status.visible = not _status.text.is_empty()
+	%StatusArea.visible = _status.visible or %Cancel.visible or %FeedbackAddress.visible
+
 func _show_error(code: String, status: int = 0) -> void:
-	_status.text = _error_text(code, status)
+	_set_status(_error_text(code, status))
 	ErrorDialog.present(self, _error_text(code, status))
 
 func _validate_passwords(operation: String) -> bool:
 	for name in (["password"] if operation == "login" else ["password","confirm"]):
 		if not _ascii_password(_fields[name].text):
-			_status.text = ""
+			_set_status("")
 			ErrorDialog.present(self, PASSWORD_HINT)
 			return false
 	if operation != "login" and _fields.password.text != _fields.confirm.text:
-		_status.text = "两次输入的密码不一致。"
+		_set_status("两次输入的密码不一致。")
 		ErrorDialog.present(self, "两次输入的密码不一致。")
 		return false
 	return true
@@ -401,9 +414,9 @@ func _present_response(operation: String, response: Dictionary) -> void:
 		_clear_secrets()
 		if operation != "login":
 			select_mode("login")
-			_status.text = "注册成功，请登录。" if operation == "register" else "账号重置成功，请使用新账号登录。"
+			_set_status("注册成功，请登录。" if operation == "register" else "账号重置成功，请使用新账号登录。")
 	elif not response.storage_error:
 		if _is_error_code(response.code):
 			_show_error(response.code, response.get("status",0))
 		else:
-			_status.text = _error_text(response.code)
+			_set_status(_error_text(response.code))

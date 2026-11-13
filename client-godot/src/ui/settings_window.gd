@@ -2,7 +2,6 @@ extends Window
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const StorageService = preload("res://src/storage/storage_service.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
-const SettingsStyle = preload("res://src/ui/settings_style.gd")
 ## 保存中要一直看得见，成功短留、失败留久一点；负数代表常驻。
 const NOTICE_SECONDS := {"saving": -1.0, "success": 2.0, "error": 8.0}
 const DEFAULT_NOTICE_SECONDS := 2.0
@@ -53,9 +52,13 @@ func set_audio_migration(migration: Object) -> void:
 func set_ui_style(ui_style: RefCounted) -> void:
 	_ui_style = ui_style
 	if is_node_ready() and _ui_style != null:
-		%StylePage.set_ui_style(_ui_style)
-		%SaveToast.set_ui_style(_ui_style)
-		%PreferencesPage.set_ui_style(_ui_style)
+		_forward_ui_style()
+
+
+func _forward_ui_style() -> void:
+	for node in [%StylePage, %SaveToast, %PreferencesPage, %ModelPage, %AudioPage, %ProfilePage]:
+		if node != null and node.has_method("set_ui_style"):
+			node.set_ui_style(_ui_style)
 
 func setup(
 	preferences: Node,
@@ -79,9 +82,7 @@ func _ready() -> void:
 	_preferences_page.setup(_preferences)
 	_model_page.setup(_models,_executor)
 	if _ui_style != null:
-		%StylePage.set_ui_style(_ui_style)
-		%SaveToast.set_ui_style(_ui_style)
-		%PreferencesPage.set_ui_style(_ui_style)
+		_forward_ui_style()
 	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory, _media_migration, _app_data_directory)
 	%AudioTab.disabled = not _clear_cache.is_valid()
 	%AudioTab.pressed.connect(func(): select_page("audio"))
@@ -104,7 +105,6 @@ func _ready() -> void:
 			save_changes())
 	_content_scroll.get_v_scroll_bar().value_changed.connect(_on_settings_scroll)
 	select_page("profile")
-	SettingsStyle.apply(self)
 
 func select_page(page: String) -> void:
 	var pages: Dictionary = {"profile":_profile_page,"preferences":_preferences_page,"models":_model_page,"audio":%AudioPage,"style":%StylePage}

@@ -7,15 +7,15 @@ func check(ok: bool,label: String) -> void:
 func _initialize() -> void:
 	run.call_deferred()
 func run() -> void:
-	check(ResourceLoader.exists("res://scenes/ui/image_window.tscn"),"independent image scene exists")
+	check(ResourceLoader.exists("res://scenes/ui/windows/image_window.tscn"),"independent image scene exists")
 	if not failures.is_empty():
 		quit(1)
 		return
 	var path := "user://image-window-test-%s.cfg" % Time.get_ticks_usec()
 	var presenter = load("res://src/ui/image_presenter.gd").new(load("res://src/storage/window_geometry.gd").new(path),load("res://src/platform/godot_window_system.gd").new())
 	root.add_child(presenter)
-	var first = load("res://scenes/ui/dynamics_window.tscn").instantiate()
-	var second = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	var first = load("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
+	var second = load("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
 	root.add_child(first)
 	root.add_child(second)
 	first.open()

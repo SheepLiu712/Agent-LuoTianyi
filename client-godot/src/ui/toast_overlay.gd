@@ -1,12 +1,14 @@
 extends Control
-## 浮层提示：画面正中的一条横向矩形，出现时淡入、到点后淡出，鼠标事件一律穿透。
+## 浮层提示：可见区域顶部安全区的一条横向矩形，出现时淡入、到点后淡出，鼠标事件一律穿透。
 ## seconds 传负数表示常驻，直到被下一条替换或显式 clear()。
 
+const SCENE_PATH := "res://scenes/ui/components/toast_overlay.tscn"
 const DEFAULT_SECONDS := 2.0
 const FADE_IN := 0.15
 const FADE_OUT := 0.25
 ## 自动折行要先拿到宽度才能算高度，所以排版走两轮。
 const LAYOUT_PASSES := 2
+const TOP_MARGIN := 16.0
 
 @onready var _panel: PanelContainer = %Panel
 @onready var _text: Label = %Text
@@ -16,7 +18,44 @@ var _kind := "info"
 var _ui_style: RefCounted
 
 
+static func present_in(
+	source: Node,
+	text: String,
+	kind: String = "info",
+	seconds: float = DEFAULT_SECONDS,
+	ui_style: RefCounted = null
+) -> Control:
+	if source == null or text.strip_edges().is_empty() or not source.is_inside_tree():
+		return null
+	var host := _resolve_toast_host(source)
+	if host == null:
+		return null
+	var toast := _find_host_toast(host)
+	if toast == null:
+		toast = (load(SCENE_PATH) as PackedScene).instantiate()
+		host.add_child(toast)
+	if ui_style != null and toast.has_method("set_ui_style"):
+		toast.set_ui_style(ui_style)
+	toast.show_kind(text, kind, seconds)
+	return toast
+
+
+static func _resolve_toast_host(source: Node) -> Node:
+	if source is Window or (source is Control and not source is Container):
+		return source
+	return source.get_window()
+
+
+static func _find_host_toast(host: Node) -> Control:
+	for child in host.get_children():
+		if child.is_in_group("toast_overlay") and child.has_method("show_kind"):
+			return child
+	return null
+
+
 func _ready() -> void:
+	add_to_group("toast_overlay")
+	set_notify_transform(true)
 	hide()
 	_watch_parent()
 	_layout()
@@ -50,14 +89,39 @@ func _stage_size() -> Vector2:
 	return size
 
 
-## 铺满舞台，再把气泡摆到正中；位置算出来而不是交给容器，舞台是 0 的时候也不会贴角。
+func _visible_stage_rect() -> Rect2:
+	var parent := get_parent()
+	if parent is Container and is_inside_tree():
+		var scroll := _enclosing_scroll()
+		if scroll != null and scroll.size.x > 0.0 and scroll.size.y > 0.0:
+			var offset := scroll.get_global_position() - get_global_position()
+			return Rect2(offset, scroll.size)
+	return Rect2(Vector2.ZERO, _stage_size())
+
+
+func _enclosing_scroll() -> ScrollContainer:
+	var current := get_parent()
+	while current != null:
+		if current is ScrollContainer:
+			return current
+		if current is Window:
+			break
+		current = current.get_parent()
+	return null
+
+
+## 铺满舞台，再把气泡摆在可见区顶部居中；不压正中表单内容，容器内也能落在可视窗口顶端。
 func _layout() -> void:
 	if not is_node_ready():
 		return
 	_fill_stage()
 	for _pass in LAYOUT_PASSES:
 		_panel.size = _panel.get_combined_minimum_size()
-	_panel.position = ((_stage_size() - _panel.size) * 0.5).round()
+	var area := _visible_stage_rect()
+	var x := area.position.x + (area.size.x - _panel.size.x) * 0.5
+	var max_offset_y := maxf(0.0, area.size.y - _panel.size.y)
+	var y := area.position.y + minf(TOP_MARGIN, max_offset_y)
+	_panel.position = Vector2(x, y).round()
 
 
 ## 父级是普通 Control 或窗口时气泡自己铺满；父级是容器时尺寸交给容器。
@@ -67,18 +131,23 @@ func _fill_stage() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
-## 窗口缩放、页面换尺寸都要重排，否则居中会跟着父级一起漂。
+## 窗口缩放、页面换尺寸与滚动容器滚屏都要同步顶部安全区。
 func _watch_parent() -> void:
 	var parent := get_parent()
 	if parent is Control:
 		parent.resized.connect(_layout)
 	elif parent is Window:
 		parent.size_changed.connect(_layout)
+	var scroll := _enclosing_scroll()
+	if scroll != null:
+		scroll.resized.connect(_layout)
+		scroll.sort_children.connect(_layout)
+		scroll.get_v_scroll_bar().value_changed.connect(func(_value): _layout.call_deferred())
 
 
-## 父级从隐藏变显示时子节点也会收到这条通知，趁机把还没有尺寸的舞台补上。
+## 父级从隐藏变显示或滚动位移更新时，同步补全顶部安全区定位。
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_VISIBILITY_CHANGED and is_visible_in_tree():
+	if what == NOTIFICATION_TRANSFORM_CHANGED or (what == NOTIFICATION_VISIBILITY_CHANGED and is_visible_in_tree()):
 		_layout()
 
 
@@ -126,21 +195,25 @@ func _apply_kind_style(kind: String) -> void:
 	if _ui_style != null:
 		_ui_style.apply_toast_style(style, kind)
 	else:
-		match kind:
-			"success":
-				style.border_color = Color(0.18, 0.64, 0.40, 0.9)
-				style.bg_color = Color(0.94, 1.0, 0.96, 1)
-			"error":
-				style.border_color = Color(0.78, 0.24, 0.24, 0.9)
-				style.bg_color = Color(1.0, 0.95, 0.95, 1)
-			"progress":
-				style.border_color = Color(0.20, 0.52, 0.86, 0.9)
-				style.bg_color = Color(0.95, 0.98, 1.0, 1)
-			_:
-				style.border_color = Color(0.18, 0.48, 0.80, 0.9)
-				style.bg_color = Color(1, 1, 1, 1)
-		style.set_border_width_all(1)
+		_apply_fallback_toast_style(style, kind)
 	_panel.add_theme_stylebox_override("panel", style)
+
+
+func _apply_fallback_toast_style(style: StyleBoxFlat, kind: String) -> void:
+	match kind:
+		"success":
+			style.border_color = Color(0.18, 0.64, 0.40, 0.9)
+			style.bg_color = Color(0.94, 1.0, 0.96, 1)
+		"error":
+			style.border_color = Color(0.78, 0.24, 0.24, 0.9)
+			style.bg_color = Color(1.0, 0.95, 0.95, 1)
+		"progress":
+			style.border_color = Color(0.20, 0.52, 0.86, 0.9)
+			style.bg_color = Color(0.95, 0.98, 1.0, 1)
+		_:
+			style.border_color = Color(0.18, 0.48, 0.80, 0.9)
+			style.bg_color = Color(1, 1, 1, 1)
+	style.set_border_width_all(1)
 
 
 ## 文案在淡出后仍可读，测试与诊断不必和动画赛跑。

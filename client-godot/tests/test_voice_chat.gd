@@ -1,7 +1,7 @@
 extends SceneTree
 const Transport = preload("res://src/network/websocket_transport.gd")
 const Session = preload("res://src/session/chat_session.gd")
-const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
+const VIEW_SCENE := "res://scenes/ui/chat/chat_view.tscn"
 const Audio = preload("res://tests/support/native_reply_audio.gd")
 const Cache = preload("res://src/storage/audio_cache.gd")
 const Log = preload("res://src/storage/client_log.gd")
@@ -165,7 +165,7 @@ func _wait_frames(count: int) -> void:
 		await process_frame
 
 func _check_clear_cache_settings(session: Variant, view: Variant, cache: Variant) -> void:
-	var settings = load("res://scenes/ui/settings_window.tscn").instantiate()
+	var settings = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
 	settings.setup(null, null, null, session.clear_cache)
 	root.add_child(settings)
 	settings.open()

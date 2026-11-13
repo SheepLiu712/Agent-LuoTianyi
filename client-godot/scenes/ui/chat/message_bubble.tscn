@@ -1,0 +1,129 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/message_bubble.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+[ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
+[ext_resource type="Script" path="res://src/ui/image_thumb_button.gd" id="5_image_entry"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[node name="MessageBubble" type="VBoxContainer"]
+size_flags_horizontal = 3
+theme = ExtResource("2_theme")
+theme_override_constants/separation = 8
+script = ExtResource("1_script")
+
+[node name="TimeMarker" type="CenterContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+
+[node name="TimePanel" type="PanelContainer" parent="TimeMarker"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"MessageTimeChip"
+
+[node name="TimeText" type="Label" parent="TimeMarker/TimePanel"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.365, 0.443, 0.482, 1)
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+
+[node name="Row" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="System" type="Label" parent="Row"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.50980395, 0.6000000, 0.6509804, 1)
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+
+[node name="Avatar" type="TextureRect" parent="Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+size_flags_vertical = 0
+material = SubResource("ShaderMaterial_avatar")
+texture = ExtResource("4_avatar")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Body" type="Control" parent="Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="MessageColumn" type="VBoxContainer" parent="Row/Body"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_right = 1.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="Bubble" type="PanelContainer" parent="Row/Body/MessageColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"MessageBubbleOther"
+
+[node name="Content" type="VBoxContainer" parent="Row/Body/MessageColumn/Bubble"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Text" type="RichTextLabel" parent="Row/Body/MessageColumn/Bubble/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/normal_font_size = 16
+fit_content = true
+scroll_active = false
+autowrap_mode = 3
+selection_enabled = true
+
+[node name="HistoryPicture" type="TextureRect" parent="Row/Body/MessageColumn/Bubble/Content"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+mouse_default_cursor_shape = 2
+expand_mode = 1
+stretch_mode = 5
+script = ExtResource("5_image_entry")
+
+[node name="ImageButton" type="Button" parent="Row/Body/MessageColumn/Bubble/Content"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "加载图片…"
+
+[node name="Picture" type="TextureRect" parent="Row/Body/MessageColumn/Bubble/Content"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+mouse_default_cursor_shape = 2
+expand_mode = 1
+stretch_mode = 5
+script = ExtResource("5_image_entry")
+
+[node name="Caption" type="Label" parent="Row/Body/MessageColumn"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 2
+autowrap_mode = 3

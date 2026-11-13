@@ -49,6 +49,7 @@ func prewarm(kind: String) -> void:
 	if _disposed or kind != "settings": return
 	if is_instance_valid(_windows.get(kind)): return
 	_ensure_window(kind)
+	_start_window(kind)
 
 func _ensure_window(kind: String) -> Window:
 	var existing = _windows.get(kind)

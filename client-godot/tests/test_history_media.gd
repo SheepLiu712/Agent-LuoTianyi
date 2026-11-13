@@ -1,5 +1,5 @@
 extends SceneTree
-const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
+const VIEW_SCENE := "res://scenes/ui/chat/chat_view.tscn"
 var failures: Array[String] = []
 func check(value: bool,text: String) -> void:
 	if not value:
