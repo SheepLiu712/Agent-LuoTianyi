@@ -132,7 +132,7 @@ bash scripts/deploy/startup/start_linux.sh --check-startup
 bash scripts/deploy/startup/start_linux.sh
 ```
 
-运行前准备开发配置、密钥和资源。路径默认是源码目录下的 `config/`、`res/`、`data/`、`.runtime/`，分别对应配置文件、资源文件、数据文件和运行时文件（日志等）。`--check-startup` 仅检查配置解析及监听设置，不启动 HTTP、数据库或模型，也不替代资源检查和实际推理。路径解析、资源校验命令及迁移方式见 [资源布局说明](scripts/deploy/RESOURCE_LAYOUT.md)。
+运行前准备开发配置、密钥和资源。路径默认是源码目录下的 `config/`、`res/`、`data/`、`.runtime/`，分别对应配置文件、资源文件、数据文件和运行时文件（日志等）。`--check-startup` 仅检查配置解析及监听设置，不启动 HTTP、数据库或模型，也不替代资源检查和实际推理。路径解析、资源校验命令及迁移方式见 [部署工具说明](scripts/deploy/README.md#独立实例路径)。
 
 如果需要指定配置、资产、数据的外部路径，需要提供一个`instance.env`文件，其中设置
 ```

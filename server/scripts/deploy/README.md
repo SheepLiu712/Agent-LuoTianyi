@@ -7,7 +7,6 @@
 | `release/` | 首次部署及版本管理，`bootstrap.py` 提供 目录初始化、首次安装功能，资产迁移和校验功能`assets` 注册为服务`systemd`共嗯。构建与检查版本，包含 build / plan / apply / status 实现、资源校验清单、数据库与资源目录迁移工具。 |
 | `init_instance.sh`、`install_instance.sh` | 初始化空实例、首次安装；参数由脚本传给共用 Python 实现。 |
 | `deploy.py` | 版本构建、更新、状态查询及资产/systemd 管理。 |
-| `RESOURCE_LAYOUT.md` | 实例目录、资产、配置和数据库迁移约定。 |
 
 ## 首次部署
 
@@ -69,7 +68,7 @@ python3 scripts/deploy/deploy.py --config "$INSTALL_DIR/deployments/deploy.toml"
 
 安装器、启动器内部均以自身位置定位服务端根目录。Linux 依赖项目位于 `environment/`，
 其本地服务端依赖相对路径为 `../../..`；修改目录时须同时调整 `pyproject.toml` 与 `uv.lock`。
-数据库迁移须在停止全部写入者后进行，具体命令见 [资源布局约定](RESOURCE_LAYOUT.md)。
+数据库迁移须在停止全部写入者后进行，具体命令见 [数据库版本与迁移](#数据库版本与迁移)。
 
 
 ## 外部路径与链接部署
@@ -116,7 +115,7 @@ ln -s /srv/agentluo-test/assets/production-baseline-20261110 "$HOME/agentluo-sha
 export AGENTLUO_ASSET_DIR="$HOME/agentluo-shared-models"
 ```
 
-运行时会解析目录链接，无需把模型复制进代码仓库。`AGENTLUO_RESOURCE_DIR` 表示人设、Prompt、管理页面等随代码发布的小资源，通常保留为自己的代码版本的 `res/`；它与大型模型的 `AGENTLUO_ASSET_DIR` 是不同的设置。完整映射见[独立实例路径](RESOURCE_LAYOUT.md#独立实例路径)。
+运行时会解析目录链接，无需把模型复制进代码仓库。`AGENTLUO_RESOURCE_DIR` 表示人设、Prompt、管理页面等随代码发布的小资源，通常保留为自己的代码版本的 `res/`；它与大型模型的 `AGENTLUO_ASSET_DIR` 是不同的设置。完整映射见[独立实例路径](#独立实例路径)。
 
 ### systemd 运行：保存自定义 instance.env
 
@@ -205,3 +204,56 @@ Chromium 也安装在该环境的 browsers/ 中，不改写旧环境的浏览器
 `status` 不修改实例：分别返回 current 指向的发布、PID 实际运行发布、发布文件校验、服务状态、
 HTTP/运行时健康、最近成功记录和最近操作。查询完成的退出码 0 不代表服务健康，自动化应读取 `healthy`。
 无法访问 systemd 或接口时报告 unknown / 不健康，不将历史部署成功视为当前正常运行。
+
+## 独立实例路径
+
+启动前可设置 `AGENTLUO_CONFIG_DIR`、`AGENTLUO_RESOURCE_DIR`、`AGENTLUO_ASSET_DIR`、`AGENTLUO_DATA_DIR`、`AGENTLUO_RUNTIME_DIR`。默认分别为源码根目录的 `config`、`res`、`res`、`data`、`.runtime`；相对环境变量值以源码根目录为基准，不以调用终端目录为基准。
+
+`res/tts` 和 `res/song_learner` 解析到资产目录，其余 `res` 路径解析到发布资源目录。实例配置中的相对路径保留原文，仅在加载时解析为绝对路径；显式绝对路径不改写。路径字段不能通过 `data/../` 等方式逃离所属根目录。自定义绝对路径需要操作者自行保证隔离。
+
+Python 入口在 `.runtime` 中运行，以容纳第三方临时文件；管理页面和模型仍通过明确的路径读取。日志写入 `.runtime/logs`，学歌子进程写入 `.runtime/song_learner`。密钥、管理员认证和配置备份留在所选配置目录。并行运行的实例必须使用独立的配置、数据、运行目录；模型资源可在满足读取和第三方库校验条件时共享。开发代码接替已停止的测试服务运行时，可显式复用其配置、数据和运行锁目录；操作示例和自动部署边界见[外部路径与链接部署](#外部路径与链接部署)。
+
+## 版本化资源
+
+`release/resources.lock.json` 列出运行所需的小资源（Prompt、当前人设、预制语音、管理页面和源码内算法数据），记录路径、大小与 SHA-256。新增或修改这些资源时，必须同时审查并更新清单。预制语音来自现有生产使用的清单及音频，不包含账号数据。
+
+学歌分段 Prompt 位于 `res/agent/prompts/song_segmentation_prompt.json`，可通过 `world.auto_song_learner.prompt_file` 指定；自动流水线显式将该文件传给子进程。这份 Prompt 随代码资源发布。
+
+`release/assets.lock.json` 记录现有模型资产基线 `production-baseline-20261110`，包含模型、词典、模型配套配置与参考音频，不包含压缩安装包、QQ 凭据、歌曲库或用户数据。这个文件不会下载资产，也不把模型提交进 Git。发布包可引用该资产版本。
+
+```bash
+python scripts/deploy/release/check_resources.py
+python scripts/deploy/release/check_resources.py --assets-root /path/to/assets
+```
+
+缺文件、大小或哈希不符时检查失败。第三方模型库可能另有首次初始化缓存行为，本次校验不等于已完成所有 GPU 工作负载的只读挂载验证。资产应先离线准备完整，再进行实际推理验收。
+
+## 启动与预检约定
+
+启动入口先加载所选配置目录中的 `secrets.local.env`，再解析配置。源码环境默认使用 `.venv/bin/python`，可通过 `AGENTLUO_PYTHON` 指定其他解释器；版本化部署由实例环境文件指定解释器。启动器的环境文件加载规则见[外部路径与链接部署](#外部路径与链接部署)。
+
+安装器与启动器使用同一运行目录的 `server.lock`；更新 Python 环境前停止使用该环境的服务。`--check-startup` 只检查配置解析、监听模式和端口，不启动 HTTP、数据库或模型，不替代资源校验和实际推理验收。
+
+部署计划还核对发布文件与资产的大小和 SHA-256、Python 与锁定依赖、PyTorch、依赖一致性及 `environment.json`。缺少环境时准备新环境，不移动旧虚拟环境。缺少模型来源或文件损坏时阻断；预检退出码 2 表示参数/输出错误，3 表示阻断。发布配置的凭据字段须使用 `$ENV_NAME` 引用；内联凭据或更新后数据库路径变化须先处理。停服前还会复核备份容量、服务权限、计划有效性和实例锁。
+
+## 数据库版本与迁移
+
+主库与歌曲知识库分别使用 SQLite `PRAGMA user_version`，当前目标均为 1，0 表示历史未标记库。
+`src/utils/database_schema.json` 保存版本 1 所需的表、列与类型；启动和 plan 都检查版本，
+版本匹配时还核验这些结构并执行 SQLite quick_check。数据库结构变更时必须维护契约并提供对应迁移。
+
+新库初始化成功后标记版本 1；历史库沿用已有迁移逻辑，迁移前通过 SQLite backup API 留下一致性备份，
+验证结构后才标记版本。备份权限为 0600，保留在原数据库旁的 `.schema-0-backup-*` 文件，不自动清理。
+未知或更高版本、版本 1 但结构损坏的库会在初始化写入前拒绝，不通过重建或清空数据库解决。
+
+plan 从发布声明和实例实际版本生成迁移清单，不执行迁移；数据库缺失也会阻断，避免误用空库。
+当前提供 0→1 的离线迁移入口，必须停止所有写入进程后使用对应发布环境执行：
+
+```bash
+python scripts/deploy/release/migrate_database.py --kind main --database /absolute/data/database/luotianyi.db
+python scripts/deploy/release/migrate_database.py --kind songs --database /absolute/data/knowledge/knowledge_db.db
+```
+
+plan 固定列出 schema、systemd、健康接口、运行时与管理页面验收。
+当前不提供自动版本回退；迁移失败保留备份、保持停服，修补后前进。恢复备份必须先确认没有需要保留的新写入。
+apply 按计划协调停服、备份与迁移；status 只读查询实际状态，执行要求见 [apply 与 status](#apply-与-status)。

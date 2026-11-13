@@ -38,7 +38,6 @@ FIXED_FILES = {
     DEPLOY + "init_instance.sh",
     DEPLOY + "install_instance.sh",
     DEPLOY + "README.md",
-    DEPLOY + "RESOURCE_LAYOUT.md",
     DEPLOY + "release/cli.py",
     DEPLOY + "release/bootstrap.py",
     DEPLOY + "release/plan.py",
