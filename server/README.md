@@ -132,7 +132,33 @@ bash scripts/deploy/startup/start_linux.sh --check-startup
 bash scripts/deploy/startup/start_linux.sh
 ```
 
-运行前准备开发配置、密钥和资源。路径默认是源码目录下的 `config/`、`res/`、`data/`、`.runtime/`；通过 `AGENTLUO_CONFIG_DIR`、`AGENTLUO_RESOURCE_DIR`、`AGENTLUO_ASSET_DIR`、`AGENTLUO_DATA_DIR`、`AGENTLUO_RUNTIME_DIR` 可指定独立位置。`--check-startup` 仅检查配置解析及监听设置，不启动 HTTP、数据库或模型，也不替代资源检查和实际推理。路径解析、资源校验命令及迁移方式见 [资源布局说明](scripts/deploy/RESOURCE_LAYOUT.md)。
+运行前准备开发配置、密钥和资源。路径默认是源码目录下的 `config/`、`res/`、`data/`、`.runtime/`，分别对应配置文件、资源文件、数据文件和运行时文件（日志等）。`--check-startup` 仅检查配置解析及监听设置，不启动 HTTP、数据库或模型，也不替代资源检查和实际推理。路径解析、资源校验命令及迁移方式见 [资源布局说明](scripts/deploy/RESOURCE_LAYOUT.md)。
+
+如果需要指定配置、资产、数据的外部路径，需要提供一个`instance.env`文件，其中设置
+```
+AGENTLUO_CONFIG_DIR="/path/to/your/config"
+AGENTLUO_DATA_DIR="/path/to/your/data"
+AGENTLUO_RUNTIME_DIR="/path/to/your/runtime"
+AGENTLUO_ASSET_DIR="/path/to/your/assets"
+AGENTLUO_RESOURCE_DIR="/path/to/your/resources"
+AGENTLUO_PYTHON="path/to/your/python"
+```
+对于源码运行，`assets`和`resources`目录默认是同一个目录，即源码目录下的`res`。这两类资源的区别是：前者时可跨代码版本复用的，后者是当前版本特有的。
+
+然后使用
+```bash
+AGENTLUO_INSTANCE_ENV="path/to/your/instance.env"
+bash scripts/deploy/startup/start_linux.sh --check-startup
+bash scripts/deploy/startup/start_linux.sh
+```
+
+来执行。
+> `instance.env` 还会可以额外提供以下字段：`PLAYWRIGHT_BROWSERS_PATH`指定无头浏览器的安装路径，`PYTHONDONTWRITEBYTECODE="1"`表示禁止在导入模块的时候写入`.pyc`文件，`SERVER_HOST`指定服务监听的主机地址。示例：
+> ```
+> PLAYWRIGHT_BROWSERS_PATH="/path/to/your/browsers"
+> PYTHONDONTWRITEBYTECODE="1"
+> SERVER_HOST="127.0.0.1"
+> ```
 
 ### Windows 源码环境
 
@@ -172,43 +198,6 @@ Windows 和 Linux 启动脚本都会保留已有的代理例外，并将本机�
 
 开发和测试工具可在已激活且包含 pip 的开发环境中使用 `python -m pip install -e ".[dev]"` 安装；uv 环境使用 `uv pip install -e ".[dev]"`。VCPedia 采集规则随 Python 包分发；可选片段合并和模型辅助提取由 `crawler.merge_rendered_fragments` 和 `crawler.use_llm` 控制。启用模型辅助处理时，分别为摘要配置 `llm_module`、为补提配置 `extraction_llm_module`，并提供对应模型的密钥。采集测试入口见 [World 测试说明](tests/unit/world/README.md)。
 
-## 测试管理与运行
-
-`server/tests` 按验证边界组织，而不是逐级复制 `src` 的内部目录。测试文件只放在 `unit/`、`integration/`、`e2e/`；可跨目录复用的 fake、样例构造器与测试装配集中放在 `support/`，不放业务断言。根目录的 `conftest.py` 负责公共 fixture、标记和外部依赖开关；`support/` 模块使用 `from support.<模块> import ...` 导入。
-
-| 目录 | 用途 | 默认运行条件 |
-| --- | --- | --- |
-| `unit/<module>/` | 单一顶层模块的快速离线测试；外部系统使用 fake | 默认运行 |
-| `integration/<boundary>/` | 在同一进程连接多个真实组件，可使用临时数据库、文件系统或 TestClient | 默认运行 |
-| `e2e/chat/` | 从生产装配或真实入口验证完整离线业务链 | 默认运行 |
-| `e2e/external/` | 需要公网、凭据、模型或其他真实外部依赖的探测 | 默认跳过，显式启用 |
-| `support/` | 各层共用的 fixture、fake 与数据构造器 | 被测试导入，本身不收集为测试 |
-
-在 `server` 目录运行：
-
-```powershell
-python -m pytest tests/unit -q --tb=short
-python -m pytest tests/integration -q --tb=short
-python -m pytest tests/e2e -q --tb=short
-python -m pytest tests -q --tb=short
-```
-
-默认全套会跳过标记为 `external` 或 `real_llm` 的探测。需要真实外部依赖时运行 `python -m pytest tests/e2e/external -q --run-external --tb=short`；真实 LLM 测试另加 `--run-real-llm`。覆盖率门禁、标记和环境开关的完整说明见 [server/tests/README.md](tests/README.md)；架构边界验证位于 `tests/integration/architecture/`。
-
-### 按改动选择验证入口
-
-| 要修改的内容 | 首先查看 | 对应验证入口 |
-| --- | --- | --- |
-| 刺激、行动及报告结构 | `domain/agent`、双方 producer / consumer | [tests/unit/domain](tests/unit/domain) |
-| 回复、图片理解、记忆与技能 | `agent/handlers`、`agent/skills`、`agent/context` | [tests/unit/agent](tests/unit/agent)、[tests/integration/agent](tests/integration/agent) |
-| 等待、批次、打断、重连 | `stage`、`adapter/websocket` | [tests/integration/stage](tests/integration/stage)、[tests/integration/websocket](tests/integration/websocket) |
-| 路由、账号、管理和启停 | `web`、`application`、`server_runtime.py` | [tests/integration/system](tests/integration/system)、[tests/integration/lifecycle](tests/integration/lifecycle) |
-| 世界任务与事实投递 | `world`、`WorldStage`、相关刺激 handler | [tests/unit/world](tests/unit/world)、[tests/integration/world](tests/integration/world) |
-| 持久化和模型接入 | `infrastructure`、相关技能适配器 | [tests/unit/infrastructure](tests/unit/infrastructure)、[tests/integration/persistence](tests/integration/persistence) |
-| CLI 动作、回复聚合和机器输出 | `cli-client/cli_client` 中的动作、会话与网络层 | [cli-client/tests](../cli-client/tests) 中的离线测试；真实服务端试运行样例见 [manual_e2e](../cli-client/tests/manual_e2e) |
-
-测试命令与外部依赖开关见 [server/tests/README.md](tests/README.md)，静态职责约束见 [check_architecture_boundaries.py](scripts/check_architecture_boundaries.py)。部分测试目录仍保留 `system` 等历史名字，定位生产代码时以[代码地图](../docs/代码地图.md)和当前 imports 为准。
-
 ## 📜 许可证和版权
 
 本项目代码基于 [MIT 许可证](../LICENSE) 开源。
@@ -238,5 +227,4 @@ python -m pytest tests -q --tb=short
 - 感谢[GPT-SoVITS项目](https://github.com/RVC-Boss/GPT-SoVITS/)提供的开源语音合成技术
 - 感谢[火爆鸡王](https://space.bilibili.com/5033594)发布的Live2D模型
 - 感谢阿里云、硅基流动平台提供的API服务
-- 感谢ChatGPT，这是我大爹，我的代码基本都是它写的。
 - 感谢所有贡献者的努力和支持！
