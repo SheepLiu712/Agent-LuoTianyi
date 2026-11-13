@@ -1,5 +1,6 @@
 """Prepare a new Linux instance without exposing its internal directory layout."""
 
+import argparse
 import json
 import os
 import pwd
@@ -227,3 +228,22 @@ def execute(args):
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Linux 首次实例准备（由 shell 入口调用）")
+    commands = parser.add_subparsers(dest="command", required=True)
+    initializer = commands.add_parser("init", help="在空目录创建新实例和密钥文件")
+    initializer.add_argument("--root", required=True)
+    initializer.add_argument(
+        "--name", help="服务名后缀，例如 test 生成 agentluo-test.service；省略时为 agentluo.service"
+    )
+    initializer.add_argument("--port", type=int, default=15673)
+    installer = commands.add_parser("install", help="从 Git 提交完成新实例的首次部署")
+    installer.add_argument("--root", required=True)
+    installer.add_argument("--ref", default="HEAD")
+    return execute(parser.parse_args())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

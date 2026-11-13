@@ -4,8 +4,9 @@
 | --- | --- |
 | `environment/` | 创建和安装 Python 环境。Linux 使用 `install_linux.sh` 与 uv 锁文件；Windows 使用 `install_windows.bat` 与可选 Conda 配置。 |
 | `startup/` | 启动已有环境中的服务。包含 Linux / Windows 启动器、systemd 服务模板和实例环境变量示例。 |
-| `release/` | 首次部署及版本管理，`bootstrap.py` 提供 init / assets / install / systemd。构建与检查版本。包含 build / plan / apply / status 实现、资源校验清单、数据库与资源目录迁移工具。 |
-| `deploy.py` | 版本部署的统一 CLI 入口，保持原命令路径。 |
+| `release/` | 首次部署及版本管理，`bootstrap.py` 提供 目录初始化、首次安装及 assets / systemd。构建与检查版本。包含 build / plan / apply / status 实现、资源校验清单、数据库与资源目录迁移工具。 |
+| `init_instance.sh`、`install_instance.sh` | 初始化空实例、首次安装；参数由脚本传给共用 Python 实现。 |
+| `deploy.py` | 版本构建、更新、状态查询及资产/systemd 管理；不再提供 init、install 子命令。 |
 | `RESOURCE_LAYOUT.md` | 实例目录、资产、配置和数据库迁移约定。 |
 
 ## 首次部署
@@ -13,24 +14,24 @@
 面向新用户的完整步骤见 [服务端 README](../../README.md#linux-首次部署)。在仓库的 `server/` 目录以普通账号执行：
 
 ```bash
-python3 scripts/deploy/deploy.py init --root "$HOME/agentluo-production"
+bash scripts/deploy/init_instance.sh --root "$HOME/agentluo-production"
 # 填写输出的 secrets.local.env 中的 API 密钥，再继续。
 python3 scripts/deploy/deploy.py assets --root "$HOME/agentluo-production" --source /path/to/models
-python3 scripts/deploy/deploy.py install --root "$HOME/agentluo-production"
+bash scripts/deploy/install_instance.sh --root "$HOME/agentluo-production"
 python3 scripts/deploy/deploy.py systemd --root "$HOME/agentluo-production"
 ```
 
-`init` 仅接受新目录或空目录，自动创建独立配置、数据、运行、资产、环境与发布目录，生成 JWT 密钥和 `deployments/deploy.toml`。默认服务名 `agentluo.service`、部署配置中的实例名 `production`、端口 `15673`。`--name` 是添加在 `agentluo` 后的后缀，不是完整服务名：`--name test` 会生成 `agentluo-test.service`，对应实例名为 `test`；显式 `--name production` 则生成 `agentluo-production.service`。端口通过 `--port` 修改。目录必须由服务账号持有，不使用 sudo 执行部署 CLI。
+`init_instance.sh` 仅接受新目录或空目录，自动创建独立配置、数据、运行、资产、环境与发布目录，生成 JWT 密钥和 `deployments/deploy.toml`。默认服务名 `agentluo.service`、部署配置中的实例名 `production`、端口 `15673`。`--name` 是添加在 `agentluo` 后的后缀，不是完整服务名：`--name test` 会生成 `agentluo-test.service`，对应实例名为 `test`；显式 `--name production` 则生成 `agentluo-production.service`。端口通过 `--port` 修改。目录必须由服务账号持有，不使用 sudo 执行部署 CLI。
 
-`assets` 从指定 Git 提交的资产清单核验源文件，复制到实例后移除组和其他账号写权限，不修改源目录；符号链接和损坏文件被拒绝。`assets` 与 `install` 都默认 `--ref HEAD`，指定版本时需使用同一 ref。
+`assets` 从指定 Git 提交的资产清单核验源文件，复制到实例后移除组和其他账号写权限，不修改源目录；符号链接和损坏文件被拒绝。`assets` 与 `install_instance.sh` 都默认 `--ref HEAD`，指定版本时需使用同一 ref。
 
-`install` 为首次安装入口：构建发布包，复用发布准备、依赖安装和启动预检，再生成普通配置、`instance.env` 与 `current`。它不要求已有数据库和 systemd 单元，不启动服务，也不宣称业务健康。已有 `current`、普通配置或数据会阻断，不能用于接管旧实例或升级；环境准备失败时不会切换 `current`。依赖下载中断留下的环境目录需先检查，现有环境校验不会原地修补损坏依赖。
+`install_instance.sh` 为首次安装入口：构建发布包，复用发布准备、依赖安装和启动预检，再生成普通配置、`instance.env` 与 `current`。它不要求已有数据库和 systemd 单元，不启动服务，也不宣称业务健康。已有 `current`、普通配置或数据会阻断，不能用于接管旧实例或升级；环境准备失败时不会切换 `current`。依赖下载中断留下的环境目录需先检查，现有环境校验不会原地修补损坏依赖。
 
 `systemd` 生成并验证 managed 单元，以 sudo 安装、重载 systemd、启用并启动服务。同名但内容或位置不同的单元会被拒绝，不会覆盖其他服务。数据库由正常服务初始化路径创建；启动后通过管理页面和 `status` 确认业务运行时健康。
 
 ## 版本更新
 
-本节适用于已按独立实例方式部署并由 systemd 管理的服务。更新沿用原安装目录、用户数据和密钥，不再执行 `init`、`install` 或重新创建服务。使用外部配置/数据或自定义环境文件的实例，先阅读[外部路径与链接部署](#外部路径与链接部署)。
+本节适用于已按独立实例方式部署并由 systemd 管理的服务。更新沿用原安装目录、用户数据和密钥，不再执行 `init_instance.sh`、`install_instance.sh` 或重新创建服务。使用外部配置/数据或自定义环境文件的实例，先阅读[外部路径与链接部署](#外部路径与链接部署)。
 
 **1. 获取目标代码并构建。** 在仓库中获取要发布的提交或标签，从 `server/` 执行。下例更新到本地 `HEAD`；也可将其换成已获取的标签。build 仅读取 Git 提交，未提交的改动不会发布。
 
@@ -144,7 +145,7 @@ systemctl status agentluo-dev.service --no-pager
 
 ### 与自动部署脚本的边界
 
-上面的外部路径方式由运行时和启动器支持。当前 `assets/install` 的一键流程采用实例内资产副本，会拒绝资产符号链接；`apply` 要求配置、数据和运行目录在实例内，不能把这些目录链接到外部后继续升级。`apply` 还会重写 `deployments/instance.env`，因此手改该文件不能作为持久外部路径配置。
+上面的外部路径方式由运行时和启动器支持。当前 `assets` / `install_instance.sh` 的一键流程采用实例内资产副本，会拒绝资产符号链接；`apply` 要求配置、数据和运行目录在实例内，不能把这些目录链接到外部后继续升级。`apply` 还会重写 `deployments/instance.env`，因此手改该文件不能作为持久外部路径配置。
 
 使用外部路径时维护独立环境文件和自定义服务单元，不使用 `deploy.py systemd` 生成 managed 服务，也不对该布局执行 `apply`。更新自己的代码或 Python 环境前先停止自己的服务，保留自定义路径，按目标版本安装依赖并重新启动；涉及原数据时仍遵守单一写入者和迁移兼容要求。需要自动备份、迁移、切换的版本升级时，使用独立实例布局及上文的版本更新流程。
 

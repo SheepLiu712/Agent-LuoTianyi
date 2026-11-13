@@ -10,10 +10,10 @@
 
 ## 验收标准
 
-1. 对空目录执行 init，创建独立的配置、数据、运行、资产、环境和发布目录，生成 JWT 密钥及部署映射。非空目录拒绝初始化，不覆盖原文件。
+1. 对空目录执行 init_instance.sh，创建独立的配置、数据、运行、资产、环境和发布目录，生成 JWT 密钥及部署映射。非空目录拒绝初始化，不覆盖原文件。
 2. 对模型目录执行 assets，按指定提交校验文件、大小和 SHA-256；匹配后复制到实例并移除组/其他账号写权限，源文件不变。缺失、损坏或符号链接导致失败，不发布不完整资产。
-3. init 和 assets 完成后执行 install，从指定提交生成发布、准备依赖、执行启动配置预检，生成普通配置、instance.env 和 current。已有数据、普通配置或 current 拒绝首次安装；环境准备失败时不切换 current、不写普通配置。
-4. install 完成后执行 systemd，生成绑定当前账号、current 和 instance.env 的服务单元，验证后通过 sudo 安装、启用并启动。同名但内容不同或来自其他位置的单元拒绝覆盖。
+3. init_instance.sh 和 assets 完成后执行 install_instance.sh，从指定提交生成发布、准备依赖、执行启动配置预检，生成普通配置、instance.env 和 current。已有数据、普通配置或 current 拒绝首次安装；环境准备失败时不切换 current、不写普通配置。
+4. install_instance.sh 完成后执行 systemd，生成绑定当前账号、current 和 instance.env 的服务单元，验证后通过 sudo 安装、启用并启动。同名但内容不同或来自其他位置的单元拒绝覆盖。
 5. 文件就绪、进程启动和业务健康分别报告；数据库由正常启动流程初始化。用户通过管理页面、status 和日志确认结果。
 6. 原 build / plan / apply / status 升级契约保持，plan 仍阻断未经接管的旧目录，不用首次安装绕过旧库迁移和备份。
 
@@ -21,11 +21,11 @@
 
 ### 模块划分
 
-- `server/scripts/deploy/release/cli.py` 注册命令；`bootstrap.py` 负责新实例初始化、资产权限和 systemd 安装编排。
+- `server/scripts/deploy/init_instance.sh`、`install_instance.sh` 提供初始化与首次安装入口，调用共用的 `release/bootstrap.py` 实现。`release/cli.py` 仅注册资产、systemd 和版本管理命令，不再注册 init、install。
 - 复用 `prepare_release.py` 的发布、资产、环境准备和启动预检，以及 `offline_steps.switch` 的配置、环境文件和 current 写入。
 - 业务运行时继续负责新数据库初始化，不新增手写 SQL 建库流程。
 
-调用顺序：init → 填写 API 密钥 → assets → install → systemd → 管理页面和客户端验收。
+调用顺序：init_instance.sh → 填写 API 密钥 → assets → install_instance.sh → systemd → 管理页面和客户端验收。
 
 ### 接口规范
 
@@ -33,14 +33,14 @@
 
 | 命令 | 必需参数 | 可选参数 | 结果 |
 | --- | --- | --- | --- |
-| init | `--root` | `--name 后缀`、`--port 15673` | 安装目录及密钥文件路径 |
+| init_instance.sh | `--root` | `--name 后缀`、`--port 15673` | 安装目录及密钥文件路径 |
 | assets | `--root`、`--source` | `--ref HEAD` | 实例资产位置 |
-| install | `--root` | `--ref HEAD` | 发布 ID 与管理页面地址，尚未启动 |
+| install_instance.sh | `--root` | `--ref HEAD` | 发布 ID 与管理页面地址，尚未启动 |
 | systemd | `--root` | 无 | 服务名、管理页面与日志命令 |
 
 省略 `--name` 时服务名为 `agentluo.service`，实例名为 `production`；显式 `--name test` 时服务名为 `agentluo-test.service`，实例名为 `test`。`--name` 指定后缀，不是完整重命名。已有实例不自动改名。
 
-安装位置为不含符号链接的绝对路径，支持字母、数字、点、斜杠、横线和下划线。新目录权限 0700，凭据与记录 0600。assets 与 install 选择匹配版本。供应商 API 密钥由用户填写，JWT 密钥自动生成且不打印。
+安装位置为不含符号链接的绝对路径，支持字母、数字、点、斜杠、横线和下划线。新目录权限 0700，凭据与记录 0600。assets 与 install_instance.sh 选择匹配版本。供应商 API 密钥由用户填写，JWT 密钥自动生成且不打印。
 
 ## 备注
 

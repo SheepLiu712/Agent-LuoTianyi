@@ -35,6 +35,8 @@ FIXED_FILES = {
     "pyproject.toml",
     "README.md",  # setuptools 构建 server 包时读取。
     DEPLOY + "deploy.py",
+    DEPLOY + "init_instance.sh",
+    DEPLOY + "install_instance.sh",
     DEPLOY + "README.md",
     DEPLOY + "RESOURCE_LAYOUT.md",
     DEPLOY + "release/cli.py",
@@ -249,19 +251,10 @@ def deployment_command(args):
 
 
 def register_bootstrap(commands):
-    initializer = commands.add_parser("init", help="在空目录创建新实例和密钥文件")
-    initializer.add_argument("--root", required=True)
-    initializer.add_argument(
-        "--name", help="服务名后缀，例如 test 生成 agentluo-test.service；省略时为 agentluo.service"
-    )
-    initializer.add_argument("--port", type=int, default=15673)
     assets = commands.add_parser("assets", help="校验并复制模型资产，配置资源权限")
     assets.add_argument("--root", required=True)
     assets.add_argument("--source", required=True)
     assets.add_argument("--ref", default="HEAD")
-    installer = commands.add_parser("install", help="从 Git 提交完成新实例的首次部署")
-    installer.add_argument("--root", required=True)
-    installer.add_argument("--ref", default="HEAD")
     service = commands.add_parser("systemd", help="生成、安装并启动本实例 systemd 服务")
     service.add_argument("--root", required=True)
 
@@ -288,7 +281,7 @@ def main():
     observer.add_argument("--json", action="store_true")
     register_bootstrap(commands)
     args = parser.parse_args()
-    if args.command in {"init", "assets", "install", "systemd"}:
+    if args.command in {"assets", "systemd"}:
         from bootstrap import execute
 
         return execute(args)

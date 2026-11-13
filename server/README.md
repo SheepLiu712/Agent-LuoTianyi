@@ -55,7 +55,7 @@ ffmpeg -version
 
 ```bash
 INSTALL_DIR="$HOME/agentluo-production"
-python3 scripts/deploy/deploy.py init --root "$INSTALL_DIR"
+bash scripts/deploy/init_instance.sh --root "$INSTALL_DIR"
 ```
 脚本将在安装目录下搭建所需要的目录结构，并生成默认的部署配置。其中默认服务名称为 `agentluo.service`，端口为 `15673`；需要其他端口时加 `--port 端口`。使用`--name` 指定 `agentluo` 后的名称后缀：例如 `--name test` 创建 `agentluo-test.service`。省略 `--name` 时服务为 `agentluo.service`。
 
@@ -70,7 +70,7 @@ nano "$INSTALL_DIR/config/secrets.local.env"
 **2. 导入模型资源。** 向维护者获取与当前版本配套的模型资源，解压到一个目录，使该目录下直接包含 `tts/` 和 `song_learner/`。把下面的路径改成你的解压位置：
 
 ```bash
-MODEL_SOURCE="$HOME/agentluo-models"
+MODEL_SOURCE= "/path/to/your/model_assets"
 python3 scripts/deploy/deploy.py assets --root "$INSTALL_DIR" --source "$MODEL_SOURCE"
 ```
 
@@ -79,7 +79,7 @@ python3 scripts/deploy/deploy.py assets --root "$INSTALL_DIR" --source "$MODEL_S
 **3. 部署服务。** 脚本会从当前 Git 提交构建服务、安装锁定的 Python 环境和 Chromium、生成运行配置，并连接好各类资源路径。首次执行需要下载依赖，耗时取决于网络速度。
 
 ```bash
-python3 scripts/deploy/deploy.py install --root "$INSTALL_DIR"
+bash scripts/deploy/install_instance.sh --root "$INSTALL_DIR"
 ```
 
 显示“首次部署文件已就绪”后进入下一步。此时尚未启动服务；无需手写 `instance.env`、创建符号链接或初始化数据库。模型导入与部署默认使用 `HEAD`；部署指定标签时，两条命令都加上同一个 `--ref 标签`。未提交的源码修改不会进入部署结果。
@@ -110,7 +110,7 @@ python3 scripts/deploy/deploy.py --config "$INSTALL_DIR/deployments/deploy.toml"
 journalctl -u agentluo.service -n 100 --no-pager
 ```
 
-`init` 和 `install` 只用于全新实例，不会覆盖已有数据或替代版本更新。后续更新沿用脚本生成的 `deployments/deploy.toml`，按[版本更新步骤](scripts/deploy/README.md#版本更新)操作。
+`init_instance.sh` 和 `install_instance.sh` 只用于全新实例，不会覆盖已有数据或替代版本更新。后续更新沿用脚本生成的 `deployments/deploy.toml`，按[版本更新步骤](scripts/deploy/README.md#版本更新)操作。
 
 ### 使用测试服务器的资源、配置和数据
 

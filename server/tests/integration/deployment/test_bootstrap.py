@@ -193,7 +193,7 @@ def test_cli_init_and_assets_work_from_repository(bootstrap):
     _, root, source, _ = bootstrap
     target = root.parent / "cli-instance"
     initialized = subprocess.run(
-        [sys.executable, str(CLI), "init", "--root", str(target)], capture_output=True, text=True
+        ["bash", str(CLI.parent / "init_instance.sh"), "--root", str(target)], capture_output=True, text=True
     )
     if os.getuid() == 0:
         assert initialized.returncode != 0 and "普通服务账号" in initialized.stdout
@@ -225,3 +225,22 @@ def test_init_service_name_suffix(bootstrap, name, instance_name, service):
     record, instance = module.settings(target)
     assert record["name"] == instance_name
     assert instance["service"] == service
+
+
+@pytest.mark.parametrize("command", ["init", "install"])
+def test_deploy_cli_no_longer_supports_initial_setup(command):
+    import subprocess
+    import sys
+
+    result = subprocess.run([sys.executable, str(CLI), command, "--help"], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert "invalid choice" in result.stderr
+
+
+@pytest.mark.parametrize("script", ["init_instance.sh", "install_instance.sh"])
+def test_shell_entrypoints_forward_help_from_any_directory(tmp_path, script):
+    import subprocess
+
+    result = subprocess.run(["bash", str(CLI.parent / script), "--help"], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "--root" in result.stdout
