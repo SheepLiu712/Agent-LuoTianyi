@@ -3,10 +3,10 @@
 | 位置 | 职责与入口 |
 | --- | --- |
 | `environment/` | 创建和安装 Python 环境。Linux 使用 `install_linux.sh` 与 uv 锁文件；Windows 使用 `install_windows.bat` 与可选 Conda 配置。 |
-| `startup/` | 启动已有环境中的服务。包含 Linux / Windows 启动器、systemd 服务模板和实例环境变量示例。 |
-| `release/` | 首次部署及版本管理，`bootstrap.py` 提供 目录初始化、首次安装及 assets / systemd。构建与检查版本。包含 build / plan / apply / status 实现、资源校验清单、数据库与资源目录迁移工具。 |
+| `startup/` | 启动已有环境中的服务，主要用于源码目录内运行。包含 Linux / Windows 启动器、systemd 服务模板和实例环境变量示例。 |
+| `release/` | 首次部署及版本管理，`bootstrap.py` 提供 目录初始化、首次安装功能，资产迁移和校验功能`assets` 注册为服务`systemd`共嗯。构建与检查版本，包含 build / plan / apply / status 实现、资源校验清单、数据库与资源目录迁移工具。 |
 | `init_instance.sh`、`install_instance.sh` | 初始化空实例、首次安装；参数由脚本传给共用 Python 实现。 |
-| `deploy.py` | 版本构建、更新、状态查询及资产/systemd 管理；不再提供 init、install 子命令。 |
+| `deploy.py` | 版本构建、更新、状态查询及资产/systemd 管理。 |
 | `RESOURCE_LAYOUT.md` | 实例目录、资产、配置和数据库迁移约定。 |
 
 ## 首次部署
@@ -41,6 +41,10 @@ UPDATE_DIR="$HOME/agentluo-updates"
 mkdir -p "$UPDATE_DIR"
 python3 scripts/deploy/deploy.py build --ref HEAD --output-dir "$UPDATE_DIR/packages"
 ```
+
+其中`UPDATE_DIR`是存放计划文件的目录，由于plan需要对计划文件和当前运行实例中的文件进行比较，它们不能是同一个目录。
+
+`build` 会生成发布包 `agentluo-<commit>.tar.gz`，并在 `packages/` 下生成清单文件 `agentluo-<commit>.json`，包含该版本的模型资源、配置和数据库迁移信息。
 
 **2. 检查更新计划。** 将 `PACKAGE` 改为上一条命令输出的发布包绝对路径。默认实例名是 `production`，创建时使用过 `--name` 的应换成对应名称；旧实例使用自己的部署配置路径。
 
