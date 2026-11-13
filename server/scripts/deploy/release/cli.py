@@ -38,6 +38,7 @@ FIXED_FILES = {
     DEPLOY + "README.md",
     DEPLOY + "RESOURCE_LAYOUT.md",
     DEPLOY + "release/cli.py",
+    DEPLOY + "release/bootstrap.py",
     DEPLOY + "release/plan.py",
     DEPLOY + "release/apply.py",
     DEPLOY + "release/status.py",
@@ -247,6 +248,24 @@ def deployment_command(args):
     return code
 
 
+def register_bootstrap(commands):
+    initializer = commands.add_parser("init", help="在空目录创建新实例和密钥文件")
+    initializer.add_argument("--root", required=True)
+    initializer.add_argument(
+        "--name", help="服务名后缀，例如 test 生成 agentluo-test.service；省略时为 agentluo.service"
+    )
+    initializer.add_argument("--port", type=int, default=15673)
+    assets = commands.add_parser("assets", help="校验并复制模型资产，配置资源权限")
+    assets.add_argument("--root", required=True)
+    assets.add_argument("--source", required=True)
+    assets.add_argument("--ref", default="HEAD")
+    installer = commands.add_parser("install", help="从 Git 提交完成新实例的首次部署")
+    installer.add_argument("--root", required=True)
+    installer.add_argument("--ref", default="HEAD")
+    service = commands.add_parser("systemd", help="生成、安装并启动本实例 systemd 服务")
+    service.add_argument("--root", required=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("~/.config/agentluo/deploy.toml"))
@@ -267,7 +286,12 @@ def main():
     observer = commands.add_parser("status", help="查询实例实际状态和最近部署结果")
     observer.add_argument("--instance", required=True)
     observer.add_argument("--json", action="store_true")
+    register_bootstrap(commands)
     args = parser.parse_args()
+    if args.command in {"init", "assets", "install", "systemd"}:
+        from bootstrap import execute
+
+        return execute(args)
     if args.command in {"apply", "status"}:
         return deployment_command(args)
     if args.command == "plan":
