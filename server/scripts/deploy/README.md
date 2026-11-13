@@ -128,7 +128,7 @@ PLAYWRIGHT_BROWSERS_PATH=/home/alice/Agent-LuoTianyi/server/.runtime/browsers
 SERVER_HOST=127.0.0.1
 ```
 
-这是 systemd 的 `EnvironmentFile`，写绝对路径，不写 `export`，不使用 `$HOME`、`$TEST_INSTANCE` 或 `~` 展开；路径包含空格时将值用双引号包围。环境文件负责定位目录，模型密钥仍从所选配置目录的 `secrets.local.env` 加载。前台启动器不会自动读取任意 `instance.env`。
+这是 systemd 的 `EnvironmentFile`，写绝对路径，不写 `export`，不使用 `$HOME`、`$TEST_INSTANCE` 或 `~` 展开；路径包含空格时将值用双引号包围。环境文件负责定位目录，模型密钥仍从所选配置目录的 `secrets.local.env` 加载。版本化实例通过 `current` 启动时，会自动读取该实例的 `deployments/instance.env`；源码目录启动默认沿用终端环境变量。也可用 `AGENTLUO_INSTANCE_ENV=/absolute/path/instance.env bash scripts/deploy/startup/start_linux.sh` 显式指定文件，或将该变量设为空来禁用自动加载。启动器用 Bash source 加载文件，因此显式指定的文件必须来自可信操作者且兼容 Bash 赋值语法；上面的简单绝对路径示例可直接使用，任意 systemd 环境文件不一定兼容。自动加载或显式文件中的设置优先于同名终端环境变量。
 
 使用[自定义服务模板](startup/agentluo.service.example)，把 `@SERVICE_USER@`、`@SERVICE_HOME@`、`@SERVER_DIR@`、`@INSTANCE_ENV_FILE@` 分别换成服务账号、账号主目录、自己的 `server/` 路径和上述环境文件绝对路径。保存为独立服务名（如 `agentluo-dev.service`），验证后安装：
 

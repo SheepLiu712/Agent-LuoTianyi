@@ -57,7 +57,9 @@ ffmpeg -version
 INSTALL_DIR="$HOME/agentluo-production"
 python3 scripts/deploy/deploy.py init --root "$INSTALL_DIR"
 ```
-脚本将在安装目录下搭建所需要的目录结构，并生成默认的部署配置。其中默认服务名称为 `agentluo.service`，端口为 `15673`；需要其他端口时加 `--port 端口`。`--name` 指定的是 `agentluo` 后的名称后缀，而不是完整重命名：例如 `--name test` 创建 `agentluo-test.service`。省略 `--name` 时服务为 `agentluo.service`，部署配置中的实例名仍为 `production`；指定 `--name test` 时实例名为 `test`。
+脚本将在安装目录下搭建所需要的目录结构，并生成默认的部署配置。其中默认服务名称为 `agentluo.service`，端口为 `15673`；需要其他端口时加 `--port 端口`。使用`--name` 指定 `agentluo` 后的名称后缀：例如 `--name test` 创建 `agentluo-test.service`。省略 `--name` 时服务为 `agentluo.service`。
+
+部署配置中的实例名默认为 `production`；指定 `--name test` 时实例名为 `test`。
 
 然后配置密钥：
 ```bash
@@ -72,7 +74,7 @@ MODEL_SOURCE="$HOME/agentluo-models"
 python3 scripts/deploy/deploy.py assets --root "$INSTALL_DIR" --source "$MODEL_SOURCE"
 ```
 
-脚本会检查所需文件是否齐全、内容是否匹配，复制到安装目录并设置权限；源文件保持不变。缺文件或版本不匹配时会列出具体路径，请补齐资源后重新执行。NLTK 等内部资源的位置与权限由脚本处理。
+脚本会检查所需文件是否齐全、内容是否匹配，复制到安装目录并设置权限；源文件保持不变。缺文件或版本不匹配时会列出具体路径，请补齐资源后重新执行。
 
 **3. 部署服务。** 脚本会从当前 Git 提交构建服务、安装锁定的 Python 环境和 Chromium、生成运行配置，并连接好各类资源路径。首次执行需要下载依赖，耗时取决于网络速度。
 
@@ -82,19 +84,13 @@ python3 scripts/deploy/deploy.py install --root "$INSTALL_DIR"
 
 显示“首次部署文件已就绪”后进入下一步。此时尚未启动服务；无需手写 `instance.env`、创建符号链接或初始化数据库。模型导入与部署默认使用 `HEAD`；部署指定标签时，两条命令都加上同一个 `--ref 标签`。未提交的源码修改不会进入部署结果。
 
-**4. 在终端启动服务。** 加载部署脚本自动生成的实例环境文件，再运行安装目录中的启动器；不需要注册系统服务。以下命令在 Bash 中执行：
+**4. 在终端启动服务。** 使用以下命令在终端中启动服务。启动器会自动加载该实例的 `deployments/instance.env`以读取对应的实例配置：
 
 ```bash
-INSTALL_DIR="$HOME/agentluo-production"
-(
-  set -a
-  source "$INSTALL_DIR/deployments/instance.env" || exit 1
-  set +a
-  exec bash "$INSTALL_DIR/current/scripts/deploy/startup/start_linux.sh"
-)
+bash "$INSTALL_DIR/current/scripts/deploy/startup/start_linux.sh"
 ```
 
-如果使用了其他安装位置，请修改 `INSTALL_DIR`。启动日志直接显示在当前终端，按 Ctrl+C 停止服务；再次启动时重复这段命令即可。环境设置放在子 Shell 中，不影响当前终端后续执行的其他命令。
+`INSTALL_DIR` 使用第一步设置的安装位置。新开终端时先重新设置该变量。日志直接显示在终端，按 Ctrl+C 停止，再次启动时重复上述命令即可。启动器中的环境设置不会影响当前终端。
 
 启动后打开管理页面（默认 `http://127.0.0.1:15673/admin`），按照页面提示完成管理员设置，确认业务运行时已启动，再通过客户端发送消息并试听语音。数据库由服务首次启动时自动创建。模型密钥或资源的运行问题可在管理页面和终端日志中检查。
 
@@ -115,10 +111,6 @@ journalctl -u agentluo.service -n 100 --no-pager
 ```
 
 `init` 和 `install` 只用于全新实例，不会覆盖已有数据或替代版本更新。后续更新沿用脚本生成的 `deployments/deploy.toml`，按[版本更新步骤](scripts/deploy/README.md#版本更新)操作。
-
-### 更新已部署的服务
-
-已由 systemd 管理的服务更新版本时，沿用原安装目录和部署配置，按[部署工具的版本更新步骤](scripts/deploy/README.md#版本更新)操作。该流程会检查目标版本，准备依赖，停服备份并切换版本；无需重新执行首次安装命令。该自动更新流程依赖 systemd；仅在终端运行的实例若要使用它，先完成上述可选的系统服务设置。
 
 ### 使用测试服务器的资源、配置和数据
 
