@@ -11,7 +11,9 @@ class QuietMedia extends Node:
 	signal state_changed(state: Dictionary)
 	func reset() -> void: pass
 	func set_scope(_server: String, _username: String) -> Error: return OK
-	func append_reply_audio(_id: String, _audio: String, _final: bool, _error: bool, _ephemeral: bool) -> void: pass
+	func append_reply_audio(_id: String, _audio: String, _final: bool, _error: bool, _ephemeral: bool,
+			_detail: String = "") -> void: pass
+	func get_message_audio(_id: String) -> Dictionary: return {}
 	func play_reply(_id: String) -> void: pass
 
 func _initialize() -> void:

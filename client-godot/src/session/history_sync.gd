@@ -209,7 +209,9 @@ func _reconcile_store(rows: Array, seq: int, generation: int) -> void:
 func _reconcile_done(code: String, inserted: int) -> void:
 	_reconcile_inflight = false
 	if _logger != null:
-		_logger.log_info("info_history_reconcile", {"count": inserted, "reason": code, "phase":"complete"})
+		var ok := code == "OK"
+		_logger.record_as("business", "history_reconcile", {"count": inserted, "reason":"reconcile",
+			"code":code, "phase":"complete" if ok else "failed", "level":"INFO" if ok else "ERROR"})
 	_reconcile_check_wanted()
 
 
@@ -260,6 +262,11 @@ func _open_storage(generation: int) -> bool:
 	var scope := str(_session.get("scope", ""))
 	if root.is_empty() or scope.is_empty():
 		_state.storage = "unavailable"
+		if _logger != null:
+			_logger.record_as("storage", "history_storage_unavailable", {
+				"scope":"sqlite", "operation":"open_scope", "outcome":"failure", "duration_ms":0,
+				"code":"INVALID_CONFIG", "phase":"failed", "level":"ERROR",
+				"detail":"history_root or scope missing"})
 		return false
 	var result: Dictionary = await _persistence.open_scope(root, scope)
 	if generation != _generation:
@@ -267,6 +274,11 @@ func _open_storage(generation: int) -> bool:
 	if not result.ok:
 		_state.storage = "unavailable"
 		_state.code = str(result.code)
+		if _logger != null:
+			_logger.record_as("storage", "history_storage_unavailable", {
+				"scope":"sqlite", "operation":"open_scope", "outcome":"failure", "duration_ms":0,
+				"code":str(result.code), "phase":"failed", "level":"ERROR",
+				"detail":str(result.get("detail", "Local SQLite database failed to open"))})
 		return false
 	_open = true
 	_state.storage = "ready"
@@ -560,11 +572,11 @@ func _legacy_phase() -> String:
 func _notify() -> void:
 	_state.next_end = _next_end
 	if _logger != null:
-		_logger.log_runtime("runtime_history_state", {
+		_logger.record_as("business", "history_state", {
 			"storage": _state.storage, "initial": _state.initial,
 			"catchup": _state.catchup, "older": _state.older,
 			"code": _state.code, "count": _state.count, "next_end": _next_end, "reason":"history",
-		})
+			"phase":"running", "level":"WARN" if _state.code not in ["", "OK"] else "INFO"})
 	state_changed.emit(get_state())
 
 

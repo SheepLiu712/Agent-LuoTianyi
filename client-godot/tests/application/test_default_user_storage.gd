@@ -20,7 +20,7 @@ func run() -> void:
 		if filename not in before:
 			if filename.ends_with(".jsonl"):
 				var content := FileAccess.get_file_as_string("user://logs/" + filename)
-				archived = content.contains("runtime_app_started") and content.contains("runtime_app_stopped") and content.contains("performance_startup") and content.contains("performance_sample")
+				archived = content.contains("app_started") and content.contains("app_stopped") and content.contains("system_startup") and content.contains("system_resource_sample")
 			DirAccess.remove_absolute("user://logs/" + filename)
 	print("Default startup archives logs in user directory: ", "PASS" if archived else "FAIL")
 	quit(0 if archived else 1)

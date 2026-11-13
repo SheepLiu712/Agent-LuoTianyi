@@ -61,9 +61,9 @@ func probe_server(address: String) -> Dictionary:
 	_busy = false
 	if generation != _generation: return _failure("CANCELLED")
 	if not response.ok:
-		return response if response.code in ["TIMEOUT", "CANCELLED"] else _failure("PUBLIC_KEY_ERROR", response.status)
+		return response if response.code in ["TIMEOUT", "CANCELLED"] else _failure("PUBLIC_KEY_ERROR", response.status, str(response.get("detail", "")))
 	if not response.data.get("public_key") is String or response.data.public_key.is_empty():
-		return _failure("PUBLIC_KEY_ERROR", response.status)
+		return _failure("PUBLIC_KEY_ERROR", response.status, "public_key missing from response")
 	return {"ok":true,"code":"OK","status":response.status,"data":{"server":base}}
 
 func _perform(operation: String, base: String, payload: Dictionary, generation: int) -> Dictionary:
@@ -94,11 +94,12 @@ func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary
 			return
 		var response: Dictionary
 		if result == HTTPRequest.RESULT_TIMEOUT:
-			response = _failure("TIMEOUT")
+			response = _failure("TIMEOUT", status, Events.http_result_name(result))
 		elif result != HTTPRequest.RESULT_SUCCESS:
-			response = _failure("NETWORK_ERROR", status)
+			response = _failure("NETWORK_ERROR", status, Events.http_result_name(result))
 		elif status != 200:
-			response = _failure("AUTH_REJECTED" if status == 401 else "HTTP_ERROR", status)
+			response = _failure("AUTH_REJECTED" if status == 401 else "HTTP_ERROR", status,
+				Events.http_failure_detail(body, status))
 		else:
 			var parser := JSON.new()
 			var valid := parser.parse(body.get_string_from_utf8()) == OK and parser.data is Dictionary
@@ -112,7 +113,7 @@ func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary
 		JSON.stringify(payload) if method == HTTPClient.METHOD_POST else "")
 	var response: Dictionary
 	if error != OK:
-		response = _failure("NETWORK_ERROR")
+		response = _failure("NETWORK_ERROR", 0, Events.request_error_detail(error))
 		Events.http(_logger, response, 0, 0, started, trace_id, route, method_name)
 	else:
 		response = await _http_finished
@@ -122,8 +123,8 @@ func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary
 	http.queue_free()
 	return response
 
-static func _failure(code: String, status: int = 0) -> Dictionary:
-	return {"ok":false, "code":code, "status":status, "data":{}}
+static func _failure(code: String, status: int = 0, detail: String = "") -> Dictionary:
+	return {"ok":false, "code":code, "status":status, "detail":detail, "data":{}}
 
 func cancel() -> void:
 	_generation += 1
@@ -139,14 +140,14 @@ func _encrypt_payload(operation: String, base: String, payload: Dictionary, gene
 	if generation != _generation:
 		return _failure("CANCELLED")
 	if not public_key.ok:
-		return public_key if public_key.code in ["TIMEOUT", "CANCELLED"] else _failure("PUBLIC_KEY_ERROR", public_key.status)
+		return public_key if public_key.code in ["TIMEOUT", "CANCELLED"] else _failure("PUBLIC_KEY_ERROR", public_key.status, str(public_key.get("detail", "")))
 	if not public_key.data.get("public_key") is String or public_key.data.public_key.is_empty():
-		return _failure("PUBLIC_KEY_ERROR", public_key.status)
+		return _failure("PUBLIC_KEY_ERROR", public_key.status, "public_key missing from response")
 	var password_field := "new_password" if operation == "reset" else "password"
 	var encrypted: Dictionary = _security.encrypt_password(public_key.data.public_key, payload[password_field])
 	payload[password_field] = ""
 	if not encrypted.ok:
-		return _failure("ENCRYPTION_ERROR")
+		return _failure("ENCRYPTION_ERROR", 0, str(encrypted.get("detail", "password encryption failed")))
 	payload[password_field] = Marshalls.raw_to_base64(encrypted.data)
 	return {"ok":true}
 

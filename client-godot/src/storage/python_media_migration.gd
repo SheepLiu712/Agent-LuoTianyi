@@ -473,19 +473,18 @@ func _log_scan(outcome: String) -> void:
 		"images":int(_scan_result.get("image_count", 0)),
 		"unmatched":int(_scan_result.get("unmatched_count", 0)),
 	}
-	var event := "info_python_media_scan" if outcome == "success" else "warning_python_media_target"
-	var fields := {"detail":str(_scan_result.get("code", "")), "phase":"complete" if outcome == "success" else "failed",
-		"outcome":outcome, "data":counts, "module":"cache"}
-	if outcome == "success":
-		_logger.log_info(event, fields)
-	else:
-		_logger.log_warning(event, fields)
+	var event := "storage_media_scan" if outcome == "success" else "storage_media_scan_failed"
+	var fields := {"scope":"file", "operation":"media_scan",
+		"detail":str(_scan_result.get("code", "")), "phase":"complete" if outcome == "success" else "failed",
+		"outcome":outcome, "duration_ms":0, "code":"OK" if outcome == "success" else "UNAVAILABLE",
+		"data":counts, "module":"cache", "level":"INFO" if outcome == "success" else "WARN"}
+	_logger.record_as("storage", event, fields)
 
 
 func _log_warning(code: String) -> void:
 	if _logger == null:
 		return
-	_logger.log_warning("warning_settings_save", {"code":code, "detail":"Python 客户端路径保存失败", "phase":"failed"})
+	_logger.record_as("business", "settings_save_failed", {"code":code, "detail":"Python 客户端路径保存失败", "phase":"failed", "level":"WARN"})
 
 
 func _report() -> void:

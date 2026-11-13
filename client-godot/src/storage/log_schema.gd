@@ -1,12 +1,11 @@
 extends RefCounted
-## 九类日志的公共 schema：分类、级别、事件注册、字段白名单、脱敏与归一化。
+## 四域日志的公共 schema：业务领域分类与严重程度解耦。
+## 分类只回答「这条日志属于哪个领域」，级别只回答「有多严重」。
 ## 该文件不持有运行状态，ClientLog 只通过静态函数读取规则。
 
-const CATEGORIES := ["error", "warning", "info", "debug", "access", "security", "performance", "transaction", "runtime"]
+const CATEGORIES := ["business", "network", "storage", "system"]
 const CATEGORY_LABELS := {
-	"error": "错误", "warning": "警告", "info": "信息", "debug": "调试",
-	"access": "访问", "security": "安全", "performance": "性能",
-	"transaction": "事务", "runtime": "运行",
+	"business": "业务流", "network": "网络通信", "storage": "存储持久化", "system": "系统诊断",
 }
 const LEVELS := ["DEBUG", "INFO", "WARN", "ERROR"]
 const OUTCOMES := ["success", "failure", "cancelled", "denied", "unknown"]
@@ -18,152 +17,96 @@ const ORIGIN_LABELS := {
 const CHANNELS := ["http", "ws", "ui", "app"]
 const SCOPES := ["sqlite", "file", "unknown"]
 const MODULES := ["app", "account", "network", "message", "audio", "cache", "history", "settings", "dynamics", "engine"]
-const MODULE_PREFIXES := [
-	["access_ui", "app"], ["access_", "network"], ["security_ws", "network"], ["security_", "account"],
-	["performance_image", "history"], ["performance_sqlite", "history"], ["transaction_sqlite", "history"],
-	["debug_audio", "audio"], ["info_audio", "audio"],
-	["error_audio", "audio"], ["warning_audio", "audio"], ["info_replay", "audio"], ["warning_replay", "audio"],
-	["error_cache", "cache"], ["info_cache", "cache"],
-	["info_message", "message"], ["info_reply", "message"],
-	["info_history", "history"], ["info_settings", "settings"],
-	["runtime_connection", "network"], ["runtime_account", "account"], ["runtime_history", "history"],
-	["runtime_dynamics", "dynamics"], ["runtime_settings", "settings"],
-	["error_engine", "engine"], ["warning_engine", "engine"], ["debug_engine", "engine"],
-	["cache_", "cache"], ["history_", "history"], ["audio_", "audio"], ["replay_", "audio"],
-	["message_", "message"], ["settings_", "settings"], ["dynamics_", "dynamics"],
-	["account_", "account"], ["engine_", "engine"],
-]
 
-const CODES := "OK UNKNOWN INVALID_INPUT INSECURE_SERVER INVALID_RESPONSE BUSY CANCELLED TIMEOUT NETWORK_ERROR HTTP_ERROR AUTH_REJECTED PUBLIC_KEY_ERROR ENCRYPTION_ERROR CREDENTIAL_UNAVAILABLE NO_SAVED_LOGIN LOGGED_OUT PENDING SEND_REJECTED DELIVERY_UNCERTAIN TRANSPORT_STOPPED ACK_TIMEOUT DISCONNECTED CONNECT_TIMEOUT AUTH_TIMEOUT INVALID_BASE64 AUDIO_ERROR REMOTE_AUDIO_ERROR TTS_EMPTY TTS_STREAM_ERROR TTS_CANCELLED AUDIO_TIMEOUT BUFFER_LIMIT DECODER_UNAVAILABLE PLAYBACK_FAILED REPLAY_FAILED CACHE_WRITE_FAILED CACHE_CLEAR_FAILED INVALID_WAV UNSUPPORTED_FORMAT TRUNCATED_AUDIO EMPTY_AUDIO STREAM_FINISHED STOPPED INTERRUPTED ENGINE_ERROR ENGINE_WARNING ENGINE_SCRIPT ENGINE_SHADER HISTORY_FAILED HISTORY_INVALID HISTORY_DUPLICATE MODEL_ERROR MODEL_DISABLED MODEL_INVALID SAVE_FAILED INVALID_JSON MODEL_BUSY UNKNOWN_MODEL_TYPE INVALID_CONFIG MODEL_KIND_MISMATCH MODEL_CAPABILITY_MISMATCH MODEL_FIELDS_REQUIRED STREAMING_NOT_SUPPORTED PLAINTEXT_CONFIRMATION_REQUIRED KEY_UNAVAILABLE NOT_FOUND COMMENT_NOT_ALLOWED INVALID_REPLY_TARGET STORAGE_ERROR ACCOUNT_START_FAILED SERVER_CHANGED ACCOUNT_SELECTED OPTIONS_CHANGED ACCOUNT_REMOVED CHECKING_SERVER IMAGE_READ_FAILED AVATAR_WRITE_FAILED NO_ACCOUNT IMAGE_TOO_LARGE IMAGE_FORMAT INVALID_IMAGE IMAGE_DIMENSIONS IMAGE_MISSING SERVER_ERROR UNAVAILABLE CACHE_SQL_FAILED CACHE_CONNECTION_INVALID CONNECTION_FAILED SEND_FAILED SYSTEM_RUNTIME_NOT_READY STORAGE_RUNNING STORAGE_UNAVAILABLE SECURITY_UNAVAILABLE PROTECT_FAILED UNPROTECT_FAILED STALE_SCOPE SCHEMA_MISSING SETTINGS_SAVE_FAILED ABNORMAL_SHUTDOWN TARGET_INVALID TARGET_MISSING SOURCE_EMPTY SOURCE_NOT_FOUND SOURCE_UNREADABLE ALREADY_CACHED UNSUPPORTED_IMAGE UI_ERROR"
+const CODES := "OK UNKNOWN INVALID_INPUT INSECURE_SERVER INVALID_RESPONSE BUSY CANCELLED TIMEOUT NETWORK_ERROR HTTP_ERROR AUTH_REJECTED PUBLIC_KEY_ERROR ENCRYPTION_ERROR CREDENTIAL_UNAVAILABLE NO_SAVED_LOGIN LOGGED_OUT PENDING SEND_REJECTED DELIVERY_UNCERTAIN TRANSPORT_STOPPED ACK_TIMEOUT DISCONNECTED CONNECT_TIMEOUT AUTH_TIMEOUT INVALID_BASE64 AUDIO_ERROR REMOTE_AUDIO_ERROR TTS_EMPTY TTS_STREAM_ERROR TTS_CANCELLED AUDIO_TIMEOUT BUFFER_LIMIT DECODER_UNAVAILABLE PLAYBACK_FAILED REPLAY_FAILED CACHE_WRITE_FAILED CACHE_CLEAR_FAILED INVALID_WAV UNSUPPORTED_FORMAT TRUNCATED_AUDIO EMPTY_AUDIO STREAM_FINISHED STOPPED INTERRUPTED ENGINE_ERROR ENGINE_WARNING ENGINE_SCRIPT ENGINE_SHADER HISTORY_FAILED HISTORY_INVALID HISTORY_DUPLICATE MODEL_ERROR MODEL_DISABLED MODEL_INVALID SAVE_FAILED INVALID_JSON MODEL_BUSY UNKNOWN_MODEL_TYPE INVALID_CONFIG MODEL_KIND_MISMATCH MODEL_CAPABILITY_MISMATCH MODEL_FIELDS_REQUIRED STREAMING_NOT_SUPPORTED PLAINTEXT_CONFIRMATION_REQUIRED KEY_UNAVAILABLE NOT_FOUND COMMENT_NOT_ALLOWED INVALID_REPLY_TARGET STORAGE_ERROR ACCOUNT_START_FAILED SERVER_CHANGED ACCOUNT_SELECTED OPTIONS_CHANGED ACCOUNT_REMOVED CHECKING_SERVER IMAGE_READ_FAILED AVATAR_WRITE_FAILED NO_ACCOUNT IMAGE_TOO_LARGE IMAGE_FORMAT INVALID_IMAGE IMAGE_DIMENSIONS IMAGE_MISSING SERVER_ERROR UNAVAILABLE CACHE_SQL_FAILED CACHE_CONNECTION_INVALID CONNECTION_FAILED SEND_FAILED SYSTEM_RUNTIME_NOT_READY STORAGE_RUNNING STORAGE_UNAVAILABLE SECURITY_UNAVAILABLE PROTECT_FAILED UNPROTECT_FAILED STALE_SCOPE SCHEMA_MISSING SETTINGS_SAVE_FAILED ABNORMAL_SHUTDOWN TARGET_INVALID TARGET_MISSING SOURCE_EMPTY SOURCE_NOT_FOUND SOURCE_UNREADABLE ALREADY_CACHED UNSUPPORTED_IMAGE UI_ERROR CAPABILITY_START_FAILED LOG_PENDING_DROPPED LOG_LIMIT_REACHED"
 const PHASES := "saving first_loading first_failed idle connecting authenticating ready reconnecting auth_rejected signed_out signed_in busy queued sending sent received failed uncertain loading complete error warning skipped playing paused stopped receiving decoded begin committed rolled_back begin_failed commit_failed rollback_failed starting running stopping start stop open close close_dialog unknown abnormal"
 const METRICS := ["has_audio", "audio_chars", "bytes", "frames", "sample_rate", "channels", "bits", "final", "audio_error", "queued", "volume", "latency_ms", "skips", "count", "status", "index", "duration_ms", "uptime_ms", "pid", "queue_depth", "memory_bytes", "objects", "draw_calls", "fps", "avg_ms", "max_ms", "failures", "affected_rows", "seq", "window_ms", "next_end"]
-const STRING_FIELDS := ["detail", "code", "phase", "module", "level", "category", "channel", "action", "method", "route", "outcome", "origin", "reason_code", "subject", "trace_id", "transaction_id", "scope", "operation", "schema_missing", "reply_id", "reason", "previous_run_id", "storage", "initial", "catchup", "older"]
+const STRING_FIELDS := ["detail", "code", "phase", "module", "level", "category", "channel", "action", "method", "route", "outcome", "origin", "reason_code", "subject", "trace_id", "transaction_id", "scope", "operation", "schema_missing", "reply_id", "reason", "previous_run_id", "storage", "initial", "catchup", "older", "model_type"]
 const SUBJECT_SECRET_KEYS := ["token", "password", "passwd", "secret", "authorization", "auth", "cookie", "key", "cipher", "private", "credential", "body", "content", "text", "audio", "base64", "message"]
 
 const CATEGORY_REQUIRED := {
-	"error": ["code", "detail", "stack", "origin"],
-	"warning": ["code", "detail", "origin"],
-	"info": ["phase"],
-	"debug": ["data"],
-	"access": ["channel", "action", "route", "outcome", "duration_ms", "trace_id"],
-	"security": ["action", "outcome", "reason_code", "subject", "trace_id"],
-	"performance": ["operation", "outcome", "duration_ms", "trace_id"],
-	"transaction": ["transaction_id", "scope", "operation", "phase", "outcome", "duration_ms", "trace_id"],
-	"runtime": ["phase", "reason", "uptime_ms", "pid"],
+	"business": ["phase"],
+	"network": ["channel", "route", "outcome", "duration_ms"],
+	"storage": ["scope", "operation", "outcome", "duration_ms"],
+	"system": [],
 }
 const CATEGORY_DEFAULTS := {
-	"code": "UNKNOWN", "detail": "", "stack": [], "data": {},
-	"channel": "app", "action": "unknown", "route": "/unknown",
-	"duration_ms": 0, "outcome": "unknown", "reason_code": "UNKNOWN",
-	"subject": "", "trace_id": "", "transaction_id": "", "scope": "unknown",
-	"operation": "unknown", "phase": "unknown", "uptime_ms": 0, "pid": 0,
-	"reason": "",
-	"origin": "unknown",
+	"channel": "app", "route": "/unknown", "duration_ms": 0, "outcome": "unknown",
+	"scope": "unknown", "operation": "unknown", "phase": "unknown",
 }
 
 const EVENT_REGISTRY := {
-	"runtime_app_started": {"category":"runtime", "module":"app", "message":"客户端启动", "phase":"starting"},
-	"runtime_app_stopped": {"category":"runtime", "module":"app", "message":"客户端正常退出", "phase":"stopped"},
-	"runtime_window": {"category":"runtime", "module":"app", "message":"窗口状态变化", "phase":"open"},
-	"runtime_previous_incomplete": {"category":"runtime", "module":"app", "message":"上次运行未正常结束", "phase":"abnormal"},
-	"runtime_account_lifecycle": {"category":"runtime", "module":"account", "message":"账号生命周期", "phase":"running"},
-	"runtime_account_state": {"category":"runtime", "module":"account", "message":"账户操作状态", "phase":"unknown"},
-	"runtime_connection_state": {"category":"runtime", "module":"network", "message":"聊天连接状态变化", "phase":"unknown"},
-	"runtime_history_state": {"category":"runtime", "module":"history", "message":"历史同步状态", "phase":"unknown"},
-	"runtime_dynamics_state": {"category":"runtime", "module":"dynamics", "message":"动态读取与写入状态", "phase":"unknown"},
-	"info_message_queued": {"category":"info", "module":"message", "message":"消息已进入发送队列", "phase":"queued"},
-	"info_message_delivery": {"category":"info", "module":"message", "message":"消息投递状态", "phase":"unknown"},
-	"info_reply_received": {"category":"info", "module":"message", "message":"收到回复分片", "phase":"received"},
-	"info_history_reconcile": {"category":"info", "module":"history", "message":"送达不确定后的历史对账", "phase":"complete"},
-	"info_settings_models": {"category":"info", "module":"settings", "message":"模型配置状态", "phase":"unknown"},
-	"info_settings_preference": {"category":"info", "module":"settings", "message":"相处偏好操作", "phase":"unknown"},
-	"info_avatar_apply": {"category":"info", "module":"app", "message":"头像应用", "phase":"complete"},
-	"info_cache_cleared": {"category":"info", "module":"cache", "message":"已执行语音缓存清理", "phase":"complete"},
-	"info_history_image": {"category":"info", "module":"history", "message":"历史图片就绪", "phase":"complete"},
-	"info_python_media_scan": {"category":"info", "module":"cache", "message":"扫描 Python 客户端媒体缓存", "phase":"complete"},
-	"warning_python_media_target": {"category":"warning", "module":"cache", "message":"Python 客户端目录不可用", "phase":"failed"},
-	"warning_ui_error": {"category":"warning", "module":"app", "message":"已通过弹窗提示用户错误", "phase":"failed"},
-	"info_audio_receive_finished": {"category":"info", "module":"audio", "message":"音频接收结束", "phase":"complete"},
-	"info_audio_playback_started": {"category":"info", "module":"audio", "message":"开始播放在线语音", "phase":"playing"},
-	"info_audio_playback_finished": {"category":"info", "module":"audio", "message":"在线语音播放结束", "phase":"complete"},
-	"info_replay_started": {"category":"info", "module":"audio", "message":"开始重放", "phase":"playing"},
-	"info_replay_paused": {"category":"info", "module":"audio", "message":"重放已暂停", "phase":"paused"},
-	"info_replay_resumed": {"category":"info", "module":"audio", "message":"继续重放", "phase":"playing"},
-	"info_replay_stopped": {"category":"info", "module":"audio", "message":"重放已停止", "phase":"stopped"},
-	"info_replay_finished": {"category":"info", "module":"audio", "message":"重放结束", "phase":"complete"},
-	"error_system": {"category":"error", "module":"app", "message":"操作出现错误", "phase":"error"},
-	"error_avatar_clear": {"category":"error", "module":"app", "message":"头像清理失败", "phase":"error"},
-	"error_avatar_save": {"category":"error", "module":"app", "message":"头像保存被拒绝", "phase":"error"},
-	"error_cache": {"category":"error", "module":"cache", "message":"语音缓存写入失败", "phase":"error"},
-	"error_history_image": {"category":"error", "module":"history", "message":"历史图片处理失败", "phase":"error"},
-	"error_audio": {"category":"error", "module":"audio", "message":"音频处理失败", "phase":"error"},
-	"error_engine": {"category":"error", "module":"engine", "message":"引擎报告错误", "phase":"error"},
-	"warning_audio_underrun": {"category":"warning", "module":"audio", "message":"音频缓冲暂时不足", "phase":"warning"},
-	"warning_replay_preempted": {"category":"warning", "module":"audio", "message":"在线语音打断本地重放", "phase":"warning"},
-	"warning_engine": {"category":"warning", "module":"engine", "message":"引擎报告警告", "phase":"warning"},
-	"warning_settings_save": {"category":"warning", "module":"app", "message":"设置保存失败", "phase":"warning"},
-	"debug_audio_received": {"category":"debug", "module":"audio", "message":"收到音频数据", "phase":"receiving"},
-	"debug_audio_format": {"category":"debug", "module":"audio", "message":"已识别音频格式", "phase":"decoded"},
-	"debug_audio_decoded": {"category":"debug", "module":"audio", "message":"音频解码完成", "phase":"decoded"},
-	"debug_state": {"category":"debug", "module":"app", "message":"运行状态快照", "phase":"running"},
-	"access_http": {"category":"access", "module":"network", "message":"HTTP 请求", "phase":"complete"},
-	"access_ws": {"category":"access", "module":"network", "message":"WebSocket 访问", "phase":"complete"},
-	"access_ui": {"category":"access", "module":"app", "message":"界面访问", "phase":"complete"},
-	"security_auth": {"category":"security", "module":"account", "message":"认证事件", "phase":"complete"},
-	"security_token": {"category":"security", "module":"account", "message":"凭证读写", "phase":"complete"},
-	"security_component": {"category":"security", "module":"account", "message":"安全组件检查", "phase":"complete"},
-	"security_scope": {"category":"security", "module":"account", "message":"数据作用域检查", "phase":"complete"},
-	"security_ws_auth": {"category":"security", "module":"network", "message":"WebSocket 认证", "phase":"complete"},
-	"performance_startup": {"category":"performance", "module":"app", "message":"启动阶段耗时", "phase":"complete"},
-	"performance_sqlite": {"category":"performance", "module":"history", "message":"SQLite 作业性能", "phase":"complete"},
-	"performance_image": {"category":"performance", "module":"history", "message":"图片处理性能", "phase":"complete"},
-	"performance_model_execution": {"category":"performance", "module":"settings", "message":"模型请求执行", "phase":"complete"},
-	"performance_http_summary": {"category":"performance", "module":"network", "message":"HTTP 请求汇总", "phase":"complete"},
-	"performance_ws_audio": {"category":"performance", "module":"network", "message":"WebSocket 音频汇总", "phase":"complete"},
-	"performance_sample": {"category":"performance", "module":"app", "message":"资源占用采样", "phase":"complete"},
-	"performance_queue": {"category":"performance", "module":"app", "message":"队列深度", "phase":"complete"},
-	"transaction_sqlite": {"category":"transaction", "module":"history", "message":"SQLite 事务", "phase":"committed"},
-	"transaction_file": {"category":"transaction", "module":"app", "message":"文件原子写事务", "phase":"committed"},
-}
-
-const LEGACY_ALIASES := {
-	"client_started": "runtime_app_started",
-	"client_stopped": "runtime_app_stopped",
-	"account_state": "runtime_account_state",
-	"connection_state": "runtime_connection_state",
-	"history_state": "runtime_history_state",
-	"dynamics_state": "runtime_dynamics_state",
-	"message_queued": "info_message_queued",
-	"message_delivery": "info_message_delivery",
-	"reply_received": "info_reply_received",
-	"system_error": "error_system",
-	"history_reconcile": "info_history_reconcile",
-	"settings_models": "info_settings_models",
-	"settings_preference": "info_settings_preference",
-	"settings_model_execution": "performance_model_execution",
-	"avatar_apply": "info_avatar_apply",
-	"avatar_clear_failed": "error_avatar_clear",
-	"avatar_save_rejected": "error_avatar_save",
-	"cache_committed": "transaction_file",
-	"cache_cleared": "info_cache_cleared",
-	"cache_error": "error_cache",
-	"history_image": "info_history_image",
-	"history_image_error": "error_history_image",
-	"engine_error": "error_engine",
-	"audio_received": "debug_audio_received",
-	"audio_format": "debug_audio_format",
-	"audio_decoded": "debug_audio_decoded",
-	"audio_receive_finished": "info_audio_receive_finished",
-	"audio_error": "error_audio",
-	"audio_playback_started": "info_audio_playback_started",
-	"audio_playback_finished": "info_audio_playback_finished",
-	"audio_underrun": "warning_audio_underrun",
-	"replay_started": "info_replay_started",
-	"replay_paused": "info_replay_paused",
-	"replay_resumed": "info_replay_resumed",
-	"replay_stopped": "info_replay_stopped",
-	"replay_finished": "info_replay_finished",
-	"replay_preempted": "warning_replay_preempted",
+	"app_started": {"category":"business", "module":"app", "message":"客户端启动", "phase":"starting"},
+	"app_stopped": {"category":"business", "module":"app", "message":"客户端正常退出", "phase":"stopped"},
+	"window_state_changed": {"category":"business", "module":"app", "message":"窗口状态变化", "phase":"open"},
+	"previous_run_incomplete": {"category":"business", "module":"app", "message":"上次运行未正常结束", "phase":"abnormal"},
+	"account_lifecycle": {"category":"business", "module":"account", "message":"账号生命周期", "phase":"running"},
+	"account_state": {"category":"business", "module":"account", "message":"账户操作状态", "phase":"unknown"},
+	"connection_state": {"category":"business", "module":"network", "message":"聊天连接状态变化", "phase":"unknown"},
+	"history_state": {"category":"business", "module":"history", "message":"历史同步状态", "phase":"unknown"},
+	"dynamics_state": {"category":"business", "module":"dynamics", "message":"动态读取与写入状态", "phase":"unknown"},
+	"message_queued": {"category":"business", "module":"message", "message":"消息已进入发送队列", "phase":"queued"},
+	"message_delivery": {"category":"business", "module":"message", "message":"消息投递状态", "phase":"unknown"},
+	"message_reply_received": {"category":"business", "module":"message", "message":"收到回复", "phase":"received"},
+	"message_error": {"category":"business", "module":"message", "message":"消息处理失败", "phase":"error"},
+	"history_reconcile": {"category":"business", "module":"history", "message":"送达不确定后的历史对账", "phase":"complete"},
+	"settings_models": {"category":"business", "module":"settings", "message":"模型配置状态", "phase":"unknown"},
+	"settings_preference": {"category":"business", "module":"settings", "message":"相处偏好操作", "phase":"unknown"},
+	"settings_save_failed": {"category":"business", "module":"settings", "message":"设置保存失败", "phase":"failed"},
+	"avatar_applied": {"category":"business", "module":"app", "message":"头像应用", "phase":"complete"},
+	"model_execution": {"category":"business", "module":"settings", "message":"模型请求执行", "phase":"complete"},
+	"account_auth": {"category":"business", "module":"account", "message":"账号认证事件", "phase":"complete"},
+	"dynamics_post_publish": {"category":"business", "module":"dynamics", "message":"发布动态", "phase":"complete"},
+	"dynamics_comment_created": {"category":"business", "module":"dynamics", "message":"发表评论", "phase":"complete"},
+	"dynamics_comment_rejected": {"category":"business", "module":"dynamics", "message":"评论被拒绝", "phase":"failed"},
+	"account_capability_degraded": {"category":"business", "module":"account", "message":"扩展能力降级", "phase":"running"},
+	"account_capability_failed": {"category":"business", "module":"account", "message":"扩展能力启动失败", "phase":"failed"},
+	"audio_receive_finished": {"category":"business", "module":"audio", "message":"音频接收结束", "phase":"complete"},
+	"audio_playback_started": {"category":"business", "module":"audio", "message":"开始播放在线语音", "phase":"playing"},
+	"audio_playback_finished": {"category":"business", "module":"audio", "message":"在线语音播放结束", "phase":"complete"},
+	"audio_replay_started": {"category":"business", "module":"audio", "message":"开始重放", "phase":"playing"},
+	"audio_replay_paused": {"category":"business", "module":"audio", "message":"重放已暂停", "phase":"paused"},
+	"audio_replay_resumed": {"category":"business", "module":"audio", "message":"继续重放", "phase":"playing"},
+	"audio_replay_stopped": {"category":"business", "module":"audio", "message":"重放已停止", "phase":"stopped"},
+	"audio_replay_finished": {"category":"business", "module":"audio", "message":"重放结束", "phase":"complete"},
+	"audio_replay_preempted": {"category":"business", "module":"audio", "message":"在线语音打断本地重放", "phase":"warning"},
+	"audio_underrun": {"category":"business", "module":"audio", "message":"音频缓冲暂时不足", "phase":"warning"},
+	"audio_error": {"category":"business", "module":"audio", "message":"音频处理失败", "phase":"error"},
+	"audio_frames_received": {"category":"business", "module":"audio", "message":"收到音频数据", "phase":"receiving"},
+	"audio_format_detected": {"category":"business", "module":"audio", "message":"已识别音频格式", "phase":"decoded"},
+	"audio_decoded": {"category":"business", "module":"audio", "message":"音频解码完成", "phase":"decoded"},
+	"network_http": {"category":"network", "module":"network", "message":"HTTP 请求", "phase":"complete"},
+	"network_http_summary": {"category":"network", "module":"network", "message":"HTTP 请求汇总", "phase":"complete"},
+	"network_ws": {"category":"network", "module":"network", "message":"WebSocket 访问", "phase":"complete"},
+	"network_ws_auth": {"category":"network", "module":"network", "message":"WebSocket 认证", "phase":"complete"},
+	"network_ws_audio_summary": {"category":"network", "module":"network", "message":"WebSocket 音频汇总", "phase":"complete"},
+	"storage_sqlite_operation": {"category":"storage", "module":"history", "message":"SQLite 操作", "phase":"complete"},
+	"storage_scope_guard": {"category":"storage", "module":"history", "message":"数据作用域检查", "phase":"complete"},
+	"storage_file_write": {"category":"storage", "module":"app", "message":"文件写入", "phase":"complete"},
+	"storage_credential": {"category":"storage", "module":"account", "message":"凭据读写", "phase":"complete"},
+	"storage_cache_cleared": {"category":"storage", "module":"cache", "message":"已执行语音缓存清理", "phase":"complete"},
+	"storage_cache_write_failed": {"category":"storage", "module":"cache", "message":"缓存写入失败", "phase":"error"},
+	"storage_media_scan": {"category":"storage", "module":"cache", "message":"扫描媒体缓存", "phase":"complete"},
+	"storage_media_scan_failed": {"category":"storage", "module":"cache", "message":"媒体缓存目录不可用", "phase":"failed"},
+	"storage_avatar_clear_failed": {"category":"storage", "module":"app", "message":"头像清理失败", "phase":"error"},
+	"storage_avatar_save_failed": {"category":"storage", "module":"app", "message":"头像保存失败", "phase":"error"},
+	"storage_history_image_ready": {"category":"storage", "module":"history", "message":"历史图片就绪", "phase":"complete"},
+	"storage_history_image_failed": {"category":"storage", "module":"history", "message":"历史图片处理失败", "phase":"error"},
+	"storage_image_operation": {"category":"storage", "module":"history", "message":"图片处理", "phase":"complete"},
+	"history_storage_unavailable": {"category":"storage", "module":"history", "message":"本地历史库不可用", "phase":"failed"},
+	"state_snapshot": {"category":"system", "module":"app", "message":"运行状态快照", "phase":"running"},
+	"ui_access": {"category":"system", "module":"app", "message":"界面访问", "phase":"complete"},
+	"ui_error_shown": {"category":"system", "module":"app", "message":"已通过弹窗提示用户错误", "phase":"failed"},
+	"system_security_component": {"category":"system", "module":"account", "message":"安全组件检查", "phase":"failed"},
+	"system_startup": {"category":"system", "module":"app", "message":"启动阶段耗时", "phase":"complete"},
+	"system_resource_sample": {"category":"system", "module":"app", "message":"资源占用采样", "phase":"complete"},
+	"system_queue_depth": {"category":"system", "module":"app", "message":"队列深度", "phase":"complete"},
+	"engine_error": {"category":"system", "module":"engine", "message":"引擎报告错误", "phase":"error"},
+	"engine_warning": {"category":"system", "module":"engine", "message":"引擎报告警告", "phase":"warning"},
+	"engine_error_repeated": {"category":"system", "module":"engine", "message":"引擎重复错误", "phase":"error"},
+	"engine_warning_repeated": {"category":"system", "module":"engine", "message":"引擎重复警告", "phase":"warning"},
+	"log_pending_dropped": {"category":"system", "module":"app", "message":"日志后台队列溢出丢弃", "phase":"warning"},
+	"log_limit_reached": {"category":"system", "module":"app", "message":"日志容量达到上限", "phase":"error"},
 }
 
 static var _patterns: Array[RegEx] = []
@@ -201,7 +144,8 @@ const CLIENT_CODES := [
 	"DECODER_UNAVAILABLE", "PLAYBACK_FAILED", "REPLAY_FAILED", "AUDIO_ERROR", "BUFFER_LIMIT",
 	"TARGET_INVALID", "TARGET_MISSING", "SOURCE_EMPTY", "SOURCE_NOT_FOUND", "SOURCE_UNREADABLE",
 	"ALREADY_CACHED", "UNSUPPORTED_IMAGE", "SEND_REJECTED", "CREDENTIAL_UNAVAILABLE",
-	"PROTECT_FAILED", "UNPROTECT_FAILED", "SECURITY_UNAVAILABLE",
+	"PROTECT_FAILED", "UNPROTECT_FAILED", "SECURITY_UNAVAILABLE", "UI_ERROR",
+	"CAPABILITY_START_FAILED", "INSECURE_SERVER", "LOG_PENDING_DROPPED", "LOG_LIMIT_REACHED",
 ]
 const NETWORK_CODES := [
 	"NETWORK_ERROR", "TIMEOUT", "CONNECTION_FAILED", "CONNECT_TIMEOUT", "DISCONNECTED",
@@ -222,20 +166,19 @@ static func infer_origin(event: String, fields: Dictionary, category: String) ->
 	if is_origin(explicit):
 		return explicit
 	var code := str(fields.get("code", fields.get("reason_code", "")))
-	if event.begins_with("access_http"):
+	var outcome := str(fields.get("outcome", "unknown"))
+	if event.begins_with("network_http"):
 		return _http_origin(fields)
-	if event.begins_with("access_ws"):
+	if event.begins_with("network_ws"):
 		return _ws_origin(fields, code)
-	if event == "error_engine":
+	if event.begins_with("engine_"):
 		return _engine_origin(fields)
-	if category in ["error", "warning"]:
-		return _code_origin(code)
-	if category == "security":
-		return _security_origin(code)
-	if category == "transaction":
-		return "client" if str(fields.get("outcome", "")) == "failure" else "none"
-	if event.begins_with("runtime_"):
-		return _runtime_origin(event, code)
+	if not code.is_empty():
+		var by_code := _code_origin(code)
+		if by_code != "unknown":
+			return by_code
+	if outcome == "failure":
+		return "network" if category == "network" else "client"
 	return "none"
 
 static func _http_origin(fields: Dictionary) -> String:
@@ -244,13 +187,13 @@ static func _http_origin(fields: Dictionary) -> String:
 	return "network" if int(fields.get("status", 0)) <= 0 else "server"
 
 static func _ws_origin(fields: Dictionary, code: String) -> String:
-	if str(fields.get("outcome", "")) != "failure":
+	if str(fields.get("outcome", "")) not in ["failure", "denied"]:
 		return "none"
 	if code in SERVER_CODES:
 		return "server"
-	var detail := str(fields.get("detail", "")).to_lower()
-	if detail.contains("server") or detail.contains("auth"):
-		return "server"
+	var by_code := _code_origin(code)
+	if by_code != "unknown":
+		return by_code
 	return "network"
 
 static func _engine_origin(fields: Dictionary) -> String:
@@ -270,86 +213,34 @@ static func _code_origin(code: String) -> String:
 		return "upstream"
 	return "unknown"
 
-static func _security_origin(code: String) -> String:
-	if code in NETWORK_CODES:
-		return "network"
-	if code in SERVER_CODES:
-		return "server"
-	if code in CLIENT_CODES:
-		return "client"
-	return "unknown"
-
-static func _runtime_origin(event: String, code: String) -> String:
-	if code.is_empty():
-		return "none"
-	if event.contains("connection") and code == "AUTH_REJECTED":
-		return "server"
-	return _code_origin(code)
-
-static func canonical_event(event: String) -> String:
-	return LEGACY_ALIASES.get(event, event)
-
 static func category_for(event: String, fields: Dictionary = {}) -> String:
 	var explicit: Variant = fields.get("category")
 	if is_category(explicit):
 		return explicit
-	var canonical := canonical_event(event)
-	if EVENT_REGISTRY.has(canonical):
-		return EVENT_REGISTRY[canonical].category
-	var prefix := event.get_slice("_", 0)
-	return prefix if prefix in CATEGORIES else "info"
+	if EVENT_REGISTRY.has(event):
+		return EVENT_REGISTRY[event].category
+	return "system"
 
 static func explanation(event: String) -> String:
-	var canonical := canonical_event(event)
-	if EVENT_REGISTRY.has(canonical):
-		return EVENT_REGISTRY[canonical].message
+	if EVENT_REGISTRY.has(event):
+		return EVENT_REGISTRY[event].message
 	return "客户端活动"
 
 static func module_for(event: String, fields: Dictionary = {}) -> String:
 	var explicit: Variant = fields.get("module")
 	if explicit is String and explicit in MODULES:
 		return explicit
-	var canonical := canonical_event(event)
-	if EVENT_REGISTRY.has(canonical):
-		return EVENT_REGISTRY[canonical].module
-	for pair in MODULE_PREFIXES:
-		if event.begins_with(pair[0]):
-			return pair[1]
+	if EVENT_REGISTRY.has(event):
+		return EVENT_REGISTRY[event].module
 	return "app"
 
-static func default_level(category: String, fields: Dictionary = {}) -> String:
-	var base: String = {"error":"ERROR", "warning":"WARN", "debug":"DEBUG"}.get(category, "INFO")
-	var elevated := _elevated_level(category, fields)
-	return elevated if not elevated.is_empty() else base
-
-static func _elevated_level(category: String, fields: Dictionary) -> String:
+static func default_level(_category: String, fields: Dictionary = {}) -> String:
 	var outcome := str(fields.get("outcome", "unknown"))
-	if category == "access":
-		return _access_level(outcome)
-	if category in ["security", "performance"]:
-		return _warn_on_failure(outcome)
-	if category == "transaction":
-		return _transaction_level(fields, outcome)
-	if category == "runtime":
-		return _runtime_level(fields)
-	return ""
-
-static func _access_level(outcome: String) -> String:
-	if outcome == "failure":
+	if outcome == "failure" or fields.get("phase") == "error":
 		return "ERROR"
-	return "WARN" if outcome in ["cancelled", "denied"] else ""
-
-static func _warn_on_failure(outcome: String) -> String:
-	return "WARN" if outcome in ["failure", "denied"] else ""
-
-static func _transaction_level(fields: Dictionary, outcome: String) -> String:
-	var phase := str(fields.get("phase", ""))
-	if phase in ["begin_failed", "commit_failed", "rollback_failed", "rolled_back"]:
-		return "ERROR"
-	return "ERROR" if outcome == "failure" else ""
-
-static func _runtime_level(fields: Dictionary) -> String:
-	return "WARN" if str(fields.get("reason", "")) == "abnormal" else ""
+	if outcome in ["cancelled", "denied"] or fields.get("phase") == "warning":
+		return "WARN"
+	return "INFO"
 
 static func required_fields(category: String) -> Array:
 	return CATEGORY_REQUIRED.get(category, [])

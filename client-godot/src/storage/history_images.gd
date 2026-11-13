@@ -138,33 +138,48 @@ func _pump() -> void:
 		http.body_size_limit = 16*1024*1024
 		http.max_redirects = 0
 		add_child(http)
-		http.request_completed.connect(func(result,status,_headers,body):
-			if generation != _generation:
-				return
-			_active.erase(id)
-			http.queue_free()
-			var outcome := "success" if result == HTTPRequest.RESULT_SUCCESS and status == 200 else "failure"
-			_log_access(status, body.size(), started, trace_id, outcome)
-			if result != HTTPRequest.RESULT_SUCCESS or status != 200:
-				_error(id,"NETWORK_ERROR")
-			else:
-					var decode_started := Time.get_ticks_usec()
-					var image := _decode(body)
-					_log_performance("decode", Time.get_ticks_usec() - decode_started, body.size(), "success" if image != null else "failure", trace_id)
-					if image == null:
-						_error(id,"INVALID_IMAGE")
-					else:
-						var saved := _save(id,body)
-						if saved != OK:
-							_volatile[id] = image
-						_ready_image(id,image,"" if saved == OK else "CACHE_WRITE_FAILED")
-			_pump())
+		http.request_completed.connect(_on_completed.bind(http, id, generation, started, trace_id))
 		var error := http.request(_session.server+"/get_image",PackedStringArray(["Content-Type: application/json"]),HTTPClient.METHOD_POST,JSON.stringify({"username":_session.username,"token":_session.token,"uuid":id}))
 		if error != OK:
 			_active.erase(id)
 			http.queue_free()
-			_log_access(0, 0, started, trace_id, "failure")
-			_error(id,"NETWORK_ERROR")
+			_log_access(0, 0, started, trace_id, "failure", Events.request_error_detail(error))
+			_error(id,"NETWORK_ERROR",Events.request_error_detail(error))
+
+func _on_completed(result: int, status: int, _headers: PackedStringArray, body: PackedByteArray,
+		http: HTTPRequest, id: String, generation: int, started: int, trace_id: String) -> void:
+	if generation != _generation:
+		return
+	_active.erase(id)
+	http.queue_free()
+	var success := result == HTTPRequest.RESULT_SUCCESS and status == 200
+	var detail := _failure_detail(result, status, body)
+	_log_access(status, body.size(), started, trace_id, "success" if success else "failure", detail)
+	if success:
+		_decode_fetched(id, body, started, trace_id)
+	else:
+		_error(id, "NETWORK_ERROR", detail)
+	_pump()
+
+func _failure_detail(result: int, status: int, body: PackedByteArray) -> String:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		return Events.http_result_name(result)
+	if status != 200:
+		return Events.http_failure_detail(body, status)
+	return ""
+
+func _decode_fetched(id: String, body: PackedByteArray, started: int, trace_id: String) -> void:
+	var decode_started := Time.get_ticks_usec()
+	var image := _decode(body)
+	_log_performance("decode", Time.get_ticks_usec() - decode_started, body.size(),
+		"success" if image != null else "failure", trace_id)
+	if image == null:
+		_error(id, "INVALID_IMAGE", "image payload could not be decoded")
+		return
+	var saved := _save(id, body)
+	if saved != OK:
+		_volatile[id] = image
+	_ready_image(id, image, "" if saved == OK else "CACHE_WRITE_FAILED")
 func _ready_image(id: String,image: Image,code: String) -> void:
 	var thumb: Image = image.duplicate()
 	var scale := minf(1.0,480.0/maxi(image.get_width(),image.get_height()))
@@ -179,13 +194,17 @@ func _ready_image(id: String,image: Image,code: String) -> void:
 		_volatile.erase(old)
 	changed.emit(id,get_state(id))
 	if _logger != null:
-		_logger.log_info("info_history_image",{"reply_id":id,"code":"OK" if code.is_empty() else code,"phase":"complete"})
+		_logger.record_as("storage", "storage_history_image_ready", {"scope":"file", "operation":"image_fetch",
+			"outcome":"success" if code.is_empty() else "failure", "duration_ms":0,
+			"reply_id":id, "code":"OK" if code.is_empty() else code, "phase":"complete"})
 
-func _error(id: String,code: String) -> void:
+func _error(id: String,code: String,detail: String = "") -> void:
 	_states[id] = {"status":"error","texture":null,"original_size":Vector2i.ZERO,"code":code}
 	changed.emit(id,get_state(id))
 	if _logger != null:
-		_logger.log_error("error_history_image",{"reply_id":id,"code":code,"detail":code,"phase":"error"})
+		_logger.record_as("storage", "storage_history_image_failed", {"scope":"file", "operation":"image_fetch",
+			"outcome":"failure", "duration_ms":0, "reply_id":id, "code":code, "detail":detail,
+			"phase":"error", "level":"ERROR"})
 func _save(id: String,bytes: PackedByteArray) -> Error:
 	var started := Time.get_ticks_usec()
 	var transaction_id := Schema.new_transaction_id()
@@ -199,14 +218,16 @@ func _save(id: String,bytes: PackedByteArray) -> Error:
 	if error == OK:
 		_prune_scope_bytes()
 	return error
-func _log_access(status: int, bytes: int, started: int, trace_id: String, outcome: String) -> void:
-	var response := {"ok":outcome == "success", "code":"" if outcome == "success" else "NETWORK_ERROR"}
+func _log_access(status: int, bytes: int, started: int, trace_id: String, outcome: String, detail: String = "") -> void:
+	var response := {"ok":outcome == "success", "code":"OK" if outcome == "success" else "NETWORK_ERROR",
+		"status":status, "detail":detail}
 	Events.http(_logger, response, status, bytes, started, trace_id, "/get_image", "POST")
 func _log_performance(operation: String, duration_us: int, bytes: int, outcome: String, trace_id: String) -> void:
 	if _logger == null:
 		return
-	_logger.log_performance("performance_image", {"operation":operation, "outcome":outcome,
-		"duration_ms":int(duration_us / 1000), "bytes":bytes, "trace_id":trace_id})
+	_logger.record_as("storage", "storage_image_operation", {"scope":"file", "operation":operation,
+		"outcome":outcome, "duration_ms":int(duration_us / 1000), "bytes":bytes,
+		"code":"OK" if outcome == "success" else "INVALID_IMAGE", "phase":"complete"})
 func _log_transaction(transaction_id: String, operation: String, success: bool, started: int, error: int) -> void:
 	Events.file_transaction(_logger, "history", operation, transaction_id, success, started,
 		"OK" if success else "CACHE_WRITE_FAILED", {"detail":"" if success else error_string(error)})

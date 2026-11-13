@@ -5,7 +5,7 @@ signal write_failed(error: int)
 const Schema = preload("res://src/storage/log_schema.gd")
 const Release = preload("res://src/storage/release_info.gd")
 const MODULES := Schema.MODULES
-const SCHEMA_VERSION := 2
+const SCHEMA_VERSION := 3
 const DEFAULT_MAX_BYTES := 8 * 1024 * 1024
 const DEFAULT_MAX_ENTRIES := 50000
 const MAX_RUNS := 50
@@ -35,6 +35,10 @@ var _dropped_debug := 0
 var _dropped_pending := 0
 var _schema_warnings := 0
 var _write_failures := 0
+var _limit_reported := false
+var _dropped_limit := 0
+var _pending_drop_requested := false
+var _pending_drop_reported := false
 
 func _init(directory: String = "user://logs", max_bytes: int = DEFAULT_MAX_BYTES, environment: Variant = null, max_entries: int = DEFAULT_MAX_ENTRIES) -> void:
 	_environment = environment if environment is Resource else preload("res://src/platform/godot_runtime_environment.gd").new()
@@ -53,91 +57,106 @@ func _init(directory: String = "user://logs", max_bytes: int = DEFAULT_MAX_BYTES
 	_meta = {"id":_id, "started":Time.get_datetime_string_from_system(true) + "Z", "pid":_environment.process_id(), "closed":false, "complete":true,
 		"schema_version":SCHEMA_VERSION, "debug_enabled":_debug_enabled,
 		"release":Release.get_info(), "engine":Engine.get_version_info().string, "os":_environment.os_name(), "architecture":Engine.get_architecture_name(),
-		"retention":{"max_bytes":_max_bytes, "max_entries":_max_entries, "max_runs":MAX_RUNS}}
+		"retention":{"max_bytes":_max_bytes, "max_entries":_max_entries, "max_runs":MAX_RUNS},
+		"dropped_limit":0, "dropped_pending":0, "dropped_debug":0}
 
-## 兼容入口：事件名可以是旧名，category 由 schema 推导。
-func record(event: String, fields: Dictionary = {}) -> Error:
+func record_as(category: String, event: String, fields: Dictionary = {}) -> Error:
+	var scoped := fields.duplicate(true)
+	var resolved := category if Schema.is_category(category) else Schema.category_for(event, scoped)
+	scoped.category = resolved
+	return _record_entry(resolved, event, scoped)
+
+func _record_entry(category: String, event: String, fields: Dictionary) -> Error:
 	if _closed or _token.search(event) == null:
 		return ERR_INVALID_PARAMETER
-	var category := Schema.category_for(event, fields)
 	var scoped := fields.duplicate(true)
-	if not Schema.is_origin(scoped.get("origin")):
-		scoped.origin = Schema.infer_origin(event, scoped, category)
-	if category == "debug" and not _debug_enabled:
+	_prepare_fields(scoped, event, category)
+	var level := _resolved_level(category, scoped)
+	if level == "DEBUG" and not _debug_enabled:
 		_dropped_debug += 1
 		return OK
+	var entry := _build_entry(category, event, scoped, level)
+	return _commit_built(entry, category)
+
+func _prepare_fields(scoped: Dictionary, event: String, category: String) -> void:
+	if not Schema.is_origin(scoped.get("origin")):
+		scoped.origin = Schema.infer_origin(event, scoped, category)
+
+func _resolved_level(category: String, scoped: Dictionary) -> String:
+	var level := Schema.default_level(category, scoped)
+	if scoped.get("level") is String and Schema.is_level(scoped.level):
+		return scoped.level
+	return level
+
+func _build_entry(category: String, event: String, scoped: Dictionary, level: String) -> Dictionary:
 	var entry := {"time":Time.get_datetime_string_from_system(true) + "Z", "elapsed_ms":Time.get_ticks_msec() - _started,
-		"run_id":_id, "seq":_seq, "category":category, "event":event,
-		"level":Schema.default_level(category, fields), "module":Schema.module_for(event, fields), "message":Schema.explanation(event)}
-	var canonical := Schema.canonical_event(event)
-	if Schema.EVENT_REGISTRY.has(canonical):
-		entry.phase = Schema.EVENT_REGISTRY[canonical].get("phase", "unknown")
+		"run_id":_id, "seq":_seq, "category":category, "event":event, "level":level,
+		"module":Schema.module_for(event, scoped), "message":Schema.explanation(event)}
+	if Schema.EVENT_REGISTRY.has(event):
+		entry.phase = Schema.EVENT_REGISTRY[event].get("phase", "unknown")
 	_seq += 1
 	_apply_fields(entry, scoped)
 	_normalize_entry(entry, category)
+	if not entry.get("code") is String:
+		entry.code = ""
+	if not entry.get("detail") is String:
+		entry.detail = ""
 	var missing := Schema.apply_defaults(entry, category)
 	if not missing.is_empty():
 		_schema_warnings += 1
+	return entry
+
+func _commit_built(entry: Dictionary, _category: String) -> Error:
 	var written := _commit_entry(entry)
 	var error: Error = written.error
-	if error != OK:
-		# 普通磁盘失败保留内存视图；超过条数上限则拒绝写入，保证本次运行有界。
-		if not written.limit_rejected:
-			_entries.append(entry)
+	if error != OK and not written.limit_rejected:
+		# 普通磁盘失败保留内存视图；容量超限的条目直接丢弃。
+		_entries.append(entry)
 		_on_write_error(error)
-	entry_added.emit(entry.duplicate(true))
+	if not written.limit_rejected:
+		entry_added.emit(entry.duplicate(true))
 	return error
 
 func _commit_entry(entry: Dictionary) -> Dictionary:
 	var serialized := JSON.stringify(entry).to_utf8_buffer()
-	var error := ERR_OUT_OF_MEMORY if _entries.size() >= _max_entries else OK
-	var limit_rejected := error == ERR_OUT_OF_MEMORY
-	if not limit_rejected:
-		error = _ensure_directory()
+	var is_over_limit := _entries.size() >= _max_entries
+	if not is_over_limit:
+		is_over_limit = _archive_size() + serialized.size() + 1 > _max_bytes
+	if is_over_limit:
+		_dropped_limit += 1
+		if not _limit_reported:
+			_limit_reported = true
+			_meta.complete = false
+			_write_limit_diagnostic()
+			_sync_drop_metadata()
+			_save_metadata()
+			write_failed.emit(ERR_OUT_OF_MEMORY)
+		return {"error":ERR_OUT_OF_MEMORY, "limit_rejected":true}
+	var error := _ensure_directory()
 	if error != OK:
-		return {"error":error, "limit_rejected":limit_rejected}
+		return {"error":error, "limit_rejected":false}
 	var written := _write_entry(serialized)
 	if written.error == OK:
 		_entries.append(entry)
 	return written
+
+## 首次超限时额外写入一条诊断条目（软上限），之后静默丢弃，避免反复同步写盘。
+func _write_limit_diagnostic() -> void:
+	var fields := {"outcome":"failure", "code":"LOG_LIMIT_REACHED", "phase":"error", "level":"ERROR",
+		"detail":"log capacity reached (%d entries / %d bytes); later entries are dropped in this run" % [_max_entries, _max_bytes]}
+	var entry := _build_entry("system", "log_limit_reached", fields, "ERROR")
+	var written := _write_entry(JSON.stringify(entry).to_utf8_buffer())
+	if written.error == OK:
+		_entries.append(entry)
+		entry_added.emit(entry.duplicate(true))
+	else:
+		_write_failures += 1
 
 func _on_write_error(error: int) -> void:
 	_meta.complete = false
 	_write_failures += 1
 	_save_metadata()
 	write_failed.emit(error)
-
-func record_as(category: String, event: String, fields: Dictionary = {}) -> Error:
-	var scoped := fields.duplicate(true)
-	scoped.category = category if Schema.is_category(category) else Schema.category_for(event, scoped)
-	return record(event, scoped)
-
-func log_error(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("error", event, fields)
-
-func log_warning(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("warning", event, fields)
-
-func log_info(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("info", event, fields)
-
-func log_debug(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("debug", event, fields)
-
-func log_access(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("access", event, fields)
-
-func log_security(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("security", event, fields)
-
-func log_performance(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("performance", event, fields)
-
-func log_transaction(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("transaction", event, fields)
-
-func log_runtime(event: String, fields: Dictionary = {}) -> Error:
-	return record_as("runtime", event, fields)
 
 ## 工作线程只入队，主线程 drain 后统一写盘。
 func record_threadsafe(category: String, event: String, fields: Dictionary = {}) -> void:
@@ -148,22 +167,38 @@ func record_threadsafe(category: String, event: String, fields: Dictionary = {})
 	if _pending.size() >= MAX_PENDING:
 		_pending.pop_front()
 		_dropped_pending += 1
+		_pending_drop_requested = true
 	_pending.append(item)
 	_pending_mutex.unlock()
 
 func drain() -> int:
-	# _process 每帧都会调用；没有后台日志时不要复制/清空整个队列。
-	if get_pending_count() == 0:
-		return 0
+	var items: Array[Dictionary] = []
+	var report_drop := false
 	_pending_mutex.lock()
-	var items := _pending.duplicate()
-	_pending.clear()
+	if not _pending.is_empty():
+		items = _pending.duplicate()
+		_pending.clear()
+	if _pending_drop_requested and not _pending_drop_reported:
+		_pending_drop_reported = true
+		_pending_drop_requested = false
+		report_drop = true
 	_pending_mutex.unlock()
+	# _process 每帧都会调用；没有后台日志时不要复制/清空整个队列。
+	if items.is_empty() and not report_drop:
+		return 0
 	for item in items:
 		if _closed:
 			break
 		record_as(str(item.category), str(item.event), item.fields)
+	if report_drop:
+		_record_pending_drop()
 	return items.size()
+
+## 后台队列溢出每次运行只报告一次；总量留在 metadata 与状态栏。
+func _record_pending_drop() -> void:
+	record_as("system", "log_pending_dropped", {"outcome":"failure", "code":"LOG_PENDING_DROPPED",
+		"phase":"warning", "level":"WARN", "count":_dropped_pending,
+		"detail":"background log queue overflowed; oldest entries were dropped"})
 
 func get_pending_count() -> int:
 	_pending_mutex.lock()
@@ -193,7 +228,8 @@ func get_stats() -> Dictionary:
 		by_origin[origin] = int(by_origin.get(origin, 0)) + 1
 	return {"entries":_entries.size(), "by_category":by_category, "by_level":by_level, "by_origin":by_origin,
 		"dropped_debug":_dropped_debug, "dropped_pending":_dropped_pending,
-		"schema_warnings":_schema_warnings, "write_failures":_write_failures, "pending":get_pending_count()}
+		"dropped_limit":_dropped_limit, "schema_warnings":_schema_warnings,
+		"write_failures":_write_failures, "pending":get_pending_count()}
 
 func ensure_ready() -> Error:
 	return OK if _initialized else _ensure_directory()
@@ -208,17 +244,23 @@ func finish() -> void:
 	if _closed:
 		return
 	drain()
-	record("runtime_app_stopped", {"phase":"stopped", "reason":"normal", "uptime_ms":Time.get_ticks_msec() - _started, "pid":_environment.process_id()})
+	record_as("business", "app_stopped", {"phase":"stopped", "reason":"normal", "uptime_ms":Time.get_ticks_msec() - _started, "pid":_environment.process_id()})
 	_close_archive()
 	_closed = true
 	_meta.closed = true
 	_meta.entries = _entries.size()
+	_sync_drop_metadata()
 	if _save_metadata() != OK:
 		_meta.complete = false
 		_write_failures += 1
 		write_failed.emit(ERR_CANT_CREATE)
 
 func list_runs() -> Array[Dictionary]:
+	var runs := _all_runs()
+	runs.assign(runs.filter(func(run): return int(run.get("schema_version", 1)) >= SCHEMA_VERSION))
+	return runs
+
+func _all_runs() -> Array[Dictionary]:
 	var runs: Array[Dictionary] = []
 	if not DirAccess.dir_exists_absolute(_directory):
 		return runs
@@ -250,10 +292,7 @@ func _finalize_run_metadata(data: Dictionary, id: String) -> void:
 		# 新格式把条数/完整性写进元数据；只确认归档仍在，不再逐行解析 8 MiB JSONL。
 		data.complete = data.get("complete", false) and FileAccess.file_exists(_path(id, ".jsonl"))
 	else:
-		# 旧归档不在列表阶段逐行解析：8 MiB × 50 份会冻结启动。
-		# 保留元数据声明并标记未校验；用户选中后再按需读取正文。
-		data.complete = data.get("complete", false)
-		data.legacy_unverified = true
+		data.complete = false
 
 func read_entries(run_id: String = "") -> Array[Dictionary]:
 	if run_id.is_empty() or run_id == _id:
@@ -271,6 +310,7 @@ func export_run(run_id: String, destination_zip: String) -> Error:
 		if run.id == run_id:
 			metadata = run
 	if run_id == _id:
+		_sync_drop_metadata()
 		metadata = _meta.duplicate(true)
 	if metadata.is_empty():
 		return ERR_DOES_NOT_EXIST
@@ -292,9 +332,15 @@ func export_run(run_id: String, destination_zip: String) -> Error:
 		"os":_environment.os_name(), "architecture":Engine.get_architecture_name(), "schema_version":int(metadata.get("schema_version", SCHEMA_VERSION)),
 		"closed":metadata.get("closed",false), "complete":metadata.get("complete",false) and read.complete,
 		"debug_enabled":metadata.get("debug_enabled", false), "count":read.entries.size(), "counts_by_category":counts,
-		"counts_by_origin":origin_counts,
+		"counts_by_origin":origin_counts, "dropped_limit":int(metadata.get("dropped_limit", 0)),
+		"dropped_pending":int(metadata.get("dropped_pending", 0)), "dropped_debug":int(metadata.get("dropped_debug", 0)),
 		"retention":metadata.get("retention", {"max_bytes":_max_bytes, "max_entries":_max_entries, "max_runs":MAX_RUNS})}
 	return _write_export(destination_zip, [["events.jsonl",events],["readable.txt",readable],["environment.json",JSON.stringify(summary)]])
+
+func _sync_drop_metadata() -> void:
+	_meta.dropped_limit = _dropped_limit
+	_meta.dropped_pending = _dropped_pending
+	_meta.dropped_debug = _dropped_debug
 
 func _ensure_directory() -> Error:
 	if _initialized:
@@ -338,7 +384,7 @@ func _save_metadata() -> Error:
 	return error
 
 func _prune() -> void:
-	var runs := list_runs()
+	var runs := _all_runs()
 	var excess := runs.size() - MAX_RUNS
 	runs.reverse()
 	for run in runs:
@@ -371,6 +417,12 @@ func _jsonl_size(path: String) -> int:
 	var size := file.get_length()
 	file.close()
 	return size
+
+## 写入前只探测一次已有 JSONL 大小；后续由 _append_entry_file 增量维护。
+func _archive_size() -> int:
+	if _archive_bytes < 0:
+		_archive_bytes = _jsonl_size(_path(_id, ".jsonl"))
+	return _archive_bytes
 
 func _read_archive(id: String) -> Dictionary:
 	var result := {"entries":[], "complete":true}
@@ -426,6 +478,9 @@ func _apply_string_field(entry: Dictionary, key: String, value: String) -> void:
 		_apply_detail_field(entry, key, value)
 
 func _apply_enum_field(entry: Dictionary, key: String, value: String) -> void:
+	if key in ["code", "reason_code"] and value.is_empty():
+		entry[key] = ""
+		return
 	entry[key] = _enum_value(key, value)
 
 func _enum_value(key: String, value: String) -> String:
@@ -473,14 +528,10 @@ func _normalize_entry(entry: Dictionary, category: String) -> void:
 	_normalize_runtime(entry, category)
 
 func _normalize_trace(entry: Dictionary, category: String) -> void:
-	if category in ["access", "security", "performance", "transaction"] and not Schema.is_trace_id(entry.get("trace_id")):
-		if category == "transaction" and Schema.is_token(entry.get("transaction_id")):
-			entry.trace_id = entry.transaction_id
-		else:
-			entry.trace_id = Schema.new_trace_id(category.left(2))
-	if category == "transaction" and not Schema.is_token(entry.get("transaction_id")):
-		entry.transaction_id = Schema.new_transaction_id()
-		entry.trace_id = entry.transaction_id
+	if category != "network":
+		entry.erase("trace_id")
+	elif not Schema.is_trace_id(entry.get("trace_id")):
+		entry.trace_id = Schema.new_trace_id("net")
 
 func _normalize_runtime(entry: Dictionary, category: String) -> void:
 	if category == "runtime":
@@ -488,18 +539,8 @@ func _normalize_runtime(entry: Dictionary, category: String) -> void:
 		entry.pid = int(entry.get("pid", _environment.process_id()))
 
 func _write_entry(serialized: PackedByteArray) -> Dictionary:
-	var error := OK
-	var limit_rejected := false
 	var path := _path(_id, ".jsonl")
-	if _archive_bytes < 0:
-		_archive_bytes = _jsonl_size(path)
-	if _entries.size() >= _max_entries or _archive_bytes + serialized.size() + 1 > _max_bytes:
-		error = ERR_OUT_OF_MEMORY
-		_meta.complete = false
-		limit_rejected = true
-	else:
-		error = _append_entry_file(path, serialized)
-	return {"error":error,"limit_rejected":limit_rejected}
+	return {"error":_append_entry_file(path, serialized), "limit_rejected":false}
 
 func _append_entry_file(path: String, serialized: PackedByteArray) -> Error:
 	var error := OK
@@ -564,8 +605,6 @@ func _valid_archive_entry(value: Variant) -> bool:
 func _safe_archive_entry(value: Dictionary) -> Dictionary:
 	var event: String = value.event
 	var category := Schema.category_for(event, value)
-	if event == "engine_error" and value.get("level") == "WARN":
-		category = "warning"
 	var safe := {"event":event,"time":value.time.left(32),"level":value.level,"module":value.module,
 		"message":Schema.explanation(event),"category":category}
 	_copy_metrics(safe, value)
@@ -584,7 +623,7 @@ func _copy_metrics(safe: Dictionary, value: Dictionary) -> void:
 			safe[key] = value[key]
 
 func _copy_strings(safe: Dictionary, value: Dictionary) -> void:
-	for key in ["code","phase","reply_id","reason","schema_missing","run_id"]:
+	for key in ["code","phase","reply_id","reason","schema_missing","run_id","model_type"]:
 		if value.get(key) is String and _token.search(value[key]) != null:
 			safe[key] = _safe_archive_string(key, value[key])
 

@@ -61,6 +61,7 @@ func test_queued_remote_error(session: Node, audio: Node, cache: RefCounted, log
 	check(status.sample_rate == 32000 and status.decoded_frames == 28800, "diagnostic-shaped WAV decodes before remote failure")
 	var terminal := event("remote", "", PackedByteArray(), true, true)
 	terminal.payload.error_code = "TTS_STREAM_ERROR"
+	terminal.payload.error_detail = "upstream synthesis failed"
 	session._receive(terminal)
 	session._receive(terminal)
 	session._receive(event("after", "后一条", Samples.tone(.12), true))
@@ -80,10 +81,13 @@ func check_remote_diagnostics(logger: RefCounted) -> void:
 	var errors := system_errors(logger)
 	if errors.size() == 1:
 		check(errors[0].code == "REMOTE_AUDIO_ERROR" and errors[0].get("reply_id") == "remote".sha256_text().substr(0, 12), "sanitized diagnostic links remote error to its reply")
-	var media_errors: Array = logger.read_entries().filter(func(entry): return entry.event == "error_audio")
+		check(errors[0].get("detail") == "upstream synthesis failed", "system diagnostic carries remote detail")
+	var media_errors: Array = logger.read_entries().filter(func(entry): return entry.event == "audio_error")
 	check(media_errors.size() == 1 and media_errors[0].code == "REMOTE_AUDIO_ERROR", "media diagnostic preserves remote failure classification")
-	var terminals: Array = logger.read_entries().filter(func(entry): return entry.event == "info_reply_received" and entry.get("audio_error", false))
+	check(media_errors[0].get("detail") == "upstream synthesis failed", "media diagnostic carries remote detail")
+	var terminals: Array = logger.read_entries().filter(func(entry): return entry.event == "message_reply_received" and entry.get("audio_error", false))
 	check(terminals.all(func(entry): return entry.get("code") == "TTS_STREAM_ERROR"), "known upstream failure code survives diagnostic sanitization")
+	check(terminals.all(func(entry): return entry.get("detail") == "upstream synthesis failed"), "reply log carries remote detail")
 
 func check_remote_status(session: Node) -> void:
 	var view: Control = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
@@ -106,6 +110,8 @@ func test_local_decode_error(session: Node, logger: RefCounted) -> void:
 	session._receive(malformed)
 	check(await until(func(): return session.get_audio_state().queued == 0), "local decode failure terminates")
 	check(system_errors(logger).size() == 2 and session.get_state().code == "AUDIO_ERROR", "local failure also reports once using existing UI code")
+	var media_errors: Array = logger.read_entries().filter(func(entry): return entry.event == "audio_error")
+	check(not media_errors[-1].get("detail", "").is_empty(), "local decode failure carries decoder detail")
 	session._receive(malformed)
 	session._present_replies()
 	check(system_errors(logger).size() == 2, "duplicate failed terminal cannot repeat local reminder")
@@ -135,7 +141,7 @@ func test_active_remote_error(session: Node, logger: RefCounted) -> void:
 	check(system_errors(logger).size() == 4, "recovery never repeats past errors")
 
 func system_errors(logger: RefCounted) -> Array:
-	return logger.read_entries().filter(func(entry): return entry.event == "error_system")
+	return logger.read_entries().filter(func(entry): return entry.event == "message_error")
 
 func test_partial_local_error(session: Node, cache: RefCounted, logger: RefCounted) -> void:
 	for pair in [["invalid-fragment", "INVALID_BASE64"], ["truncated-final", "TRUNCATED_AUDIO"]]:
@@ -147,8 +153,9 @@ func test_partial_local_error(session: Node, cache: RefCounted, logger: RefCount
 		session._receive(terminal)
 		check(await until(func(): return session.get_audio_state().queued == 0), "partial local failure ends without blocking: " + pair[0])
 		check(system_errors(logger).size() == previous_count + 1 and session.get_state().code == "AUDIO_ERROR", "partial decode failure reports exactly once as local")
-		var media_errors: Array = logger.read_entries().filter(func(entry): return entry.event == "error_audio")
+		var media_errors: Array = logger.read_entries().filter(func(entry): return entry.event == "audio_error")
 		check(media_errors[-1].code == pair[1], "specific local decoder error survives diagnostics")
+		check(not media_errors[-1].get("detail", "").is_empty(), "partial decoder failure carries detail")
 		check(cache.lookup(pair[0]).is_empty() and cache._pending.is_empty(), "partial failed audio is never committed")
 		check(session.get_messages().any(func(message): return message.text == pair[0]), "partial local failure preserves text")
 
@@ -159,7 +166,7 @@ func test_failed_audio_tail(session: Node, cache: RefCounted, logger: RefCounted
 	session._receive(terminal)
 	check(await until(func(): return session.get_audio_state().queued == 0), "failure flag takes precedence over nonempty terminal audio")
 	check(system_errors(logger).size() == previous_count + 1, "failed nonempty terminal reports once")
-	var received: Array = logger.read_entries().filter(func(entry): return entry.event == "debug_audio_received" and entry.reply_id == "failed-tail".sha256_text().left(12))
+	var received: Array = logger.read_entries().filter(func(entry): return entry.event == "audio_frames_received" and entry.reply_id == "failed-tail".sha256_text().left(12))
 	check(received.is_empty() and cache.lookup("failed-tail").is_empty() and cache._pending.is_empty(), "failed terminal bytes never enter decoder or cache")
 	session._receive(terminal)
 	check(system_errors(logger).size() == previous_count + 1, "completed nonempty failure terminal remains idempotent")

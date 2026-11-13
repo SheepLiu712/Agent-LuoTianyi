@@ -50,7 +50,7 @@ func _write_encrypted(server: String, username: String, scope: String, encrypted
 
 func _save_failure(server: String, username: String, transaction_id: String, started: int, code: String, error: Error) -> Error:
 	_log_token("write", server, username, "failure", code)
-	_log_transaction(transaction_id, false, started, code)
+	_log_transaction(transaction_id, false, started, code, error)
 	return error
 
 func read(server: String, username: String) -> Dictionary:
@@ -87,5 +87,6 @@ func forget(server: String, username: String) -> Error:
 func _log_token(action: String, server: String, username: String, outcome: String, code: String) -> void:
 	Events.security_token(_logger, action, Schema.hash_subject(server, username), outcome, code)
 
-func _log_transaction(transaction_id: String, success: bool, started: int, code: String) -> void:
-	Events.file_transaction(_logger, "account", "credential_save", transaction_id, success, started, code)
+func _log_transaction(transaction_id: String, success: bool, started: int, code: String, error: Error = OK) -> void:
+	Events.file_transaction(_logger, "account", "credential_save", transaction_id, success, started, code,
+		{"detail":"" if success else error_string(error)})

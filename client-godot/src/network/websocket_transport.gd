@@ -43,16 +43,19 @@ func start(session: Dictionary) -> Error:
 		return ERR_INVALID_PARAMETER
 	if not ServerAddress.allows_insecure(base):
 		if _logger != null:
-			_logger.log_security("security_ws_auth", {"action":"connect", "outcome":"denied", "reason_code":"INSECURE_SERVER",
-				"subject":Schema.hash_subject(base, str(session.username)), "channel":"ws"})
+			_logger.record_as("network", "network_ws_auth", {"action":"connect", "outcome":"denied",
+				"reason_code":"INSECURE_SERVER", "code":"INSECURE_SERVER",
+				"subject":Schema.hash_subject(base, str(session.username)), "channel":"ws",
+				"route":"/chat_ws", "duration_ms":0})
 		return ERR_INVALID_PARAMETER
 	var fingerprint := JSON.stringify([base, session.username, session.message_token]).sha256_text()
 	stop()
 	if fingerprint == _rejected:
 		if _logger != null:
-			_logger.log_security("security_ws_auth", {"action":"auth", "outcome":"denied", "reason_code":"AUTH_REJECTED",
+			_logger.record_as("network", "network_ws_auth", {"action":"auth", "outcome":"denied",
+				"reason_code":"AUTH_REJECTED", "code":"AUTH_REJECTED",
 				"subject":Schema.hash_subject(base, str(session.username)), "channel":"ws",
-				"trace_id":Schema.new_trace_id("ws")})
+				"route":"/chat_ws", "duration_ms":0, "trace_id":Schema.new_trace_id("ws")})
 		_set_state("auth_rejected", "AUTH_REJECTED")
 		return ERR_UNAUTHORIZED
 	_session = {"server":base, "username":session.username, "message_token":session.message_token}
@@ -95,17 +98,18 @@ func _tick_reconnect(now: int) -> void:
 
 func _tick_deadline(now: int) -> void:
 	if _state.phase in ["connecting", "authenticating"] and now >= _deadline:
-		_disconnect(now, "CONNECT_TIMEOUT" if _state.phase == "connecting" else "AUTH_TIMEOUT")
+		var detail := "WebSocket connect deadline exceeded" if _state.phase == "connecting" else "WebSocket auth deadline exceeded"
+		_disconnect(now, "CONNECT_TIMEOUT" if _state.phase == "connecting" else "AUTH_TIMEOUT", detail)
 
 func _tick_heartbeat(now: int) -> void:
 	if _state.phase != "ready":
 		return
 	# TCP 半开时 WebSocketPeer 仍会报 OPEN；只发不收会让连接永远停在 ready。
 	if _ping_sent_at >= 0 and now - _ping_sent_at >= 15000:
-		_disconnect(now, "HEARTBEAT_TIMEOUT")
+		_disconnect(now, "HEARTBEAT_TIMEOUT", "heartbeat response not received within 15 seconds")
 		return
 	if now - _last_rx >= 35000:
-		_disconnect(now, "HEARTBEAT_TIMEOUT")
+		_disconnect(now, "HEARTBEAT_TIMEOUT", "no socket traffic for 35 seconds")
 		return
 	if now >= _next_heartbeat:
 		_ping_id += 1
@@ -129,15 +133,15 @@ func _connect_socket(now: int) -> void:
 	_last_rx = now
 	_set_state("connecting", "")
 	if _peer.connect_to_url(url) != OK:
-		_disconnect(now, "CONNECTION_FAILED")
+		_disconnect(now, "CONNECTION_FAILED", "WebSocketPeer.connect_to_url failed")
 
 func _handle_event(event: Dictionary, now: int) -> void:
 	if event.type == "auth_error":
-		_reject_auth(_error_code(event.payload, "AUTH_REJECTED"))
+		_reject_auth(_error_code(event.payload, "AUTH_REJECTED"), _payload_detail(event.payload))
 		return
 	# 限流、系统未就绪等错误不是凭据失败，不能写永久黑名单。
 	if event.type == "error" and _state.phase == "authenticating":
-		_disconnect(now, _error_code(event.payload, "AUTH_UNAVAILABLE"))
+		_disconnect(now, _error_code(event.payload, "AUTH_UNAVAILABLE"), _payload_detail(event.payload))
 		return
 	if event.type == "auth_ok" and _state.phase == "authenticating":
 		_reconnect_attempt = 0
@@ -154,7 +158,7 @@ func _handle_event(event: Dictionary, now: int) -> void:
 	if event.type in ["system_ready", "auth_ok"]:
 		return
 	if event.type == "system_not_ready":
-		_disconnect(now, "SYSTEM_RUNTIME_NOT_READY")
+		_disconnect(now, "SYSTEM_RUNTIME_NOT_READY", _payload_detail(event.payload))
 		return
 	if _state.phase != "ready":
 		return
@@ -163,13 +167,14 @@ func _send_control(type: String, payload: Dictionary, now: int) -> void:
 	var packet := {"type":type, "payload":payload, "client_msg_id":"c-" + Crypto.new().generate_random_bytes(16).hex_encode(),
 		"ts":int(Time.get_unix_time_from_system() * 1000), "reply_to":null}
 	var encoded := JSON.stringify(packet)
-	if _peer == null or _peer.send_text(encoded) != OK:
-		_disconnect(now, "SEND_FAILED")
+	var error := ERR_UNAVAILABLE if _peer == null else _peer.send_text(encoded)
+	if error != OK:
+		_disconnect(now, "SEND_FAILED", Events.request_error_detail(error))
 	else:
 		_log_ws("send", type, "success", 0, encoded.length())
 
-func _disconnect(now: int, code: String) -> void:
-	_log_ws("disconnect", code, "failure", int((Time.get_ticks_usec() - _connect_started) / 1000), 0, code)
+func _disconnect(now: int, code: String, detail: String = "") -> void:
+	_log_ws("disconnect", code, "failure", int((Time.get_ticks_usec() - _connect_started) / 1000), 0, code, detail)
 	_close_socket()
 	_outbox.disconnected(now)
 	_next_connect = now + mini(2000 * (1 << mini(_reconnect_attempt, 4)), 30000)
@@ -183,19 +188,23 @@ func _close_socket() -> void:
 
 func _protocol_error(now: int) -> void:
 	system_error.emit("INVALID_RESPONSE")
-	_disconnect(now, "INVALID_RESPONSE")
+	_disconnect(now, "INVALID_RESPONSE", "malformed WebSocket packet")
 
 func _set_state(phase: String, code: String) -> void:
 	_state = {"phase":phase, "code":code}
 	state_changed.emit(get_state())
 	if _logger != null:
-		_logger.log_debug("debug_state", {"data":{"phase":phase, "code":code, "reconnect":_reconnect_attempt}})
+		_logger.record_as("system", "state_snapshot", {"level":"DEBUG",
+			"data":{"phase":phase, "code":code, "reconnect":_reconnect_attempt}})
 
-func _reject_auth(code: String) -> void:
+func _reject_auth(code: String, detail: String = "") -> void:
 	if _logger != null:
-		_logger.log_security("security_ws_auth", {"action":"auth", "outcome":"denied", "reason_code":code,
+		_logger.record_as("network", "network_ws_auth", {"action":"auth", "outcome":"denied",
+			"reason_code":code, "code":code,
 			"subject":Schema.hash_subject(str(_session.get("server", "")), str(_session.get("username", ""))),
-			"channel":"ws", "trace_id":_connect_trace if Schema.is_trace_id(_connect_trace) else Schema.new_trace_id("ws")})
+			"channel":"ws", "route":"/chat_ws", "duration_ms":0,
+			"trace_id":_connect_trace if Schema.is_trace_id(_connect_trace) else Schema.new_trace_id("ws"),
+			"detail":detail})
 	_rejected = _fingerprint
 	_close_socket()
 	_session.clear()
@@ -222,10 +231,13 @@ func _poll_socket(now: int) -> void:
 	# 关闭帧可能与 auth_error 或最终回复同批到达：先消费队列再决定是否重连。
 	_receive_packets(now)
 	if _peer != null and ready in [WebSocketPeer.STATE_CLOSED, WebSocketPeer.STATE_CLOSING]:
-		if _state.phase == "authenticating" and _peer.get_close_code() == 1008:
-			_reject_auth("AUTH_REJECTED")
+		var close_code := _peer.get_close_code()
+		var close_reason := _peer.get_close_reason()
+		var detail := _close_detail(close_code, close_reason)
+		if _state.phase == "authenticating" and close_code == 1008:
+			_reject_auth("AUTH_REJECTED", detail)
 		else:
-			_disconnect(now, "CONNECTION_LOST")
+			_disconnect(now, "CONNECTION_LOST", detail)
 
 func _receive_packets(now: int) -> void:
 	var processed := 0
@@ -281,13 +293,30 @@ func _send_pending(now: int) -> void:
 	var packets: Array[Dictionary] = _outbox.take_ready(now, _state.phase == "ready")
 	for packet in packets:
 		var encoded := JSON.stringify(packet)
-		if _peer == null or _peer.send_text(encoded) != OK:
-			_disconnect(now, "SEND_FAILED")
+		var error := ERR_UNAVAILABLE if _peer == null else _peer.send_text(encoded)
+		if error != OK:
+			_disconnect(now, "SEND_FAILED", Events.request_error_detail(error))
 			break
 		_log_ws("send", str(packet.get("type", "unknown")), "success", 0, encoded.length())
 
-func _log_ws(action: String, method: String, outcome: String, duration_ms: int, bytes: int, code: String = "") -> void:
-	Events.ws(_logger, _connect_trace, action, method, outcome, duration_ms, bytes, code)
+func _log_ws(action: String, method: String, outcome: String, duration_ms: int, bytes: int, code: String = "",
+		detail: String = "") -> void:
+	Events.ws(_logger, _connect_trace, action, method, outcome, duration_ms, bytes, code, detail)
+
+func _close_detail(code: int, reason: String) -> String:
+	var parts: Array[String] = []
+	if code > 0:
+		parts.append("close code %d" % code)
+	if not reason.is_empty():
+		parts.append("reason: " + Schema.sanitize_text(reason, 256))
+	return "; ".join(parts)
+
+func _payload_detail(payload: Dictionary) -> String:
+	for key in ["detail", "message", "reason"]:
+		var value: Variant = payload.get(key)
+		if value is String and not value.is_empty():
+			return Schema.sanitize_text(value, 512)
+	return ""
 
 func _flush_audio_access() -> void:
 	if _audio_frames <= 0:

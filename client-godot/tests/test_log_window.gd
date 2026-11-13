@@ -18,6 +18,8 @@ func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(directory)
 	await _check_application(directory)
 	await _check_viewer(directory)
+	await _check_render_cap(directory)
+	await _check_drop_status(directory)
 	_cleanup(directory)
 	print("Log window: ","PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
@@ -57,12 +59,12 @@ func _check_application(directory: String) -> void:
 	if runs.size() == 1:
 		var data := JSON.stringify(observer.read_entries(runs[0].id))
 		_check_engine_warning_captured_with_detail(data)
-		check(data.contains("access_ui") and data.contains("logs"), "application access is logged")
+		check(data.contains("ui_access") and data.contains("logs"), "application access is logged")
 
 func _check_viewer(directory: String) -> void:
 	var logger = Log.new(directory+"/logs")
 	logger.set_debug_enabled(true)
-	logger.record("runtime_app_started", {"phase":"starting", "reason":"normal", "uptime_ms":0, "pid":1})
+	logger.record_as("business", "app_started", {"phase":"starting", "reason":"normal", "uptime_ms":0, "pid":1})
 	if not ResourceLoader.exists("res://scenes/ui/windows/log_window.tscn"):
 		check(false,"log window scene available")
 		logger.finish()
@@ -76,11 +78,11 @@ func _check_viewer(directory: String) -> void:
 	await process_frame
 	_check_filter_widths(viewer)
 	_check_origin_filter(viewer)
-	logger.log_debug("debug_audio_received",{"frames":42})
+	logger.record_as("business", "audio_frames_received",{"level":"DEBUG", "frames":42, "phase":"receiving"})
 	var output: RichTextLabel = viewer.find_children("*","RichTextLabel",true,false)[0]
 	check(output.get_parsed_text().contains("42"),"visible window appends live metrics")
 	var search: LineEdit = viewer.find_children("*","LineEdit",true,false).filter(func(n): return n.placeholder_text.begins_with("搜索"))[0]
-	search.text = "debug_audio_received"
+	search.text = "audio_frames_received"
 	search.text_changed.emit(search.text)
 	await create_timer(0.3).timeout
 	_check_search_filters_display(output)
@@ -89,10 +91,53 @@ func _check_viewer(directory: String) -> void:
 	await process_frame
 	logger.finish()
 
+func _check_render_cap(directory: String) -> void:
+	var logger = Log.new(directory+"/cap")
+	for index in range(1100):
+		logger.record_as("business", "message_queued", {"phase":"queued", "count":index})
+	var viewer = load("res://scenes/ui/windows/log_window.tscn").instantiate()
+	viewer.setup(logger)
+	root.add_child(viewer)
+	viewer.open()
+	await process_frame
+	await process_frame
+	var output: RichTextLabel = viewer.find_children("*","RichTextLabel",true,false)[0]
+	var lines: Array = Array(output.get_parsed_text().split("\n")).filter(func(line): return not line.strip_edges().is_empty())
+	check(lines.size() == 1000, "large run renders only the first 1000 matching entries")
+	var status: Label = viewer.get_node("%Status")
+	check(status.text.contains("仅显示前 1000"), "render cap is announced in status")
+	viewer.queue_free()
+	await process_frame
+	logger.finish()
+
+func _check_drop_status(directory: String) -> void:
+	var logger = Log.new(directory+"/drops", 8 * 1024 * 1024, null, 5)
+	for index in range(7):
+		logger.record_as("business", "message_queued", {"phase":"queued", "count":index})
+	var viewer = load("res://scenes/ui/windows/log_window.tscn").instantiate()
+	viewer.setup(logger)
+	root.add_child(viewer)
+	viewer.open()
+	await process_frame
+	await process_frame
+	var status: Label = viewer.get_node("%Status")
+	check(status.text.contains("已丢弃") and status.text.contains("容量 2"), "dropped entries are visible in status")
+	viewer.queue_free()
+	await process_frame
+	logger.finish()
+
 func _cleanup(directory: String) -> void:
 	for file in DirAccess.get_files_at(directory+"/logs"):
 		DirAccess.remove_absolute(directory+"/logs/"+file)
 	DirAccess.remove_absolute(directory+"/logs")
+	if DirAccess.dir_exists_absolute(directory+"/cap"):
+		for file in DirAccess.get_files_at(directory+"/cap"):
+			DirAccess.remove_absolute(directory+"/cap/"+file)
+		DirAccess.remove_absolute(directory+"/cap")
+	if DirAccess.dir_exists_absolute(directory+"/drops"):
+		for file in DirAccess.get_files_at(directory+"/drops"):
+			DirAccess.remove_absolute(directory+"/drops/"+file)
+		DirAccess.remove_absolute(directory+"/drops")
 	DirAccess.remove_absolute(directory)
 func _check_late_opening_retains_first_startup_entry(texts: Variant) -> void:
 	check(texts.size() == 1 and texts[0].get_parsed_text().contains("客户端启动"),"late opening retains first startup entry")
@@ -107,7 +152,7 @@ func _check_application_exit_closes_startup_archive(runs: Variant) -> void:
 	check(runs.size() == 1 and runs[0].closed,"application exit closes startup archive")
 
 func _check_search_filters_display(output: Variant) -> void:
-	check(output.get_parsed_text().contains("debug_audio_received") and not output.get_parsed_text().contains("runtime_app_started"),"search filters display")
+	check(output.get_parsed_text().contains("audio_frames_received") and not output.get_parsed_text().contains("app_started"),"search filters display")
 
 func _check_filter_widths(viewer: Variant) -> void:
 	for control in viewer.find_children("*","Button",true,false):

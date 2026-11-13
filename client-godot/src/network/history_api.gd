@@ -40,7 +40,7 @@ func fetch_page(session: Dictionary, end_index: int = -1, count: int = DEFAULT_C
 	var error := http.request(_url(session, end_index, count), _headers(session), HTTPClient.METHOD_GET)
 	if error != OK:
 		_release(http)
-		return _log_and_return(_failure("NETWORK_ERROR"), 0, 0, started, trace_id)
+		return _log_and_return(_failure("NETWORK_ERROR", 0, Events.request_error_detail(error)), 0, 0, started, trace_id)
 	var response: Dictionary = await _completed
 	_release(http)
 	response.trace_id = trace_id
@@ -92,18 +92,19 @@ func _response(result: int, status: int, body: PackedByteArray) -> Dictionary:
 	if result != HTTPRequest.RESULT_SUCCESS:
 		return _transport_failure(result, status)
 	if status != 200:
-		return _http_failure(status)
+		return _http_failure(status, body)
 	return _parse(status, body)
 
 
 func _transport_failure(result: int, status: int) -> Dictionary:
-	return _failure("TIMEOUT" if result == HTTPRequest.RESULT_TIMEOUT else "NETWORK_ERROR", status)
+	return _failure("TIMEOUT" if result == HTTPRequest.RESULT_TIMEOUT else "NETWORK_ERROR", status,
+		Events.http_result_name(result))
 
 
-func _http_failure(status: int) -> Dictionary:
+func _http_failure(status: int, body: PackedByteArray) -> Dictionary:
 	if status == 401 or status == 403:
-		return _failure("AUTH_REJECTED", status)
-	return _failure("HTTP_ERROR", status)
+		return _failure("AUTH_REJECTED", status, Events.http_failure_detail(body, status))
+	return _failure("HTTP_ERROR", status, Events.http_failure_detail(body, status))
 
 
 func _parse(status: int, body: PackedByteArray) -> Dictionary:
@@ -155,8 +156,8 @@ func _text(session: Dictionary, key: String) -> String:
 	return value if value is String else ""
 
 
-static func _failure(code: String, status: int = 0) -> Dictionary:
-	return {"ok": false, "code": code, "status": status, "data": {}}
+static func _failure(code: String, status: int = 0, detail: String = "") -> Dictionary:
+	return {"ok": false, "code": code, "status": status, "detail": detail, "data": {}}
 
 func _log_and_return(response: Dictionary, status: int, bytes: int, started: int, trace_id: String) -> Dictionary:
 	Events.http(_logger, response, status, bytes, started, trace_id, "/history", "GET")

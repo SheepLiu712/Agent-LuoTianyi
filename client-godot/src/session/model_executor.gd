@@ -53,6 +53,7 @@ func submit(payload: Dictionary) -> void:
 		response.merge({"content":result.content,"usage":result.usage})
 	else:
 		response.error = result.code
+		response.detail = str(result.get("detail", ""))
 	_results[id] = response
 	_result_order.append(id)
 	_trim_results()
@@ -77,7 +78,7 @@ func test_config(type_id: String,config: Dictionary) -> Dictionary:
 	snapshot.enabled = true
 	var generation := _generation
 	var result := await _execute({"type":type_id,"model_kind":snapshot.get("model_kind"),"prompt":"Reply with a JSON object containing ok=true.","params":{},"use_json":snapshot.get("model_capabilities",{}).get("can_use_json",false),"enable_thinking":false},snapshot)
-	return {"ok":false,"code":"CANCELLED"} if generation != _generation else {"ok":result.ok,"code":result.code}
+	return {"ok":false,"code":"CANCELLED","detail":"model test was cancelled"} if generation != _generation else {"ok":result.ok,"code":result.code,"detail":str(result.get("detail", ""))}
 
 func _execute(request: Dictionary,config: Dictionary) -> Dictionary:
 	var valid := _validate_request(request, config)
@@ -105,54 +106,57 @@ func _execute(request: Dictionary,config: Dictionary) -> Dictionary:
 	_requests.erase(http)
 	http.queue_free()
 	var answer := _parse(result,use_json)
-	_log("complete" if answer.ok else "error",answer.code,str(request.type),Time.get_ticks_msec()-started)
+	_log("complete" if answer.ok else "error",answer.code,str(request.type),Time.get_ticks_msec()-started,
+		str(answer.get("detail", "")))
 	return answer
 func _parse(result: Dictionary,use_json: bool) -> Dictionary:
 	if not result.ok:
-		return _failure(result.code)
+		return _failure(result.code, str(result.get("detail", "")))
 	var data: Dictionary = result.data
 	if not data.get("choices") is Array or data.choices.is_empty() or not data.choices[0] is Dictionary or not data.choices[0].get("message") is Dictionary or not data.choices[0].message.get("content") is String:
-		return _failure("INVALID_RESPONSE")
+		return _failure("INVALID_RESPONSE", "choices[0].message.content is missing")
 	var content: String = data.choices[0].message.content
 	if use_json and JSON.new().parse(content) != OK:
-		return _failure("INVALID_JSON")
+		return _failure("INVALID_JSON", "model content is not valid JSON")
 	var usage := _response_usage(data)
 	return {"ok":true,"code":"OK","content":content,"usage":usage}
-func _failure(code: String) -> Dictionary:
-	return {"ok":false,"code":code}
+func _failure(code: String, detail: String = "") -> Dictionary:
+	return {"ok":false,"code":code,"detail":detail}
 
-func _log(phase: String,code: String,type_id: String,elapsed: int) -> void:
+func _log(phase: String,code: String,type_id: String,elapsed: int,detail: String = "") -> void:
 	if _logger != null:
-		_logger.log_performance("performance_model_execution",{"operation":"model_execution","outcome":"success" if code == "OK" else "failure",
-			"phase":phase,"code":code,"reply_id":type_id,"duration_ms":elapsed})
+		_logger.record_as("business", "model_execution", {"operation":"model_execution",
+			"outcome":"success" if code == "OK" else "failure", "phase":phase, "code":code,
+			"model_type":type_id, "duration_ms":elapsed, "detail":detail,
+			"level":"INFO" if code == "OK" else "ERROR"})
 
 func _exit_tree() -> void:
 	stop()
 
 func _validate_request(request: Dictionary, config: Dictionary) -> Dictionary:
 	if not _active:
-		return _failure("CANCELLED")
+		return _failure("CANCELLED", "model executor is stopped")
 	if config.is_empty() or config.get("enabled") != true:
-		return _failure("MODEL_DISABLED")
+		return _failure("MODEL_DISABLED", "model is disabled or has no config")
 	var valid: Dictionary = _settings.validate(str(request.get("type","")),config)
 	if not valid.ok:
-		return _failure(valid.code)
+		return _failure(valid.code, str(valid.get("detail", "")))
 	if request.get("model_kind") != config.model_kind:
-		return _failure("MODEL_KIND_MISMATCH")
+		return _failure("MODEL_KIND_MISMATCH", "request model_kind does not match config")
 	if not request.get("prompt") is String or not request.get("params",{}) is Dictionary or not request.get("use_json",false) is bool or not request.get("enable_thinking",false) is bool:
-		return _failure("INVALID_INPUT")
+		return _failure("INVALID_INPUT", "prompt, params, use_json or enable_thinking has an invalid type")
 	return {"ok":true}
 
 func _validate_media(request: Dictionary, config: Dictionary, use_json: bool, thinking: bool) -> Dictionary:
 	if (use_json and not config.model_capabilities.can_use_json) or (thinking and not config.model_capabilities.can_enable_thinking):
-		return _failure("MODEL_CAPABILITY_MISMATCH")
+		return _failure("MODEL_CAPABILITY_MISMATCH", "model does not support requested JSON or thinking mode")
 	var image: Variant = request.get("image_base64","")
 	if not image is String or (not image.is_empty() and config.model_kind != "vlm"):
-		return _failure("MODEL_KIND_MISMATCH")
+		return _failure("MODEL_KIND_MISMATCH", "image input requires a VLM model")
 	if not image.is_empty():
 		var image_check: Dictionary = Attachment.from_data_uri(image)
 		if not image_check.ok:
-			return _failure(image_check.code)
+			return _failure(image_check.code, str(image_check.get("detail", "image attachment is invalid")))
 	return {"ok":true}
 
 func _request_body(request: Dictionary, config: Dictionary, params: Dictionary, image: String, thinking: bool, use_json: bool) -> Dictionary:

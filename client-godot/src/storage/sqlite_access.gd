@@ -14,8 +14,8 @@ func _init(db: Object) -> void:
 	_db = db
 
 
-static func failure(code: String) -> Dictionary:
-	return {"ok": false, "code": code, "data": {}}
+static func failure(code: String, detail: String = "") -> Dictionary:
+	return {"ok": false, "code": code, "detail": detail, "data": {}}
 
 
 static func success(data: Dictionary = {}) -> Dictionary:
@@ -24,18 +24,23 @@ static func success(data: Dictionary = {}) -> Dictionary:
 
 func query(sql: String, bindings: Array = []) -> Dictionary:
 	if not ready():
-		return failure("CACHE_CONNECTION_INVALID")
+		return failure("CACHE_CONNECTION_INVALID", "database connection is not ready")
 	if not _db.query_with_bindings(sql, bindings):
-		return failure("CACHE_SQL_FAILED")
+		return _sql_failure(sql)
 	return success({"rows": _db.query_result.duplicate(true)})
 
 
 func execute(sql: String, bindings: Array = []) -> Dictionary:
 	if not ready():
-		return failure("CACHE_CONNECTION_INVALID")
+		return failure("CACHE_CONNECTION_INVALID", "database connection is not ready")
 	if not _db.query_with_bindings(sql, bindings):
-		return failure("CACHE_SQL_FAILED")
+		return _sql_failure(sql)
 	return success()
+
+func _sql_failure(sql: String) -> Dictionary:
+	var message: Variant = _db.get("error_message")
+	var detail := str(message) if message is String and not message.is_empty() else "unknown sqlite error"
+	return {"ok": false, "code": "CACHE_SQL_FAILED", "detail": "%s | SQL: %s" % [detail, sql.left(120)], "data": {}}
 
 
 ## 逐条执行多语句块；任一失败即返回，不再继续后续语句。
@@ -50,7 +55,7 @@ func execute_block(block: String) -> Dictionary:
 ## BEGIN IMMEDIATE：写事务一开始就拿写锁，避免提交时才暴露冲突。
 func transaction(action: Callable, label: String = "") -> Dictionary:
 	if not ready():
-		return failure("CACHE_CONNECTION_INVALID")
+		return failure("CACHE_CONNECTION_INVALID", "database connection is not ready")
 	var started := Time.get_ticks_usec()
 	var transaction_id := LogSchema.new_transaction_id()
 	var begun := execute("BEGIN IMMEDIATE")
@@ -121,6 +126,13 @@ func foreign_key_violations() -> Array:
 
 
 func _rollback(failure_result: Dictionary) -> Dictionary:
-	if not execute("ROLLBACK").ok:
-		return failure("CACHE_CONNECTION_INVALID")
+	var rolled := execute("ROLLBACK")
+	if not rolled.ok:
+		# 回滚失败不能覆盖原始 SQL 错误：保留 code/detail，并附上回滚失败原因。
+		var original_code := str(failure_result.get("code", "CACHE_SQL_FAILED"))
+		var original_detail := str(failure_result.get("detail", ""))
+		var rollback_detail := str(rolled.get("detail", "unknown rollback error"))
+		var merged := failure(original_code, "rollback failed: %s | original: %s" % [rollback_detail, original_detail])
+		merged.data = failure_result.get("data", {})
+		return merged
 	return failure_result

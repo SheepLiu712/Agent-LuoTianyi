@@ -117,4 +117,4 @@ func _check_thinking_and_waiting_propagated(session: Variant) -> void:
 	check(thinking_seen and not session.get_state().thinking, "thinking and waiting propagated")
 
 func _check_actual_reply_arrival_is_diagnosable(log_text: Variant) -> void:
-	check(log_text.contains("info_reply_received") and log_text.contains("audio_chars"), "actual reply arrival is diagnosable")
+	check(log_text.contains("message_reply_received") and log_text.contains("audio_chars"), "actual reply arrival is diagnosable")

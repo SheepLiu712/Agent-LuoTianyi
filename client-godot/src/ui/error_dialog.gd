@@ -59,7 +59,8 @@ func show_error(text: String, dialog_title: String = "提示") -> void:
 		return
 	var logger = _logger_ref.get_ref() if _logger_ref != null else null
 	if logger != null:
-		logger.log_warning("warning_ui_error", {"code": "UI_ERROR", "detail": clean, "phase": "failed"})
+		logger.record_as("system", "ui_error_shown", {"code": "UI_ERROR", "detail": clean,
+			"phase": "failed", "level": "WARN"})
 	_queue.append({"text": clean, "title": dialog_title})
 	if _queue.size() > MAX_QUEUE:
 		_queue.pop_front()

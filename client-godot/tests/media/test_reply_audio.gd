@@ -93,7 +93,7 @@ func test_mixer() -> void:
 	check(audio.get_state().queued == 0 and not audio.get_state().playing, "reset releases unfinished streams")
 	check(not played.has("reset"), "reset does not emit old account completion")
 	var log_text := JSON.stringify(logger.read_entries())
-	for event in ["debug_audio_received", "debug_audio_format", "debug_audio_decoded", "info_audio_receive_finished", "info_audio_playback_started", "info_audio_playback_finished", "INVALID_BASE64"]:
+	for event in ["audio_frames_received", "audio_format_detected", "audio_decoded", "audio_receive_finished", "audio_playback_started", "audio_playback_finished", "INVALID_BASE64"]:
 		check(log_text.contains(event), "diagnostic stage " + event)
 	audio.queue_free()
 	await process_frame

@@ -8,21 +8,21 @@ signal state_changed(state: Dictionary)
 const MAX_METADATA := 256
 
 const EVENT_MAP := {
-	"replay_finished":["info", "info_replay_finished", "complete"],
-	"audio_playback_finished":["info", "info_audio_playback_finished", "complete"],
-	"audio_error":["error", "error_audio", "error"],
-	"cache_error":["error", "error_cache", "error"],
-	"replay_started":["info", "info_replay_started", "playing"],
-	"replay_paused":["info", "info_replay_paused", "paused"],
-	"replay_resumed":["info", "info_replay_resumed", "playing"],
-	"replay_stopped":["info", "info_replay_stopped", "stopped"],
-	"audio_received":["debug", "debug_audio_received", "receiving"],
-	"audio_format":["debug", "debug_audio_format", "decoded"],
-	"audio_decoded":["debug", "debug_audio_decoded", "decoded"],
-	"audio_receive_finished":["info", "info_audio_receive_finished", "complete"],
-	"replay_preempted":["warning", "warning_replay_preempted", "warning"],
-	"audio_playback_started":["info", "info_audio_playback_started", "playing"],
-	"audio_underrun":["warning", "warning_audio_underrun", "warning"],
+	"replay_finished":["business", "audio_replay_finished", "INFO", "complete"],
+	"audio_playback_finished":["business", "audio_playback_finished", "INFO", "complete"],
+	"audio_error":["business", "audio_error", "ERROR", "error"],
+	"cache_error":["storage", "storage_cache_write_failed", "ERROR", "error"],
+	"replay_started":["business", "audio_replay_started", "INFO", "playing"],
+	"replay_paused":["business", "audio_replay_paused", "INFO", "paused"],
+	"replay_resumed":["business", "audio_replay_resumed", "INFO", "playing"],
+	"replay_stopped":["business", "audio_replay_stopped", "INFO", "stopped"],
+	"audio_received":["business", "audio_frames_received", "DEBUG", "receiving"],
+	"audio_format":["business", "audio_format_detected", "DEBUG", "decoded"],
+	"audio_decoded":["business", "audio_decoded", "DEBUG", "decoded"],
+	"audio_receive_finished":["business", "audio_receive_finished", "INFO", "complete"],
+	"replay_preempted":["business", "audio_replay_preempted", "WARN", "warning"],
+	"audio_playback_started":["business", "audio_playback_started", "INFO", "playing"],
+	"audio_underrun":["business", "audio_underrun", "WARN", "warning"],
 }
 
 var _decoder_factory: Resource
@@ -30,6 +30,7 @@ var _cache: RefCounted
 var _metadata: Dictionary = {}
 var _metadata_order: Array[String] = []
 var _cache_errors: Dictionary = {}
+var _error_details: Dictionary = {}
 var _replay = preload("res://src/media/cache_replay.gd").new()
 var _logger: RefCounted
 var _streams: Dictionary = {}
@@ -65,7 +66,8 @@ func _init(logger: RefCounted = null, clock: Callable = Callable(), cache: RefCo
 	add_child(_player)
 	set_process(false)
 
-func append_reply_audio(id: String, encoded: String, final: bool, audio_error: bool = false, ephemeral: bool = false) -> void:
+func append_reply_audio(id: String, encoded: String, final: bool, audio_error: bool = false,
+		ephemeral: bool = false, audio_detail: String = "") -> void:
 	set_process(true)
 	if _completed.has(id):
 		return
@@ -80,7 +82,7 @@ func append_reply_audio(id: String, encoded: String, final: bool, audio_error: b
 		if _cache != null:
 			_cache.abort(id)
 	if audio_error:
-		_fail(id, "REMOTE_AUDIO_ERROR")
+		_fail(id, "REMOTE_AUDIO_ERROR", audio_detail)
 		return
 	if not encoded.is_empty():
 		if not _append_encoded(id, item, encoded):
@@ -126,35 +128,48 @@ func reset() -> void:
 	set_process(false)
 
 func _log(event: String, id: String, fields: Dictionary = {}) -> void:
-	if _logger != null:
-		var mapped: Array = EVENT_MAP.get(event, ["info", event, ""])
-		var scoped := fields.duplicate(true)
-		scoped["reply_id"] = id
-		if not str(mapped[2]).is_empty():
-			scoped["phase"] = mapped[2]
-		if mapped[0] in ["error", "warning"]:
-			if event == "audio_underrun" and not scoped.has("code"):
-				scoped["code"] = "BUFFER_LIMIT"
-			if event == "replay_preempted" and not scoped.has("code"):
-				scoped["code"] = "INTERRUPTED"
-			scoped["detail"] = scoped.get("detail", scoped.get("code", ""))
-			scoped["stack"] = scoped.get("stack", [])
-		_logger.record_as(mapped[0], mapped[1], scoped)
+	if _logger == null:
+		return
+	var mapped: Array = EVENT_MAP.get(event, ["business", event, "INFO", "unknown"])
+	var scoped := _log_fields(event, id, fields, mapped)
+	_logger.record_as(mapped[0], mapped[1], scoped)
+
+func _log_fields(event: String, id: String, fields: Dictionary, mapped: Array) -> Dictionary:
+	var scoped := fields.duplicate(true)
+	scoped["reply_id"] = id
+	scoped["phase"] = mapped[3]
+	scoped["level"] = mapped[2]
+	if mapped[0] == "storage":
+		scoped["scope"] = "file"
+		scoped["operation"] = "cache_write"
+		scoped["outcome"] = "failure"
+		scoped["duration_ms"] = 0
+	_apply_audio_defaults(event, mapped, scoped)
+	return scoped
+
+func _apply_audio_defaults(event: String, mapped: Array, scoped: Dictionary) -> void:
+	if event == "audio_underrun" and not scoped.has("code"):
+		scoped["code"] = "BUFFER_LIMIT"
+	if event == "replay_preempted" and not scoped.has("code"):
+		scoped["code"] = "INTERRUPTED"
+	if mapped[2] in ["ERROR", "WARN"] and not scoped.has("code"):
+		scoped["code"] = "AUDIO_ERROR" if mapped[0] == "business" else "CACHE_WRITE_FAILED"
 
 func _end_receive(id: String) -> void:
 	var item: Dictionary = _streams[id]
 	if not item.final:
 		item.final = true
-		_log("audio_receive_finished", id, {"code":item.code})
+		_log("audio_receive_finished", id, {"code":item.code, "detail":_error_details.get(id, "")})
 		receive_finished.emit(id, item.code)
 
-func _fail(id: String, code: String) -> void:
+func _fail(id: String, code: String, detail: String = "") -> void:
 	var item: Dictionary = _streams[id]
 	item.code = code
+	_error_details[id] = detail
 	if _cache != null:
 		_cache.abort(id)
 	item.decoder = null
-	_log("audio_error", id, {"code":code})
+	_log("audio_error", id, {"code":code, "detail":detail})
 	_end_receive(id)
 	if id == _active:
 		_stop_player()
@@ -175,7 +190,7 @@ func _complete() -> void:
 	_streams.erase(id)
 	_active = ""
 	_stop_player()
-	_log("audio_playback_finished", id, {"code":code})
+	_log("audio_playback_finished", id, {"code":code, "detail":_error_details.get(id, "")})
 	playback_finished.emit(id, code)
 
 func _process(_delta: float) -> void:
@@ -191,7 +206,7 @@ func _process(_delta: float) -> void:
 func _expire_streams(now: int) -> void:
 	for id in _streams.keys():
 		if not _streams[id].final and now - int(_streams[id].updated) >= 60000:
-			_fail(id, "AUDIO_TIMEOUT")
+			_fail(id, "AUDIO_TIMEOUT", "no audio received for 60 seconds")
 
 func _pump_active(item: Dictionary, now: int) -> void:
 	if item.decoder == null or item.stopped:
@@ -211,6 +226,7 @@ func set_scope(server: String, username: String) -> Error:
 	_metadata.clear()
 	_metadata_order.clear()
 	_cache_errors.clear()
+	_error_details.clear()
 	# 缓存对纯文字聊天可选：缺少重放能力不得让 transport/账号会话启动失败。
 	return _cache.set_scope(server,username) if _cache != null else OK
 
@@ -221,7 +237,8 @@ func get_message_audio(id: String) -> Dictionary:
 	return {"available":not data.is_empty(), "duration":data.get("duration",0.0),
 		"waveform":data.get("waveform",PackedFloat32Array()), "blocked":_player.playing,
 		"status":_replay.status if _replay.id == id else "idle",
-		"position":_replay.position if _replay.id == id else 0.0, "code":_cache_errors.get(id,"")}
+		"position":_replay.position if _replay.id == id else 0.0, "code":_cache_errors.get(id,""),
+		"detail":_error_details.get(id, "")}
 
 ## 缓存目录被外部写入（如语音迁移）后重新问一次磁盘；
 ## 这里只丢内存缓存并通知界面，不做任何文件操作。
@@ -233,6 +250,7 @@ func forget_audio(ids: Array) -> void:
 		_metadata.erase(id)
 		_metadata_order.erase(id)
 		_cache_errors.erase(id)
+		_error_details.erase(id)
 		_notify_audio(id)
 
 func replay(id: String) -> Error:
@@ -288,7 +306,8 @@ func _cache_failed(id: String) -> void:
 	_streams[id].cache_suppressed = true
 	_cache.abort(id)
 	_cache_errors[id] = "CACHE_WRITE_FAILED"
-	_log("cache_error",id,{"code":"CACHE_WRITE_FAILED"})
+	_error_details[id] = "audio cache write failed"
+	_log("cache_error",id,{"code":"CACHE_WRITE_FAILED", "detail":_error_details[id]})
 	_notify_audio(id)
 
 func _notify_audio(id: String) -> void:
@@ -306,6 +325,7 @@ func _remember_metadata(id: String, data: Dictionary) -> void:
 			continue
 		_metadata.erase(old)
 		_cache_errors.erase(old)
+		_error_details.erase(old)
 
 func _notify_all_audio() -> void:
 	for id in _metadata.keys():
@@ -315,9 +335,10 @@ func _ensure_stream(id: String) -> bool:
 	if not _streams.has(id):
 		if _streams.size() >= 16:
 			_completed[id] = true
-			_log("audio_error", id, {"code":"BUFFER_LIMIT"})
-			_log("audio_receive_finished", id, {"code":"BUFFER_LIMIT"})
-			_log("audio_playback_finished", id, {"code":"BUFFER_LIMIT"})
+			_error_details[id] = "audio stream limit of 16 reached"
+			_log("audio_error", id, {"code":"BUFFER_LIMIT", "detail":_error_details[id]})
+			_log("audio_receive_finished", id, {"code":"BUFFER_LIMIT", "detail":_error_details[id]})
+			_log("audio_playback_finished", id, {"code":"BUFFER_LIMIT", "detail":_error_details[id]})
 			receive_finished.emit(id, "BUFFER_LIMIT")
 			playback_finished.emit(id, "BUFFER_LIMIT")
 			return false
@@ -327,11 +348,11 @@ func _ensure_stream(id: String) -> bool:
 
 func _append_encoded(id: String, item: Dictionary, encoded: String) -> bool:
 	if not _valid_encoded_audio(encoded):
-		_fail(id, "INVALID_BASE64")
+		_fail(id, "INVALID_BASE64", "audio fragment is not valid base64")
 		return false
 	var bytes := Marshalls.base64_to_raw(encoded)
 	if bytes.is_empty() or Marshalls.raw_to_base64(bytes) != encoded:
-		_fail(id, "INVALID_BASE64")
+		_fail(id, "INVALID_BASE64", "audio fragment failed base64 round-trip")
 		return false
 	_log("audio_received", id, {"bytes":bytes.size()})
 	_append_cache(id, item, bytes)
@@ -339,7 +360,7 @@ func _append_encoded(id: String, item: Dictionary, encoded: String) -> bool:
 		return false
 	var status: Dictionary = item.decoder.append(bytes)
 	if not status.ok:
-		_fail(id, status.code)
+		_fail(id, status.code, str(status.get("detail", "decoder rejected audio fragment")))
 		return false
 	if status.sample_rate > 0 and not item.format_logged:
 		_log("audio_format", id, status)
@@ -367,7 +388,7 @@ func _check_queued_frames(id: String) -> bool:
 		if other.decoder != null:
 			queued_frames += int(other.decoder.get_status().queued_frames)
 	if queued_frames > 128 * 1024 * 1024 / 8:
-		_fail(id, "BUFFER_LIMIT")
+		_fail(id, "BUFFER_LIMIT", "decoder queue exceeds 16 MiB")
 		return false
 	return true
 
@@ -375,7 +396,7 @@ func _finish_receive(id: String, item: Dictionary) -> void:
 	if item.decoder != null:
 		var status: Dictionary = item.decoder.finish()
 		if not status.ok:
-			_fail(id, status.code)
+			_fail(id, status.code, str(status.get("detail", "decoder failed to finish audio stream")))
 			return
 		_commit_cache(id, item, status)
 	_end_receive(id)
@@ -423,7 +444,7 @@ func _pump_playback(item: Dictionary, status: Dictionary, now: int) -> void:
 	if count > 0:
 		var frames: PackedVector2Array = item.decoder.read_frames(count)
 		if not _playback.push_buffer(frames):
-			_fail(_active, "PLAYBACK_FAILED")
+			_fail(_active, "PLAYBACK_FAILED", "AudioStreamGeneratorPlayback.push_buffer failed")
 			return
 		_pushed += frames.size()
 		_drain_at = 0
@@ -437,7 +458,7 @@ func _ensure_decoder(id: String, item: Dictionary) -> bool:
 	if item.decoder == null:
 		item.decoder = _decoder_factory.create_decoder()
 		if item.decoder == null:
-			_fail(id, "DECODER_UNAVAILABLE")
+			_fail(id, "DECODER_UNAVAILABLE", "decoder factory returned null")
 			return false
 	return true
 

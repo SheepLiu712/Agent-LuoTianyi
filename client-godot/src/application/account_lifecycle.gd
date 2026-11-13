@@ -43,17 +43,38 @@ func start(session: Dictionary) -> Error:
 	_dynamics.start(session)
 	# 头像只跟着账号走：换账号时先清空再读新账号的那一张。
 	if _avatar != null: _avatar.start(session)
-	for capability in [_appearance,_world,_devices]:
-		if capability == null:
-			continue
-		var capability_result: Error = capability.start(get_context())
-		# 扩展能力允许缺席（ERR_UNAVAILABLE）而不阻断文字聊天；其它启动错误整体回滚。
-		if capability_result != OK and capability_result != ERR_UNAVAILABLE:
-			stop()
-			return capability_result
+	var capability_result := _start_capabilities()
+	if capability_result != OK:
+		stop()
+		return capability_result
 	_active = true
 	_log("start", "success", OK)
 	return OK
+
+## 扩展能力允许缺席（ERR_UNAVAILABLE）而不阻断文字聊天；其它启动错误整体回滚。
+func _start_capabilities() -> Error:
+	var cap_names := ["appearance", "world", "devices"]
+	var caps := [_appearance, _world, _devices]
+	for index in caps.size():
+		var capability = caps[index]
+		if capability == null:
+			continue
+		var cap_name: String = cap_names[index]
+		var result: Error = capability.start(get_context())
+		if result == ERR_UNAVAILABLE:
+			_log_capability(cap_name, result, "account_capability_degraded", "UNAVAILABLE", "WARN", "unavailable")
+		elif result != OK:
+			_log_capability(cap_name, result, "account_capability_failed", "CAPABILITY_START_FAILED", "ERROR", "failed")
+			return result
+	return OK
+
+func _log_capability(cap_name: String, result: Error, event: String, code: String, level: String, state: String) -> void:
+	if _logger == null:
+		return
+	_logger.record_as("business", event, {
+		"phase":"running" if state == "unavailable" else "failed",
+		"code":code, "level":level,
+		"detail":"Capability %s %s: error code %d" % [cap_name, state, result]})
 
 func get_context() -> Dictionary:
 	return _context.duplicate(true)
@@ -75,5 +96,6 @@ func stop() -> void:
 func _log(action: String, outcome: String, result: Error) -> void:
 	if _logger == null:
 		return
-	_logger.log_runtime("runtime_account_lifecycle", {"phase":action, "reason":"account", "outcome":outcome,
-		"code":"OK" if result == OK else "ACCOUNT_START_FAILED"})
+	_logger.record_as("business", "account_lifecycle", {"phase":action, "reason":"account", "outcome":outcome,
+		"code":"OK" if result == OK else "ACCOUNT_START_FAILED",
+		"level":"ERROR" if result != OK else "INFO"})

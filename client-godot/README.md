@@ -69,7 +69,7 @@ python client-godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 正式聊天自动播放服务端 WAV/PCM 分片；同 UUID 聚合，后续回复等前一句实际播完再呈现。支持口型、音量保存、停止当前语音、错误及断线清理；完整语音以临时文件接收、成功终止及原生验证后提交，提供消息重放/暂停/继续/停止，波形来自原生 RMS，进度来自混音器消耗帧。在线语音抢占重放；停止在线声音不取消后续接收和缓存。原生 `PcmStreamDecoder` 与 `WindowsSecurity` 共用 DLL，按上面的 `build_security.py` 命令重建，需分发完整目录。
 
-登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据，单次默认 8 MiB / 5 万条，保留最近50次并保护仍运行实例，当前启动不截断。日志统一分为错误、警告、信息、调试、访问、安全、性能、事务、运行九类，条目带 `category/level/module/trace_id`，可搜索、按类别/级别/模块筛选、复制与导出完整诊断 ZIP，不上传。用哈希 `reply_id`/`trace_id` 关联 HTTP、WS、音频、SQLite 与错误链路；错误原文与堆栈可保留，但不会写入正文、token、Authorization、密钥或 Base64。调试日志默认关闭，`--debug-log` 开启。完整规范见 [日志规范](docs/logging.md)。
+登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据（`schema_version=3`，旧 v2 归档不再显示并随保留策略自然淘汰），单次默认 8 MiB / 5 万条，保留最近 50 次并保护仍运行实例。日志按业务流（`business`）、网络通信（`network`）、存储持久化（`storage`）、系统诊断（`system`）四领域划分并与严重级别（`DEBUG/INFO/WARN/ERROR`）解耦，窗口支持按类别/级别/模块/归属筛选与搜索，单次最多渲染 1000 条匹配记录，可复制或导出完整诊断 ZIP（不上传）。通过哈希 `reply_id`、网络 `trace_id` 与存储 `transaction_id` 关联链路；保留脱敏错误原文与堆栈，不写入正文、token、Authorization、密钥或 Base64。`DEBUG` 级别日志默认关闭，由 `--debug-log` 按级别开启。完整规范见 [日志规范](docs/logging.md)。
 
 `check.ps1` 增量解码及真实混音测试默认使用合成音频；`check_network.ps1` 还验证 loopback WebSocket 到播放器链路、顺序、隐藏音频、停止及断线。Windows 输出驱动验证可运行：
 

@@ -102,7 +102,8 @@ func _fields(preferences: Dictionary) -> Dictionary:
 func _notify() -> void:
 	_state.can_save = _state.phase == "ready" and _state.dirty
 	if _logger != null:
-		_logger.log_info("info_settings_preference",{"phase":_state.phase,"code":_state.code})
+		_logger.record_as("business", "settings_preference",{"phase":_state.phase,"code":_state.code,
+			"level":"WARN" if _state.code not in ["", "OK"] else "INFO"})
 	changed.emit(get_state())
 func _exit_tree() -> void:
 	stop()

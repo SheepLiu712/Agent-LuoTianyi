@@ -194,7 +194,9 @@ func clear(older_than_days: int = 0) -> Error:
 			if removed != OK:
 				result = removed
 	if _logger != null:
-		_logger.log_info("info_cache_cleared",{"code":"OK" if result == OK else "CACHE_CLEAR_FAILED","phase":"complete","count":1})
+		_logger.record_as("storage", "storage_cache_cleared", {"scope":"file", "operation":"cache_clear",
+			"outcome":"success" if result == OK else "failure", "duration_ms":0,
+			"code":"OK" if result == OK else "CACHE_CLEAR_FAILED", "phase":"complete", "count":1})
 	return result
 
 func _now() -> int:
@@ -215,11 +217,16 @@ func _clear_older(days: int) -> Error:
 		var removed := _clear_old_manifest(_directory.path_join(name), cutoff)
 		if removed != OK:
 			result = removed
-	if _logger != null: _logger.log_info("info_cache_cleared", {"code":"OK" if result == OK else "CACHE_CLEAR_FAILED","phase":"complete","count":1})
+	if _logger != null:
+		_logger.record_as("storage", "storage_cache_cleared", {"scope":"file", "operation":"cache_clear",
+			"outcome":"success" if result == OK else "failure", "duration_ms":0,
+			"code":"OK" if result == OK else "CACHE_CLEAR_FAILED", "phase":"complete", "count":1})
 	return result
 func _error(id: String, result: Error) -> Error:
 	if _logger != null:
-		_logger.log_error("error_cache",{"reply_id":id,"code":"CACHE_WRITE_FAILED","detail":error_string(result),"phase":"error"})
+		_logger.record_as("storage", "storage_cache_write_failed", {"scope":"file", "operation":"cache_write",
+			"outcome":"failure", "duration_ms":0, "reply_id":id, "code":"CACHE_WRITE_FAILED",
+			"detail":error_string(result), "phase":"error", "level":"ERROR"})
 	return result
 
 func _log_transaction(transaction_id: String, id: String, metadata: Dictionary, success: bool, started: int) -> void:

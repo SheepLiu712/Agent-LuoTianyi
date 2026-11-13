@@ -164,7 +164,7 @@ func _on_split_dragged(_offset: int) -> void:
 		return
 	_settings.set_value("layout", "ratio", _ratio)
 	if _settings.save_settings() != OK and _log != null:
-		_log.log_warning("warning_settings_save", {"code":"SETTINGS_SAVE_FAILED", "detail":"窗口布局保存失败", "phase":"failed"})
+		_log.record_as("business", "settings_save_failed", {"code":"SETTINGS_SAVE_FAILED", "detail":"窗口布局保存失败", "phase":"failed", "level":"WARN"})
 
 
 func _resize_split() -> void:
@@ -204,7 +204,7 @@ func _persist_composer_height(height: float, key: String) -> void:
 		return
 	_settings.set_value("layout", key, height)
 	if _settings.save_settings() != OK and _log != null:
-		_log.log_warning("warning_settings_save", {"code":"SETTINGS_SAVE_FAILED", "detail":"输入框高度保存失败", "phase":"failed"})
+		_log.record_as("business", "settings_save_failed", {"code":"SETTINGS_SAVE_FAILED", "detail":"输入框高度保存失败", "phase":"failed", "level":"WARN"})
 
 
 func _is_number(value: Variant) -> bool:

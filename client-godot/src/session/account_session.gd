@@ -64,7 +64,9 @@ func select_account(username: String) -> Dictionary:
 	profile.username = username
 	var result := _persist(profile)
 	_emit("ACCOUNT_SELECTED", result != OK)
-	_log_security("select_account", "success" if result == OK else "failure", "ACCOUNT_SELECTED" if result == OK else "STORAGE_ERROR", _profile.server, username)
+	_log_security("select_account", "success" if result == OK else "failure",
+		"ACCOUNT_SELECTED" if result == OK else "STORAGE_ERROR", _profile.server, username,
+		"" if result == OK else error_string(result))
 	return _result(result == OK, "ACCOUNT_SELECTED" if result == OK else "STORAGE_ERROR", result != OK)
 
 func set_login_options(username: String, remember: bool, auto_login: bool) -> Dictionary:
@@ -76,12 +78,18 @@ func set_login_options(username: String, remember: bool, auto_login: bool) -> Di
 	if not remember and _storage.forget_login_token(profile.server, username) != OK:
 		_emit("STORAGE_ERROR", true)
 		return _result(false, "STORAGE_ERROR", true)
+	return _apply_login_options(profile, index, username, remember, auto_login)
+
+func _apply_login_options(profile: Dictionary, index: int, username: String, remember: bool,
+		auto_login: bool) -> Dictionary:
 	profile.accounts[index].remember = remember
 	profile.accounts[index].auto_login = auto_login and remember
 	var result := _persist(profile)
-	_emit("OPTIONS_CHANGED", result != OK)
-	_log_security("options", "success" if result == OK else "failure", "OPTIONS_CHANGED" if result == OK else "STORAGE_ERROR", _profile.server, username)
-	return _result(result == OK, "OPTIONS_CHANGED" if result == OK else "STORAGE_ERROR", result != OK)
+	var failed := result != OK
+	_emit("OPTIONS_CHANGED", failed)
+	_log_security("options", "failure" if failed else "success", "STORAGE_ERROR" if failed else "OPTIONS_CHANGED",
+		_profile.server, username, error_string(result) if failed else "")
+	return _result(not failed, "STORAGE_ERROR" if failed else "OPTIONS_CHANGED", failed)
 
 func remove_account(username: String) -> Dictionary:
 	if _busy: return _result(false, "BUSY")
@@ -95,7 +103,9 @@ func remove_account(username: String) -> Dictionary:
 	if profile.username == username: profile.username = ""
 	var result := _persist(profile)
 	_emit("ACCOUNT_REMOVED", result != OK)
-	_log_security("remove_account", "success" if result == OK else "failure", "ACCOUNT_REMOVED" if result == OK else "STORAGE_ERROR", _profile.server, username)
+	_log_security("remove_account", "success" if result == OK else "failure",
+		"ACCOUNT_REMOVED" if result == OK else "STORAGE_ERROR", _profile.server, username,
+		"" if result == OK else error_string(result))
 	return _result(result == OK, "ACCOUNT_REMOVED" if result == OK else "STORAGE_ERROR", result != OK)
 
 func set_server(address: String) -> Dictionary:
@@ -115,7 +125,8 @@ func set_server(address: String) -> Dictionary:
 		if _persist(profile) != OK: response = _result(false, "STORAGE_ERROR", true)
 		else: response.code = "SERVER_CHANGED"
 	_emit(response.code, response.storage_error)
-	_log_security("change_server", "success" if response.ok else "failure", response.code, address, "")
+	_log_security("change_server", "success" if response.ok else "failure", response.code, address, "",
+		str(response.get("detail", "")))
 	return response
 
 func perform(operation: String, server: String, fields: Dictionary, remember: bool = false, auto_login: bool = false) -> Dictionary:
@@ -138,7 +149,8 @@ func perform(operation: String, server: String, fields: Dictionary, remember: bo
 	elif operation == "auto_login" and response.code == "AUTH_REJECTED":
 		response.storage_error = _forget_options(ServerAddress.normalize(server), str(fields.get("username", ""))) != OK
 	_emit(response.code, response.storage_error)
-	_log_security(operation, "success" if response.ok else "failure", response.code, server, str(fields.get("username", "")), str(response.get("trace_id", "")))
+	_log_security(operation, "success" if response.ok else "failure", response.code, server,
+		str(fields.get("username", "")), str(response.get("detail", "")))
 	return response
 
 
@@ -163,7 +175,8 @@ func login_saved(username: String) -> Dictionary:
 	if not stored.ok:
 		var error := _forget_options(_profile.server, username)
 		_emit("CREDENTIAL_UNAVAILABLE", error != OK)
-		_log_security("login_saved", "failure", "CREDENTIAL_UNAVAILABLE", _profile.server, username)
+		_log_security("login_saved", "failure", "CREDENTIAL_UNAVAILABLE", _profile.server, username,
+			str(stored.get("detail", "")))
 		return _result(false, "CREDENTIAL_UNAVAILABLE", error != OK)
 	_log_security("login_saved", "success", "OK", _profile.server, username)
 	return await perform("auto_login", _profile.server, {"username":username,"token":stored.token}, true, entry.auto_login)
@@ -179,7 +192,9 @@ func logout() -> Error:
 	_session.clear()
 	var result := _forget_options(server, username)
 	_emit("LOGGED_OUT", result != OK)
-	_log_security("logout", "success" if result == OK else "failure", "LOGGED_OUT" if result == OK else "STORAGE_ERROR", server, username)
+	_log_security("logout", "success" if result == OK else "failure",
+		"LOGGED_OUT" if result == OK else "STORAGE_ERROR", server, username,
+		"" if result == OK else error_string(result))
 	return result
 
 func get_session() -> Dictionary:
@@ -225,8 +240,9 @@ func _emit(code: String, storage_error: bool = false) -> void:
 func _result(ok: bool, code: String, storage_error: bool = false) -> Dictionary:
 	return {"ok":ok,"code":code,"storage_error":storage_error}
 
-func _log_security(action: String, outcome: String, code: String, server: String, username: String, trace_id: String = "") -> void:
-	Events.security_auth(_logger, action, outcome, code, ServerAddress.normalize(server), username, trace_id)
+func _log_security(action: String, outcome: String, code: String, server: String, username: String,
+		detail: String = "") -> void:
+	Events.security_auth(_logger, action, outcome, code, ServerAddress.normalize(server), username, detail)
 
 func _exit_tree() -> void:
 	cancel()

@@ -182,25 +182,24 @@ func _log_result(result: Dictionary) -> void:
 	if _logger == null:
 		return
 	var operation := str(result.get("operation", "unknown"))
-	var outcome := "success" if result.get("ok", false) else "failure"
-	var code := str(result.get("code", "UNKNOWN"))
+	var is_ok := bool(result.get("ok", false))
 	var duration := int(result.get("duration_ms", 0))
+	if is_ok and duration < 10 and operation.begins_with("read_"):
+		return
+	var code := str(result.get("code", "OK" if is_ok else "UNKNOWN"))
 	var transaction: Variant = result.get("transaction")
-	var trace_id := ""
+	var fields := {"scope":"sqlite", "operation":operation,
+		"outcome":"success" if is_ok else "failure", "duration_ms":duration,
+		"queue_depth":pending_jobs(), "code":code, "detail":str(result.get("detail", "")),
+		"phase":"complete", "level":"INFO" if is_ok else "ERROR"}
 	if transaction is Dictionary:
-		trace_id = str(transaction.get("trace_id", ""))
-	if trace_id.is_empty():
-		trace_id = Schema.new_trace_id("db")
-	_logger.log_performance("performance_sqlite", {"operation":operation, "outcome":outcome,
-		"duration_ms":duration, "queue_depth":pending_jobs(), "code":code, "trace_id":trace_id})
-	if transaction is Dictionary:
-		_logger.log_transaction("transaction_sqlite", {"transaction_id":str(transaction.get("transaction_id", trace_id)),
-			"scope":"sqlite", "operation":str(transaction.get("operation", operation)),
-			"phase":str(transaction.get("phase", "rolled_back")), "outcome":str(transaction.get("outcome", outcome)),
-			"duration_ms":int(transaction.get("duration_ms", duration)), "trace_id":trace_id, "code":code})
+		fields.transaction_id = str(transaction.get("transaction_id", ""))
+		fields.phase = str(transaction.get("phase", "unknown"))
+	_logger.record_as("storage", "storage_sqlite_operation", fields)
 	if code == "STALE_SCOPE":
-		_logger.log_security("security_scope", {"action":"db_scope_guard", "outcome":"denied", "reason_code":"STALE_SCOPE",
-			"subject":Schema.hash_subject("", "db"), "trace_id":trace_id})
+		_logger.record_as("storage", "storage_scope_guard", {"scope":"sqlite", "operation":"db_scope_guard",
+			"outcome":"denied", "duration_ms":0, "code":"STALE_SCOPE", "phase":"complete",
+			"subject":Schema.hash_subject("", "db"), "level":"WARN"})
 
 
 static func _failure(code: String) -> Dictionary:

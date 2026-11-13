@@ -36,9 +36,10 @@ func send(url: String, method: int, data: Dictionary = {}, headers: PackedString
 			return
 		var response: Dictionary
 		if result != HTTPRequest.RESULT_SUCCESS:
-			response = _failure("TIMEOUT" if result == HTTPRequest.RESULT_TIMEOUT else "NETWORK_ERROR",status)
+			response = _failure("TIMEOUT" if result == HTTPRequest.RESULT_TIMEOUT else "NETWORK_ERROR",status,
+				Events.http_result_name(result))
 		elif status < 200 or status >= 300:
-			response = _failure("AUTH_REJECTED" if status == 401 else "HTTP_ERROR",status)
+			response = _failure("AUTH_REJECTED" if status == 401 else "HTTP_ERROR",status,Events.http_failure_detail(body,status))
 		else:
 			var parser := JSON.new()
 			var valid := parser.parse(body.get_string_from_utf8()) == OK and parser.data is Dictionary
@@ -53,7 +54,7 @@ func send(url: String, method: int, data: Dictionary = {}, headers: PackedString
 	var error := http.request(url,request_headers,method,"" if method == HTTPClient.METHOD_GET else JSON.stringify(data))
 	var result: Dictionary
 	if error != OK:
-		result = _failure("NETWORK_ERROR")
+		result = _failure("NETWORK_ERROR", 0, Events.request_error_detail(error))
 		Events.http(_logger, result, 0, 0, started, trace_id, route, method_name)
 	else:
 		result = await _done
@@ -77,5 +78,5 @@ func cancel() -> void:
 		_done.emit(_failure("CANCELLED"))
 func _exit_tree() -> void:
 	cancel()
-static func _failure(code: String,status: int = 0) -> Dictionary:
-	return {"ok":false,"code":code,"status":status,"data":{}}
+static func _failure(code: String,status: int = 0,detail: String = "") -> Dictionary:
+	return {"ok":false,"code":code,"status":status,"detail":detail,"data":{}}

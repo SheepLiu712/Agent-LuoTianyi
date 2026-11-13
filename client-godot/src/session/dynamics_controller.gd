@@ -316,25 +316,38 @@ func _request(path: String,method: int = HTTPClient.METHOD_GET,data: Dictionary 
 	return result
 
 func publish(content: String) -> Dictionary:
-	return await _write("",content,"")
+	var result: Dictionary = await _write("",content,"")
+	_log_write("dynamics_post_publish", result)
+	return result
 
 func comment(id: String,content: String,parent_comment_id: String = "") -> Dictionary:
 	var post := _find_post(id)
 	if post.is_empty() or not post.allow_comment:
-		return _failure("COMMENT_NOT_ALLOWED")
+		var detail := "Post not found or comments disabled for post: %s" % id
+		if _logger != null:
+			_logger.record_as("business", "dynamics_comment_rejected", {
+				"phase":"failed", "code":"COMMENT_NOT_ALLOWED", "level":"WARN",
+				"detail":detail})
+		return _failure("COMMENT_NOT_ALLOWED", detail)
 	if not parent_comment_id.is_empty():
 		var found := false
 		for item in get_comments(id).items:
 			found = found or item.id == parent_comment_id
 		if not found:
-			return _failure("INVALID_REPLY_TARGET")
-	return await _write(id,content,parent_comment_id)
+			var detail := "Parent comment not found: %s" % parent_comment_id
+			if _logger != null:
+				_logger.record_as("business", "dynamics_comment_rejected", {
+					"phase":"failed", "code":"INVALID_REPLY_TARGET", "level":"WARN", "detail":detail})
+			return _failure("INVALID_REPLY_TARGET", detail)
+	var result: Dictionary = await _write(id,content,parent_comment_id)
+	_log_write("dynamics_comment_created", result)
+	return result
 
 func _write(id: String,content: String,parent: String) -> Dictionary:
 	if content.strip_edges().is_empty():
-		return _failure("INVALID_INPUT")
+		return _failure("INVALID_INPUT", "comment content is empty")
 	if _write_blocked(id):
-		return _failure("BUSY")
+		return _failure("BUSY", "dynamics write is blocked by another operation")
 	_writing = true
 	var generation := _generation
 	var data := {"content":content}
@@ -344,14 +357,15 @@ func _write(id: String,content: String,parent: String) -> Dictionary:
 		data.parent_comment_id = null if parent.is_empty() else parent
 	var result := await _request(path,HTTPClient.METHOD_POST,data)
 	if generation != _generation:
-		return _failure("CANCELLED")
+		return _failure("CANCELLED", "dynamics write was cancelled")
 	_writing = false
 	if result.ok and not _valid_item(result.data.get("item"),not id.is_empty(),id):
-		result = _failure("INVALID_RESPONSE")
+		result = _failure("INVALID_RESPONSE", "server item does not match the written post or comment")
 	if result.ok:
 		_accept_written_item(id, result.data.item)
 	_notify()
-	return {"ok":result.ok,"code":result.code,"item_id":result.data.item.id if result.ok else ""}
+	return {"ok":result.ok,"code":result.code,"item_id":result.data.item.id if result.ok else "",
+		"detail":str(result.get("detail", ""))}
 func _page(data: Dictionary,cursor: String,comments: bool,id: String = "") -> Dictionary:
 	if not data.get("items") is Array or not data.get("has_more") is bool:
 		return _failure("INVALID_RESPONSE")
@@ -397,8 +411,8 @@ func _empty_comments() -> Dictionary:
 func _sort_comments(items: Array) -> void:
 	items.sort_custom(func(a,b): return a.created_at < b.created_at or (a.created_at == b.created_at and a.id < b.id))
 
-func _failure(code: String) -> Dictionary:
-	return {"ok":false,"code":code}
+func _failure(code: String, detail: String = "") -> Dictionary:
+	return {"ok":false,"code":code,"detail":detail}
 
 func _notify() -> void:
 	_log("ready",_state.code)
@@ -406,7 +420,16 @@ func _notify() -> void:
 
 func _log(phase: String,code: String) -> void:
 	if _logger != null:
-		_logger.log_runtime("runtime_dynamics_state",{"phase":phase,"code":code,"reason":"dynamics","count":_posts.size()})
+		_logger.record_as("business", "dynamics_state",{"phase":phase,"code":code,"reason":"dynamics",
+			"count":_posts.size(),"level":"WARN" if code not in ["", "OK"] else "INFO"})
+
+func _log_write(event: String, result: Dictionary) -> void:
+	if _logger == null:
+		return
+	var ok: bool = result.get("ok", false)
+	_logger.record_as("business", event, {"phase":"complete" if ok else "failed",
+		"outcome":"success" if ok else "failure", "code":str(result.get("code", "UNKNOWN")),
+		"detail":str(result.get("detail", ""))})
 
 func _exit_tree() -> void:
 	stop()

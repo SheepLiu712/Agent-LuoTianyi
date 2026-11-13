@@ -21,6 +21,7 @@ var _messages: Array[Dictionary] = []
 var _by_id: Dictionary = {}
 var _replies: Dictionary = {}
 var _finished: Dictionary = {}
+var _logged_replies: Dictionary = {}
 var _state := {"phase":"idle", "code":"", "thinking":false, "speaking":false}
 var _history: Node
 var _waiting_history := false
@@ -166,7 +167,7 @@ func send_image(bytes: PackedByteArray, mime: String) -> String:
 		return ""
 	var attachment := Attachment.from_bytes(bytes, mime)
 	if not attachment.ok:
-		_system_error(attachment.code)
+		_system_error(attachment.code, "", _attachment_error_detail(str(attachment.code)))
 		return ""
 	var payload := {
 		"image_base64": Marshalls.raw_to_base64(attachment.bytes),
@@ -201,8 +202,11 @@ func _make_local_message(kind: String, text: String) -> Dictionary:
 func _queue_or_send(message: Dictionary, event_type: String, payload: Dictionary) -> String:
 	if not _waiting_history:
 		return _send_now(message, event_type, payload)
-	if _pending_history.size() >= 128 or _too_large(payload):
-		_system_error("SEND_REJECTED")
+	if _pending_history.size() >= 128:
+		_system_error("SEND_REJECTED", "", "waiting-history queue is full (128 messages)")
+		return ""
+	if _too_large(payload):
+		_system_error("SEND_REJECTED", "", "message exceeds the 8 MiB payload limit")
 		return ""
 	message.status = "waiting_history"
 	_pending_history[message.id] = {"type": event_type, "payload": payload}
@@ -213,7 +217,8 @@ func _send_now(message: Dictionary, event_type: String, payload: Dictionary) -> 
 	payload["llm_mode"] = {"types": _model_types()}
 	var wire: String = _transport.send_event(event_type, payload, true)
 	if wire.is_empty():
-		_system_error("SEND_REJECTED")
+		_system_error("SEND_REJECTED", "", "transport rejected %s (state %s)" % [
+			event_type, str(_transport.get_state().get("code", ""))])
 		return ""
 	message.status = "queued"
 	var accepted := _accept_local(message)
@@ -234,9 +239,10 @@ func _accept_local(message: Dictionary) -> String:
 	if _persistence != null:
 		_persistence.save_live(message.duplicate(true))
 	if _logger != null:
-		_logger.log_info("info_message_queued", {"reply_id": message.id, "phase":"queued"})
+		_logger.record_as("business", "message_queued", {"reply_id": message.id, "phase":"queued", "code":"OK"})
 		var text: Variant = message.get("text", "")
-		_logger.log_debug("debug_state", {"data":{"kind":str(message.get("type", "")), "text_chars":str(text).length() if text is String else 0, "has_image":message.get("image") != null}})
+		_logger.record_as("system", "state_snapshot", {"level":"DEBUG",
+			"data":{"kind":str(message.get("type", "")), "text_chars":str(text).length() if text is String else 0, "has_image":message.get("image") != null}})
 	changed.emit()
 	return message.id
 
@@ -342,6 +348,7 @@ func stop() -> void:
 	_by_id.clear()
 	_replies.clear()
 	_finished.clear()
+	_logged_replies.clear()
 	_state = {"phase":"idle", "code":"", "thinking":false, "speaking":false}
 	changed.emit()
 	state_changed.emit(get_state())
@@ -359,7 +366,9 @@ func _fail_pending_history() -> void:
 
 func _connection_changed(connection: Dictionary) -> void:
 	if _logger != null:
-		_logger.log_runtime("runtime_connection_state", {"phase":connection.get("phase","unknown"), "code":connection.get("code",""), "reason":"connection"})
+		_logger.record_as("business", "connection_state", {"phase":connection.get("phase","unknown"),
+			"code":connection.get("code",""), "reason":"connection",
+			"level":"WARN" if connection.get("code","") not in ["", "OK"] else "INFO"})
 	_state.phase = connection.phase
 	_state.code = connection.code
 	if connection.phase != "ready":
@@ -376,7 +385,8 @@ func _connection_changed(connection: Dictionary) -> void:
 func _delivery_changed(wire_id: String, status: String, code: String) -> void:
 	var id := str(_wire_ids.get(wire_id, wire_id))
 	if _logger != null:
-		_logger.log_info("info_message_delivery", {"reply_id":id,"phase":status,"code":code})
+		_logger.record_as("business", "message_delivery", {"reply_id":id,"phase":status,"code":code,
+			"level":"WARN" if status in ["failed", "uncertain"] else "INFO"})
 	if not _by_id.has(id):
 		return
 	_by_id[id].status = status
@@ -388,12 +398,12 @@ func _delivery_changed(wire_id: String, status: String, code: String) -> void:
 	if status == "uncertain":
 		request_reconcile()
 
-func _system_error(code: String, reply_id: String = "") -> void:
+func _system_error(code: String, reply_id: String = "", detail: String = "") -> void:
 	if _logger != null:
-		var fields := {"code":code, "detail":code, "phase":"error"}
+		var fields := {"code":code, "detail":detail, "phase":"error", "level":"ERROR"}
 		if not reply_id.is_empty():
 			fields.reply_id = reply_id
-		_logger.log_error("error_system", fields)
+		_logger.record_as("business", "message_error", fields)
 	_state.code = code
 	state_changed.emit(get_state())
 
@@ -411,7 +421,7 @@ func _receive(event: Dictionary) -> void:
 func _receive_reply(payload: Dictionary, event_timestamp: Variant = null) -> void:
 	var id: Variant = payload.get("uuid")
 	if not id is String or id.is_empty() or (payload.get("text") != null and not payload.text is String):
-		_system_error("INVALID_RESPONSE")
+		_system_error("INVALID_RESPONSE", "", "agent_message is missing a valid uuid or text")
 		return
 	_log_reply(id, payload)
 	if _finished.has(id):
@@ -423,12 +433,16 @@ func _receive_reply(payload: Dictionary, event_timestamp: Variant = null) -> voi
 	if reply.final:
 		return
 	_update_reply(reply, payload)
-	_media.append_reply_audio(id, payload.audio if payload.get("audio") is String else "", reply.final, reply.audio_error, payload.get("is_ephemeral",false) == true)
+	_media.append_reply_audio(id, payload.audio if payload.get("audio") is String else "", reply.final,
+		reply.audio_error, payload.get("is_ephemeral",false) == true, str(payload.get("error_detail", "")))
 	_present_replies()
 func _audio_finished(id: String, code: String) -> void:
 	if not _replies.has(id):
 		return
 	_replies[id].played = true
+	var detail := str(_media.get_message_audio(id).get("detail", ""))
+	if not detail.is_empty():
+		_replies[id].audio_detail = detail
 	if not code.is_empty() and code != "STOPPED":
 		_replies[id].audio_error = true
 		_replies[id].audio_code = "REMOTE_AUDIO_ERROR" if code == "REMOTE_AUDIO_ERROR" else "AUDIO_ERROR"
@@ -487,7 +501,7 @@ func _report_reply_audio_error(id: String, reply: Dictionary) -> void:
 	if not reply.audio_error or reply.get("error_reported", false):
 		return
 	reply.error_reported = true
-	_system_error(reply.get("audio_code", "AUDIO_ERROR"), id)
+	_system_error(reply.get("audio_code", "AUDIO_ERROR"), id, str(reply.get("audio_detail", "")))
 
 func _reply_timestamp(raw: Variant) -> float:
 	if (raw is int or raw is float) and is_finite(float(raw)) and raw > 0:
@@ -517,7 +531,7 @@ func stop_replay() -> void:
 func clear_cache(older_than_days: int = 0) -> Error:
 	var result: Error = _media.clear_cache(older_than_days)
 	if result != OK:
-		_system_error("CACHE_CLEAR_FAILED")
+		_system_error("CACHE_CLEAR_FAILED", "", error_string(result))
 	return result
 
 func get_history_state() -> Dictionary:
@@ -764,8 +778,10 @@ func dismiss_unread() -> void:
 
 
 func report_visible_messages(ids: Array[String], foreground: bool) -> void:
-	if _reading != null and _reading.report_visible(ids,foreground) != OK:
-		_system_error("SAVE_FAILED")
+	if _reading != null:
+		var error: Error = _reading.report_visible(ids,foreground)
+		if error != OK:
+			_system_error("SAVE_FAILED", "", error_string(error))
 
 func _update_reading() -> void:
 	if _reading != null:
@@ -792,14 +808,29 @@ func _model_types() -> Array:
 	return _models.enabled_types() if _models != null else []
 
 func _log_reply(id: String, payload: Dictionary) -> void:
-	if _logger != null:
-		var fields := {"reply_id":id, "has_audio":payload.get("audio") is String and not payload.audio.is_empty(),
-			"audio_chars":payload.audio.length() if payload.get("audio") is String else 0,
-			"final":payload.get("is_final_package", true), "audio_error":payload.get("audio_error", false)}
-		if payload.get("audio_error", false) == true:
-			fields.code = payload.error_code if payload.get("error_code") in ["TTS_EMPTY", "TTS_STREAM_ERROR", "TTS_CANCELLED"] else "REMOTE_AUDIO_ERROR"
-			fields.phase = "received"
-			_logger.log_info("info_reply_received", fields)
+	if _logger == null or _logged_replies.has(id):
+		return
+	var final: bool = payload.get("is_final_package", true) == true
+	var audio_error: bool = payload.get("audio_error", false) == true
+	if not final and not audio_error:
+		return
+	_logged_replies[id] = true
+	_logger.record_as("business", "message_reply_received", _reply_log_fields(id, payload, final, audio_error))
+
+func _reply_log_fields(id: String, payload: Dictionary, final: bool, audio_error: bool) -> Dictionary:
+	var has_audio: bool = payload.get("audio") is String and not payload.audio.is_empty()
+	var detail := str(payload.get("error_detail", "")) if audio_error else ""
+	return {"reply_id":id, "has_audio":has_audio, "audio_chars":payload.audio.length() if has_audio else 0,
+		"final":final, "audio_error":audio_error, "phase":"received",
+		"code":_reply_code(payload, audio_error), "detail":detail,
+		"level":"WARN" if audio_error else "INFO"}
+
+func _reply_code(payload: Dictionary, audio_error: bool) -> String:
+	if not audio_error:
+		return "OK"
+	if payload.get("error_code") in ["TTS_EMPTY", "TTS_STREAM_ERROR", "TTS_CANCELLED"]:
+		return str(payload.error_code)
+	return "REMOTE_AUDIO_ERROR"
 
 func _update_reply(reply: Dictionary, payload: Dictionary) -> void:
 	if payload.get("text") is String and not payload.text.is_empty():
@@ -808,7 +839,27 @@ func _update_reply(reply: Dictionary, payload: Dictionary) -> void:
 		reply.expression = payload.expression
 	if payload.get("display_in_chat", true) == false:
 		reply.display = false
-	reply.audio_error = reply.audio_error or payload.get("audio_error", false) == true
-	if payload.get("audio_error", false) == true:
-		reply.audio_code = "REMOTE_AUDIO_ERROR"
-	reply.final = reply.final or payload.get("is_final_package", true) == true or reply.audio_error
+	_update_reply_audio(reply, payload)
+	if payload.get("is_final_package", true) == true:
+		reply.final = true
+
+func _update_reply_audio(reply: Dictionary, payload: Dictionary) -> void:
+	if payload.get("audio_error", false) != true:
+		return
+	reply.audio_error = true
+	reply.audio_code = "REMOTE_AUDIO_ERROR"
+	reply.final = true
+	if payload.get("error_detail") is String:
+		reply.audio_detail = payload.error_detail
+
+func _attachment_error_detail(code: String) -> String:
+	match code:
+		"IMAGE_TOO_LARGE":
+			return "image exceeds the 6 MiB attachment limit"
+		"IMAGE_FORMAT":
+			return "unsupported image format"
+		"IMAGE_DIMENSIONS":
+			return "image dimensions exceed the attachment limits"
+		"INVALID_IMAGE":
+			return "image could not be decoded"
+	return "image attachment rejected: %s" % code

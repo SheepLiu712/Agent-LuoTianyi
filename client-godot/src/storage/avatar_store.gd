@@ -42,21 +42,22 @@ func read_bytes(path: String) -> PackedByteArray:
 
 func save(bytes: PackedByteArray) -> Dictionary:
 	if _directory.is_empty():
-		return _result("NO_ACCOUNT")
+		return _result("NO_ACCOUNT", "no active account scope")
 	if bytes.size() > Attachment.MAX_BYTES:
-		return _result("IMAGE_TOO_LARGE")
+		return _result("IMAGE_TOO_LARGE", "image exceeds %d bytes" % Attachment.MAX_BYTES)
 	# 先按魔数过滤格式，再解码：不支持的格式根本不该走进解码器。
 	if Attachment.detect_mime(bytes) not in ALLOWED_MIME:
-		return _result("IMAGE_FORMAT")
+		return _result("IMAGE_FORMAT", "unsupported image format")
 	var attachment := Attachment.from_bytes(bytes, "")
 	if not attachment.ok:
-		return _result(str(attachment.code))
+		return _result(str(attachment.code), str(attachment.get("detail", "image validation failed")))
 	var source: Image = attachment.texture.get_image()
 	if source == null:
-		return _result("IMAGE_FORMAT")
+		return _result("IMAGE_FORMAT", "decoded image is unavailable")
 	var squared := AvatarImage.fit_square(source)
-	if _write(squared) != OK:
-		return _result("AVATAR_WRITE_FAILED")
+	var written := _write(squared)
+	if written != OK:
+		return _result("AVATAR_WRITE_FAILED", error_string(written))
 	return {"ok": true, "code": "OK", "texture": ImageTexture.create_from_image(squared)}
 
 func clear() -> Error:
@@ -64,7 +65,9 @@ func clear() -> Error:
 		return OK
 	var error := DirAccess.remove_absolute(ProjectSettings.globalize_path(path()))
 	if error != OK and _logger != null:
-		_logger.log_error("error_avatar_clear", {"code":"AVATAR_WRITE_FAILED", "detail":error_string(error), "phase":"error"})
+		_logger.record_as("storage", "storage_avatar_clear_failed", {"scope":"file", "operation":"avatar_clear",
+			"outcome":"failure", "duration_ms":0, "code":"AVATAR_WRITE_FAILED",
+			"detail":error_string(error), "phase":"error", "level":"ERROR"})
 	return error
 
 ## 先写临时文件再整体改名：中途失败不会留下半张头像。
@@ -83,7 +86,8 @@ func _write(image: Image) -> Error:
 		return ERR_FILE_CANT_WRITE
 	return OK
 
-func _result(code: String) -> Dictionary:
+func _result(code: String, detail: String = "") -> Dictionary:
 	if code != "OK" and _logger != null:
-		_logger.log_error("error_avatar_save", {"code": code, "detail": code, "phase":"error"})
-	return {"ok": false, "code": code, "texture": null}
+		_logger.record_as("storage", "storage_avatar_save_failed", {"scope":"file", "operation":"avatar_save",
+			"outcome":"failure", "duration_ms":0, "code":code, "detail":detail, "phase":"error", "level":"ERROR"})
+	return {"ok": false, "code": code, "detail": detail, "texture": null}

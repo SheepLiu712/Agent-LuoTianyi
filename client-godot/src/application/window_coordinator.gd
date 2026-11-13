@@ -178,5 +178,6 @@ func _log(kind: String, route: String, action: String, outcome: String, duration
 	if kind == "access":
 		Events.ui(_logger, route, action, duration_ms, outcome, action.to_upper())
 	else:
-		_logger.log_runtime("runtime_window", {"phase":action, "reason":reason if not reason.is_empty() else "window",
-			"outcome":outcome, "action":action, "route":route})
+		_logger.record_as("business", "window_state_changed", {"phase":action,
+			"reason":reason if not reason.is_empty() else "window", "outcome":outcome,
+			"action":action, "route":route})

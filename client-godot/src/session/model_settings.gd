@@ -96,7 +96,8 @@ func _default(type: Dictionary) -> Dictionary:
 	return {"enabled":false,"provider":"OpenAI 兼容","base_url":"","api_key":"","model":"","model_kind":type.model_kind,"model_capabilities":{"can_use_json":false,"can_enable_thinking":false},"params":{}}
 func _notify() -> void:
 	if _logger != null:
-		_logger.log_info("info_settings_models",{"phase":_state.phase,"code":_state.code,"count":_state.count})
+		_logger.record_as("business", "settings_models",{"phase":_state.phase,"code":_state.code,
+			"count":_state.count,"level":"WARN" if _state.code not in ["", "OK"] else "INFO"})
 	changed.emit(get_state())
 func _exit_tree() -> void:
 	stop()

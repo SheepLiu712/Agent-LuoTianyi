@@ -3,6 +3,11 @@ const AvatarStore = preload("res://src/storage/avatar_store.gd")
 const Attachment = preload("res://src/media/image_attachment.gd")
 var failures: Array[String] = []
 
+class FailingStore:
+	extends "res://src/storage/avatar_store.gd"
+	func _write(_image: Image) -> Error:
+		return ERR_FILE_CANT_WRITE
+
 func check(ok: bool, label: String) -> void:
 	if not ok:
 		failures.append(label)
@@ -21,6 +26,7 @@ func run() -> void:
 	_check_save(store)
 	_check_isolation(store)
 	_check_rejections(store)
+	_check_write_failure()
 	check(store.clear() == OK and store.load_texture() == null, "clear removes the avatar")
 	_remove(root)
 	print("Avatar store: ", "PASS" if failures.is_empty() else "FAIL")
@@ -49,12 +55,20 @@ func _check_rejections(store: RefCounted) -> void:
 	bmp_bytes[0] = 0x42
 	bmp_bytes[1] = 0x4d
 	var rejected: Dictionary = store.save(bmp_bytes)
-	check(not rejected.ok and rejected.code == "IMAGE_FORMAT", "bitmap uploads are refused")
+	check(not rejected.ok and rejected.code == "IMAGE_FORMAT" and not rejected.detail.is_empty(),
+		"bitmap uploads are refused with detail")
 	var oversized := PackedByteArray()
 	oversized.resize(Attachment.MAX_BYTES + 1)
 	check(store.save(oversized).code == "IMAGE_TOO_LARGE", "oversized uploads are refused")
 	check(store.save(PackedByteArray()).code == "IMAGE_FORMAT", "empty uploads are refused")
 	check(store.load_texture() != null, "rejected uploads leave the previous avatar intact")
+
+func _check_write_failure() -> void:
+	var store = FailingStore.new()
+	store.set_scope("https://example.com", "A")
+	var result: Dictionary = store.save(_png(64, 64))
+	check(not result.ok and result.code == "AVATAR_WRITE_FAILED" and not result.detail.is_empty(),
+		"write failure keeps the OS error detail")
 
 func _png(width: int, height: int) -> PackedByteArray:
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)

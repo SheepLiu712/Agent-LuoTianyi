@@ -37,28 +37,31 @@ func apply_bytes(bytes: PackedByteArray) -> Dictionary:
 	if result.ok:
 		_texture = result.texture
 		avatar_changed.emit(_texture)
-	_log(str(result.code))
-	return {"ok": result.ok, "code": result.code}
+		_log_success()
+	return {"ok": result.ok, "code": result.code, "detail": str(result.get("detail", ""))}
 
 ## 头像页拿到的是路径而不是字节：读盘交给存储，这里只做结果归一。
 func apply_file(path: String) -> Dictionary:
 	var bytes: PackedByteArray = _store.read_bytes(path)
 	if bytes.is_empty():
-		_log("IMAGE_READ_FAILED")
-		return {"ok": false, "code": "IMAGE_READ_FAILED"}
+		_log_read_failure()
+		return {"ok": false, "code": "IMAGE_READ_FAILED", "detail": "selected image file could not be read"}
 	return apply_bytes(bytes)
 
 func reset() -> Dictionary:
 	var error: Error = _store.clear()
 	if error != OK:
-		return {"ok": false, "code": "AVATAR_WRITE_FAILED"}
+		return {"ok": false, "code": "AVATAR_WRITE_FAILED", "detail": error_string(error)}
 	_texture = null
 	avatar_changed.emit(null)
-	return {"ok": true, "code": "OK"}
+	return {"ok": true, "code": "OK", "detail": ""}
 
-func _log(code: String) -> void:
+func _log_success() -> void:
 	if _logger != null:
-		if code == "OK":
-			_logger.log_info("info_avatar_apply", {"code":code, "phase":"complete"})
-		else:
-			_logger.log_error("error_avatar_save", {"code":code, "detail":code, "phase":"error"})
+		_logger.record_as("business", "avatar_applied", {"code":"OK", "phase":"complete"})
+
+## 保存失败已由 AvatarStore 记录一次；这里只补读盘失败，避免重复告警。
+func _log_read_failure() -> void:
+	if _logger != null:
+		_logger.record_as("business", "avatar_applied", {"code":"IMAGE_READ_FAILED", "phase":"failed",
+			"outcome":"failure", "detail":"selected image file could not be read", "level":"ERROR"})

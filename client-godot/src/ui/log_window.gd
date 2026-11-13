@@ -3,6 +3,7 @@ const Schema = preload("res://src/storage/log_schema.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const StatusBanner = preload("res://src/ui/status_banner.gd")
 const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
+const MAX_RENDER_ENTRIES := 1000
 @export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
 @export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _logger: RefCounted
@@ -24,6 +25,8 @@ var _selected := ""
 var _export_id := ""
 var _initialized := false
 var _search_timer: Timer
+var _rendered := 0
+var _truncated := false
 
 func setup(logger: RefCounted) -> void:
 	_logger = logger
@@ -46,7 +49,7 @@ func _initialize() -> void:
 	_level.set_items([{"id":"all","label":"全部级别"},{"id":"DEBUG","label":"DEBUG"},{"id":"INFO","label":"INFO"},{"id":"WARN","label":"WARN"},{"id":"ERROR","label":"ERROR"}])
 	var categories: Array = [{"id":"all","label":"全部类别"}]
 	for category in Schema.CATEGORIES:
-		categories.append({"id":category,"label":Schema.CATEGORY_LABELS[category]})
+		categories.append({"id":category,"label":"%s (%s)" % [Schema.CATEGORY_LABELS[category], category]})
 	_category.set_items(categories)
 	var modules: Array = [{"id":"all","label":"全部模块"}]
 	for module in _logger.MODULES:
@@ -110,8 +113,6 @@ func open() -> void:
 			caption += " · 本次启动"
 		elif not run.closed:
 			caption += " · 运行中" if run.active else " · 未正常结束"
-		elif run.get("legacy_unverified", false):
-			caption += " · 旧归档未校验"
 		options.append({"id":run.id,"label":caption})
 	_runs.set_items(options)
 	_runs.set_selected_id(_selected)
@@ -121,6 +122,8 @@ func open() -> void:
 
 func _refresh() -> void:
 	_text.clear()
+	_rendered = 0
+	_truncated = false
 	var entries: Array = _logger.read_entries(_selected)
 	_append_matching(entries)
 	_update_status_summary(entries)
@@ -128,6 +131,9 @@ func _refresh() -> void:
 
 func _append_matching(entries: Array) -> void:
 	for entry in entries:
+		if _rendered >= MAX_RENDER_ENTRIES:
+			_truncated = true
+			return
 		if _matches(entry):
 			_append(entry)
 
@@ -144,7 +150,25 @@ func _update_status_summary(entries: Array) -> void:
 	var summary := "共 %s 条记录；筛选只影响显示，导出包含整次启动。" % entries.size()
 	if not parts.is_empty():
 		summary = "共 %s 条记录（%s）；筛选只影响显示，导出包含整次启动。" % [entries.size(), " / ".join(parts)]
+	if _truncated:
+		summary += " 当前仅显示前 %d 条匹配记录。" % MAX_RENDER_ENTRIES
+	var dropped := _drop_counts()
+	var dropped_total := int(dropped.get("limit", 0)) + int(dropped.get("pending", 0)) + int(dropped.get("debug", 0))
+	if dropped_total > 0:
+		summary += " 已丢弃：容量 %d 条 / 后台队列 %d 条 / DEBUG %d 条。" % [
+			int(dropped.get("limit", 0)), int(dropped.get("pending", 0)), int(dropped.get("debug", 0))]
 	_set_status(summary, "muted")
+
+func _drop_counts() -> Dictionary:
+	if _selected == _logger.get_run_id():
+		var stats: Dictionary = _logger.get_stats()
+		return {"limit":stats.get("dropped_limit", 0), "pending":stats.get("dropped_pending", 0),
+			"debug":stats.get("dropped_debug", 0)}
+	for run in _logger.list_runs():
+		if run.id == _selected:
+			return {"limit":run.get("dropped_limit", 0), "pending":run.get("dropped_pending", 0),
+				"debug":run.get("dropped_debug", 0)}
+	return {}
 
 
 func _set_status(text: String, kind: String) -> void:
@@ -189,6 +213,10 @@ func _search_matches(entry: Dictionary) -> bool:
 	return haystack.to_lower().contains(needle)
 
 func _append(entry: Dictionary) -> void:
+	if _rendered >= MAX_RENDER_ENTRIES:
+		_truncated = true
+		return
+	_rendered += 1
 	_text.push_color(get_theme_color(entry.level, "LogEntry"))
 	var metrics := entry.duplicate()
 	for key in ["time","level","module","category","message","event","detail","stack","data"]:

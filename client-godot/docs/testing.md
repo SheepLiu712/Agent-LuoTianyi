@@ -31,11 +31,13 @@ runner 使用本地 HTTP/WebSocket 夹具和独立 APPDATA，不访问公共账�
 
 唯一回归样例为 `tests/fixtures/chat/reply_events.json`。由已知可用历史提交恢复的 9 个事件原样迁入客户端，运行器同时交给 Godot 收包链路与旧 Python 客户端 `client/src/network/event_types.py` 真实解析器。无需恢复根目录 contracts 或修改旧端代码；该文件是测试数据，不是新增的服务端协议定义。
 
-基础入口还执行 `tests/session/test_reply_audio_errors.gd`，用合成 WAV 重现诊断包的 32 kHz、28,800 帧及 49,152/8,492 字节两段接收后失败尾包。覆盖排队和播放中失败、无音频失败、本地解码失败、重复终包、恰好一次提醒、真实后续播放、失败缓存中止和日志白名单。测试不使用用户音频，也不把服务端 TTS 的内部原因判为已修复。
+基础入口还执行 `tests/session/test_reply_audio_errors.gd`，用合成 WAV 重现诊断包的 32 kHz、28,800 帧及 49,152/8,492 字节两段接收后失败尾包。覆盖排队和播放中失败、无音频失败、本地解码失败、重复终包、恰好一次提醒、真实后续播放、失败缓存中止和日志白名单；失败日志同时断言 `message_error`、`audio_error` 与 `message_reply_received` 的 `detail` 会保留本地解码或远端 TTS 原因。测试不使用用户音频，也不把服务端 TTS 的内部原因判为已修复。
 
 ## 独立检查
 
-日志专项：`tests/test_log_schema.gd`、`tests/test_client_log.gd`、`tests/test_log_integration.gd`、`tests/test_log_window.gd`、`tests/storage/test_sqlite_transaction_log.gd`。覆盖九类必填字段、旧归档别名、调试开关、线程安全队列、WS/HTTP/凭证埋点、事务元数据、类别筛选与导出脱敏。
+日志专项：`tests/test_log_schema.gd`、`tests/test_client_log.gd`、`tests/test_log_integration.gd`、`tests/test_log_window.gd`、`tests/storage/test_sqlite_transaction_log.gd` 与 `tests/storage/test_avatar_store.gd`。覆盖四域必填字段与 71 个注册事件、无旧别名、DEBUG 按级别开关、线程安全队列与每次运行一次 `log_pending_dropped` 汇总、HTTP/WS 传输枚举与 `detail`、服务端错误 body 提取、WS close code/reason、SQLite 单条合并/快读过滤/回滚失败保留原始错误、凭证与头像文件错误 `detail`、头像保存失败单条日志、音频失败 `detail`、容量首次 `log_limit_reached` 软诊断、metadata/导出丢弃计数、回复逐条去重、1000 条渲染上限与导出脱敏。
+
+`tests/test_history_sync.gd` 的既有 fixture 时序断言（`business sent before first history boundary` / `initial failure retains pending sends`）与日志系统改动无关，当前仍需单独排查；不应据此声称全部历史同步用例通过。
 
 ```powershell
 & $python client-godot/tests/test_dependency_boundaries.py

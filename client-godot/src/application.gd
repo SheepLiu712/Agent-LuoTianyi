@@ -114,7 +114,7 @@ func _init_services_and_logging() -> void:
 	ErrorDialog.set_logger(_log)
 	_log.write_failed.connect(func(error): push_warning("Client log write failed: %s" % error))
 	_log.ensure_ready()
-	_log.record("runtime_app_started", {"phase":"starting", "reason":"normal", "uptime_ms":0, "pid":runtime.process_id()})
+	_log.record_as("business", "app_started", {"phase":"starting", "reason":"normal", "uptime_ms":0, "pid":runtime.process_id()})
 	_log_previous_incomplete()
 	_record_startup_phase("services_ready")
 
@@ -156,9 +156,10 @@ func _mount_login_page() -> void:
 
 
 func _handle_security_unavailable() -> void:
-	_log.log_security("security_component", {
-		"action":"check", "outcome":"failure", "reason_code":"SECURITY_UNAVAILABLE",
-		"subject":LogSchema.hash_subject("", "system"), "channel":"app", "detail":"认证加密组件不可用"})
+	_log.record_as("system", "system_security_component", {
+		"action":"check", "outcome":"failure", "reason_code":"SECURITY_UNAVAILABLE", "code":"SECURITY_UNAVAILABLE",
+		"subject":LogSchema.hash_subject("", "system"), "channel":"app", "detail":"认证加密组件不可用",
+		"phase":"failed", "level":"ERROR"})
 	%SecurityError.show()
 	%SecurityError.text = "账号与聊天功能暂不可用"
 	call_deferred("_present_security_error")
@@ -186,7 +187,7 @@ func _save_volume_setting(settings: Resource) -> void:
 		return
 	settings.set_value("audio", "volume", volume)
 	if settings.save_settings() != OK:
-		_log.log_warning("warning_settings_save", {"code":"SETTINGS_SAVE_FAILED", "detail":"音频音量保存失败", "phase":"failed"})
+		_log.record_as("business", "settings_save_failed", {"code":"SETTINGS_SAVE_FAILED", "detail":"音频音量保存失败", "phase":"failed", "level":"WARN"})
 
 
 ## 账户状态变化回调：登录后在 PageSlot 实例化聊天工作区，登出后销毁工作区并显示登录页。
@@ -195,10 +196,11 @@ func _present_security_error() -> void:
 
 
 func _account_changed(state: Dictionary) -> void:
-	_log.record("runtime_account_state", {
+	_log.record_as("business", "account_state", {
 		"phase":state.phase,
 		"code":"STORAGE_ERROR" if state.storage_error else state.code,
 		"reason":"account",
+		"level":"WARN" if state.code not in ["", "OK"] or state.storage_error else "INFO",
 		"uptime_ms":Time.get_ticks_msec() - _started_msec,
 		"pid":runtime.process_id()})
 	# 本地登录状态写入失败时保留页内警告；下一个没有 storage_error 的状态再收起。
@@ -221,9 +223,9 @@ func _show_signed_in() -> void:
 
 	var lifecycle_result: Error = _lifecycle.start(_session.get_session())
 	if lifecycle_result != OK:
-		_log.record("runtime_account_state", {
+		_log.record_as("business", "account_state", {
 			"phase":"signed_out", "code":"ACCOUNT_START_FAILED", "reason":"account_start_failed",
-			"uptime_ms":Time.get_ticks_msec() - _started_msec, "pid":runtime.process_id()})
+			"level":"ERROR", "uptime_ms":Time.get_ticks_msec() - _started_msec, "pid":runtime.process_id()})
 		_session.logout()
 		return
 	_coordinator.prewarm("settings")
@@ -270,6 +272,8 @@ func _exit_tree() -> void:
 func _process(_delta: float) -> void:
 	if _log != null:
 		_log.drain()
+	if _engine_log != null:
+		_engine_log.flush()
 
 
 ## 打开设置类窗口（如 dynamics/settings）。
@@ -290,7 +294,7 @@ func _open_dynamic_post(post: Dictionary) -> void:
 ## 将关闭请求转交给窗口协调器统一处理。
 func _request_close(action: String) -> void:
 	if _log != null:
-		_log.log_runtime("runtime_window", {
+		_log.record_as("business", "window_state_changed", {
 			"phase":"close", "reason":action, "action":"close", "route":"main",
 			"uptime_ms":Time.get_ticks_msec() - _started_msec, "pid":runtime.process_id()})
 	if _coordinator != null: _coordinator.request_close(action)
@@ -324,7 +328,7 @@ func _restore_settings(settings: Resource) -> void:
 	_restore_volume(settings)
 	if _log != null:
 		var ratio: Variant = settings.get_value("layout", "ratio", 1.0 / 3.0)
-		_log.log_debug("debug_state", {"data":{"ratio":ratio, "volume":_chat.get_audio_state().volume}})
+		_log.record_as("system", "state_snapshot", {"level":"DEBUG", "data":{"ratio":ratio, "volume":_chat.get_audio_state().volume}})
 
 
 func _restore_volume(settings: Resource) -> void:
@@ -336,7 +340,7 @@ func _restore_volume(settings: Resource) -> void:
 func _record_startup_phase(phase: String) -> void:
 	if _log == null:
 		return
-	_log.log_performance("performance_startup", {
+	_log.record_as("system", "system_startup", {
 		"operation":phase, "outcome":"success",
 		"duration_ms":int((Time.get_ticks_usec() - _started_usec) / 1000), "phase":"complete"})
 
@@ -347,9 +351,9 @@ func _log_previous_incomplete() -> void:
 	for run in _log.list_runs():
 		if run.id == _log.get_run_id() or run.get("active", false) or run.get("closed", false):
 			continue
-		_log.log_runtime("runtime_previous_incomplete", {
+		_log.record_as("business", "previous_run_incomplete", {
 			"phase":"abnormal", "reason":"abnormal", "uptime_ms":0,
-			"pid":int(run.get("pid", 0)), "previous_run_id":str(run.id), "count":1})
+			"pid":int(run.get("pid", 0)), "previous_run_id":str(run.id), "count":1, "level":"WARN"})
 		return
 
 
@@ -374,7 +378,7 @@ func _sample_performance() -> void:
 	if _log == null:
 		return
 	var uptime := Time.get_ticks_msec() - _started_msec
-	_log.log_performance("performance_sample", {
+	_log.record_as("system", "system_resource_sample", {
 		"operation":"resource_sample", "outcome":"success", "duration_ms":0,
 		"memory_bytes":int(Performance.get_monitor(Performance.MEMORY_STATIC)),
 		"objects":int(Performance.get_monitor(Performance.OBJECT_COUNT)),
@@ -386,7 +390,7 @@ func _sample_performance() -> void:
 	var unsaved := 0
 	if _services != null and _services.persistence != null and _services.persistence.has_method("unsaved_count"):
 		unsaved = int(_services.persistence.unsaved_count())
-	_log.log_performance("performance_queue", {
+	_log.record_as("system", "system_queue_depth", {
 		"operation":"queue_depth", "outcome":"success", "duration_ms":0,
 		"queue_depth":queue_depth, "count":unsaved, "uptime_ms":uptime})
 	_sample_http_summary()
@@ -402,7 +406,7 @@ func _sample_http_summary() -> void:
 		if int(entry.get("seq", 0)) <= _last_summary_seq:
 			continue
 		_last_summary_seq = maxi(_last_summary_seq, int(entry.get("seq", 0)))
-		if entry.get("category") != "access" or entry.get("event") != "access_http":
+		if entry.get("category") != "network" or entry.get("event") != "network_http":
 			continue
 		count += 1
 		var duration := int(entry.get("duration_ms", 0))
@@ -412,10 +416,11 @@ func _sample_http_summary() -> void:
 		if entry.get("outcome") == "failure":
 			failures += 1
 	if count > 0:
-		_log.log_performance("performance_http_summary", {
+		_log.record_as("network", "network_http_summary", {
 			"operation":"http_summary", "outcome":"success",
 			"duration_ms":maximum, "count":count, "avg_ms":int(total / count), "max_ms":maximum,
-			"bytes":bytes, "failures":failures, "window_ms":30000})
+			"bytes":bytes, "failures":failures, "window_ms":30000,
+			"channel":"http", "route":"/aggregate", "code":"OK"})
 
 
 func _capture_or_resume() -> void:
