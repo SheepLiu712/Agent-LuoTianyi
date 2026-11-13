@@ -7,91 +7,162 @@
 AgentLuo 是以虚拟歌手洛天依为角色的对话系统。服务端负责对话、记忆检索、图片理解、语音合成和歌曲处理；桌面端和移动端负责播放声音并展示 Live2D 角色表情和口型。
 
 ## 服务端部署
+已有实例迁移和版本更新见[部署工具说明](scripts/deploy/README.md)，下面介绍首次部署的步骤。
 
-服务端使用 Python 3.10 和 FastAPI 提供 HTTP 与 WebSocket 接口。SQLite 保存业务数据，ChromaDB 保存向量索引，短期消息缓冲由服务进程管理。GPT-SoVITS 在本机执行语音合成，文本、视觉等模型按配置调用外部接口。
+### 仓库与安装位置
 
-### 准备代码、资源和配置
+源码仓库和服务安装目录往往不是同一个目录：仓库用于开发、测试和发布；服务安装目录负责保存和运行稳定的服务。
 
-在部署目录克隆仓库，进入包含 `server_main.py` 的目录。下文的相对路径和命令均从该目录执行。
+为了`部署`服务，您需要获取仓库中服务端的部分，并将其`部署`到一个独立的目录。服务使用的代码、模型、配置及用户数据由部署脚本放到独立安装目录。
+
+部署目录可放在 home 下，也可放在其他磁盘分区；不建议直接在仓库目录运行生产服务。
+
+先获取代码，进入 `server/`，后续命令都在这里执行：
 
 ```bash
 git clone https://github.com/SheepLiu712/Agent-LuoTianyi.git
 cd Agent-LuoTianyi/server
 ```
 
-1. 向项目维护者获取运行资源，放入 `res/` 。 `data/`是用户数据，独立部署不需要获取。管理后台的静态入口是 `res/admin_ui/admin_static/index.html`，同目录的 `assets/` 保存网页脚本和样式。
-2. 迁移已有实例时，先停止源服务或取得数据库的一致性备份，再复制配置、资源和数据。SQLite 数据库和关联的预写日志（WAL）应来自同一份快照。迁移到 Linux 后，核对配置和模型文件中的路径、文件名大小写以及运行账号的读写权限。
-3. 编辑 `config/config.json`，将 `is_debug` 设为 `false`，确认 `server.production_port`（仓库默认 `15673`）。默认监听地址为 `127.0.0.1`。
-4. 编辑 `config/secrets.local.env`，每行写入一个 `变量名=实际值`，保留已有条目。服务启动时会加载该文件。下表列出仓库默认配置所需的密钥；自定义模型使用对应配置引用的环境变量。
+### Linux 首次部署
 
-| 变量 | 用途 |
-| --- | --- |
-| `JWT_SECRET` | 登录令牌签名。迁移时沿用原值可保持已有令牌有效。 |
-| `QWEN_API_KEY` | DashScope 平台的文本、视觉及语音模型。 |
-| `SILICONFLOW_API_KEY` | 硅基流动平台的向量嵌入模型。 |
-| `AMAP_KEY` | 城市漫步任务使用的高德地图 Web 服务。 |
-
-### Linux 安装与启动
-
-以下步骤适用于 Ubuntu 24.04、x86_64 架构和支持 CUDA 12.8 的 NVIDIA 显卡。使用同一个普通账号安装项目环境和运行服务。系统软件包安装需要管理员权限。
-
-**1. 安装系统工具。** FFmpeg 用于音频编解码，编译工具用于构建学歌依赖，uv 用于安装 Python 和同步项目环境。使用 `nvidia-smi` 确认当前账号可访问显卡。
+以下命令适用于 Ubuntu 24.04 x86_64，在普通用户终端执行；安装系统软件包时会请求 sudo 权限。先确认 `nvidia-smi` 能正常显示显卡。
 
 ```bash
 nvidia-smi
+```
+应该保证其驱动版本和CUDA版本支持 Cuda 12.8。然后执行系统软件包的安装：
+
+```bash
 sudo apt update
-sudo apt install -y curl ca-certificates ffmpeg libsndfile1 libportaudio2 build-essential
-uv_installer=$(mktemp)
-curl -fLsS https://astral.sh/uv/install.sh -o "$uv_installer" &&
-  sudo env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh "$uv_installer"
-rm -f "$uv_installer"
+sudo apt install -y git curl ca-certificates python3 ffmpeg libsndfile1 libportaudio2 build-essential pkg-config
+
+# 安装 uv，并让当前终端能够找到它
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+# 按项目锁定的 Playwright 版本安装 Chromium 所需系统库和字体
+uvx --from playwright==1.64.1 playwright install-deps chromium
+
+# 检查uv和ffmpeg是否安装成功
 uv --version
 ffmpeg -version
 ```
 
-**2. 设置权限并运行安装脚本。** 由运行账号持有生产目录，限制配置文件的访问权限。已有服务先停机，再同步依赖。
+完成主机依赖安装后，按下面四步安装，便可以在终端启动服务。需要后台运行和开机自启时，可选择执行最后的步骤。所有命令使用同一个普通账号执行。
+
+**1. 创建安装目录。** 选择一个尚未使用的目录，脚本会创建所需子目录、生成登录签名密钥和部署配置。无需手动区分配置、数据库或临时文件的存放位置。
 
 ```bash
-chmod 700 . config
-touch config/secrets.local.env
-chmod 600 config/secrets.local.env
-if [ -f config/admin_auth.json ]; then chmod 600 config/admin_auth.json; fi
-bash scripts/deploy/environment/install_linux.sh
+INSTALL_DIR="$HOME/agentluo-production"
+bash scripts/deploy/init_instance.sh --root "$INSTALL_DIR"
+```
+脚本将在安装目录下搭建所需要的目录结构，并生成默认的部署配置。其中默认服务名称为 `agentluo.service`，端口为 `15673`；需要其他端口时加 `--port 端口`。使用`--name` 指定 `agentluo` 后的名称后缀：例如 `--name test` 创建 `agentluo-test.service`。省略 `--name` 时服务为 `agentluo.service`。
+
+部署配置中的实例名默认为 `production`；指定 `--name test` 时实例名为 `test`。
+
+然后配置密钥：
+```bash
+nano "$INSTALL_DIR/config/secrets.local.env"
+```
+在打开的文件中填写 `QWEN_API_KEY`、`SILICONFLOW_API_KEY` 和 `AMAP_KEY`，分别用于 DashScope 模型、硅基流动向量模型和高德地图。自动生成的 `JWT_SECRET` 保持原样。
+
+**2. 导入模型资源。** 向维护者获取与当前版本配套的模型资源，解压到一个目录，使该目录下直接包含 `tts/` 和 `song_learner/`。把下面的路径改成你的解压位置：
+
+```bash
+MODEL_SOURCE= "/path/to/your/model_assets"
+python3 scripts/deploy/deploy.py assets --root "$INSTALL_DIR" --source "$MODEL_SOURCE"
 ```
 
-安装脚本使用 Python 3.10.22 创建 `.venv/`，按 [Linux 依赖锁文件](scripts/deploy/environment/uv.lock) 安装 PyTorch 2.9.1、torchaudio 2.9.1 和 torchvision 0.24.1 的 CUDA 12.8 构建，以及语音合成和学歌依赖。随后安装 Chromium 的系统库和浏览器，浏览器文件保存在 `.runtime/browsers/`。安装结束前会检查 Python 依赖、显卡矩阵运算、音频重采样、MP3 编码和浏览器页面渲染。
+脚本会检查所需文件是否齐全、内容是否匹配，复制到安装目录并设置权限；源文件保持不变。缺文件或版本不匹配时会列出具体路径，请补齐资源后重新执行。
 
-**3. 前台启动并验收。**
+**3. 部署服务。** 脚本会从当前 Git 提交构建服务、安装锁定的 Python 环境和 Chromium、生成运行配置，并连接好各类资源路径。首次执行需要下载依赖，耗时取决于网络速度。
 
 ```bash
+bash scripts/deploy/install_instance.sh --root "$INSTALL_DIR"
+```
+
+显示“首次部署文件已就绪”后进入下一步。此时尚未启动服务；无需手写 `instance.env`、创建符号链接或初始化数据库。模型导入与部署默认使用 `HEAD`；部署指定标签时，两条命令都加上同一个 `--ref 标签`。未提交的源码修改不会进入部署结果。
+
+**4. 在终端启动服务。** 使用以下命令在终端中启动服务。启动器会自动加载该实例的 `deployments/instance.env`以读取对应的实例配置：
+
+```bash
+bash "$INSTALL_DIR/current/scripts/deploy/startup/start_linux.sh"
+```
+
+`INSTALL_DIR` 使用第一步设置的安装位置。新开终端时先重新设置该变量。日志直接显示在终端，按 Ctrl+C 停止，再次启动时重复上述命令即可。启动器中的环境设置不会影响当前终端。
+
+启动后打开管理页面（默认 `http://127.0.0.1:15673/admin`），按照页面提示完成管理员设置，确认业务运行时已启动，再通过客户端发送消息并试听语音。数据库由服务首次启动时自动创建。模型密钥或资源的运行问题可在管理页面和终端日志中检查。
+
+**5. 可选：设置为系统服务。** 如果希望关闭终端后继续运行，或需要开机自启，先按 Ctrl+C 停止前台服务，再从仓库的 `server/` 目录执行：
+
+```bash
+python3 scripts/deploy/deploy.py systemd --root "$INSTALL_DIR"
+```
+
+脚本会生成 systemd 单元，绑定当前账号和安装目录，安装并启动后台服务，同时设置开机自启。执行时按提示输入 sudo 密码。systemd 启动成功仅表示进程已启动，仍需通过管理页面确认业务运行时状态。
+
+完成可选的 systemd 设置后，使用默认实例名称时，可执行以下命令查看状态和日志；仅在终端运行时直接查看终端输出和管理页面：
+
+```bash
+python3 scripts/deploy/deploy.py --config "$INSTALL_DIR/deployments/deploy.toml" status \
+  --instance production --json
+journalctl -u agentluo.service -n 100 --no-pager
+```
+
+`init_instance.sh` 和 `install_instance.sh` 只用于全新实例，不会覆盖已有数据或替代版本更新。后续更新沿用脚本生成的 `deployments/deploy.toml`，按[版本更新步骤](scripts/deploy/README.md#版本更新)操作。
+
+### 使用测试服务器的资源、配置和数据
+
+支持将代码放在自己的 home 目录，通过外部路径或目录链接使用已有模型、配置和数据。前台启动可直接设置环境变量；使用 systemd 长期运行时，可将路径保存到自定义 `instance.env`。操作示例、共享数据的使用条件及与自动部署的区别见[外部路径与链接部署](scripts/deploy/README.md#外部路径与链接部署)。
+
+## 开发环境与源码运行
+
+开发环境在仓库中安装，生产实例的 `environments/` 由版本部署管理。以下命令均从仓库的 `server/` 执行，配置、数据和运行目录应与生产隔离。
+
+### Linux 源码环境
+
+准备上述主机依赖后，以普通账号运行安装器。它创建仓库内的 `.venv/`，按锁安装依赖，安装 Chromium 系统库及浏览器，并检查 CUDA、音频处理和浏览器渲染；系统库安装需要管理员权限。
+
+```bash
+bash scripts/deploy/environment/install_linux.sh
+source .venv/bin/activate
+uv pip install --python .venv/bin/python -e ".[dev]"
+bash scripts/deploy/startup/start_linux.sh --check-startup
 bash scripts/deploy/startup/start_linux.sh
 ```
 
-启动日志应出现“配置校验通过，ServerRuntime 已自动启动”。在服务器上打开 `http://127.0.0.1:15673/admin`（端口以配置为准），确认业务运行时已启动，再通过客户端发送一条消息并试听语音回复。前台运行时可用 Ctrl+C 停止服务。
+运行前准备开发配置、密钥和资源。路径默认是源码目录下的 `config/`、`res/`、`data/`、`.runtime/`，分别对应配置文件、资源文件、数据文件和运行时文件（日志等）。`--check-startup` 仅检查配置解析及监听设置，不启动 HTTP、数据库或模型，也不替代资源检查和实际推理。路径解析、资源校验命令及迁移方式见 [部署工具说明](scripts/deploy/README.md#独立实例路径)。
 
-**4. 需要后台运行时，交给 systemd 管理。** 先停止前台实例，复制 [systemd 模板](scripts/deploy/startup/agentluo.service.example) 并编辑：
+如果需要指定配置、资产、数据的外部路径，需要提供一个`instance.env`文件，其中设置
+```
+AGENTLUO_CONFIG_DIR="/path/to/your/config"
+AGENTLUO_DATA_DIR="/path/to/your/data"
+AGENTLUO_RUNTIME_DIR="/path/to/your/runtime"
+AGENTLUO_ASSET_DIR="/path/to/your/assets"
+AGENTLUO_RESOURCE_DIR="/path/to/your/resources"
+AGENTLUO_PYTHON="path/to/your/python"
+```
+对于源码运行，`assets`和`resources`目录默认是同一个目录，即源码目录下的`res`。这两类资源的区别是：前者时可跨代码版本复用的，后者是当前版本特有的。
 
+然后使用
 ```bash
-cp scripts/deploy/startup/agentluo.service.example /tmp/agentluo.service
-nano /tmp/agentluo.service
+AGENTLUO_INSTANCE_ENV="path/to/your/instance.env"
+bash scripts/deploy/startup/start_linux.sh --check-startup
+bash scripts/deploy/startup/start_linux.sh
 ```
 
-将模板中的全部占位符替换为实际值：`@SERVICE_USER@` 是安装环境时使用的普通账号（`id -un`），`@SERVER_DIR@` 是包含 `server_main.py` 的绝对路径（`pwd -P`），`@SERVICE_HOME@` 是该账号的主目录。模板设置失败重启、5 分钟内最多启动 3 次、120 秒停止超时，并将日志交给 journal。检查并安装服务单元：
+来执行。
+> `instance.env` 还会可以额外提供以下字段：`PLAYWRIGHT_BROWSERS_PATH`指定无头浏览器的安装路径，`PYTHONDONTWRITEBYTECODE="1"`表示禁止在导入模块的时候写入`.pyc`文件，`SERVER_HOST`指定服务监听的主机地址。示例：
+> ```
+> PLAYWRIGHT_BROWSERS_PATH="/path/to/your/browsers"
+> PYTHONDONTWRITEBYTECODE="1"
+> SERVER_HOST="127.0.0.1"
+> ```
 
-```bash
-systemd-analyze verify /tmp/agentluo.service
-sudo install -m 644 /tmp/agentluo.service /etc/systemd/system/agentluo.service
-sudo systemctl daemon-reload
-sudo systemctl start agentluo
-systemctl status agentluo --no-pager
-sudo journalctl -u agentluo -n 100 --no-pager
-```
+### Windows 源码环境
 
-按前述启动日志和客户端交互步骤验收。需要开机自启时执行 `sudo systemctl enable agentluo`。日常启停使用 `sudo systemctl stop agentluo` 和 `sudo systemctl restart agentluo`。
-
-### Windows 安装与启动
-
-推荐使用 uv 管理项目内的 Python 虚拟环境。两种方案都安装 Python 3.10、PyTorch、语音合成与学歌依赖，以及 Chromium。编译学歌依赖需要 Visual Studio Build Tools 的“使用 C++ 的桌面开发”工作负载。以下命令均从服务端目录执行。
+推荐使用 uv 管理项目内的 Python 虚拟环境。两种方案都安装 Python 3.10、PyTorch、语音合成与学歌依赖，以及 Chromium。编译学歌依赖需要 Visual Studio Build Tools 的“使用 C++ 的桌面开发”工作负载。以下命令均从仓库的 `server/` 目录执行；这是源码环境安装方式，版本化 `apply` 流程依赖 Linux/systemd。
 
 **方案一：uv（默认）。** 准备 uv 和 FFmpeg，使 `uv --version` 和 `ffmpeg -version` 能在终端运行。可分别通过 `winget install --id astral-sh.uv -e` 和 `winget install --id Gyan.FFmpeg -e` 安装，安装后重新打开终端。一行命令安装项目环境到 `.venv`：
 
@@ -125,7 +196,7 @@ Windows 和 Linux 启动脚本都会保留已有的代理例外，并将本机�
 
 ### 开发与采集配置
 
-开发和测试工具可在开发环境中使用 `python -m pip install -e ".[dev]"` 安装。VCPedia 采集规则随 Python 包分发；可选片段合并和模型辅助提取由 `crawler.merge_rendered_fragments` 和 `crawler.use_llm` 控制。启用模型辅助处理时，分别为摘要配置 `llm_module`、为补提配置 `extraction_llm_module`，并提供对应模型的密钥。采集测试入口见 [World 测试说明](tests/unit/world/README.md)。
+开发和测试工具可在已激活且包含 pip 的开发环境中使用 `python -m pip install -e ".[dev]"` 安装；uv 环境使用 `uv pip install -e ".[dev]"`。VCPedia 采集规则随 Python 包分发；可选片段合并和模型辅助提取由 `crawler.merge_rendered_fragments` 和 `crawler.use_llm` 控制。启用模型辅助处理时，分别为摘要配置 `llm_module`、为补提配置 `extraction_llm_module`，并提供对应模型的密钥。采集测试入口见 [World 测试说明](tests/unit/world/README.md)。
 
 ## 📜 许可证和版权
 
@@ -156,9 +227,4 @@ Windows 和 Linux 启动脚本都会保留已有的代理例外，并将本机�
 - 感谢[GPT-SoVITS项目](https://github.com/RVC-Boss/GPT-SoVITS/)提供的开源语音合成技术
 - 感谢[火爆鸡王](https://space.bilibili.com/5033594)发布的Live2D模型
 - 感谢阿里云、硅基流动平台提供的API服务
-- 感谢ChatGPT，这是我大爹，我的代码基本都是它写的。
 - 感谢所有贡献者的努力和支持！
-
-## 多实例与部署资源
-
-独立配置、数据与模型路径、旧资源离线迁移及资源清单校验见 [部署资源布局](scripts/deploy/RESOURCE_LAYOUT.md)。启动前可使用 `python server_main.py --check-startup` 检查监听配置；此命令不启动业务服务。

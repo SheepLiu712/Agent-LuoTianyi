@@ -35,9 +35,11 @@ FIXED_FILES = {
     "pyproject.toml",
     "README.md",  # setuptools 构建 server 包时读取。
     DEPLOY + "deploy.py",
+    DEPLOY + "init_instance.sh",
+    DEPLOY + "install_instance.sh",
     DEPLOY + "README.md",
-    DEPLOY + "RESOURCE_LAYOUT.md",
     DEPLOY + "release/cli.py",
+    DEPLOY + "release/bootstrap.py",
     DEPLOY + "release/plan.py",
     DEPLOY + "release/apply.py",
     DEPLOY + "release/status.py",
@@ -247,6 +249,15 @@ def deployment_command(args):
     return code
 
 
+def register_bootstrap(commands):
+    assets = commands.add_parser("assets", help="校验并复制模型资产，配置资源权限")
+    assets.add_argument("--root", required=True)
+    assets.add_argument("--source", required=True)
+    assets.add_argument("--ref", default="HEAD")
+    service = commands.add_parser("systemd", help="生成、安装并启动本实例 systemd 服务")
+    service.add_argument("--root", required=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("~/.config/agentluo/deploy.toml"))
@@ -267,7 +278,12 @@ def main():
     observer = commands.add_parser("status", help="查询实例实际状态和最近部署结果")
     observer.add_argument("--instance", required=True)
     observer.add_argument("--json", action="store_true")
+    register_bootstrap(commands)
     args = parser.parse_args()
+    if args.command in {"assets", "systemd"}:
+        from bootstrap import execute
+
+        return execute(args)
     if args.command in {"apply", "status"}:
         return deployment_command(args)
     if args.command == "plan":
