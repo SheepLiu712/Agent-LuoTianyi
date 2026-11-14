@@ -94,6 +94,23 @@ def test_build_from_commit_with_dirty_worktree_and_existing_package(repo):
     assert package.read_bytes() == b"existing different package"
 
 
+def test_release_preserves_call_availability_and_maintenance_budget(repo):
+    result = build(repo, "HEAD")
+    assert result.returncode == 0, result.stderr
+    with tarfile.open(json.loads(result.stdout)["package"]) as archive:
+        config = json.load(archive.extractfile("config/config.json"))
+    # Assert required production behavior, not merely equality to the template:
+    # that equality passed even when the template silently disabled calls.
+    call = config["call_transport"]
+    assert call["enabled"] is True
+    assert call["realtime_speech"]["enabled"] is True
+    assert call["realtime_speech"]["api_key"] == "$QWEN_API_KEY"
+    assert call["realtime_speech"]["model"] == "qwen3.5-omni-plus-realtime"
+    assert call["realtime_speech"]["endpoint"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+    assert config["agent_runtime"]["omni_prompt_file"]
+    assert config["stage_manager"]["stage"]["termination_timeout"] == 90
+
+
 @pytest.mark.parametrize("missing", [False, True], ids=["changed", "missing"])
 def test_build_rejects_commit_with_modified_or_missing_resource(repo, missing):
     resource = repo / "server/res/agent/prompts/example.txt"
