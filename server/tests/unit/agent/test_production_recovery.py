@@ -1,7 +1,7 @@
 """Regression cases from the November 14 production incident."""
 
 import importlib.util
-from importlib.metadata import PackageNotFoundError, distribution
+from importlib.metadata import distribution
 
 import pytest
 
@@ -73,10 +73,7 @@ def test_chinese_labels_are_normalized_before_filtering(label, expected):
 )
 def test_real_gsv_segmentation_preserves_supported_speech(text, language):
     # Load the classifier alone: no GPU/model startup is needed for segmentation.
-    try:
-        source = distribution("gsv-tts-lite").locate_file("gsv_tts/LangSegment.py")
-    except PackageNotFoundError:
-        pytest.skip("requires the optional speech dependency gsv-tts-lite")
+    source = distribution("gsv-tts-lite").locate_file("gsv_tts/LangSegment.py")
     spec = importlib.util.spec_from_file_location("incident_lang_segment", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
