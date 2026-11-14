@@ -38,6 +38,7 @@ from src.utils.logger import get_logger
 
 from .._config import _StageConfig
 from .._lifecycle import StageLifetime
+from ._maintenance import ThresholdMaintenance
 from ._models import _InputStatus, _PendingInput, _ReplyAttempt
 from ._sinks import StimulusInputSink, _AgentOutputSink, _NoOutputSink, _PlanSink, _TerminationPlanSink
 
@@ -126,6 +127,7 @@ class ChatStage:
         self._plans: deque[tuple[d.ActionPlan, d.CancellationToken]] = deque()
         self._execution: d.ExecutionContext | None = None
         self._realizing: asyncio.Task[None] | None = None
+        self._maintenance = ThresholdMaintenance(self)
         self._deadline: datetime | None = None
         self._schedule_revision = 0
         self._timer: asyncio.TimerHandle | None = None
@@ -741,18 +743,19 @@ class ChatStage:
     def _enqueue_plan(self, plan: d.ActionPlan, token: d.CancellationToken) -> None:
         if self._state is not StageState.ONLINE:
             raise d.SinkRejectedError("stage is offline", code=d.SinkRejectionCode.SINK_CLOSED)
-        if len(self._plans) >= self._config.max_plans:
+        if len(self._plans) + len(self._maintenance.pending) >= self._config.max_plans:
             raise d.SinkRejectedError("plan queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
-        self._plans.append((plan, token))
         attempt = self._attempts.get(plan.origin_request_id)
         if attempt is not None:
             # StartThinking is handled by _PlanSink and never reaches this queue.
             # Keep this boundary even after every accepted plan has finished executing.
             attempt.has_committed_plan = True
             attempt.remaining_plans.add(plan.plan_id)
-        if self._realizing is None or self._realizing.done():
-            self._realizing = asyncio.create_task(self._realize_plans(), name="stage-realize")
-            self._realizing.add_done_callback(lambda _: self._resume_execution())
+        if self._maintenance.accepts(plan):
+            self._maintenance.enqueue(plan, token)
+        else:
+            self._plans.append((plan, token))
+            self._resume_execution()
 
     def _resume_execution(self) -> None:
         if self._plans and self._state is StageState.ONLINE and (self._realizing is None or self._realizing.done()):
@@ -971,9 +974,10 @@ class ChatStage:
         for context in (*self._requests.values(), self._execution):
             if context is not None:
                 context.cancellation.cancel(d.CancellationReason.NO_LONGER_NEEDED)
+        maintenance_task = self._maintenance.cancel()
         tasks = [
             task
-            for task in (*self._handles.values(), self._realizing, self._login_reminder_dispatch)
+            for task in (*self._handles.values(), self._realizing, self._login_reminder_dispatch, maintenance_task)
             if task is not None and not task.done()
         ]
         for task in tasks:

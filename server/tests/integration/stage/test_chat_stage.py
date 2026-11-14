@@ -656,3 +656,42 @@ async def test_termination_durations_persist_with_outcome(tmp_path, monkeypatch,
     finally:
         await adapter.detach_stage_binding(stage)
         service.close()
+
+
+@pytest.mark.asyncio
+async def test_termination_waits_background_cleanup_before_ending_and_context_close():
+    entered, cancelling, release = (asyncio.Event() for _ in range(3))
+    ending = []
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            ending.append(True)
+            return await ending_plan(request, sink)
+        value = replace(
+            plan(request),
+            actions=(d.CognitiveMaintenance(action_id=str(uuid4()), reason=d.MaintenanceReason.COMPACTION_THRESHOLD),),
+        )
+        await sink.emit(value)
+        return report(request, plans=(value.plan_id,))
+
+    async def realize(value, context, sink):
+        if value.actions[0].reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+            finally:
+                assert context.cancellation.is_cancelled
+                cancelling.set()
+                await release.wait()
+        return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
+
+    stage, _, adapter, _, _ = await setup(RecordingAgent(handle, realize))
+    stage.stimulus_input_sink.submit(stimulus())
+    await asyncio.wait_for(entered.wait(), 1)
+    stop = asyncio.create_task(stage.terminate(StageEndReason.SHUTDOWN))
+    await asyncio.wait_for(cancelling.wait(), 1)
+    assert not stage.context.closed and not stop.done() and not ending
+    release.set()
+    result = await asyncio.wait_for(stop, 1)
+    assert result.resources_released and stage.context.closed and ending == [True]
+    await adapter.detach_stage_binding(stage)

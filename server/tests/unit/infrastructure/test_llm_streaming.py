@@ -77,3 +77,76 @@ async def test_provider_stream_is_incremental_and_closes_on_all_exits(monkeypatc
     assert events.closed
     assert len(requests) == 1
     assert requests[0]["stream"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 429, 200])
+async def test_provider_error_records_diagnostics_without_format_error_or_content(
+    monkeypatch, tmp_path, caplog, capture_project_log, status
+):
+    from src.infrastructure.observability import (
+        ObservabilityService,
+        get_observability_service,
+        set_observability_service,
+    )
+    from src.infrastructure.models.llm.errors import ProviderStreamError
+
+    payload = {
+        "error": {
+            "code": "DataInspectionFailed" if status != 429 else "RateLimitExceeded",
+            "type": "invalid_request_error",
+            "message": "private prompt and secret-key",
+        },
+        "request_id": "provider-request-123",
+    }
+
+    async def handler(request):
+        if status == 200:
+            return httpx.Response(status, content=("data: " + json.dumps(payload) + "\n\n").encode())
+        return httpx.Response(status, json=payload)
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(
+        "src.infrastructure.models.llm.streaming.httpx.AsyncClient",
+        lambda **kwargs: client_type(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    interface = OpenAIAPIInterface({"base_url": "https://example.test/v1", "api_key": "", "model": "test"})
+    interface.api_key = "secret-key"
+    module = LLMModule("reply", {}, SimpleNamespace(render=lambda **kwargs: "private prompt"), interface, stream=True)
+    capture_project_log(module.logger.name)
+    store = ObservabilityService({"db_path": str(tmp_path / "metrics.db")})
+    previous = get_observability_service()
+    set_observability_service(store)
+    try:
+        with pytest.raises(ProviderStreamError if status == 200 else httpx.HTTPStatusError):
+            await module.generate_response()
+        row = store._query_all("SELECT * FROM llm_call_metrics")[0]
+        assert row["success"] == 0
+        assert "provider-request-123" in row["error_message"] and payload["error"]["code"] in row["error_message"]
+        rendered = " ".join(record.getMessage() for record in caplog.records)
+        assert "provider-request-123" in rendered and payload["error"]["code"] in rendered
+        assert "private prompt" not in rendered + row["error_message"]
+        assert "secret-key" not in rendered + row["error_message"]
+    finally:
+        set_observability_service(previous)
+        store.close()
+
+
+def test_content_inspection_wrapper_preserves_provider_identifiers():
+    from src.infrastructure.models.llm.errors import provider_error_details
+    from src.infrastructure.models.llm.interface import LLMContentInspectionError
+
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://example.test"),
+        json={"code": "DataInspectionFailed", "request_id": "sdk-request", "message": "private input"},
+    )
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as cause:
+        try:
+            raise LLMContentInspectionError("private input") from cause
+        except LLMContentInspectionError as error:
+            detail = provider_error_details(error)
+    assert "DataInspectionFailed" in detail and "sdk-request" in detail and "400" in detail
+    assert "private input" not in detail

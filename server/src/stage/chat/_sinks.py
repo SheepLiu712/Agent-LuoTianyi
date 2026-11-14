@@ -89,11 +89,11 @@ class _TerminationPlanSink:
 
 
 class _NoOutputSink:
-    """结束维护禁止产生任何用户输出。"""
+    """后台及结束维护禁止产生任何用户输出。"""
 
     async def emit(self, output: d.AgentOutput) -> d.OutputReceipt:
         _ = output
-        raise d.SinkRejectedError("termination maintenance cannot emit output", code=d.SinkRejectionCode.SINK_CLOSED)
+        raise d.SinkRejectedError("maintenance cannot emit output", code=d.SinkRejectionCode.SINK_CLOSED)
 
 
 class _AgentOutputSink:
