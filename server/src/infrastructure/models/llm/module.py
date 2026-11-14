@@ -3,6 +3,7 @@ from contextlib import aclosing
 from typing import Any, Dict, List
 
 from src.infrastructure.models.client_execution import ClientLLMExecutionError, ClientModelExecutor, notify_fallback
+from src.infrastructure.models.llm.errors import provider_error_details
 from src.infrastructure.models.llm.interface import LLMAPIInterface
 from src.infrastructure.models.llm.prompts import PromptTemplate
 from src.infrastructure.observability import get_observability_service, get_trace_context
@@ -78,7 +79,12 @@ class LLMModule:
                 )
             return response["content"]
         except Exception as exc:
-            self.logger.error("模型调用失败 module={} error_type={}", self.name, type(exc).__name__)
+            self.logger.error(
+                "模型调用失败 module=%s error_type=%s detail=%s",
+                self.name,
+                type(exc).__name__,
+                provider_error_details(exc),
+            )
             if observability is not None:
                 observability.record_llm_call(
                     module_name=self.name,
@@ -87,7 +93,7 @@ class LLMModule:
                     latency_ms=(time.perf_counter() - started) * 1000.0,
                     success=False,
                     error_type=exc.__class__.__name__,
-                    error_message=str(exc),
+                    error_message=provider_error_details(exc),
                     trace_id=trace_context.get("trace_id"),
                     user_id=trace_context.get("user_id"),
                 )

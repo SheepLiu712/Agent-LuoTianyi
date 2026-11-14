@@ -5,11 +5,13 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from .errors import ProviderStreamError
+
 
 def _decode_event(data):
     event = json.loads(data)
     if "error" in event:
-        raise RuntimeError("模型流返回错误事件")
+        raise ProviderStreamError(event)
     finished, chunks = False, []
     for choice in event.get("choices", ()):
         reason = choice.get("finish_reason")
@@ -30,6 +32,8 @@ async def stream_completion(url: str, api_key: str, payload: dict, timeout: floa
         raise RuntimeError("流式模型调用要求配置服务端 API Key")
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", url, headers={"Authorization": f"Bearer {api_key}"}, json=payload) as response:
+            if response.is_error:
+                await response.aread()
             response.raise_for_status()
             finished = False
             async for line in response.aiter_lines():

@@ -656,3 +656,124 @@ async def test_termination_durations_persist_with_outcome(tmp_path, monkeypatch,
     finally:
         await adapter.detach_stage_binding(stage)
         service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("maintenance_failure", [False, True])
+async def test_threshold_maintenance_does_not_block_later_reply_and_is_serial(maintenance_failure):
+    entered, release, replied, drained = (asyncio.Event() for _ in range(4))
+    active = peak = runs = 0
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            return await ending_plan(request, sink)
+        if not isinstance(request.stimulus, d.InteractionDeadline):
+            return report(request)
+        reply = plan(request)
+        maintenance = replace(
+            plan(request, ordinal=1),
+            actions=(d.CognitiveMaintenance(action_id=str(uuid4()), reason=d.MaintenanceReason.COMPACTION_THRESHOLD),),
+        )
+        await sink.emit(reply)
+        await sink.emit(maintenance)
+        return report(
+            request,
+            consumed=tuple(i.stimulus_id for i in request.interaction.pending_stimuli),
+            plans=(reply.plan_id, maintenance.plan_id),
+        )
+
+    async def realize(value, context, sink):
+        nonlocal active, peak, runs
+        if isinstance(value.actions[0], d.CognitiveMaintenance):
+            if value.actions[0].reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
+                active += 1
+                peak = max(peak, active)
+                runs += 1
+                try:
+                    entered.set()
+                    await release.wait()
+                    if maintenance_failure and runs == 1:
+                        raise RuntimeError("maintenance failed")
+                finally:
+                    active -= 1
+                    if runs == 2:
+                        drained.set()
+        else:
+            await sink.emit(
+                d.TextFinalOutput(
+                    interaction_id=context.interaction_id,
+                    execution_id=context.execution_id,
+                    action_id=value.actions[0].action_id,
+                    sequence_no=0,
+                    delivery=d.OutputDelivery.CONVERSATION,
+                    text="回复",
+                )
+            )
+            await sink.emit(
+                d.MessageEndOutput(
+                    interaction_id=context.interaction_id,
+                    execution_id=context.execution_id,
+                    action_id=value.actions[0].action_id,
+                    sequence_no=1,
+                    delivery=d.OutputDelivery.CONVERSATION,
+                    status=d.MessageEndStatus.COMPLETED,
+                    error_code=None,
+                )
+            )
+            if entered.is_set():
+                replied.set()
+        return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
+
+    stage, _, adapter, _, _ = await setup(RecordingAgent(handle, realize))
+    try:
+        assert stage.stimulus_input_sink.submit(stimulus())
+        await asyncio.wait_for(entered.wait(), 1)
+        assert stage.stimulus_input_sink.submit(stimulus())
+        await asyncio.wait_for(replied.wait(), 1)
+        assert active == peak == runs == 1  # reply delivered while maintenance still blocked
+        release.set()
+        await asyncio.wait_for(drained.wait(), 1)
+        assert peak == 1 and runs == 2
+    finally:
+        release.set()
+        await cleanup(stage, adapter)
+
+
+@pytest.mark.asyncio
+async def test_termination_waits_background_cleanup_before_ending_and_context_close():
+    entered, cancelling, release = (asyncio.Event() for _ in range(3))
+    ending = []
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            ending.append(True)
+            return await ending_plan(request, sink)
+        value = replace(
+            plan(request),
+            actions=(d.CognitiveMaintenance(action_id=str(uuid4()), reason=d.MaintenanceReason.COMPACTION_THRESHOLD),),
+        )
+        await sink.emit(value)
+        return report(request, plans=(value.plan_id,))
+
+    async def realize(value, context, sink):
+        if value.actions[0].reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+            finally:
+                assert context.cancellation.is_cancelled
+                cancelling.set()
+                await release.wait()
+        return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
+
+    stage, _, adapter, _, _ = await setup(RecordingAgent(handle, realize))
+    stage.stimulus_input_sink.submit(stimulus())
+    await asyncio.wait_for(entered.wait(), 1)
+    stop = asyncio.create_task(stage.terminate(StageEndReason.SHUTDOWN))
+    await asyncio.wait_for(cancelling.wait(), 1)
+    assert not stage.context.closed and not stop.done() and not ending
+    release.set()
+    result = await asyncio.wait_for(stop, 1)
+    assert result.resources_released and stage.context.closed and ending == [True]
+    assert stage._maintenance.task.done()
+    await adapter.detach_stage_binding(stage)

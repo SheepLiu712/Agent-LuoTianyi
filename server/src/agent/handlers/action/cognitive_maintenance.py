@@ -27,6 +27,7 @@ class CognitiveMaintenanceActionHandler:
         context = execution_context.interaction_context
         if context is None or not all(hasattr(context, name) for name in ("identity", "conversation", "user")):
             return self._result(action, d.ActionExecutionStatus.FAILED, d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)
+        recalled_ids = frozenset(entry.entry_id for entry in context.recalled_memory.read())
         try:
             if context.identity.user_id is None:
                 return self._result(action)
@@ -49,9 +50,9 @@ class CognitiveMaintenanceActionHandler:
                 raise RuntimeError("COGNITIVE_MAINTENANCE_CONFLICT")
             return self._result(action)
         finally:
-            # 旧 Reflection 的每轮召回清理语义保留在行动结束边界。
+            # 只清理维护开始前的召回，保留并行回复新加入的记录。
             if context is not None and hasattr(context, "recalled_memory"):
-                context.recalled_memory.clear()
+                context.recalled_memory.remove(recalled_ids)
 
     @staticmethod
     def _result(

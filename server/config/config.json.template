@@ -332,7 +332,7 @@
                     "llm_module": {
                         "llm": {
                             "name": "qwen3.5-plus",
-                            "enable_thinking": true
+                            "enable_thinking": false
                         },
                         "prompt_name": "user_profile_update_prompt"
                     }
