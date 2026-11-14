@@ -611,3 +611,48 @@ async def test_stage_construction_failure_closes_created_context():
             config={"max_stimuli": 0},
         )
     assert factory.created == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "timeout", "maintenance_failure", "close_failure"])
+async def test_termination_durations_persist_with_outcome(tmp_path, monkeypatch, outcome):
+    from src.infrastructure.observability import ObservabilityService, stage_timing
+
+    service = ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})
+    monkeypatch.setattr(stage_timing, "get_observability_service", lambda: service)
+
+    async def handle(request, sink):
+        if outcome == "timeout":
+            await asyncio.Event().wait()
+        return await ending_plan(request, sink)
+
+    async def realize(value, context, sink):
+        return SimpleNamespace(status=d.ExecutionStatus.FAILED, error_code=d.ExecutionErrorCode.INTERNAL_ERROR)
+
+    agent = RecordingAgent(handle, realize if outcome == "maintenance_failure" else None)
+    stage, _, adapter, _, _ = await setup(agent, {"termination_timeout": 0.01})
+    if outcome == "close_failure":
+
+        async def fail_close():
+            raise RuntimeError("close failed")
+
+        monkeypatch.setattr(stage.context, "close", fail_close)
+    try:
+        result = await stage.terminate(StageEndReason.SHUTDOWN)
+        rows = service.get_recent_pipeline_spans(trace_id=f"stage:{stage.interaction_id}")
+        by_name = {row["span_name"].removeprefix("stage.termination."): row for row in rows}
+        assert set(by_name) == {"total", "stop_tasks", "maintenance", "close_context"}
+        assert by_name["total"]["status"] == ("success" if outcome == "success" else "error")
+        assert by_name["maintenance"]["status"] == (
+            "error" if outcome in ("timeout", "maintenance_failure") else "success"
+        )
+        assert by_name["close_context"]["status"] == ("error" if outcome == "close_failure" else "success")
+        assert by_name["total"]["duration_ms"] >= sum(
+            by_name[name]["duration_ms"] for name in ("stop_tasks", "maintenance", "close_context")
+        )
+        assert result.resources_released == (outcome != "close_failure")
+        assert await stage.terminate(StageEndReason.SHUTDOWN) is result
+        assert len(service.get_recent_pipeline_spans(trace_id=f"stage:{stage.interaction_id}")) == 4
+    finally:
+        await adapter.detach_stage_binding(stage)
+        service.close()

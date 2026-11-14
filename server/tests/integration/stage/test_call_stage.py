@@ -1084,3 +1084,30 @@ async def test_cleanup_keeps_ownership_when_provider_close_fails(call_setup):
     assert not released
     assert stage.context is None
     assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_call_termination_timings_include_failed_settlement_and_resource_release(
+    call_setup, tmp_path, monkeypatch
+):
+    from src.infrastructure.observability import ObservabilityService, stage_timing
+
+    service = ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})
+    monkeypatch.setattr(stage_timing, "get_observability_service", lambda: service)
+    stage, provider, _, _ = await _create(call_setup)
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        await finish_call(stage, StageEndReason.USER_REQUESTED)
+        rows = service.get_recent_pipeline_spans(trace_id=f"stage:{stage.interaction_id}")
+        total = next(row for row in rows if row["span_name"] == "stage.termination.total")
+        stops = [row for row in rows if row["span_name"] == "stage.termination.stop_tasks"]
+        assert {row["metadata"]["phase"] for row in stops} == {"playback", "initialization", "inflight", "cleanup"}
+        # This harness has no FinalizeCall handler: failed settlement must not hide resource release.
+        assert total["status"] == "error"
+        assert total["metadata"]["resources_released"] is True
+        assert all(row["status"] == "success" for row in stops)
+        assert total["duration_ms"] >= sum(row["duration_ms"] for row in stops)
+        assert any(row["span_name"] == "stage.termination.cleanup" for row in rows)
+        assert provider.closed and stage.context is None
+    finally:
+        service.close()

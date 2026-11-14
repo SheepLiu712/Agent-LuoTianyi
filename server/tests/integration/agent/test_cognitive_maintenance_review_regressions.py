@@ -70,6 +70,10 @@ class PrefixCompaction:
     def requires_compaction(self, conversation) -> bool:
         return len(conversation.read().entries) > 60
 
+    def planned_covered_entries(self, conversation):
+        snapshot = conversation.read()
+        return snapshot.entries[:-30]
+
     async def compact(self, conversation):
         snapshot = conversation.read()
         covered = snapshot.entries[:-30]

@@ -25,6 +25,7 @@ from src.domain.agent.maintenance import (
 )
 from src.domain.call import CallFinalSnapshot
 from src.domain.call.contracts import CallMaintenanceSnapshot
+from src.infrastructure.observability.stage_timing import stage_timing
 from src.infrastructure.persistence.cognitive_maintenance import (
     CognitiveMaintenanceBatch,
     CognitiveMaintenanceBatchDraft,
@@ -32,6 +33,7 @@ from src.infrastructure.persistence.cognitive_maintenance import (
 
 from ._call import _CallMaintenance
 from ._compaction import _ConversationCompaction
+from ._parallel import parallel_results
 
 
 class _Conversation(Protocol):
@@ -64,6 +66,8 @@ class _Context(Protocol):
 
 class _Compaction(Protocol):
     def requires_compaction(self, conversation_context: _Conversation) -> bool: ...
+
+    def planned_covered_entries(self, conversation_context: _Conversation) -> tuple: ...
 
     async def compact(self, conversation_context: _Conversation) -> ConversationCompaction | None: ...
 
@@ -112,6 +116,23 @@ class CognitiveMaintenanceSkill:
         self._call_maintenance = _CallMaintenance(dict(memories), batches)
 
     async def maintain(self, invocation: SkillInvocation, *, request: MaintenanceRequest) -> MaintenanceResult:
+        with stage_timing(
+            invocation.interaction_id,
+            (
+                "stage.termination.maintenance"
+                if request.call_snapshot is not None and request.reason is MaintenanceReason.INTERACTION_ENDING
+                else "agent.cognitive_maintenance"
+            ),
+            stage_kind="call" if request.call_snapshot is not None else "chat",
+            reason=request.reason.value,
+        ) as timing:
+            result = await self._maintain(invocation, request=request)
+            timing["result"] = result.status.value
+            if result.status is MaintenanceStatus.CONFLICT:
+                timing["status"] = "error"
+            return result
+
+    async def _maintain(self, invocation: SkillInvocation, *, request: MaintenanceRequest) -> MaintenanceResult:
         self._check_cancelled(invocation)
         context, reason = request.context, request.reason
         if request.call_snapshot is not None:
@@ -195,13 +216,15 @@ class CognitiveMaintenanceSkill:
         batch = await context.conversation.load_cognitive_maintenance_batch(previous_progress=previous)
 
         if batch is None:
-            compaction = await self._prepare_compaction(_BoundedConversation(snapshot), reason)
-            covered = self._covered_entries(entries, compaction, reason)
+            bounded_conversation = _BoundedConversation(snapshot)
+            needs_compaction = self._compaction.requires_compaction(bounded_conversation)
+            covered = self._compaction.planned_covered_entries(bounded_conversation) if needs_compaction else entries
             maintained = self._entries_after_progress(entries, previous)
-            if compaction is not None:
+            if needs_compaction:
                 covered_ids = {item.entry_id for item in covered}
                 maintained = tuple(item for item in maintained if item.entry_id in covered_ids)
             if not maintained:
+                compaction = await self._prepare_compaction(bounded_conversation, reason)
                 if compaction is not None:
                     committed = await context.conversation.commit_cognitive_maintenance(
                         compaction=compaction,
@@ -223,14 +246,22 @@ class CognitiveMaintenanceSkill:
                     previous,
                     covered_entry_ids=tuple(item.entry_id for item in covered),
                 )
-            candidates = await memory.extract_maintenance_candidates(
-                history=snapshot.summary.text, current_dialogue=self._render_entries(maintained)
+            compaction, candidates, proposed = await parallel_results(
+                self._prepare_compaction(bounded_conversation, reason),
+                memory.extract_maintenance_candidates(
+                    history=snapshot.summary.text, current_dialogue=self._render_entries(maintained)
+                ),
+                memory.propose_user_profile(
+                    history={
+                        "summary": snapshot.summary.text,
+                        "recent_conversation": self._render_entry_lines(maintained),
+                    },
+                    current_profile=context.user.read().profile.description,
+                ),
             )
             self._check_cancelled(invocation)
-            proposed = await memory.propose_user_profile(
-                history={"summary": snapshot.summary.text, "recent_conversation": self._render_entry_lines(maintained)},
-                current_profile=context.user.read().profile.description,
-            )
+            if compaction is not None and compaction.covered_entry_ids != tuple(item.entry_id for item in covered):
+                raise ValueError("压缩结果与计划的维护范围不一致")
             draft = CognitiveMaintenanceBatchDraft(
                 target_entry_id=maintained[-1].entry_id,
                 covered_entry_ids=tuple(item.entry_id for item in covered),
@@ -306,15 +337,6 @@ class CognitiveMaintenanceSkill:
         if reason is MaintenanceReason.COMPACTION_THRESHOLD or self._compaction.requires_compaction(conversation):
             return await self._compaction.compact(conversation)
         return None
-
-    @staticmethod
-    def _covered_entries(entries, compaction, reason):
-        if compaction is None:
-            return entries if reason is MaintenanceReason.INTERACTION_ENDING else ()
-        prefix = entries[: len(compaction.covered_entry_ids)]
-        if tuple(entry.entry_id for entry in prefix) != compaction.covered_entry_ids:
-            raise ValueError("压缩结果不是当前对话的连续前缀")
-        return prefix
 
     @staticmethod
     def _entries_after_progress(entries, progress):

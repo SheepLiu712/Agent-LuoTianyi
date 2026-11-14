@@ -63,6 +63,7 @@ from src.infrastructure.observability.call_metrics import (
     CallMetricStatus,
 )
 from src.infrastructure.observability.call_reply_timing import CallReplyTiming, reply_timing_scope
+from src.infrastructure.observability.stage_timing import stage_timing
 from src.infrastructure.persistence.call_sessions.repository import CallSessionRecord, CallSessionRepository
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
@@ -768,15 +769,30 @@ class CallStage:
         return await asyncio.shield(self._lifetime.termination)
 
     async def _terminate_owned(self) -> StageTerminationResult:
+        with stage_timing(self.interaction_id, "stage.termination.total", stage_kind="call") as timing:
+            result = await self._terminate_measured()
+            timing.update(
+                status="error" if result.finalization_error or result.cleanup_error else "success",
+                finalization_error=result.finalization_error,
+                cleanup_error=result.cleanup_error,
+                resources_released=result.resources_released,
+            )
+            return result
+
+    async def _terminate_measured(self) -> StageTerminationResult:
         error = None
         # _interrupt 已阻断旧输出；先交付 playback.stop，再发布唯一业务终态。
         stops = [t for t in self._tasks if t.get_name() == "call-playback-stop" and not t.done()]
-        if stops:
-            await asyncio.gather(*stops, return_exceptions=True)
+        with stage_timing(self.interaction_id, "stage.termination.stop_tasks", stage_kind="call", phase="playback"):
+            if stops:
+                await asyncio.gather(*stops, return_exceptions=True)
         self._lifetime.interaction_ended = True
         await self._send_terminal_best_effort(self._terminal)
         try:
-            await self._lifetime.stop_initialization()
+            with stage_timing(
+                self.interaction_id, "stage.termination.stop_tasks", stage_kind="call", phase="initialization"
+            ):
+                await self._lifetime.stop_initialization()
             async with self._lifecycle_lock:
                 if self._terminal.kind == "FAILED":
                     await self._transition(CallState.FAILED, end_reason=self._terminal.end_reason, publish=False)
@@ -1651,16 +1667,20 @@ class CallStage:
 
     async def _finish(self, outcome: CallOutcome, reason: CallEndReason) -> CallFinalSnapshot:  # noqa: C901
         try:
-            try:
-                await self._drain_facts()
-            except Exception:
-                # The accepted input ledger still supplies ending facts. Report
-                # the write failure after settlement instead of skipping it.
-                get_logger(__name__).warning("Call fact write failed before ending call=%s", self.call_id)
-            # Admission is already closed (ENDING/DECLINED). Drain any owned
-            # maintenance write before freezing the final progress boundary.
-            if self._realize_task is not None and self._realize_task is not asyncio.current_task():
-                await asyncio.gather(self._realize_task, return_exceptions=True)
+            with stage_timing(
+                self.interaction_id, "stage.termination.stop_tasks", stage_kind="call", phase="inflight"
+            ) as timing:
+                try:
+                    await self._drain_facts()
+                except Exception:
+                    # The accepted input ledger still supplies ending facts. Report
+                    # the write failure after settlement instead of skipping it.
+                    timing["status"] = "error"
+                    get_logger(__name__).warning("Call fact write failed before ending call=%s", self.call_id)
+                # Admission is already closed (ENDING/DECLINED). Drain any owned
+                # maintenance write before freezing the final progress boundary.
+                if self._realize_task is not None and self._realize_task is not asyncio.current_task():
+                    await asyncio.gather(self._realize_task, return_exceptions=True)
             ended = self._terminal.ended_at
             duration = self._terminal.active_duration_ms
             terminal_facts = {"ended_at": ended, "active_duration_ms": duration}
@@ -1867,15 +1887,25 @@ class CallStage:
             raise self._fact_error
 
     async def _cleanup(self, *, close_context: bool = True) -> BaseException | None:
+        with stage_timing(
+            self.interaction_id, "stage.termination.cleanup", stage_kind="call", close_context=close_context
+        ) as timing:
+            error = await self._cleanup_measured(close_context=close_context)
+            if error is not None:
+                timing.update(status="error", error_type=type(error).__name__)
+            return error
+
+    async def _cleanup_measured(self, *, close_context: bool) -> BaseException | None:
         if self._retention_changed is not None:
             self._report_retention(None)
         self._plans.clear()
-        current = asyncio.current_task()
-        pending = tuple(task for task in self._tasks if task is not current and not task.done())
-        for task in pending:
-            self._cancel_task(task)
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+        with stage_timing(self.interaction_id, "stage.termination.stop_tasks", stage_kind="call", phase="cleanup"):
+            current = asyncio.current_task()
+            pending = tuple(task for task in self._tasks if task is not current and not task.done())
+            for task in pending:
+                self._cancel_task(task)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         try:
             await self._drain_facts()
             cleanup_error = None
