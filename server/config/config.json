@@ -226,6 +226,7 @@
         "offline_timeout": 60,
         "return_user_threshold_seconds": 432000,
         "stage": {
+            "termination_timeout": 90,
             "proactive_idle_seconds": 30,
             "login_reminder_wait": 1
         },

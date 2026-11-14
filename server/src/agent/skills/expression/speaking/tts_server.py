@@ -23,6 +23,7 @@ from src.utils.server_paths import resolve_server_path
 
 from .call_pcm import normalize_clip_to_pcm16_mono
 from .errors import TTSStreamCancelled
+from .gsv_languages import configure_chinese_language_labels
 
 
 def _build_absolute_path(path_value: Optional[str]) -> Optional[str]:
@@ -154,6 +155,9 @@ def _run_gsv_worker(  # noqa: C901
         import pathlib
 
         from gsv_tts import TTS
+        from gsv_tts.LangSegment import LangSegment
+
+        configure_chinese_language_labels(LangSegment)
 
         if version("torch").partition("+")[0] == "2.8.0" and version("gsv-tts-lite") in {"0.4.6", "0.4.7"}:
             from gsv_tts import Config

@@ -277,14 +277,19 @@ async def test_ending_fresh_token_and_rejection_after_termination():
 
 
 @pytest.mark.asyncio
-async def test_ending_timeout_releases_stage():
+async def test_ending_timeout_releases_stage(capture_project_log, caplog):
     async def handle(request, sink):
         await asyncio.Event().wait()
 
     stage, _, adapter, _, _ = await setup(RecordingAgent(handle), {"termination_timeout": 0.01})
+    capture_project_log(stage._logger.name)
     result = await stage.terminate(StageEndReason.IDLE_TIMEOUT)
     assert result.finalization_error == "interaction ending timed out"
     assert stage.state is StageState.TERMINATED and stage.context.closed
+    failure = next(record for record in caplog.records if "Stage termination failed" in record.getMessage())
+    assert failure.exc_info is not None
+    assert isinstance(failure.exc_info[1], asyncio.TimeoutError)
+    assert "timeout_seconds=0.01" in failure.getMessage()
     await adapter.detach_stage_binding(stage)
 
 

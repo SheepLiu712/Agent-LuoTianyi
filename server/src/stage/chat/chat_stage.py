@@ -1006,6 +1006,12 @@ class ChatStage:
                     self._run_termination_maintenance(business_reason), timeout=self._config.termination_timeout
                 )
         except Exception as failure:
+            self._logger.exception(
+                "Stage termination failed interaction=%s reason=%s timeout_seconds=%s",
+                self.interaction_id,
+                reason,
+                self._config.termination_timeout,
+            )
             error = (
                 "interaction ending timed out" if isinstance(failure, asyncio.TimeoutError) else type(failure).__name__
             )
