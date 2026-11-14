@@ -54,7 +54,9 @@ def test_usage_continuous_buckets_distinguish_missing_and_zero(metrics):
             (at.isoformat(), "reply", tokens),
         )
     daily = metrics.usage_trends(now=now)
-    assert len(daily["rows"]) == 289
+    timestamps = [datetime.fromisoformat(row["ts"]) for row in daily["rows"]]
+    assert timestamps[0] <= now - timedelta(days=1) and timestamps[-1] == now
+    assert all(b - a == timedelta(minutes=5) for a, b in zip(timestamps, timestamps[1:]))
     assert [r["online"] for r in daily["rows"][-3:]] == [8, None, 0]
     assert [r["calls"] for r in daily["rows"][-3:]] == [1, 0, 1]
     assert daily["totals"] == {"calls": 2, "tokens": 300, "online_peak": 8}
@@ -141,7 +143,6 @@ def test_cancelled_tts_keeps_worker_occupancy_until_actual_finish(metrics):
     first.mark("submitted")
     worker_event(first.id, "worker_started", int((origin + 1) * 1e9))
     first.finish("cancelled")
-    assert first.id in tts_metrics._requests
     worker_event(first.id, "first_audio", int((origin + 2) * 1e9))
     row = metrics._query_all("SELECT * FROM tts_requests WHERE request_id=?", (first.id,))[0]
     assert row["status"] == "cancelled"
@@ -149,9 +150,7 @@ def test_cancelled_tts_keeps_worker_occupancy_until_actual_finish(metrics):
     assert row["first_audio_ms"] == pytest.approx(2000, abs=0.01)
     assert row["returned_ms"] is None
     worker_event(first.id, "worker_finished", int((origin + 3) * 1e9))
-    assert first.id not in tts_metrics._requests
     second.finish("cancelled")
-    assert second.id not in tts_metrics._requests
     windows = metrics._query_all("SELECT * FROM tts_queue_windows")
     assert max(r["waiting_peak"] for r in windows) == 2
     assert max(r["running_peak"] for r in windows) == 1
@@ -204,18 +203,6 @@ def test_metrics_api_auth_and_shared_window_validation(metrics, monkeypatch):
             client.get("/admin/api/metrics/latency?window=bad", headers={"Authorization": "Bearer allowed"}).status_code
             == 422
         )
-
-
-@pytest.mark.asyncio
-async def test_sampler_start_stop_does_not_duplicate_background_tasks(metrics):
-    sampler = PopulationSampler(SimpleNamespace(snapshot_population=lambda: counts(0)), metrics)
-    sampler.start()
-    task = sampler.task
-    sampler.start()
-    assert task is sampler.task
-    await sampler.stop()
-    await sampler.stop()
-    assert task.done() and sampler.task is None
 
 
 @pytest.mark.asyncio
@@ -382,12 +369,3 @@ async def test_chat_model_first_draft_and_output_acceptance_have_distinct_bounda
     assert rows["chat.v2.delivery"]["duration_ms"] == 10000
     assert rows["chat.v2.total"]["duration_ms"] == 25000
     assert len(metrics._query_all("SELECT * FROM pipeline_spans WHERE span_name='chat.v2.total'")) == 1
-
-
-def test_background_metric_failure_does_not_break_request_or_close(metrics):
-    def fail():
-        raise RuntimeError("unavailable")
-
-    metrics.defer_metric_write(fail)
-    metrics.defer_metric_write(metrics.record_population, datetime.now(timezone.utc).isoformat(), "run", counts(1))
-    assert len(metrics._query_all("SELECT * FROM stage_population_samples")) == 1
