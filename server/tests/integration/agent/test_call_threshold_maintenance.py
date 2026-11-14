@@ -22,6 +22,7 @@ from src.agent.context import (
     ConversationMode,
     ConversationSnapshot,
     ConversationSummary,
+    RecalledMemoryContext,
     TextContent,
 )
 from src.agent.context._conversation_store import EphemeralCallConversationStore
@@ -145,6 +146,7 @@ async def context_with_turns(seed_count=0, count=32):
             identity=ContextIdentity("luotianyi", "call", "user"), _store=EphemeralCallConversationStore(seed)
         ),
         user=Profile(),
+        recalled_memory=RecalledMemoryContext(),
     )
     turns = []
     for seq in range(1, count + 1):

@@ -465,84 +465,107 @@ async def test_partial_consumption_keeps_remaining_and_stale_deadline_is_ignored
 
 
 @pytest.mark.asyncio
-async def test_real_agent_context_access_plan_delivery_and_reflection_after_execution():
-    release = asyncio.Event()
-    events = []
-
-    class Preprocess(ChatPreprocessingHandler):
-        async def handle(self, req, plans):
-            assert plans.context is stage.context
-            events.append("preprocess-and-save")
-            return await super().handle(req, plans)
+@pytest.mark.parametrize("maintenance_failure", [False, True])
+async def test_real_agent_delivers_reply_while_threshold_maintenance_is_blocked(maintenance_failure):
+    release, entered, second_reply, drained = (asyncio.Event() for _ in range(4))
+    active = peak = runs = 0
+    delivered = []
 
     class Reply:
         async def handle(self, req, plans):
             assert req.prepared_inputs[0].text == "你好"
-            events.append("reply")
             accepted = await plans.emit(ActionPlanDraft(source_stimulus_ids=ids(req), actions=plan(req).actions))
-            reflection = await plans.emit(
+            maintenance = await plans.emit(
                 ActionPlanDraft(
                     source_stimulus_ids=ids(req),
                     actions=(
                         d.CognitiveMaintenance(
-                            action_id=f"{req.request_id}-maintenance",
-                            reason=d.MaintenanceReason.COMPACTION_THRESHOLD,
+                            action_id=f"{req.request_id}-maintenance", reason=d.MaintenanceReason.COMPACTION_THRESHOLD
                         ),
                     ),
                 )
             )
-            return report(req, consumed=ids(req), plans=(accepted.plan_id, reflection.plan_id))
+            return report(req, consumed=ids(req), plans=(accepted.plan_id, maintenance.plan_id))
 
-    class Reflect:
+    class Maintain:
         async def realize(self, action, context, outputs):
-            events.append("reflection")
-            return d.ActionResult(
-                action_id=action.action_id,
-                status=d.ActionExecutionStatus.COMPLETED,
-                error_code=None,
-                irreversible_effect_committed=False,
-                effect_ref=None,
-            )
+            nonlocal active, peak, runs
+            if action.reason is d.MaintenanceReason.COMPACTION_THRESHOLD:
+                active += 1
+                peak = max(peak, active)
+                runs += 1
+                try:
+                    entered.set()
+                    await release.wait()
+                    if maintenance_failure and runs == 1:
+                        raise RuntimeError("maintenance unavailable")
+                finally:
+                    active -= 1
+                    if runs == 2:
+                        drained.set()
+            return result(action)
 
     from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+    from src.agent.processing.output_drafts import TextFinalDraft, MessageEndDraft
+
+    def result(action):
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=d.ActionExecutionStatus.COMPLETED,
+            error_code=None,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        )
 
     class Execute:
         async def realize(self, action, context, outputs):
-            events.append("execute")
-            await release.wait()
-            return d.ActionResult(
-                action_id=action.action_id,
-                status=d.ActionExecutionStatus.COMPLETED,
-                error_code=None,
-                irreversible_effect_committed=False,
-                effect_ref=None,
+            await outputs.emit(TextFinalDraft(delivery=action.delivery, text=action.content))
+            await outputs.emit(
+                MessageEndDraft(delivery=action.delivery, status=d.MessageEndStatus.COMPLETED, error_code=None)
             )
+            delivered.append(action.content)
+            if len(delivered) == 2:
+                second_reply.set()
+            return result(action)
 
     agent = Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
             [
-                (d.StimulusKind.TEXT_MESSAGE, Preprocess(_Understanding())),
+                (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
                 (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
                 (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-            ],
+            ]
         ),
         action_router=ActionRouter(
             [
                 (d.ActionKind.SAY, Execute()),
-                (d.ActionKind.COGNITIVE_MAINTENANCE, Reflect()),
+                (d.ActionKind.COGNITIVE_MAINTENANCE, Maintain()),
             ]
         ),
     )
-    stage, _, adapter, _, _ = await setup(agent)
+    stage, _, adapter, _, socket = await setup(agent)
     try:
-        stage.stimulus_input_sink.submit(stimulus())
-        await until(lambda: "execute" in events)
-        assert "reflection" not in events
+        assert stage.stimulus_input_sink.submit(stimulus())
+        await asyncio.wait_for(entered.wait(), 2)
+        assert stage.stimulus_input_sink.submit(stimulus())
+        await asyncio.wait_for(second_reply.wait(), 2)
+        assert active == peak == runs == 1
+        # Real Agent -> Stage output sink -> adapter: both replies reach the client while maintenance is blocked.
+        await until(
+            lambda: len(
+                [
+                    event
+                    for event in socket.events
+                    if event.get("type") == "agent_message" and event["payload"]["is_final_package"]
+                ]
+            )
+            == 2
+        )
         release.set()
-        await until(lambda: "reflection" in events)
-        assert events == ["preprocess-and-save", "reply", "execute", "reflection"]
+        await asyncio.wait_for(drained.wait(), 2)
+        assert peak == 1
     finally:
         release.set()
         await cleanup(stage, adapter)
