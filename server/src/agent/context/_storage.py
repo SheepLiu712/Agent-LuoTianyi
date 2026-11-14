@@ -1,6 +1,7 @@
 """将数据库服务的历史格式转换为上下文数据类型。"""
 
 import json
+import re
 from dataclasses import asdict
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -158,7 +159,13 @@ def _decode_entry(item: dict) -> ConversationEntry:
         if content.text != text:
             raise ValueError("音频历史内容与结构化元数据不一致")
     elif kind == "sing":
-        content = SongContent(text, data["song"], data.get("segment"))
+        song = data.get("song")
+        if not song:
+            legacy = re.match(r"^(?:（唱歌）：《([^》]+)》|（唱了《([^》]+)》）)", text)
+            if legacy is None:
+                raise ValueError("演唱历史缺少曲名且不符合旧版格式")
+            song = next(value for value in legacy.groups() if value)
+        content = SongContent(text, song, data.get("segment"))
     elif kind == "call":
         content = _decode_call_content(data, text)
     else:

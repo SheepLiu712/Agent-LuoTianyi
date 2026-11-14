@@ -4,6 +4,21 @@
         "debug_port": 24523,
         "production_port": 15673
     },
+    "call_transport": {
+        "enabled": true,
+        "realtime_speech": {
+            "enabled": true,
+            "api_key": "$QWEN_API_KEY",
+            "model": "qwen3.5-omni-plus-realtime",
+            "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+            "max_sentence_silence": 500
+        }
+    },
+    "stage_manager": {
+        "stage": {
+            "termination_timeout": 90
+        }
+    },
     "llm_service": {
         "client_llm_timeout_seconds": 120,
         "prompt_manager": {

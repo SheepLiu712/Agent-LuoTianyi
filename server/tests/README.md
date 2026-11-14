@@ -15,6 +15,17 @@
 
 以下命令均在 `server` 目录运行：
 
+先安装开发依赖和真实语言分段测试使用的两个轻量包，与离线 CI 保持一致：
+
+```bash
+python -m pip install -e '.[dev]' httpx
+python -m pip install --no-deps gsv-tts-lite==0.4.7 py3langid==0.4.0
+```
+
+语言分段测试直接加载 `LangSegment.py`，不导入 gsv 的音频入口、不加载声学模型，也不需要 GPU。
+`numpy>=2` 由服务端基础依赖提供。这里的 `--no-deps` 仅用于分段测试；完整语音服务仍须使用正式部署环境。
+缺少测试依赖会报告错误，不会以跳过测试代替验收。
+
 ```powershell
 # 快速单元测试
 python -m pytest tests/unit -q --tb=short
