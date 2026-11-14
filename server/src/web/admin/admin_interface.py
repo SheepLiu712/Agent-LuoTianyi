@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -341,6 +342,16 @@ async def dashboard(
     days: int = Query(default=1, ge=1, le=90),
 ) -> dict[str, Any]:
     return get_admin_shell().observability.get_dashboard_summary(days=days)
+
+
+@protected_router.get("/metrics/usage")
+async def usage_metrics(window: Literal["24h", "7d"] = "24h") -> dict[str, Any]:
+    return await asyncio.to_thread(get_admin_shell().observability.usage_trends, window)
+
+
+@protected_router.get("/metrics/latency")
+async def latency_metrics(window: Literal["24h", "7d", "all"] = "24h") -> dict[str, Any]:
+    return await asyncio.to_thread(get_admin_shell().observability.latency_groups, window)
 
 
 @protected_router.get("/llm/summary")

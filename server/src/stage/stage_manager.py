@@ -219,6 +219,28 @@ class StageManager:
         self._call_ownership_generation = 0
         self._intent_expiry: dict[tuple[str, str], asyncio.Task[None]] = {}
 
+    def snapshot_population(self) -> dict[str, int]:
+        """Count retained chat/call scopes atomically on the owning event loop."""
+        chats, calls = set(), set()
+        chat_count = call_count = terminating = 0
+        for entry in self._managed.values():
+            if isinstance(entry.stage, ChatStage):
+                chats.add(entry.scope)
+                chat_count += 1
+            elif isinstance(entry.stage, CallStage):
+                calls.add(entry.scope)
+                call_count += 1
+            else:
+                continue
+            terminating += entry.stage.lifecycle_state is StageLifecycleState.TERMINATING
+        return {
+            "scope_count": len(chats | calls),
+            "chat_stage_count": chat_count,
+            "call_stage_count": call_count,
+            "overlap_count": len(chats & calls),
+            "terminating_stage_count": terminating,
+        }
+
     @property
     def call_business_ready(self) -> bool:
         """返回通话依赖的完整就绪事实。"""

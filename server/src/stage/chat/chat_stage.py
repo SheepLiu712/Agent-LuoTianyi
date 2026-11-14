@@ -33,6 +33,7 @@ from src.domain.stage.lifecycle import (
     StageTerminationOwner,
 )
 from src.domain.stage.transport import StageOutputSink
+from src.infrastructure.observability.reply_metrics import ChatReplyTiming, chat_reply_scope
 from src.infrastructure.observability.stage_timing import stage_timing
 from src.utils.logger import get_logger
 
@@ -575,6 +576,7 @@ class ChatStage:
         else:
             entry.prepared = report.preprocessed_input
             entry.ready_at = datetime.now(timezone.utc)
+            entry.ready_monotonic = time.monotonic()
             entry.status = _InputStatus.READY
         self._refresh_deadline()
 
@@ -607,6 +609,8 @@ class ChatStage:
             ):
                 continue
             attempt.interrupted = True
+            if attempt.timing is not None:
+                attempt.timing.finish("cancelled")
             attempt.request.cancellation.cancel(d.CancellationReason.SUPERSEDED)
             task.cancel()
             for sid in attempt.input_ids:
@@ -640,6 +644,10 @@ class ChatStage:
         for entry in entries:
             entry.status = _InputStatus.REPLYING
         self._reply = _ReplyAttempt(request, tuple(e.stimulus.stimulus_id for e in entries))
+        self._reply.timing = ChatReplyTiming(
+            request.request_id,
+            min((e.ready_monotonic for e in entries if e.ready_monotonic is not None), default=time.monotonic()),
+        )
         self._attempts[request.request_id] = self._reply
         self._scheduling = False
         self._launch_handle(request, self._on_reply_finished)
@@ -667,6 +675,12 @@ class ChatStage:
         if attempt.remaining_plans or attempt.report is None:
             return
         self._attempts.pop(attempt.request.request_id, None)
+        if attempt.timing is not None:
+            attempt.timing.finish(
+                "cancelled"
+                if attempt.interrupted
+                else "error" if attempt.report.request_status is d.HandlingRequestStatus.FAILED else "incomplete"
+            )
         if attempt.interrupted or attempt.report.request_status is not d.HandlingRequestStatus.COMPLETED:
             return
 
@@ -706,7 +720,9 @@ class ChatStage:
                 self._send_control(
                     AgentPresentationChanged(interaction_id=self.interaction_id, state=AgentPresentationState.LISTENING)
                 )
-            report = await self._agent.handle_stimulus(request, sink, context=self.context)
+            attempt = self._attempts.get(request.request_id)
+            with chat_reply_scope(attempt.timing if attempt else None):
+                report = await self._agent.handle_stimulus(request, sink, context=self.context)
             pending_ids = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
             if (
                 report.request_id != request.request_id
@@ -961,6 +977,11 @@ class ChatStage:
         self._schedule_revision += 1
         self._clear_timer()
 
+    def _finish_reply_metrics(self):
+        for attempt in self._attempts.values():
+            if attempt.timing is not None:
+                attempt.timing.finish("cancelled")
+
     async def _stop_work(self) -> None:
         self._scheduling = False
         self._invalidate_deadline()
@@ -990,6 +1011,7 @@ class ChatStage:
         self._handles.clear()
         self._thinking.clear()
         self._reply = None
+        self._finish_reply_metrics()
         self._attempts.clear()
         for entry in self._pending.values():
             if entry.status is _InputStatus.REPLYING:

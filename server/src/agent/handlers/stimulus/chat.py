@@ -1,6 +1,6 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 from dataclasses import replace
 from datetime import timedelta
 from typing import Final
@@ -31,6 +31,8 @@ from src.agent.skills.cognitive import (
 from src.agent.skills.invocation import handling_invocation
 from src.agent.skills.memory_retrieval import MemoryQuery
 from src.agent.skills.memory_write import MemoryBasis, MemoryFact, MemoryScope, MemoryWriteSkill
+from src.infrastructure.observability.reply_metrics import chat_phase
+from src.infrastructure.observability.stage_timing import stage_timing
 from src.utils.enum_type import ConversationSource
 
 _MEMORY_ACK_REPLY_TOPIC_PREFIX: Final = "刚刚已经把这条用户长期记忆提交完成，请用角色口吻简短确认"
@@ -71,6 +73,12 @@ class ChatPreprocessingHandler:
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """文本先理解并落库，再返回 READY 结果；不交付计划，不消费本批输入。"""
+        if isinstance(request.stimulus, (d.TextMessage, d.ImageMessage, d.VoiceMessage)):
+            with stage_timing(request.request_id, "chat.v2.input"):
+                return await self._prepare(request, plans)
+        return await self._prepare(request, plans)
+
+    async def _prepare(self, request, plans):
         stimulus = request.stimulus
         # Conversation timestamps are stored as naive server-local time. Agent replies
         # use the same convention, so convert the UTC interaction clock first.
@@ -212,14 +220,18 @@ class ChatReplyHandler:
         invocation.require_user_id()
         if invocation.cancellation.is_cancelled:
             return ReplyGenerationResult()
-        decision = await self._skills.topic_extraction.extract(reply_topic, conversation_history=conversation_history)
+        with chat_phase("topic"):
+            decision = await self._skills.topic_extraction.extract(
+                reply_topic, conversation_history=conversation_history
+            )
         if invocation.cancellation.is_cancelled:
             return ReplyGenerationResult()
-        recalled = (
-            await self._skills.retrieval.search(invocation, query=MemoryQuery(decision.memory_queries))
-            if decision.memory_queries
-            else None
-        )
+        with chat_phase("retrieval") if decision.memory_queries else nullcontext():
+            recalled = (
+                await self._skills.retrieval.search(invocation, query=MemoryQuery(decision.memory_queries))
+                if decision.memory_queries
+                else None
+            )
         if invocation.cancellation.is_cancelled:
             return ReplyGenerationResult()
         candidate = (

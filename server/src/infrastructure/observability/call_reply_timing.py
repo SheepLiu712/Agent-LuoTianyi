@@ -91,6 +91,7 @@ class CallReplyTiming:
         generation_started_at=None,
         response_id=None,
         segment_index=None,
+        v2_sink=None,
         clock=time.monotonic,
         wall_clock=lambda: datetime.now(timezone.utc),
     ):
@@ -98,6 +99,7 @@ class CallReplyTiming:
         self._anchor = clock()
         self._wall = wall_clock()
         self._sink = sink
+        self._v2_sink = v2_sink
         self.call_id = call_id
         self._metadata = {
             "reply_request_id": request_id,
@@ -162,6 +164,10 @@ class CallReplyTiming:
         self._marks[phase] = now
         if start is not None:
             self._record(names[phase], start, now, status)
+        if phase == "tts_synthesized" and self._v2_sink is not None:
+            submitted = self._marks.get("reply_submitted")
+            if submitted is not None:
+                self._v2_sink("tts", submitted, now)
         if phase == "tts_first_packet":
             # 保留既有首包指标，同时明确它包含排队，不冒充纯合成耗时。
             submitted = self._marks.get("reply_submitted")

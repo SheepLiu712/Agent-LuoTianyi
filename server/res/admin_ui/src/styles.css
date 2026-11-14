@@ -1078,3 +1078,28 @@ th {
   flex-direction: column;
   align-items: stretch;
 }
+
+.metrics-note { color: var(--muted, #68778d); font-size: 13px; line-height: 1.7; }
+.metrics-outcomes { color: var(--muted, #68778d); font-size: 13px; }
+.usage-readout { min-height: 24px; padding: 10px 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.usage-chart { border-top: 1px solid #e7ebf0; padding-top: 12px; }
+.usage-chart h3 { margin: 4px 0; font-size: 14px; }
+.usage-chart svg { width: 100%; display: block; }
+.usage-cursor { stroke: #8092ac; stroke-dasharray: 4 3; }
+.table-overflow { overflow-x: auto; }
+
+.content { min-width: 0; }
+@media (max-width: 760px) {
+  body { min-width: 0; }
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { padding: 12px; }
+  .brand { padding: 0 4px 10px; }
+  .nav { display: flex; flex-wrap: wrap; margin-top: 10px; gap: 4px; }
+  .nav button { padding: 8px; font-size: 13px; }
+  .content { padding: 16px 12px; }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .page-header { align-items: flex-start; gap: 8px; }
+  .refresh-note { white-space: nowrap; }
+  .panel { padding: 12px; }
+  .table-overflow table { min-width: 520px; }
+}

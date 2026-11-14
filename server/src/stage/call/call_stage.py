@@ -63,6 +63,7 @@ from src.infrastructure.observability.call_metrics import (
     CallMetricStatus,
 )
 from src.infrastructure.observability.call_reply_timing import CallReplyTiming, reply_timing_scope
+from src.infrastructure.observability.reply_metrics import record_duration
 from src.infrastructure.observability.stage_timing import stage_timing
 from src.infrastructure.persistence.call_sessions.repository import CallSessionRecord, CallSessionRepository
 from src.utils.logger import get_logger
@@ -322,6 +323,7 @@ class CallStage:
         self._plans: deque[_QueuedPlan] = deque()
         self._request_tokens: set[d.CancellationToken] = set()
         self._reply_timings: dict[str, CallReplyTiming] = {}
+        self._latency_v2_seen = set()
         self._latency_invalidated: set[str] = set()
         self._handle_tasks: set[asyncio.Task[Any]] = set()
         self._execution_tokens: set[d.CancellationToken] = set()
@@ -554,12 +556,28 @@ class CallStage:
     def playback_final(self, response_id: str, stream_id: int) -> None:
         self._playback.mark_final_sent(response_id, stream_id)
 
+    def _record_latency_v2(self, turn_seq, phase, start, end=None, status="success"):
+        if turn_seq is None or (turn_seq, phase) in self._latency_v2_seen:
+            return
+        self._latency_v2_seen.add((turn_seq, phase))
+        record_duration(
+            f"call:{self.call_id}:{turn_seq}",
+            f"call.v2.{phase}",
+            start,
+            self._monotonic() if end is None else end,
+            status=status,
+        )
+
     def audio_acknowledged(self, response_id: str) -> None:
         response = self._responses.get(response_id)
         if response is not None:
             timing = self._reply_timings.get(response.request_id)
             if timing is not None:
                 timing.acknowledged(response_id)
+            turn = self._turns.get(response.turn_seq)
+            if turn is not None and turn.speech_ended_at is not None:
+                self._record_latency_v2(response.turn_seq, "ack", turn.speech_ended_at)
+                self._record_latency_v2(response.turn_seq, "terminal", self._monotonic())
 
     def audio_sent(self, response_id: str) -> None:
         """接纳非空 PCM 的网络发送成功通知，按正式轮次记录一次首音频耗时。"""
@@ -847,6 +865,10 @@ class CallStage:
             )
         return self._item_turns[item_id]
 
+    def _record_endpointing(self, turn_seq, estimated_end_ns):
+        if estimated_end_ns is not None:
+            self._record_latency_v2(turn_seq, "endpointing", estimated_end_ns / 1e9)
+
     async def _on_omni_event(self, event):
         if self.termination_requested:
             return
@@ -863,6 +885,7 @@ class CallStage:
         elif isinstance(event, SpeechStopped):
             seq = self._turn_for_item(event.item_id)
             self._turns[seq].speech_ended_at = self._monotonic()
+            self._record_endpointing(seq, event.estimated_end_ns)
             self._turns[seq].speech_ended_timestamp = (
                 self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
             )
@@ -942,6 +965,7 @@ class CallStage:
         if event.response_id in self._cancelled_replies or key in self._segment_keys:
             return
         seq, _ = self._model_replies[event.response_id]
+        self._record_latency_v2(seq, "generation", self._model_started_at[event.response_id])
         call_latency(
             "reply.segment_ready",
             self.call_id,
@@ -1186,6 +1210,7 @@ class CallStage:
             speech_ended_at=turn.speech_ended_at if turn else None,
             speech_end_basis="provider_speech_stopped_received",
             generation_started_at=self._model_started_at[stimulus.response_id],
+            v2_sink=lambda phase, start, end: self._record_latency_v2(turn_seq, phase, start, end),
             response_id=stimulus.response_id,
             segment_index=stimulus.segment_index,
             sink=getattr(self._call_metrics, "record_reply_span", None),
@@ -1202,6 +1227,8 @@ class CallStage:
             timing.finish(outcome)
 
     def _interrupt_reply_timings(self):
+        for seq in self._turns:
+            self._record_latency_v2(seq, "terminal", self._monotonic(), status="incomplete")
         for timing in self._reply_timings.values():
             timing.finish("interrupted")
 

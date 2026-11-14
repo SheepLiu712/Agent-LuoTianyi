@@ -7,6 +7,7 @@ from src.agent.skills.invocation import execution_invocation
 from src.agent.skills.memory_retrieval import MemoryQuery
 from src.domain.call.omni import MemoryLookupHit, MemoryLookupResult
 from src.infrastructure.observability.retrieval_timing import retrieval_call_scope
+from src.infrastructure.observability.stage_timing import stage_timing
 
 
 class LookupCallMemoryHandler:
@@ -22,7 +23,8 @@ class LookupCallMemoryHandler:
         with retrieval_call_scope(
             context.interaction_id, action.turn_seq, response_id=action.response_id, tool_call_id=action.tool_call_id
         ):
-            result = await self._retrieval.search(invocation, query=MemoryQuery((action.query,)))
+            with stage_timing(f"call:{context.interaction_id}:{action.turn_seq}", "call.v2.retrieval"):
+                result = await self._retrieval.search(invocation, query=MemoryQuery((action.query,)))
         if context.cancellation.is_cancelled:
             raise d.SinkRejectedError("cancelled lookup", code=d.SinkRejectionCode.STALE_INTERACTION)
         interaction.call_memory.remember_hits(result.hits)

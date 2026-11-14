@@ -20,6 +20,7 @@ class _PendingInput:
     status: _InputStatus = _InputStatus.PREPROCESSING
     prepared: d.PreprocessedInput | None = None
     ready_at: datetime | None = None
+    ready_monotonic: float | None = None
 
 
 @dataclass
@@ -30,3 +31,4 @@ class _ReplyAttempt:
     report: d.HandlingReport | None = None
     interrupted: bool = False
     has_committed_plan: bool = False
+    timing: object | None = None

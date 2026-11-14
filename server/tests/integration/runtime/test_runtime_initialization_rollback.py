@@ -167,22 +167,19 @@ async def test_initialization_rollback_waits_for_stage_manager_before_agent_and_
     calls = []
     stage_release = asyncio.Event()
 
-    class Runtime:
-        async def close_world_stages(self):
-            calls.append("world_stages")
-
-        stage_manager = SimpleNamespace(
+    runtime = rollback_runtime(
+        calls,
+        SimpleNamespace(
             close=lambda: _record_wait(calls, "stage_manager_started", "stage_manager_stopped", stage_release)
-        )
-        chat_adapter = SimpleNamespace(close=lambda: _record(calls, "chat_adapter"))
-        call_adapter = SimpleNamespace(close=lambda: _record(calls, "transport"))
+        ),
+    )
 
     world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
     agent = SimpleNamespace(shutdown=lambda: _record(calls, "agent"))
     database = SimpleNamespace(shutdown=lambda: _record(calls, "database"))
     rollback = asyncio.create_task(
         runtime_module.ServerRuntime._rollback_failed_initialization(
-            runtime=Runtime(),
+            runtime=runtime,
             world=world,
             database_manager=database,
             agent_runtime=agent,
@@ -223,12 +220,7 @@ async def test_cancelled_runtime_rollback_drains_real_manager_termination_before
     manager, initializing = await _start_managed_chat_termination(Termination().reconcile)
     await entered.wait()
 
-    runtime = SimpleNamespace(
-        close_world_stages=lambda: _record(calls, "world_stages"),
-        stage_manager=manager,
-        chat_adapter=SimpleNamespace(close=lambda: _record(calls, "chat_adapter")),
-        call_adapter=SimpleNamespace(close=lambda: _record(calls, "transport")),
-    )
+    runtime = rollback_runtime(calls, manager)
     world = SimpleNamespace(stop_background_services=lambda: _record(calls, "world"))
     agent = SimpleNamespace(shutdown=lambda: _record(calls, "agent"))
     database = SimpleNamespace(shutdown=lambda: _record(calls, "database"))
@@ -291,12 +283,7 @@ async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_f
         calls.append("world")
         raise RuntimeError("world internal detail")
 
-    runtime = SimpleNamespace(
-        close_world_stages=lambda: _record(calls, "world_stages"),
-        stage_manager=manager,
-        chat_adapter=SimpleNamespace(close=lambda: _record(calls, "chat_adapter")),
-        call_adapter=SimpleNamespace(close=lambda: _record(calls, "transport")),
-    )
+    runtime = rollback_runtime(calls, manager)
     rollback = asyncio.create_task(
         runtime_module.ServerRuntime._rollback_failed_initialization(
             runtime=runtime,
@@ -327,6 +314,27 @@ async def test_cancelled_runtime_rollback_continues_after_termination_and_stop_f
     assert calls.index("termination_stopped") < calls.index("agent") < calls.index("database")
     assert "world internal detail" not in caplog.text
     assert "Task exception was never retrieved" not in caplog.text
+
+
+def rollback_runtime(calls, manager):
+    """Use the real lifecycle owner; only external dependencies are test doubles."""
+    runtime = runtime_module.ServerRuntime(
+        user_interface=None,
+        websocket_service=None,
+        world=None,
+        database_manager=None,
+        agent_runtime=None,
+        media_resolver=None,
+        llm_service=None,
+        client_llm_executor=None,
+        observability=None,
+        owns_observability=False,
+        stage_manager=manager,
+        chat_adapter=SimpleNamespace(close=lambda: _record(calls, "chat_adapter")),
+        call_adapter=SimpleNamespace(close=lambda: _record(calls, "transport")),
+    )
+    runtime.close_world_stages = lambda: _record(calls, "world_stages")
+    return runtime
 
 
 async def _record(calls, value):
