@@ -90,3 +90,23 @@ async def test_conflicted_batch_is_not_reported_as_completed_action():
         await CognitiveMaintenanceActionHandler("luotianyi", Conflicted()).realize(
             action(d.MaintenanceReason.INTERACTION_ENDING), execution_context(context()), None
         )
+
+
+@pytest.mark.asyncio
+async def test_background_maintenance_preserves_new_reply_recall():
+    from src.agent.context import RecallEntry, JargonExplanation
+
+    ctx = context()
+    old = RecallEntry("old", "old-input", JargonExplanation("old", "old"))
+    new = RecallEntry("new", "new-input", JargonExplanation("new", "new"))
+    ctx.recalled_memory.append((old,))
+
+    class ConcurrentSkill:
+        async def maintain(self, *args, **kwargs):
+            ctx.recalled_memory.append((new,))
+            return SimpleNamespace(status=d.MaintenanceStatus.COMPLETED)
+
+    await CognitiveMaintenanceActionHandler("luotianyi", ConcurrentSkill()).realize(
+        action(d.MaintenanceReason.COMPACTION_THRESHOLD), execution_context(ctx), None
+    )
+    assert ctx.recalled_memory.read() == (new,)
