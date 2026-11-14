@@ -122,6 +122,10 @@ class Compaction:
     def requires_compaction(self, conversation):
         return self.required
 
+    def planned_covered_entries(self, conversation):
+        snapshot = conversation.read()
+        return snapshot.entries[: -self.keep] if self.keep else snapshot.entries
+
     async def compact(self, conversation):
         self.model_calls += 1
         if self.fail:
@@ -330,3 +334,102 @@ async def test_cancellation_before_progress_does_not_advance_marker():
             token_invocation, request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=ctx)
         )
     assert ctx.conversation.progress is None
+
+
+@pytest.mark.asyncio
+async def test_summary_memory_and_profile_start_together_before_freezing_batch():
+    started = {name: asyncio.Event() for name in ("summary", "memory", "profile")}
+    release = asyncio.Event()
+
+    class ParallelCompaction(Compaction):
+        async def compact(self, conversation):
+            started["summary"].set()
+            await release.wait()
+            return await super().compact(conversation)
+
+    class ParallelMemory(Memory):
+        async def extract_maintenance_candidates(self, **kwargs):
+            started["memory"].set()
+            await release.wait()
+            return await super().extract_maintenance_candidates(**kwargs)
+
+        async def propose_user_profile(self, **kwargs):
+            started["profile"].set()
+            await release.wait()
+            return await super().propose_user_profile(**kwargs)
+
+    memory = ParallelMemory()
+    ctx = context((entry(1), entry(2), entry(3)))
+    task = asyncio.create_task(
+        skill(memory, ParallelCompaction(required=True, keep=1)).maintain(
+            invocation(), request=MaintenanceRequest(reason=MaintenanceReason.COMPACTION_THRESHOLD, context=ctx)
+        )
+    )
+    try:
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), 1)
+        assert ctx.conversation.batch is None
+        assert memory.writes == []
+    finally:
+        release.set()
+        result = await task
+    assert result.maintained_entry_ids == ("e1", "e2")
+    assert "消息3" not in memory.extracts[0][1]
+    assert "消息3" not in str(memory.profiles[0][0])
+    assert ctx.conversation.progress == "e2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["summary", "memory", "profile", "cancel"])
+async def test_parallel_generation_failure_drains_siblings_without_freezing(failure):
+    started = {name: asyncio.Event() for name in ("summary", "memory", "profile")}
+    finished = set()
+    cleanup_started, cleanup_release = asyncio.Event(), asyncio.Event()
+
+    async def generate(name):
+        started[name].set()
+        try:
+            await asyncio.gather(*(event.wait() for event in started.values()))
+            if failure == name:
+                raise RuntimeError(name)
+            await asyncio.Event().wait()
+        finally:
+            if name != failure:
+                cleanup_started.set()
+                await cleanup_release.wait()
+            finished.add(name)
+
+    class FailingCompaction(Compaction):
+        async def compact(self, conversation):
+            return await generate("summary")
+
+    class FailingMemory(Memory):
+        async def extract_maintenance_candidates(self, **kwargs):
+            return await generate("memory")
+
+        async def propose_user_profile(self, **kwargs):
+            return await generate("profile")
+
+    memory = FailingMemory()
+    ctx = context((entry(1), entry(2)))
+    task = asyncio.create_task(
+        skill(memory, FailingCompaction(required=True, keep=0)).maintain(
+            invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=ctx)
+        )
+    )
+    try:
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), 1)
+        if failure == "cancel":
+            task.cancel()
+        await asyncio.wait_for(cleanup_started.wait(), 1)
+        assert not task.done()
+        if failure == "cancel":
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+    finally:
+        cleanup_release.set()
+        with pytest.raises(asyncio.CancelledError if failure == "cancel" else RuntimeError):
+            await task
+    assert finished == set(started)
+    assert ctx.conversation.batch is None and ctx.conversation.progress is None
+    assert memory.writes == [] and ctx.user.updates == []

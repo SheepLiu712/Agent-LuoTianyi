@@ -219,3 +219,41 @@ async def test_summary_deduplicates_merged_confirmed_replies_and_formal_entries(
     assert combined.count("已确认合并回复") == 1
     assert "草稿" not in combined
     assert "未播放回复" not in combined
+
+
+@pytest.mark.asyncio
+async def test_call_memory_and_profile_generate_concurrently_before_writes():
+    import asyncio
+
+    started = {name: asyncio.Event() for name in ("memory", "profile")}
+    release = asyncio.Event()
+    writes = []
+
+    class Memory:
+        async def extract_maintenance_candidates(self, **kwargs):
+            started["memory"].set()
+            await release.wait()
+            return ()
+
+        async def propose_user_profile(self, **kwargs):
+            started["profile"].set()
+            await release.wait()
+            return "画像"
+
+        async def write_maintenance_candidates(self, **kwargs):
+            writes.append(kwargs)
+
+    snapshot = _snapshot(turns=(CallFinalTurn(1, "用户事实", CallReplyStatus.COMPLETED, "正式回复"),))
+    task = asyncio.create_task(
+        _CallMaintenance({"luotianyi": Memory()}).maintain(
+            _invocation(), snapshot, current_profile="", settlement_input_digest=_maintenance_digest(snapshot)
+        )
+    )
+    try:
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), 1)
+        assert writes == []
+    finally:
+        release.set()
+        result = await task
+    assert result == (1, "画像")
+    assert len(writes) == 1

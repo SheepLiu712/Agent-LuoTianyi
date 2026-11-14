@@ -33,6 +33,7 @@ from src.domain.stage.lifecycle import (
     StageTerminationOwner,
 )
 from src.domain.stage.transport import StageOutputSink
+from src.infrastructure.observability.stage_timing import stage_timing
 from src.utils.logger import get_logger
 
 from .._config import _StageConfig
@@ -992,19 +993,41 @@ class ChatStage:
         self._pending = {sid: e for sid, e in self._pending.items() if e.status is _InputStatus.READY}
 
     async def _terminate(self, reason: StageEndReason) -> StageTerminationResult:
+        with stage_timing(
+            self.interaction_id, "stage.termination.total", stage_kind="chat", reason=reason.value
+        ) as timing:
+            result = await self._terminate_measured(reason)
+            timing.update(
+                status="error" if result.finalization_error or result.cleanup_error else "success",
+                finalization_error=result.finalization_error,
+                cleanup_error=result.cleanup_error,
+                resources_released=result.resources_released,
+            )
+            return result
+
+    async def _terminate_measured(self, reason: StageEndReason) -> StageTerminationResult:
         error = cleanup_error = None
         try:
-            await self._lifetime.stop_initialization()
-            await self._stop_work()
+            with stage_timing(self.interaction_id, "stage.termination.stop_tasks", stage_kind="chat"):
+                await self._lifetime.stop_initialization()
+                await self._stop_work()
             self._lifetime.interaction_ended = True
             if self._context is not None:
                 business_reason = {
                     StageEndReason.SWITCH: d.InteractionEndingReason.SWITCH_TO_CALL,
                     StageEndReason.SHUTDOWN: d.InteractionEndingReason.SHUTDOWN,
                 }.get(reason, d.InteractionEndingReason.USER_LEFT)
-                _, error = await asyncio.wait_for(
-                    self._run_termination_maintenance(business_reason), timeout=self._config.termination_timeout
-                )
+                with stage_timing(
+                    self.interaction_id,
+                    "stage.termination.maintenance",
+                    stage_kind="chat",
+                    timeout_seconds=self._config.termination_timeout,
+                ) as timing:
+                    _, error = await asyncio.wait_for(
+                        self._run_termination_maintenance(business_reason), timeout=self._config.termination_timeout
+                    )
+                    if error:
+                        timing.update(status="error", finalization_error=error)
         except Exception as failure:
             self._logger.exception(
                 "Stage termination failed interaction=%s reason=%s timeout_seconds=%s",
@@ -1018,7 +1041,8 @@ class ChatStage:
         finally:
             try:
                 if self._context is not None:
-                    await self._context.close()
+                    with stage_timing(self.interaction_id, "stage.termination.close_context", stage_kind="chat"):
+                        await self._context.close()
             except Exception as failure:
                 cleanup_error = type(failure).__name__
             self._pending.clear()

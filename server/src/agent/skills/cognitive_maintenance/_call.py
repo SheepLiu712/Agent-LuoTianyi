@@ -19,6 +19,8 @@ from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
 from src.utils.owned_operation import complete_owned
 
+from ._parallel import parallel_results
+
 
 class CallMaintenanceMemory(Protocol):
     async def extract_maintenance_candidates(
@@ -75,11 +77,14 @@ class _CallMaintenance:
             if frozen is not None and frozen.settlement_input_digest != settlement_input_digest:
                 raise ValueError("SETTLEMENT_INPUT_CONFLICT")
         if frozen is None:
-            candidates = await memory.extract_maintenance_candidates(history="", current_dialogue="\n".join(lines))
-            profile = await memory.propose_user_profile(
-                history={"summary": "", "recent_conversation": list(lines)},
-                current_profile=current_profile,
+            candidates, profile = await parallel_results(
+                memory.extract_maintenance_candidates(history="", current_dialogue="\n".join(lines)),
+                memory.propose_user_profile(
+                    history={"summary": "", "recent_conversation": list(lines)},
+                    current_profile=current_profile,
+                ),
             )
+            self._check_cancelled(invocation)
             proposed = CallMaintenanceBatch(
                 maintenance_id=maintenance_id,
                 call_id=_call_id(snapshot),

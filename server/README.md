@@ -228,3 +228,35 @@ Windows 和 Linux 启动脚本都会保留已有的代理例外，并将本机�
 - 感谢[火爆鸡王](https://space.bilibili.com/5033594)发布的Live2D模型
 - 感谢阿里云、硅基流动平台提供的API服务
 - 感谢所有贡献者的努力和支持！
+
+
+### Stage 回收耗时
+
+回收计时写入现有可观测性 SQLite 数据库（默认 `data/admin_metrics.sqlite3`）的
+`pipeline_spans`，正常路径不输出耗时数值日志，不需要数据库迁移。
+`trace_id = stage:<interaction_id>` 关联同一次交互，`metadata_json.stage_kind` 区分 `chat` / `call`。
+
+| span_name | 范围 |
+| --- | --- |
+| `stage.termination.total` | 完整终止任务，包含停止任务、结束维护和上下文/资源清理 |
+| `stage.termination.stop_tasks` | 聊天：停止初始化和工作任务；通话：按 `phase` 分别记录 `playback`、`initialization`、`inflight`、`cleanup`，可按交互求和 |
+| `stage.termination.maintenance` | 聊天：结束刺激、维护计划执行及超时后的退出等待；通话：结束认知维护技能，不含随后生成的通话概要 |
+| `stage.termination.close_context` | 聊天关闭上下文 |
+| `stage.termination.cleanup` | 通话资源清理，每次调用分别记录，包含其 `cleanup` 停止任务，不能与它重复相加 |
+| `agent.cognitive_maintenance` | 聊天认知维护技能以及通话阈值维护，用 `reason` 区分触发原因 |
+
+`duration_ms` 使用单调时钟；`status` 区分 `success`、`error`、`cancelled`。
+业务返回的维护失败也记为 `error`，总计时包含 `finalization_error`、`cleanup_error` 和
+`resources_released`。未执行的阶段不产生记录；进程被强制终止时，未退出的计时段无法落库。
+埋点写入失败不会改变回收结果。计时只保存身份、状态、错误类型与数值，不保存对话内容。
+聊天维护的 90 秒预算保持原有范围，不是整个回收过程的硬上限。
+
+例如查询最近 24 小时的回收耗时：
+
+```sql
+SELECT trace_id, span_name, duration_ms, status, metadata_json
+FROM pipeline_spans
+WHERE span_name LIKE 'stage.termination.%'
+  AND julianday(start_ts) >= julianday('now', '-1 day')
+ORDER BY start_ts DESC;
+```
