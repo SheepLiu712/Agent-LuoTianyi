@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Generator
 from typing import TYPE_CHECKING
 
 from src.domain.agent import CALL_PCM_FORMAT, AudioFormat, CancellationToken
+from src.infrastructure.observability.tts_metrics import mark_tts
 
 from .call_pcm import UnsupportedCallAudioError
 from .errors import TTSStreamCancelled
@@ -62,9 +63,12 @@ class AsyncTTS:
         if module is None:
             raise RuntimeError(f"角色 {character_id} 未配置 TTS")
         stop = threading.Event()
+        server = getattr(module, "tts_server", None)
+        mark_tts("bound", worker=getattr(server, "metrics_id", character_id))
 
         # 创建和推进同步生成器都在工作线程执行。
         def generate() -> Generator[bytes, None, None]:
+            mark_tts("thread_started")
             if output_format is None:
                 yield from module.stream_synthesize_speech_with_tone(text, tone, cancel_event=stop)
                 return

@@ -8,7 +8,6 @@ type DashboardSummary = {
   pipeline: Record<string, LatencySummary>;
   logs: Record<string, number>;
   recent_logs: LogEvent[];
-  slow_spans: PipelineSpan[];
 };
 
 type LatencySummary = {
@@ -181,36 +180,6 @@ function validateClientModelTypes(
   return errors;
 }
 
-type LlmCall = {
-  id: number;
-  ts: string;
-  trace_id?: string;
-  user_id?: string;
-  module_name: string;
-  interface_name?: string;
-  model_name?: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  latency_ms: number;
-  success: number;
-  error_type?: string;
-  error_message?: string;
-  metadata?: Record<string, unknown>;
-};
-
-type PipelineSpan = {
-  id: number;
-  trace_id: string;
-  user_id?: string;
-  topic_id?: string;
-  span_name: string;
-  start_ts: string;
-  duration_ms: number;
-  status: string;
-  metadata?: Record<string, unknown>;
-};
-
 type LogEvent = {
   id: number;
   ts: string;
@@ -218,30 +187,6 @@ type LogEvent = {
   logger_name: string;
   message: string;
   traceback?: string;
-};
-
-type TraceSummary = {
-  trace_id: string;
-  user_id?: string;
-  topic_id?: string;
-  start_ts?: string;
-  end_ts?: string;
-  duration_ms: number;
-  span_count: number;
-  total_span_ms: number;
-  max_span_ms: number;
-  llm_call_count: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  total_llm_latency_ms: number;
-  failed_llm_calls: number;
-};
-
-type TraceDetail = {
-  summary: TraceSummary;
-  spans: PipelineSpan[];
-  llm_calls: LlmCall[];
 };
 
 type DynamicAdminPost = {
@@ -288,69 +233,12 @@ type DynamicAdminComment = {
   cursor?: string;
 };
 
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'dynamics' | 'invite_codes' | 'config' | 'logs';
-
-type LlmStatsTab = {
-  id: 'seven_days' | 'one_day' | 'recent';
-  label: string;
-  subtitle: string;
-  url: string;
-  metricTitle: string;
-  tokenDetail: string;
-  showTimeBuckets: boolean;
-};
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'dynamics' | 'invite_codes' | 'config' | 'logs';
 
 type LocalActionStatus = {
   tone: 'info' | 'success' | 'error';
   message: string;
 };
-
-type LlmChartMetric = {
-  id: 'call_count' | 'total_tokens' | 'avg_total_tokens' | 'avg_prompt_tokens' | 'avg_completion_tokens' | 'avg_latency_ms' | 'failed_calls';
-  label: string;
-  field: string;
-  format: 'number' | 'ms';
-};
-
-const llmStatsTabs: LlmStatsTab[] = [
-  {
-    id: 'seven_days',
-    label: '7日平均',
-    subtitle: '最近 7 日 LLM 调用量、Token 与耗时',
-    url: '/admin/api/llm/summary?days=7&bucket_hours=2',
-    metricTitle: '7 日调用',
-    tokenDetail: '7 日累计',
-    showTimeBuckets: true,
-  },
-  {
-    id: 'one_day',
-    label: '1日平均',
-    subtitle: '最近 24 小时 LLM 调用量、Token 与耗时',
-    url: '/admin/api/llm/summary?days=1&bucket_hours=2',
-    metricTitle: '1 日调用',
-    tokenDetail: '1 日累计',
-    showTimeBuckets: true,
-  },
-  {
-    id: 'recent',
-    label: '最近平均',
-    subtitle: '最近 50 次 LLM 调用的平均表现',
-    url: '/admin/api/llm/summary?recent_limit=50',
-    metricTitle: '最近调用',
-    tokenDetail: '最近 50 次累计',
-    showTimeBuckets: false,
-  },
-];
-
-const llmChartMetrics: LlmChartMetric[] = [
-  { id: 'call_count', label: '调用次数', field: 'call_count', format: 'number' },
-  { id: 'total_tokens', label: 'Token 数', field: 'total_tokens', format: 'number' },
-  { id: 'avg_total_tokens', label: '平均 Token', field: 'avg_total_tokens', format: 'number' },
-  { id: 'avg_prompt_tokens', label: '平均 Prompt', field: 'avg_prompt_tokens', format: 'number' },
-  { id: 'avg_completion_tokens', label: '平均 Completion', field: 'avg_completion_tokens', format: 'number' },
-  { id: 'avg_latency_ms', label: '平均耗时', field: 'avg_latency_ms', format: 'ms' },
-  { id: 'failed_calls', label: '失败次数', field: 'failed_calls', format: 'number' },
-];
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin' });
@@ -455,10 +343,6 @@ function formatSecretCategory(secret: SecretInfo) {
     return 'LLM API Key';
   }
   return '自定义';
-}
-
-function formatChartValue(value: number, metric: LlmChartMetric) {
-  return metric.format === 'ms' ? formatMs(value) : formatNumber(value);
 }
 
 function AdminGate() {
@@ -573,9 +457,8 @@ function App({ onLogout }: { onLogout: () => void }) {
         </div>
         <nav className="nav">
           <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}>首页</button>
-          <button className={page === 'llm' ? 'active' : ''} onClick={() => setPage('llm')}>LLM 统计</button>
+          <button className={page === 'llm' ? 'active' : ''} onClick={() => setPage('llm')}>用量趋势</button>
           <button className={page === 'pipeline' ? 'active' : ''} onClick={() => setPage('pipeline')}>链路耗时</button>
-          <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
           <button className={page === 'dynamics' ? 'active' : ''} onClick={() => setPage('dynamics')}>动态管理</button>
           <button className={page === 'config' ? 'active' : ''} onClick={() => setPage('config')}>服务配置</button>
           <button className={page === 'invite_codes' ? 'active' : ''} onClick={() => setPage('invite_codes')}>邀请码管理</button>
@@ -587,7 +470,6 @@ function App({ onLogout }: { onLogout: () => void }) {
         {page === 'dashboard' && <DashboardPage />}
         {page === 'llm' && <LlmPage />}
         {page === 'pipeline' && <PipelinePage />}
-        {page === 'traces' && <TracePage />}
         {page === 'dynamics' && <DynamicsPage />}
         {page === 'invite_codes' && <InviteCodesPage />}
         {page === 'config' && <ConfigPage />}
@@ -697,7 +579,6 @@ function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
 
 function DashboardPage() {
   const { data, error, loading } = usePolling<DashboardSummary>('/admin/api/dashboard?days=1');
-  const slowSpans = data?.slow_spans || [];
   const recentLogs = data?.recent_logs || [];
 
   return (
@@ -710,10 +591,7 @@ function DashboardPage() {
         <MetricCard title="Warnings" value={formatNumber(data?.logs?.warning_count)} detail="最近 24 小时" tone="warning" />
         <MetricCard title="Errors" value={formatNumber(data?.logs?.error_count)} detail="最近 24 小时" tone="danger" />
       </section>
-      <section className="two-column">
-        <Panel title="慢 Span">
-          <SpanTable rows={slowSpans} compact />
-        </Panel>
+      <section>
         <Panel title="最近异常">
           <LogTable rows={recentLogs} compact />
         </Panel>
@@ -722,41 +600,105 @@ function DashboardPage() {
   );
 }
 
+type UsageRow = { ts: string; online: number | null; online_peak: number | null; calls: number; tokens: number };
+type UsageSummary = {
+  rows: UsageRow[]; bucket_seconds: number;
+  totals: { calls: number; tokens: number; online_peak: number | null };
+  latest_population: { sampled_at: string; scope_count: number } | null;
+};
+
+function TimeRange({ value, onChange, all = false }: {
+  value: string; onChange: (value: string) => void; all?: boolean;
+}) {
+  return <div className="sub-tabs" aria-label="统计时间范围">
+    {([['24h', '最近24小时'], ['7d', '最近7天'], ...(all ? [['all', '所有数据']] : [])]).map(([key, label]) =>
+      <button key={key} className={value === key ? 'active' : ''} onClick={() => onChange(key)}>{label}</button>)}
+  </div>;
+}
+
 function LlmPage() {
-  const [activeTabId, setActiveTabId] = useState<LlmStatsTab['id']>('seven_days');
-  const activeTab = llmStatsTabs.find((tab) => tab.id === activeTabId) || llmStatsTabs[0];
-  const { data, error, loading } = usePolling<LlmSummary>(activeTab.url);
-  return (
-    <>
-      <PageHeader title="LLM 统计" subtitle={activeTab.subtitle} />
-      <div className="sub-tabs">
-        {llmStatsTabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={tab.id === activeTabId ? 'active' : ''}
-            onClick={() => setActiveTabId(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <StatusBar loading={loading} error={error} />
-      <section className="metric-grid">
-        <MetricCard title={activeTab.metricTitle} value={formatNumber(data?.totals?.call_count)} detail={`${formatNumber(data?.totals?.total_tokens)} tokens`} />
-        <MetricCard title="平均 Token" value={formatNumber(data?.totals?.avg_total_tokens)} detail={`${formatNumber(data?.totals?.avg_prompt_tokens)} prompt / ${formatNumber(data?.totals?.avg_completion_tokens)} completion`} />
-        <MetricCard title="Prompt Tokens" value={formatNumber(data?.totals?.prompt_tokens)} detail={activeTab.tokenDetail} />
-        <MetricCard title="平均耗时" value={formatMs(data?.totals?.avg_latency_ms)} detail={`${formatNumber(data?.totals?.failed_calls)} failed`} />
-      </section>
-      <Panel title="模块统计">
-        <LlmModuleTable rows={data?.by_module || []} />
-      </Panel>
-      {activeTab.showTimeBuckets && (
-        <Panel title="分时趋势">
-          <LlmTimeBucketChart rows={data?.time_buckets || []} />
-        </Panel>
-      )}
-    </>
-  );
+  const [window, setWindow] = useState('24h');
+  const [hover, setHover] = useState<number | null>(null);
+  const { data, error, loading } = usePolling<UsageSummary>(`/admin/api/metrics/usage?window=${window}`, 60000);
+  const { data: modules } = usePolling<LlmSummary>(`/admin/api/llm/summary?days=${window === '24h' ? 1 : 7}`, 60000);
+  const latest = data?.latest_population;
+  const stale = latest && Date.now() - Date.parse(latest.sampled_at) > 10 * 60 * 1000;
+  const selected = hover === null ? null : data?.rows[hover];
+  return <>
+    <PageHeader title="用量趋势" subtitle="在线规模、LLM 调用量和 Token 用量 · 北京时间 UTC+8" />
+    <TimeRange value={window} onChange={value => { setWindow(value); setHover(null); }} />
+    <StatusBar loading={loading} error={error} />
+    <section className="metric-grid">
+      <MetricCard title="当前在线估计" value={latest ? formatNumber(latest.scope_count) : '—'}
+        detail={latest ? `${stale ? '采样已过期 · ' : ''}${formatShanghaiTime(latest.sampled_at)}` : '暂无采样'} />
+      <MetricCard title="在线峰值" value={data?.totals.online_peak == null ? '—' : formatNumber(data.totals.online_peak)} detail="所选范围的采样峰值" />
+      <MetricCard title="LLM 调用总量" value={formatNumber(data?.totals.calls)} detail="所选时间范围" />
+      <MetricCard title="Token 总量" value={formatNumber(data?.totals.tokens)} detail="所选时间范围" />
+    </section>
+    <Panel title="分时趋势">
+      <p className="metrics-note">在线规模按用户和角色去重，包含断线保留及回收中的 Stage。每5分钟采样，缺失处断线；
+        {window === '24h' ? '调用与 Token 按5分钟累计。' : '在线按小时取有效样本平均，调用与 Token 按小时累计。'}</p>
+      <div className="usage-readout" aria-live="polite">{selected ? <>
+        {formatShanghaiTime(selected.ts)} · 在线 {selected.online == null ? '—' : formatNumber(selected.online)}
+        {window === '7d' && selected.online_peak != null ? `（峰值 ${selected.online_peak}）` : ''}
+        {' · '}调用 {formatNumber(selected.calls)} · Token {formatNumber(selected.tokens)}
+      </> : '移动到任一图表，查看同一时间的三项指标'}</div>
+      {(['online', 'calls', 'tokens'] as const).map(metric => <UsageChart key={metric} rows={data?.rows || []}
+        metric={metric} selected={hover} onSelect={setHover} />)}
+    </Panel>
+    <Panel title="模块统计"><div className="table-overflow"><LlmModuleTable rows={modules?.by_module || []} /></div></Panel>
+  </>;
+}
+
+function UsageChart({ rows, metric, selected, onSelect }: {
+  rows: UsageRow[]; metric: 'online' | 'calls' | 'tokens'; selected: number | null; onSelect: (index: number | null) => void;
+}) {
+  const titles = { online: '在线规模（估计）', calls: 'LLM 调用次数', tokens: 'Token 用量' };
+  const [compact, setCompact] = useState(() => globalThis.matchMedia('(max-width: 760px)').matches);
+  useEffect(() => {
+    const media = globalThis.matchMedia('(max-width: 760px)');
+    const update = () => setCompact(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  const width = compact ? 420 : 960, height = 160, left = 55, right = 25, top = 14, bottom = 34;
+  const maximum = Math.max(1, ...rows.map(row => row[metric] ?? 0));
+  const x = (index: number) => left + index / Math.max(1, rows.length - 1) * (width - left - right);
+  const y = (value: number) => top + (1 - value / maximum) * (height - top - bottom);
+  let connected = false;
+  const path = rows.map((row, index) => {
+    const value = row[metric];
+    if (value == null) { connected = false; return ''; }
+    const command = connected ? 'L' : 'M'; connected = true;
+    return `${command}${x(index)},${y(value)}`;
+  }).join(' ');
+  return <div className="usage-chart">
+    <h3>{titles[metric]}</h3>
+    {!rows.length ? <p className="empty-state">暂无时段数据</p> : <svg viewBox={`0 0 ${width} ${height}`}
+      role="img" aria-label={titles[metric]} tabIndex={0}
+      onKeyDown={event => { if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+        event.preventDefault(); onSelect(Math.max(0, Math.min(rows.length - 1, (selected ?? 0) + (event.key === 'ArrowRight' ? 1 : -1))));
+      } }}
+      onMouseMove={event => { const box = event.currentTarget.getBoundingClientRect();
+        const local = (event.clientX - box.left) / box.width * width;
+        onSelect(Math.max(0, Math.min(rows.length - 1, Math.round((local - left) / (width - left - right) * (rows.length - 1)))));
+      }}>
+      {[0, .5, 1].map(ratio => <g key={ratio}>
+        <line className="chart-grid-line" x1={left} x2={width - right} y1={y(maximum * ratio)} y2={y(maximum * ratio)} />
+        <text className="chart-y-label" x={left - 8} y={y(maximum * ratio) + 4} textAnchor="end">{formatNumber(maximum * ratio)}</text>
+      </g>)}
+      <path className="chart-line" fill="none" d={path} />
+      {rows.map((row, index) => row[metric] != null &&
+        (index === 0 || rows[index - 1][metric] == null) &&
+        (index === rows.length - 1 || rows[index + 1][metric] == null)
+        ? <circle key={row.ts} className="chart-point" cx={x(index)} cy={y(row[metric]!)} r="3" /> : null)}
+      {(compact ? [0, .5, 1] : [0, .25, .5, .75, 1]).map(ratio => { const index = Math.round(ratio * (rows.length - 1)); return <text
+        key={ratio} className="chart-x-label" x={x(index)} y={height - 8} textAnchor="middle">
+        {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(rows[index].ts))}
+      </text>; })}
+      {selected != null && selected < rows.length && <line className="usage-cursor" x1={x(selected)} x2={x(selected)} y1={top} y2={height - bottom} />}
+    </svg>}
+  </div>;
 }
 
 function LlmModuleTable({ rows }: { rows: Array<Record<string, string | number | null>> }) {
@@ -801,299 +743,38 @@ function LlmModuleTable({ rows }: { rows: Array<Record<string, string | number |
   );
 }
 
-function LlmTimeBucketChart({ rows }: { rows: Array<Record<string, string | number>> }) {
-  const [activeMetricId, setActiveMetricId] = useState<LlmChartMetric['id']>('call_count');
-  const metric = llmChartMetrics.find((item) => item.id === activeMetricId) || llmChartMetrics[0];
-  const values = rows.map((row) => Number(row[metric.field] || 0));
-  const maxValue = Math.max(...values, 0);
-  const chartWidth = 960;
-  const chartHeight = 300;
-  const padding = { top: 24, right: 28, bottom: 54, left: 64 };
-  const plotWidth = chartWidth - padding.left - padding.right;
-  const plotHeight = chartHeight - padding.top - padding.bottom;
-  const scaleY = (value: number) => {
-    if (maxValue <= 0) {
-      return padding.top + plotHeight;
-    }
-    return padding.top + plotHeight - (value / maxValue) * plotHeight;
-  };
-  const points = rows.map((row, index) => {
-    const x = padding.left + (rows.length <= 1 ? plotWidth / 2 : (index / (rows.length - 1)) * plotWidth);
-    const y = scaleY(Number(row[metric.field] || 0));
-    return { x, y, row };
-  });
-  const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
-  const total = values.reduce((sum, value) => sum + value, 0);
-  const average = values.length ? total / values.length : 0;
-
-  return (
-    <div className="llm-chart-panel">
-      <div className="metric-switch">
-        {llmChartMetrics.map((item) => (
-          <button
-            key={item.id}
-            className={item.id === activeMetricId ? 'active' : ''}
-            onClick={() => setActiveMetricId(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {rows.length === 0 ? (
-        <div className="empty-state">暂无时段数据</div>
-      ) : (
-        <>
-          <div className="line-chart-wrap">
-            <svg className="line-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${metric.label}分时趋势`}>
-              <line className="chart-axis" x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotHeight} />
-              <line className="chart-axis" x1={padding.left} y1={padding.top + plotHeight} x2={padding.left + plotWidth} y2={padding.top + plotHeight} />
-              {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-                const y = padding.top + plotHeight - ratio * plotHeight;
-                const value = maxValue * ratio;
-                return (
-                  <g key={ratio}>
-                    <line className="chart-grid-line" x1={padding.left} y1={y} x2={padding.left + plotWidth} y2={y} />
-                    <text className="chart-y-label" x={padding.left - 10} y={y + 4} textAnchor="end">
-                      {formatChartValue(value, metric)}
-                    </text>
-                  </g>
-                );
-              })}
-              {polylinePoints && <polyline className="chart-line" points={polylinePoints} />}
-              {points.map((point, index) => (
-                <g key={String(point.row.bucket_start || index)}>
-                  <circle className="chart-point" cx={point.x} cy={point.y} r="4">
-                    <title>{`${String(point.row.bucket_label || point.row.bucket_start)}: ${formatChartValue(Number(point.row[metric.field] || 0), metric)}`}</title>
-                  </circle>
-                  <text className="chart-x-label" x={point.x} y={padding.top + plotHeight + 24} textAnchor="middle">
-                    {String(point.row.bucket_start || '').replace(':00', '')}
-                  </text>
-                </g>
-              ))}
-            </svg>
-          </div>
-          <div className="chart-summary">
-            <span>峰值 {formatChartValue(maxValue, metric)}</span>
-            <span>平均 {formatChartValue(average, metric)}</span>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function PipelinePage() {
-  const { data, error, loading } = usePolling<Record<string, LatencySummary>>('/admin/api/pipeline/latency?days=7');
-  const { data: spans } = usePolling<PipelineSpan[]>('/admin/api/pipeline/spans?limit=100&slow=true');
-  const summaryRows = useMemo(() => Object.entries(data || {}), [data]);
-
-  return (
-    <>
-      <PageHeader title="链路耗时" subtitle="通话回复首包延迟与各处理阶段耗时" />
-      <CallReplyLatencyPanel />
-      <StatusBar loading={loading} error={error} />
-      <Panel title="7 日耗时分布">
-        <table>
-          <thead>
-            <tr>
-              <th>Span</th>
-              <th>Count</th>
-              <th>Avg</th>
-              <th>P50</th>
-              <th>P90</th>
-              <th>P99</th>
-              <th>Max</th>
-            </tr>
-          </thead>
-          <tbody>
-            {summaryRows.map(([name, row]) => (
-              <tr key={name}>
-                <td>{name}</td>
-                <td>{formatNumber(row.count)}</td>
-                <td>{formatMs(row.avg_ms)}</td>
-                <td>{formatMs(row.p50_ms)}</td>
-                <td>{formatMs(row.p90_ms)}</td>
-                <td>{formatMs(row.p99_ms)}</td>
-                <td>{formatMs(row.max_ms)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
-      <Panel title="慢 Span 明细" className="scroll-panel">
-        <SpanTable rows={spans || []} />
-      </Panel>
-    </>
-  );
-}
-
-const CALL_REPLY_PHASES = [
-  ['total', '供应商判停至首个音频 ACK（听到首包代理）'],
-  ['legacy_first_generated', '历史口径：估算句末至生成首包'],
-  ['endpointing', '判断说话结束'],
-  ['scheduling', '等待开始检索'],
-  ['retrieval', '记忆检索'],
-  ['retrieval.authorization', '检索明细：授权编号查询'],
-  ['retrieval.queue', '检索明细：线程池排队'],
-  ['retrieval.embedding', '检索明细：远程向量化'],
-  ['retrieval.vector_search', '检索明细：本地向量搜索'],
-  ['retrieval.hydration', '检索明细：记忆正本回查'],
-  ['retrieval.materialization', '检索明细：结果整理'],
-
-  ['generation_queue', '准备生成回复'],
-  ['generation', '生成首段回复'],
-  ['submission', '提交首段回复'],
-  ['tts_first_packet', '提交至首个 TTS 包'],
-] as const;
-
-type CallReplyLatency = {
-  attempt_count: number;
-  completed_count: number;
-  summary: Record<string, LatencySummary & { failed_count: number }>;
-  recent: Array<{
-    trace_id: string; request_id: string; turn_seq: number; started_at: string;
-    speech_end_basis: string; outcome: string;
-    phases: Record<string, { duration_ms: number; status: string }>;
-  }>;
+type LatencyGroups = {
+  since: string | null; until: string;
+  groups: Array<{ id: string; title: string; outcomes: Record<string, number>;
+    rows: Array<LatencySummary & { key: string; label: string }> }>;
 };
 
-function CallReplyLatencyPanel() {
-  const { data, error, loading } = usePolling<CallReplyLatency>('/admin/api/pipeline/call-replies?days=7&limit=100');
-  const [selected, setSelected] = useState('');
-  const attempt = data?.recent.find(row => row.request_id === selected) || data?.recent[0];
-  const outcomes: Record<string, string> = {
-    completed: '已生成首包', interrupted: '已打断', failed: '失败', incomplete: '未完成或未收到结束记录',
+function PipelinePage() {
+  const [window, setWindow] = useState('24h');
+  const { data, error, loading } = usePolling<LatencyGroups>(`/admin/api/metrics/latency?window=${window}`, 60000);
+  const notes: Record<string, string> = {
+    chat: '总耗时从本批最早输入准备完成算起，结束于首段文本被服务端输出层接纳；不代表客户端收到。',
+    call: '首个 ACK 是客户端确认的代理指标；判停使用音频结束估计。实时模型自动触发，LLM 启动以收到供应商开始回复事件为起点。',
+    tts: '首包以 worker 生成有效音频为准。排队包含线程池、合成锁和 worker 等待；无首包的请求不填零。',
+    stage_chat: '完整回收包含停止任务、维护和上下文关闭；90秒预算仅针对维护。',
+    stage_call: '同次回收的多次停止或清理先累计再统计；清理包含部分停止任务，不能将所有行直接相加。',
   };
-  return <Panel title="通话回复延迟（近 7 日）" className="scroll-panel">
+  const outcomeLabels: Record<string, string> = { success: '成功', error: '失败', cancelled: '取消', incomplete: '未完成', pending: '处理中', timeout: '超时', empty: '无音频', worker_lost: 'worker中断' };
+  return <>
+    <PageHeader title="链路耗时" subtitle="聊天、通话、TTS 与 Stage 回收 · 各阶段仅统计有效样本" />
+    <TimeRange value={window} onChange={setWindow} all />
     <StatusBar loading={loading} error={error} />
-    <p>仅统计用户发言触发的回复，不含开场白、主动发言和预制致歉。实时链路从通话层收到供应商判停事件开始计时。</p>
-    <p>听到首包取服务端收到的首个音频 ACK，包含客户端处理和确认回传。未收到 ACK 的轮次不计入总延迟。生成回复指首段可提交文本就绪，不是整段回复生成结束。</p>
-    <p>回复尝试：{formatNumber(data?.attempt_count || 0)}；已生成首包：{formatNumber(data?.completed_count || 0)}。各阶段仅汇总成功样本，缺失值不按零计入。检索明细已包含在记忆检索总耗时中，同类操作按每轮累计。</p>
-    <table><thead><tr><th>阶段</th><th>成功样本</th><th>失败样本</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th><th>最大</th></tr></thead>
-      <tbody>{CALL_REPLY_PHASES.map(([key, label]) => {
-        const row = data?.summary[key];
-        return <tr key={key}><td>{label}</td><td>{row?.count || 0}</td><td>{row?.failed_count || 0}</td>
-          {(['avg_ms', 'p50_ms', 'p90_ms', 'p99_ms', 'max_ms'] as const).map(field =>
-            <td key={field}>{row?.count ? formatMs(row[field]) : '—'}</td>)}</tr>;
-      })}</tbody>
-    </table>
-    <h3>最近回复的阶段明细</h3>
-    <select aria-label="选择通话回复" value={attempt?.request_id || ''} onChange={event => setSelected(event.target.value)}>
-      {!data?.recent.length && <option value="">暂无通话回复样本</option>}
-      {data?.recent.map(row => <option key={row.request_id} value={row.request_id}>
-        {new Date(row.started_at).toLocaleString()} · 第 {row.turn_seq} 轮 · {outcomes[row.outcome] || row.outcome} · {row.request_id.slice(0, 8)}
-      </option>)}
-    </select>
-    {attempt && <>
-      <p>通话链路：<code>{attempt.trace_id}</code>；回复请求：<code>{attempt.request_id}</code></p>
-      <p>说完时间依据：{attempt.speech_end_basis === 'provider_speech_stopped_received' ? '供应商判停' : attempt.speech_end_basis === 'audio_ingress_estimate' ? '服务端音频接收时间估算' : '不可用；不计入总延迟'}；状态：{outcomes[attempt.outcome] || attempt.outcome}</p>
-      <table><thead><tr><th>阶段</th><th>耗时</th><th>结果</th></tr></thead><tbody>
-        {CALL_REPLY_PHASES.map(([key, label]) => {
-          const phase = attempt.phases[key];
-          return <tr key={key}><td>{label}</td><td>{phase ? formatMs(phase.duration_ms) : '—'}</td><td>{phase ? phase.status === 'success' ? '成功' : '失败' : '未采集'}</td></tr>;
-        })}
-      </tbody></table>
-    </>}
-  </Panel>;
-}
-
-function TracePage() {
-  const { data, error, loading } = usePolling<TraceSummary[]>('/admin/api/traces?days=7&limit=200');
-  const traces = data || [];
-  const [selectedTrace, setSelectedTrace] = useState<string | null>(null);
-  const [traceQuery, setTraceQuery] = useState('');
-  const visibleTraces = useMemo(() => {
-    const query = traceQuery.trim().toLowerCase();
-    if (!query) {
-      return traces;
-    }
-    return traces.filter((trace) => trace.trace_id.toLowerCase().includes(query));
-  }, [traceQuery, traces]);
-
-  useEffect(() => {
-    if (!selectedTrace && traces.length > 0) {
-      setSelectedTrace(traces[0].trace_id);
-    }
-  }, [selectedTrace, traces]);
-
-  function submitTraceSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextTrace = traceQuery.trim();
-    if (nextTrace) {
-      setSelectedTrace(nextTrace);
-    }
-  }
-
-  const detailUrl = selectedTrace ? `/admin/api/traces/${encodeURIComponent(selectedTrace)}` : null;
-  const { data: detail, error: detailError, loading: detailLoading } = usePolling<TraceDetail>(detailUrl);
-  const summary = detail?.summary || traces.find((trace) => trace.trace_id === selectedTrace);
-
-  return (
-    <>
-      <PageHeader title="链路追踪" subtitle="按 trace_id 汇总同一轮链路的耗时、Span 和 LLM Token" />
-      <StatusBar loading={loading} error={error} />
-      <section className="trace-layout">
-        <Panel title="最近 Trace" className="scroll-panel trace-list-panel">
-          <form className="trace-search" onSubmit={submitTraceSearch}>
-            <input
-              value={traceQuery}
-              onChange={(event) => setTraceQuery(event.target.value)}
-              placeholder="搜索或输入 trace_id"
-            />
-            <button type="submit">查看</button>
-          </form>
-          <table>
-            <thead>
-              <tr>
-                <th>Trace</th>
-                <th>Duration</th>
-                <th>Spans</th>
-                <th>LLM</th>
-                <th>Tokens</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleTraces.map((trace) => (
-                <tr
-                  key={trace.trace_id}
-                  className={trace.trace_id === selectedTrace ? 'selected-row' : ''}
-                  onClick={() => setSelectedTrace(trace.trace_id)}
-                >
-                  <td className="mono">{trace.trace_id}</td>
-                  <td>{formatMs(trace.duration_ms)}</td>
-                  <td>{formatNumber(trace.span_count)}</td>
-                  <td>{formatNumber(trace.llm_call_count)}</td>
-                  <td>{formatNumber(trace.total_tokens)}</td>
-                  <td>{formatShanghaiTime(trace.end_ts || trace.start_ts)}</td>
-                </tr>
-              ))}
-              {visibleTraces.length === 0 && (
-                <tr>
-                  <td colSpan={6}>没有匹配的 trace</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </Panel>
-        <div>
-          <StatusBar loading={detailLoading} error={detailError} />
-          <section className="metric-grid trace-metrics">
-            <MetricCard title="链路耗时" value={formatMs(summary?.duration_ms)} detail={`${formatNumber(summary?.span_count)} spans`} />
-            <MetricCard title="LLM Token" value={formatNumber(summary?.total_tokens)} detail={`${formatNumber(summary?.prompt_tokens)} prompt / ${formatNumber(summary?.completion_tokens)} completion`} />
-            <MetricCard title="LLM 耗时和调用" value={formatMs(summary?.total_llm_latency_ms)} detail={`${formatNumber(summary?.llm_call_count)} calls`} />
-            <MetricCard title="失败调用" value={formatNumber(summary?.failed_llm_calls)} detail={summary?.topic_id || 'topic_id -'} tone={summary?.failed_llm_calls ? 'danger' : undefined} />
-          </section>
-          <Panel title="Span 明细">
-            <SpanTable rows={detail?.spans || []} />
-          </Panel>
-          <Panel title="LLM 调用明细">
-            <LlmCallTable rows={detail?.llm_calls || []} />
-          </Panel>
-        </div>
-      </section>
-    </>
-  );
+    {data && <p className="metrics-note">{data.since ? formatShanghaiTime(data.since) : '暂无记录'} 至 {formatShanghaiTime(data.until)} · UTC+8
+      {window === 'all' && ' · 所有数据指指标库当前保留的数据'}</p>}
+    {data?.groups.map(group => <Panel key={group.id} title={group.title}>
+      <p className="metrics-note">{notes[group.id]}</p>
+      <p className="metrics-outcomes">{Object.entries(group.outcomes).map(([key, count]) => `${outcomeLabels[key] || key} ${count}`).join(' · ') || '暂无请求记录'}</p>
+      <div className="table-overflow"><table><thead><tr><th>环节</th><th>样本数</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th></tr></thead>
+        <tbody>{group.rows.map(row => <tr key={row.key}><td>{row.label}</td><td>{row.count}</td>
+          {(['avg_ms', 'p50_ms', 'p90_ms', 'p99_ms'] as const).map(field => <td key={field}>{row.count ? formatMs(row[field]) : '—'}</td>)}
+        </tr>)}</tbody></table></div>
+    </Panel>)}
+  </>;
 }
 
 function DynamicsPage() {
@@ -2455,66 +2136,6 @@ function Panel({ title, children, className }: { title: string; children: React.
       <h2>{title}</h2>
       <div className="panel-content">{children}</div>
     </section>
-  );
-}
-
-function SpanTable({ rows, compact = false }: { rows: PipelineSpan[]; compact?: boolean }) {
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Span</th>
-          <th>Duration</th>
-          {!compact && <th>Trace</th>}
-          <th>Status</th>
-          {!compact && <th>Time</th>}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.span_name}</td>
-            <td>{formatMs(row.duration_ms)}</td>
-            {!compact && <td className="mono">{row.trace_id}</td>}
-            <td><span className={`pill ${row.status}`}>{row.status}</span></td>
-            {!compact && <td>{formatShanghaiTime(row.start_ts)}</td>}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function LlmCallTable({ rows }: { rows: LlmCall[] }) {
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Module</th>
-          <th>Model</th>
-          <th>Latency</th>
-          <th>Total</th>
-          <th>Prompt</th>
-          <th>Completion</th>
-          <th>Status</th>
-          <th>Time</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.module_name}</td>
-            <td>{row.model_name || '-'}</td>
-            <td>{formatMs(row.latency_ms)}</td>
-            <td>{formatNumber(row.total_tokens)}</td>
-            <td>{formatNumber(row.prompt_tokens)}</td>
-            <td>{formatNumber(row.completion_tokens)}</td>
-            <td><span className={`pill ${row.success ? 'success' : 'error'}`}>{row.success ? 'success' : 'error'}</span></td>
-            <td>{formatShanghaiTime(row.ts)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 

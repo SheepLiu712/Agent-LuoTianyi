@@ -9,6 +9,7 @@ from src.agent.skills.contracts import SkillInvocation
 from src.agent.skills.expression.speaking.backend import SpeechBackend
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
 from src.domain.agent import CALL_PCM_FORMAT, MAX_CALL_PCM_CHUNK_BYTES, AudioFormat, AudioFraming, Tone
+from src.infrastructure.observability.tts_metrics import tts_request
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,14 @@ class SpeakingSkill:
             raise TypeError("tone 必须使用领域类型")
         if output_format is not None and output_format != CALL_PCM_FORMAT:
             raise ValueError("CALL 音频必须使用规范 24 kHz PCM16 单声道格式")
+        with tts_request(invocation) as timing:
+            async with aclosing(self._speak(invocation, text=text, tone=tone, output_format=output_format)) as stream:
+                async for chunk in stream:
+                    if chunk.data:
+                        timing.mark("returned")
+                    yield chunk
+
+    async def _speak(self, invocation, *, text, tone, output_format):
         generated = False
         async with aclosing(
             self._tts.stream(

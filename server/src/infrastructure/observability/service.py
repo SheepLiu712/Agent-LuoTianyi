@@ -16,6 +16,9 @@ from uuid import uuid4
 
 from src.utils.server_paths import ServerPaths
 
+from .metric_writer import MetricWriter
+from .usage_metrics import UsageMetricsStore
+
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 
 
@@ -104,7 +107,7 @@ class SpanTimer:
             _current_topic_id.reset(self._topic_token)
 
 
-class ObservabilityService:
+class ObservabilityService(UsageMetricsStore):
     """SQLite-backed first-phase metrics store for the admin console."""
 
     def __init__(self, config: Dict[str, Any] | None = None, *, base_dir: str | Path | None = None) -> None:
@@ -119,10 +122,22 @@ class ObservabilityService:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._initialize_schema()
+        self.initialize_usage_schema()
+        self._metrics_writer = MetricWriter(self._metric_transaction)
 
     def close(self) -> None:
+        self._metrics_writer.close()
         with self._lock:
             self._conn.close()
+
+    @contextmanager
+    def _metric_transaction(self):
+        with self._lock:
+            yield
+            self._conn.commit()
+
+    def defer_metric_write(self, function, *args, **kwargs):
+        self._metrics_writer.submit(function, *args, **kwargs)
 
     @contextmanager
     def span(
@@ -288,7 +303,6 @@ class ObservabilityService:
             "pipeline": spans,
             "logs": logs,
             "recent_logs": self.get_recent_logs(limit=10, min_level="WARNING"),
-            "slow_spans": self.get_recent_pipeline_spans(limit=10, order_by_slow=True),
         }
 
     def get_llm_summary(
@@ -646,6 +660,9 @@ class ObservabilityService:
             ("llm_call_metrics", "ts"),
             ("pipeline_spans", "start_ts"),
             ("admin_log_events", "ts"),
+            ("stage_population_samples", "sampled_at"),
+            ("tts_requests", "requested_at"),
+            ("tts_queue_windows", "bucket_start"),
         ):
             self._execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
 
@@ -721,13 +738,16 @@ class ObservabilityService:
     def _execute(self, sql: str, params: Iterable[Any] = ()) -> None:
         with self._lock:
             self._conn.execute(sql, tuple(params))
-            self._conn.commit()
+            writer = getattr(self, "_metrics_writer", None)
+            if writer is None or not writer.is_writer():
+                self._conn.commit()
 
     def _query_one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any]:
         rows = self._query_all(sql, params)
         return rows[0] if rows else {}
 
     def _query_all(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
+        self._metrics_writer.flush()
         with self._lock:
             cur = self._conn.execute(sql, tuple(params))
             return [dict(row) for row in cur.fetchall()]

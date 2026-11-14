@@ -260,3 +260,44 @@ WHERE span_name LIKE 'stage.termination.%'
   AND julianday(start_ts) >= julianday('now', '-1 day')
 ORDER BY start_ts DESC;
 ```
+
+
+### 管理看板的用量与链路耗时
+
+“用量趋势”将在线规模、LLM 调用量和 Token 用量放在同一时间轴，固定按北京时间
+（UTC+8）显示。在线规模是 Stage 估计值：每 5 分钟按 `(user_id, character_id)`
+对保留的 ChatStage、CallStage 去重，包含断线保留及回收中的 Stage。缺失采样显示断线，
+不补零。24 小时按 5 分钟展示；7 日按小时展示有效在线样本的平均值、调用及 Token 的总量。
+新采样不会补造升级前的在线历史。
+
+“链路耗时”默认最近 24 小时，可选 7 日及数据库中保留的全部数据，分为聊天、通话、
+TTS、聊天 Stage 回收、通话 Stage 回收。每行展示样本量、平均值、P50、P90、P99。
+各阶段独立统计实际完成的样本，不将缺失或失败阶段补零；回收的多个停止任务及清理
+片段先按同一交互求和再计算分位数。失败、取消及不完整请求数量单独显示。
+
+- 聊天包括输入准备、等待回复、主题与意图、记忆检索、LLM 首段、首段交付及总耗时。
+  首段交付结束于 Stage 接纳输出，不表示客户端已收到；总耗时从输入准备完成开始。
+- 通话仅展示供应商判停至首个音频 ACK、判断说话结束（估计）、记忆检索、LLM 首段、
+  首段回复至 TTS 首包。ACK 是客户端确认的代理指标，不是实际扬声器播放时间。
+  当前实时模型自动触发回复，LLM 起点是收到 `response.created` 事件，
+  不包含此前的供应商内部处理及网络时间。不同轮次汇总展示，不再逐轮展开。
+- TTS 从 `SpeakingSkill.speak` 请求进入计时；排队包括线程调度、合成锁等待和 worker
+  接收前的等待。首包产出在 worker 生成首个有效音频时记录，同时保留父进程收到首包的
+  时间。取消后仍在 worker 内运行的任务继续占用队列统计，直到 worker 完成。
+
+新增的受保护接口是 `GET /admin/api/metrics/usage?window=24h|7d` 和
+`GET /admin/api/metrics/latency?window=24h|7d|all`。数据库自动新增
+`stage_population_samples`、`tts_requests`、`tts_queue_windows`；TTS 队列在状态变化
+及每 10 秒观察一次，每 5 分钟保存等待数量峰值、运行数量峰值和观察到的最长等待。
+这些峰值保留供排障查询，界面只显示请求耗时分布。新口径的聊天/通话阶段使用
+`chat.v2.*`、`call.v2.*`，不混入旧口径记录。数据沿用现有保留期（默认 30 天）。
+
+TTS 数值由父进程后台批量写 SQLite，音频路径不等待数据库提交；查询及正常关闭会
+等待已有写入完成。强制结束进程可能丢失尚未写入的事件，重新打开时将遗留 pending
+请求标为 incomplete。埋点不记录对话或音频内容。界面已移除链路追踪及慢 Span，
+原始记录和原有查询接口保留供排障使用。
+
+浏览器验收脚本：先在 `res/admin_ui` 执行 `npm run dev -- --host 127.0.0.1`，
+再从 `server` 执行 `python scripts/check_admin_metrics_ui.py --output-dir <截图目录>`
+（需安装 Playwright 及 Chromium）。脚本使用临时 SQLite 和模拟管理 API，验证桌面、
+窄屏、UTC+8 时间展示、时间范围切换及移除的入口；它不调用生产服务。

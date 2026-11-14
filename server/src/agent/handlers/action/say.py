@@ -11,6 +11,7 @@ from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from src.agent.skills.invocation import execution_invocation
 from src.infrastructure.observability.call_latency import call_latency
 from src.infrastructure.observability.call_reply_timing import call_tts_scope, mark_reply_phase
+from src.infrastructure.observability.tts_metrics import tts_action_scope
 from src.utils.logger import get_logger
 
 
@@ -98,6 +99,10 @@ class SayHandler:
     async def _realize_tts(
         self, action: d.Say, execution_context: d.ExecutionContext, outputs: OutputEmitter
     ) -> d.ActionResult:
+        with tts_action_scope(action.action_id):
+            return await self._realize_tts_scoped(action, execution_context, outputs)
+
+    async def _realize_tts_scoped(self, action, execution_context, outputs):
         is_call = action.call_delivery.audio_route is d.CallAudioRoute.CALL
         await self._emit_presentation(action, outputs)
         if is_call:
@@ -118,7 +123,15 @@ class SayHandler:
     ) -> d.ActionResult:
         async with aclosing(
             self._speaking.speak(
-                execution_invocation(self._character_id, execution_context),
+                execution_invocation(
+                    self._character_id,
+                    execution_context,
+                    user_id=(
+                        execution_context.interaction_context.identity.user_id
+                        if execution_context.interaction_context is not None
+                        else None
+                    ),
+                ),
                 text=action.sound_content,
                 tone=action.tone,
                 output_format=d.CALL_PCM_FORMAT if is_call else None,

@@ -8,6 +8,7 @@ from typing import Literal
 from src.agent.context.models import UserContextSnapshot
 from src.agent.skills.contracts import CharacterNarrative, ReplyDraft
 from src.infrastructure.config.skills import SkillsConfig
+from src.infrastructure.observability.reply_metrics import mark_chat_generation
 from src.utils.logger import get_logger
 
 from ._reply_resources import ReplyResources
@@ -78,6 +79,7 @@ class ReplySkill:
         available = asyncio.Event()
 
         async def emit(draft):
+            mark_chat_generation("generated")
             await queue.put(draft)
             available.set()
 
@@ -107,6 +109,7 @@ class ReplySkill:
 
     @staticmethod
     async def _generate(resource, prompt, sing_plan, emit):
+        mark_chat_generation("started")
         if sing_plan is not None:
             # 演唱指令需要完整结果，不将歌曲名按标点切成多段。
             response = (

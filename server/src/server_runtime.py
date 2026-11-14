@@ -17,6 +17,7 @@ from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_
 from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
+from src.infrastructure.observability.population import PopulationSampler
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
@@ -48,6 +49,7 @@ class ServerRuntime:
     client_llm_executor: ClientLLMExecutor
     observability: ObservabilityService
     owns_observability: bool = field(default=True)
+    population_sampler: PopulationSampler | None = field(default=None, init=False)
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
     call_adapter: CallWebSocketAdapter | None = None
@@ -270,6 +272,8 @@ class ServerRuntime:
         """启动所有后台服务。"""
         self.ensure_dependencies()
         self.world.start_background_services()
+        self.population_sampler = PopulationSampler(self.stage_manager, self.observability)
+        self.population_sampler.start()
 
     @classmethod
     async def _rollback_failed_initialization(
@@ -337,6 +341,7 @@ class ServerRuntime:
                 uninstall_observability_log_handler()
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
+            ("population sampler", runtime.population_sampler.stop if runtime and runtime.population_sampler else None),
             ("world stages", runtime.close_world_stages if runtime is not None else None),
             ("chat adapter", runtime.chat_adapter.close if runtime is not None else None),
             (
@@ -397,6 +402,7 @@ class ServerRuntime:
                 return
             errors: list[str] = []
             shutdown_steps = (
+                ("population sampler", self.population_sampler.stop if self.population_sampler else None),
                 ("world runtime", self.world.stop_background_services),
                 ("world stages", self.close_world_stages),
                 ("chat adapter", self.chat_adapter.close),
