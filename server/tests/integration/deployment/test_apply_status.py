@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import shlex
+import shutil
 import sqlite3
 import sys
 import tarfile
@@ -11,7 +12,7 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
-from integration.deployment.test_release_build import CLI, SERVER, build, git, repo  # noqa: F401
+from integration.deployment.test_release_build import CLI, SERVER, build, create_release_repo, git
 
 
 def initialize_databases(root, manifest):
@@ -35,16 +36,9 @@ def initialize_databases(root, manifest):
             connection.commit()
 
 
-@pytest.fixture
-def deployment(repo, monkeypatch):  # noqa: F811
-    monkeypatch.syspath_prepend(str(CLI.parent / "release"))
-    monkeypatch.syspath_prepend(str(SERVER))
-    import apply as executor
-    import plan
-    import prepare_release
-    import service_control
-    import status
-
+@pytest.fixture(scope="module")
+def release_package(tmp_path_factory):
+    repo = create_release_repo(tmp_path_factory.mktemp("deployment-package"))
     asset = {
         "schema_version": 1,
         "asset_version": "test",
@@ -53,8 +47,23 @@ def deployment(repo, monkeypatch):  # noqa: F811
     (repo / "server/scripts/deploy/release/assets.lock.json").write_text(json.dumps(asset))
     git(repo, "commit", "-qam", "small asset")
     built = json.loads(build(repo, "HEAD").stdout)
-    package = Path(built["package"])
-    root = repo / "instance"
+    return Path(built["package"])
+
+
+@pytest.fixture
+def deployment(tmp_path, release_package, monkeypatch):
+    monkeypatch.syspath_prepend(str(CLI.parent / "release"))
+    monkeypatch.syspath_prepend(str(SERVER))
+    import apply as executor
+    import plan
+    import prepare_release
+    import service_control
+    import status
+
+    # Tests corrupt packages and mutate instances: copy, never share writable state.
+    package = tmp_path / release_package.name
+    shutil.copy2(release_package, package)
+    root = tmp_path / "instance"
     old = root / "releases/old"
     old.mkdir(parents=True)
     with tarfile.open(package) as archive:
@@ -73,7 +82,7 @@ def deployment(repo, monkeypatch):  # noqa: F811
     (environment / "bin/python").write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' "$@"\n')
     (environment / "bin/python").chmod(0o755)
     initialize_databases(root, manifest)
-    config = repo / "deploy.toml"
+    config = tmp_path / "deploy.toml"
     config.write_text(
         f'[instances.test]\nroot = "{root}"\nservice = "test.service"\n'
         'health_url = "http://127.0.0.1:12345/admin/api/health"\n'
@@ -131,7 +140,7 @@ def deployment(repo, monkeypatch):  # noqa: F811
     monkeypatch.setattr(status, "actual_release", actual)
     monkeypatch.setattr(status, "health", healthy)
     monkeypatch.setattr(executor, "await_healthy", lambda *args: {"healthy": True})
-    out = repo / "plan.json"
+    out = tmp_path / "plan.json"
     report = plan.plan(package, config, "test", out)
     assert report["executable"], report["blockers"]
     return executor, plan, status, root, config, package, out, controller, manifest

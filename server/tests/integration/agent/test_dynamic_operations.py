@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from support.users import seed_authenticated_user
 
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.infrastructure.media import create_media_resolver
 from src.infrastructure.persistence.database.database_service import DatabaseManager
-from src.infrastructure.persistence.database.sql_database import InviteCode
 from src.web.http import UserInterface
 from src.web.http.types import (
     DynamicCommentCreateRequest,
@@ -96,26 +96,9 @@ def db_manager(tmp_path):
     del os.environ["JWT_SECRET"]
 
 
-def _add_invite_code(db_manager: DatabaseManager, code: str) -> None:
-    session = db_manager.open_sql_session()
-    session.add(InviteCode(code=code, is_used=False))
-    session.commit()
-    session.close()
-
-
-def _register_and_login(db_manager: DatabaseManager, username: str, invite_code: str) -> dict:
-    ok, message = db_manager.credential_service.register_user(username, "password123", invite_code)
-    assert ok is True, message
-    result = db_manager.credential_service.authenticate_password_login(username, "password123")
-    assert result is not None
-    return result
-
-
 def test_dynamic_visibility_and_comment_isolation(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE1")
-    _add_invite_code(db_manager, "INVITE2")
-    user1 = _register_and_login(db_manager, "user1", "INVITE1")
-    user2 = _register_and_login(db_manager, "user2", "INVITE2")
+    user1 = seed_authenticated_user(db_manager, "user1")
+    user2 = seed_authenticated_user(db_manager, "user2")
 
     ok, _, private_dynamic = db_manager.dynamic_store.create_dynamic(
         author_type="user",
@@ -176,8 +159,7 @@ def test_dynamic_visibility_and_comment_isolation(db_manager: DatabaseManager):
 
 
 def test_dynamic_unread_status_and_mark_read(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE3")
-    user = _register_and_login(db_manager, "reader", "INVITE3")
+    user = seed_authenticated_user(db_manager, "reader")
     user_id = user["user_uuid"]
 
     initial = db_manager.dynamic_store.get_dynamic_unread_status(user_id)
@@ -225,8 +207,7 @@ def test_dynamic_unread_status_and_mark_read(db_manager: DatabaseManager):
 
 
 def test_system_dynamic_skips_memory_and_reply_and_disallows_comments(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE_SYSTEM")
-    auth = _register_and_login(db_manager, "systemuser", "INVITE_SYSTEM")
+    auth = seed_authenticated_user(db_manager, "systemuser")
 
     from src.application.admin.system_dynamic_publisher import publish_system_dynamic
 
@@ -292,8 +273,7 @@ def test_admin_create_system_dynamic_endpoint(db_manager: DatabaseManager, monke
 
 
 def test_admin_dynamic_time_filters(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE_TIME")
-    auth = _register_and_login(db_manager, "timeuser", "INVITE_TIME")
+    auth = seed_authenticated_user(db_manager, "timeuser")
 
     ok, _, dynamic = db_manager.dynamic_store.create_dynamic(
         author_type="user",
@@ -351,8 +331,7 @@ def test_admin_dynamic_time_filters(db_manager: DatabaseManager):
 
 
 def test_admin_dynamic_list_includes_comment_count(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE_COUNT")
-    auth = _register_and_login(db_manager, "countuser", "INVITE_COUNT")
+    auth = seed_authenticated_user(db_manager, "countuser")
 
     ok, _, dynamic = db_manager.dynamic_store.create_dynamic(
         author_type="user",
@@ -392,8 +371,7 @@ def test_admin_dynamic_list_includes_comment_count(db_manager: DatabaseManager):
 
 
 def test_admin_dynamic_list_filters_diary_source_type(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE_DIARY_FILTER")
-    auth = _register_and_login(db_manager, "diaryfilteruser", "INVITE_DIARY_FILTER")
+    auth = seed_authenticated_user(db_manager, "diaryfilteruser")
 
     ok, _, diary = db_manager.dynamic_store.create_dynamic(
         author_type="agent",
@@ -428,8 +406,7 @@ def test_admin_dynamic_list_filters_diary_source_type(db_manager: DatabaseManage
 
 
 def test_user_interface_dynamic_flow(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE4")
-    auth = _register_and_login(db_manager, "uiuser", "INVITE4")
+    auth = seed_authenticated_user(db_manager, "uiuser")
     ui = UserInterface(db_manager, create_media_resolver())
     runtime = SimpleNamespace(database_manager=db_manager)
 
@@ -501,8 +478,7 @@ def test_user_interface_dynamic_flow(db_manager: DatabaseManager):
 
 
 def test_user_interface_dynamic_rejects_bad_token(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE_BAD_TOKEN")
-    _register_and_login(db_manager, "badtokenuser", "INVITE_BAD_TOKEN")
+    seed_authenticated_user(db_manager, "badtokenuser")
     ui = UserInterface(db_manager, create_media_resolver())
     runtime = SimpleNamespace(database_manager=db_manager)
 
@@ -521,8 +497,7 @@ def test_user_interface_dynamic_rejects_bad_token(db_manager: DatabaseManager):
 
 
 def test_dynamic_pending_reply_items_include_thread_comments(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE_THREAD")
-    auth = _register_and_login(db_manager, "threaduser", "INVITE_THREAD")
+    auth = seed_authenticated_user(db_manager, "threaduser")
 
     db_manager.conversation_service.save_user_preferences(auth["user_uuid"], {"relationship": "朋友"})
     db_manager.conversation_service.update_user_description(auth["user_uuid"], "用户最近在记录自己的日常状态。")

@@ -75,8 +75,8 @@ jobs:
         run: python -m black --check .
       - name: 检查测试报告校验脚本
         run: |
-          python -m ruff check ../.github/scripts/check_pytest_results.py
-          python -m black --check --include '.*\.py$' ../.github/scripts/check_pytest_results.py
+          python -m ruff check ../.github/scripts/check_pytest_results.py ../.github/scripts/run_server_tests.py
+          python -m black --check --include '.*\.py$' ../.github/scripts/check_pytest_results.py ../.github/scripts/run_server_tests.py
 
   server-tests:
     needs: changes
@@ -106,18 +106,16 @@ jobs:
       - name: 从公开模板创建测试配置
         run: cp config/config.json.template config/config.json
       - name: 运行全部离线测试
-        run: >-
-          python -m pytest tests
-          -m 'not external and not real_llm'
-          --ignore=tests/e2e/external
-          -q --tb=short --junitxml=test-results.xml
+        run: python ../.github/scripts/run_server_tests.py
       - name: 确认选定测试没有被跳过
         run: python ../.github/scripts/check_pytest_results.py test-results.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: server-test-results
-          path: server/test-results.xml
+          path: |
+            server/test-results*.xml
+            server/test-*.log
 
   desktop-tests:
     needs: changes

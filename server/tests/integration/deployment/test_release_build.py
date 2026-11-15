@@ -18,6 +18,10 @@ def git(repo, *args):
 
 @pytest.fixture
 def repo(tmp_path):
+    return create_release_repo(tmp_path)
+
+
+def create_release_repo(tmp_path):
     server = tmp_path / "server"
     shutil.copytree(CLI.parent, server / "scripts/deploy", ignore=shutil.ignore_patterns("__pycache__"))
     for path in ("server_main.py", "README.md", "pyproject.toml", "src/server_runtime.py"):

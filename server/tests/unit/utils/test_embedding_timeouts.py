@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -15,7 +16,17 @@ def transport(monkeypatch, handler):
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
 
 
-def test_transient_failure_recovers_and_batch_preserves_input_order(monkeypatch):
+@pytest.fixture
+def advance_retry_wait(monkeypatch):
+    from src.infrastructure.models.llm import embedding
+
+    async def elapsed(_delay):
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(embedding, "asyncio", SimpleNamespace(**{**vars(asyncio), "sleep": elapsed}))
+
+
+def test_transient_failure_recovers_and_batch_preserves_input_order(monkeypatch, advance_retry_wait):
     calls = []
 
     async def provider(request):
@@ -32,7 +43,7 @@ def test_transient_failure_recovers_and_batch_preserves_input_order(monkeypatch)
 
 
 @pytest.mark.parametrize("status,attempts", [(401, 1), (400, 1), (429, 3), (503, 3)])
-def test_failed_request_has_finite_retries_and_safe_diagnostics(monkeypatch, status, attempts):
+def test_failed_request_has_finite_retries_and_safe_diagnostics(monkeypatch, advance_retry_wait, status, attempts):
     calls = []
 
     async def provider(request):
