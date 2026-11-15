@@ -42,7 +42,7 @@ def test_song_catalog_advertises_only_segments_that_can_render(tmp_path):
     _, audio = manager.get_song_segment("部分可唱", "副歌")
     assert audio is not None and audio[:4] == b"RIFF"
 
-    manager.get_song_metadata("部分可唱").segments = [SongSegment("越界", 1, 3, [])]
+    manager.get_song_metadata("部分可唱").segments = [SongSegment("越界", 2.1, 3, [])]
     assert manager.can_i_sing_song("部分可唱") == ("", [])
     assert manager.get_songs_can_sing() == {}
 
@@ -62,3 +62,50 @@ def test_asset_validation_rejects_duplicate_and_missing_audio(tmp_path):
     assert [segment.description for segment in playable_segments(config["segments"], audio_path)] == ["同名"]
     audio_path.unlink()
     assert playable_segments(config["segments"], audio_path) == []
+
+
+def test_underestimated_mp3_duration_preserves_tail_and_rendering(tmp_path, monkeypatch):
+    from src.infrastructure.media import song_asset_validation
+
+    write_song(tmp_path, "尾段", [{"description": "结尾", "start_time": 1.5, "end_time": 2, "lyrics": []}])
+    monkeypatch.setattr(song_asset_validation, "mediainfo", lambda _: {"duration": "1.2"})
+    manager = SingingManager({"resource_path": str(tmp_path)})
+    assert manager.can_i_sing_song("尾段") == ("尾段", ["结尾"])
+    _, audio = manager.get_song_segment("尾段", "结尾")
+    assert manager.get_song_metadata("尾段").segments[0].end_time == 2
+    assert audio is not None
+
+
+def test_true_tail_overrun_clips_audio_and_lyrics_but_not_outside_start(tmp_path):
+    segments = [
+        {
+            "description": "结尾",
+            "start_time": 1,
+            "end_time": 3,
+            "lyrics": [{"duration": 0.5, "content": "保留"}, {"duration": 1.5, "content": "尾句"}],
+        }
+    ]
+    directory = write_song(tmp_path, "截断", segments)
+    valid = playable_segments(segments, directory / "截断.mp3")
+    assert valid[0].end_time == 2
+    assert [line.duration for line in valid[0].lyrics] == [0.5, 0.5]
+    segments[0]["start_time"] = 2.1
+    assert playable_segments(segments, directory / "截断.mp3") == []
+
+
+def test_unfinished_learning_is_not_reported_as_broken_song(tmp_path, monkeypatch):
+    directory = write_song(tmp_path, "未完成", [])
+    (directory / "未完成.json").unlink()
+    (directory / "workflow_status.json").write_text('{"generate_song_json": false}', encoding="utf-8")
+    from unittest.mock import Mock
+
+    from src.agent.skills.expression.singing import manager as module
+
+    logger = Mock()
+    monkeypatch.setattr(module, "get_logger", lambda _: logger)
+    manager = SingingManager({"resource_path": str(tmp_path)})
+    assert manager.get_songs_can_sing() == {}
+    logger.warning.assert_not_called()
+    (directory / "workflow_status.json").unlink()
+    manager.reload_songs()
+    assert any("Config file missing" in str(call) for call in logger.warning.call_args_list)

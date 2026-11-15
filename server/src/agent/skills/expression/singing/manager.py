@@ -71,6 +71,12 @@ class SingingManager:
         lyrics_file = song_dir / f"{song}.lrc"
         audio_file = song_dir / f"{song}.cleaned.mp3"
         config_file = song_dir / f"{song}.json"
+        status_file = song_dir / "workflow_status.json"
+        if not config_file.exists() and status_file.is_file():
+            status = json.loads(status_file.read_text(encoding="utf-8"))
+            if status.get("generate_song_json") is False:
+                self.logger.info(f"Song learning pending, excluded from playable catalog: {song}")
+                return None
         if not lyrics_file.exists():
             self.logger.warning(f"Lyrics file missing for song {song}")
             return None
@@ -94,8 +100,6 @@ class SingingManager:
         if not segments:
             self.logger.warning(f"No playable segments for song {song}")
             return None
-        if len(segments) != len(raw_segments):
-            self.logger.warning(f"Ignored {len(raw_segments) - len(segments)} invalid segment(s) in song {song}")
         metadata = SongMetadata(
             song_name=song,
             title=title,

@@ -72,6 +72,7 @@ def test_auto_song_learner_does_not_mark_invalid_segments_as_learned(monkeypatch
     _write_playable_song_output(song_dir, "坏歌")
     config_path = song_dir / "坏歌.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["segments"][0]["start_time"] = 2.1
     config["segments"][0]["end_time"] = 3
     config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
 
