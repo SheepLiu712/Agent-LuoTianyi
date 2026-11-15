@@ -22,6 +22,7 @@ from src.domain.agent.maintenance import (
     MaintenanceReason,
     MaintenanceReport,
     MaintenanceStatus,
+    MemoryWriteResult,
 )
 from src.domain.call import CallFinalSnapshot
 from src.domain.call.contracts import CallMaintenanceSnapshot
@@ -79,7 +80,7 @@ class _Memory(Protocol):
 
     async def write_maintenance_candidates(
         self, *, user_id: str, maintenance_id: str, candidates: tuple[MaintenanceCandidate, ...]
-    ) -> None: ...
+    ) -> MemoryWriteResult: ...
 
     async def propose_user_profile(self, *, history: dict[str, Any], current_profile: str) -> str | None: ...
 
@@ -128,6 +129,8 @@ class CognitiveMaintenanceSkill:
         ) as timing:
             result = await self._maintain(invocation, request=request)
             timing["result"] = result.status.value
+            if result.memory_skipped_count is not None:
+                timing["memory_skipped_count"] = result.memory_skipped_count
             if result.status is MaintenanceStatus.CONFLICT:
                 timing["status"] = "error"
             return result
@@ -280,7 +283,7 @@ class CognitiveMaintenanceSkill:
 
         # A concurrent winner may differ from the local model output. Only its frozen payload is usable.
         candidates = self._deserialize_candidates(batch.candidates)
-        await memory.write_maintenance_candidates(
+        memory_result = await memory.write_maintenance_candidates(
             user_id=invocation.require_user_id(), maintenance_id=batch.maintenance_id, candidates=candidates
         )
         self._check_cancelled(invocation)
@@ -300,6 +303,7 @@ class CognitiveMaintenanceSkill:
                 None,
                 covered_entry_ids=batch.covered_entry_ids,
                 maintained_entry_ids=batch.maintained_entry_ids,
+                memory_skipped_count=(len(candidates) if memory_result is MemoryWriteResult.SKIPPED_EMBEDDING else 0),
                 memory_candidate_count=len(candidates),
                 profile_updated=profile_updated,
             )
@@ -310,6 +314,7 @@ class CognitiveMaintenanceSkill:
             batch.target_entry_id,
             covered_entry_ids=batch.covered_entry_ids,
             maintained_entry_ids=batch.maintained_entry_ids,
+            memory_skipped_count=(len(candidates) if memory_result is MemoryWriteResult.SKIPPED_EMBEDDING else 0),
             memory_candidate_count=len(candidates),
             profile_updated=profile_updated,
             compacted=batch.compaction_expected_count is not None,
@@ -327,6 +332,7 @@ class CognitiveMaintenanceSkill:
             covered_entry_ids=tuple(entry_id for report in reports for entry_id in report.covered_entry_ids),
             maintained_entry_ids=tuple(entry_id for report in reports for entry_id in report.maintained_entry_ids),
             memory_candidate_count=sum(report.memory_candidate_count for report in reports),
+            memory_skipped_count=sum(report.memory_skipped_count or 0 for report in reports),
             profile_updated=any(report.profile_updated for report in reports),
             compacted=any(report.compacted for report in reports),
         )

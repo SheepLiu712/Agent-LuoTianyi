@@ -31,12 +31,10 @@ class TouchInteractionHandler:
             interaction_id=identity.interaction_id,
             cancellation=request.cancellation,
         )
-        if not self._reactions.allows(invocation, request.stimulus):
-            get_logger(__name__).warning(
-                "Touch interaction rejected request_id=%s stimulus_id=%s",
-                request.request_id,
-                request.stimulus.stimulus_id,
-            )
+        reason = self._reactions.rejection_reason(invocation, request.stimulus)
+        if reason is not None:
+            if reason.startswith("rate_limit"):
+                return self._report(request, plans)
             return self._report(
                 request,
                 plans,

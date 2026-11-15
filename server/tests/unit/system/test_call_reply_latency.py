@@ -159,6 +159,7 @@ def test_realtime_summary_counts_first_valid_sent_per_turn_and_splits_tts(tmp_pa
 @pytest.mark.asyncio
 async def test_concurrent_retrieval_logs_keep_tool_identity_and_restore_scope(monkeypatch):
     import asyncio
+
     from src.infrastructure.observability import retrieval_timing as timing
 
     captured = []
@@ -183,3 +184,24 @@ async def test_concurrent_retrieval_logs_keep_tool_identity_and_restore_scope(mo
     assert by_tool["a"]["status"] == "success" and by_tool["b"]["status"] == "error"
     assert by_tool["b"]["phases"]["embedding"]["status"] == "error"
     assert all(row["turn_seq"] == 3 and row["response_id"] == "model" for row in captured)
+
+
+@pytest.mark.asyncio
+async def test_retrieval_cancel_propagates_without_error_log(monkeypatch, caplog):
+    import asyncio
+    import logging
+
+    from src.infrastructure.observability import retrieval_timing
+
+    monkeypatch.setattr(retrieval_timing, "logger", logging.getLogger("test.retrieval.cancel"))
+
+    @retrieval_timing.measure_retrieval
+    async def cancelled():
+        with retrieval_timing.retrieval_phase("embedding"):
+            raise asyncio.CancelledError
+
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled()
+    assert not any(r.levelno >= logging.ERROR for r in caplog.records)
+    assert "status=cancelled" in caplog.text

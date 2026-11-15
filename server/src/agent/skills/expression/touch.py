@@ -96,13 +96,19 @@ class TouchPolicy:
         )
 
     def allows(self, stimulus: d.TouchInteraction) -> bool:
-        """仅接受已知区域，且 10/30 秒计数不超过配置上限。"""
+        return self.rejection_reason(stimulus) is None
+
+    def rejection_reason(self, stimulus: d.TouchInteraction) -> str | None:
+        """Explain policy decisions without changing the accepted region/frequency boundaries."""
         if any(region.value not in self.allowed_regions for region in stimulus.body_regions):
-            return False
+            return "unsupported_region"
         frequency = stimulus.click_frequency
-        return frequency is None or (
-            frequency.count_10s <= self.max_touches_10s and frequency.count_30s <= self.max_touches_30s
-        )
+        if frequency is not None:
+            if frequency.count_10s > self.max_touches_10s:
+                return "rate_limit_10s"
+            if frequency.count_30s > self.max_touches_30s:
+                return "rate_limit_30s"
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,9 +149,28 @@ class TouchReactionSkill:
         return builder, media_ids, TouchPolicy.from_config(config.get("policy"))
 
     def allows(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> bool:
-        """按本次角色的策略判断快速反应是否允许。"""
+        return self.rejection_reason(invocation, stimulus) is None
+
+    def rejection_reason(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> str | None:
         resources = self._resources.get(invocation.character_id)
-        return resources is not None and resources[2].allows(stimulus)
+        policy = resources[2] if resources is not None else None
+        reason = policy.rejection_reason(stimulus) if policy is not None else "resources_unconfigured"
+        if reason is not None:
+            log = get_logger(__name__).info if reason.startswith("rate_limit") else get_logger(__name__).warning
+            frequency = stimulus.click_frequency
+            log(
+                "Touch rejected stimulus_id=%s character_id=%s reason=%s regions=%s "
+                "count_10s=%s limit_10s=%s count_30s=%s limit_30s=%s",
+                stimulus.stimulus_id,
+                invocation.character_id,
+                reason,
+                [region.value for region in stimulus.body_regions],
+                frequency.count_10s if frequency else None,
+                policy.max_touches_10s if policy else None,
+                frequency.count_30s if frequency else None,
+                policy.max_touches_30s if policy else None,
+            )
+        return reason
 
     def choose(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> TouchReaction | None:
         """返回可读取的随机触摸资源；未命中或资源失败时返回 None。"""

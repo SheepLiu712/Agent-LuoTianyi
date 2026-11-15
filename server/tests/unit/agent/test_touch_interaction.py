@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 from support.routing_support import Sink
+from support.skill_support import invocation
 from support.touch_support import touch_request
 
 import src.domain.agent as d
@@ -16,15 +17,14 @@ from src.agent.skills.expression.touch import (
     TouchReactionSkill,
 )
 from src.agent_runtime.agent_runtime import AgentRuntime
-from support.skill_support import invocation
 
 
 @dataclass(frozen=True, slots=True)
 class ReactionSkill:
     reaction: TouchReaction | None
 
-    def allows(self, skill_invocation, stimulus: d.TouchInteraction) -> bool:
-        return TouchPolicy().allows(stimulus)
+    def rejection_reason(self, skill_invocation, stimulus: d.TouchInteraction):
+        return TouchPolicy().rejection_reason(stimulus)
 
     def choose(self, skill_invocation, stimulus: d.TouchInteraction) -> TouchReaction | None:
         return self.reaction
@@ -120,7 +120,7 @@ def test_touch_skill_rejects_directory_only_configuration(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatch):
+async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatch, caplog):
     import json
     import wave
 
@@ -157,6 +157,17 @@ async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatc
         catalog,
     )
     monkeypatch.setattr("src.agent.skills.expression._touch_resources.random.choice", lambda files: next(iter(files)))
+
+    import logging
+    monkeypatch.setattr("src.agent.skills.expression.touch.get_logger", lambda _: logging.getLogger("test.touch.reason"))
+    with caplog.at_level(logging.INFO):
+        assert skill.rejection_reason(invocation(), touch_request(
+            frequency=d.TouchClickFrequency(count_10s=9, count_30s=9)
+        ).stimulus) == "rate_limit_10s"
+        assert skill.rejection_reason(invocation(), touch_request(regions=("unknown",)).stimulus) == "unsupported_region"
+    assert "count_10s=9 limit_10s=8" in caplog.text
+    assert "regions=['unknown']" in caplog.text
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
     reaction = skill.choose(invocation(), touch_request().stimulus)
 
@@ -244,7 +255,7 @@ def test_touch_policy_invalid_config_is_rejected(config):
         (("head",), d.TouchClickFrequency(count_10s=9, count_30s=9)),
     ],
 )
-async def test_touch_handler_rejected_policy_fails_and_discards(regions, frequency):
+async def test_touch_handler_distinguishes_rate_limit_from_unsupported_region(regions, frequency):
     request = touch_request(regions=regions, frequency=frequency)
     sink = Sink()
     plans = _plans(request, sink)
@@ -254,8 +265,11 @@ async def test_touch_handler_rejected_policy_fails_and_discards(regions, frequen
 
     report = await handler.handle(request, plans)
 
-    assert report.request_status is d.HandlingRequestStatus.FAILED
-    assert report.error_code is d.HandlingErrorCode.UNSUPPORTED_INTERACTION
+    limited = frequency is not None
+    assert report.request_status is (
+        d.HandlingRequestStatus.COMPLETED if limited else d.HandlingRequestStatus.FAILED
+    )
+    assert report.error_code is (None if limited else d.HandlingErrorCode.UNSUPPORTED_INTERACTION)
     assert report.retryable is False
     assert report.emitted_plan_ids == ()
     assert sink.values == []

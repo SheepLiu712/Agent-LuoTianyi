@@ -17,6 +17,12 @@ class MaintenanceStatus(str, Enum):
     CONFLICT = "conflict"
 
 
+class MemoryWriteResult(str, Enum):
+    WRITTEN = "written"
+    EMPTY = "empty"
+    SKIPPED_EMBEDDING = "skipped_embedding"
+
+
 class MaintenanceMemoryType(str, Enum):
     USER_FACT = "user_fact"
     INTERACTION_EVENT = "interaction_event"
@@ -45,3 +51,4 @@ class MaintenanceReport:
     memory_candidate_count: int = 0
     profile_updated: bool = False
     compacted: bool = False
+    memory_skipped_count: int | None = None

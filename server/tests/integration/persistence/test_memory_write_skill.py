@@ -34,7 +34,10 @@ class Vectors:
         self.documents = {}
         self.fail_at = None
 
-    def upsert_documents(self, documents, ids):
+    async def prepare_embeddings(self, texts):
+        return [[1.0] for text in texts]
+
+    def upsert_documents(self, documents, ids, *, embeddings=None):
         if self.fail_at is not None and len(self.documents) == self.fail_at:
             raise RuntimeError("索引写入失败")
         for document, key in zip(documents, ids):

@@ -5,7 +5,7 @@ from datetime import date
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.domain import MemoryContext, MemoryHit
-from src.domain.agent.maintenance import MaintenanceCandidate
+from src.domain.agent.maintenance import MaintenanceCandidate, MemoryWriteResult
 from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.infrastructure.observability.retrieval_timing import measure_retrieval, retrieval_phase
 from src.infrastructure.persistence.database.vector_store import VectorStore
@@ -274,8 +274,8 @@ class AgentMemory:
         user_id: str,
         maintenance_id: str,
         candidates: tuple[MaintenanceCandidate, ...],
-    ) -> None:
-        await self.memory_writer.write_maintenance_candidates(
+    ) -> MemoryWriteResult:
+        return await self.memory_writer.write_maintenance_candidates(
             vector_store=self.vector_store,
             memory_store=self.memory_store,
             user_id=user_id,

@@ -1,3 +1,4 @@
+import asyncio
 """授权范围内的排序去重与当前歌曲资源查询。"""
 
 import logging
@@ -117,7 +118,10 @@ async def test_production_vector_adapter_does_not_turn_backend_failure_into_empt
     store = object.__new__(ChromaVectorStore)
     store._closed = False
     store.logger = logging.getLogger(__name__)
-    store._embedding_function = SimpleNamespace(embed_query=lambda query: [1.0])
+    async def embed(texts):
+        return [[1.0] for text in texts]
+    store._embedding_function = SimpleNamespace(aembed_documents=embed)
+    store._embedding_slots = asyncio.Semaphore(1)
     with ThreadPoolExecutor(max_workers=1) as executor:
         store._executor = executor
         store.collection = SimpleNamespace(query=lambda **kwargs: {"ids": []})
@@ -236,11 +240,11 @@ async def test_real_vector_search_reuses_embedding_and_reports_retrieval_details
 
     calls = []
 
-    def embed(self, text):
-        calls.append(text)
-        return [1.0, 0.0, 0.0]
+    async def embed(self, texts):
+        calls.extend(texts)
+        return [[1.0, 0.0, 0.0] for text in texts]
 
-    monkeypatch.setattr(SiliconFlowEmbeddings, "_embed", embed)
+    monkeypatch.setattr(SiliconFlowEmbeddings, "aembed_documents", embed)
     own = await setup.skill.commit_fact(invocation(), fact=fact("own", content="用户喜欢音乐"))
     await setup.skill.commit_fact(invocation("miku"), fact=fact("other", content="其他角色的记忆"))
     store = ChromaVectorStore({"vector_store_path": str(tmp_path / "vectors"), "embedding_model": {"api_key": "test"}})
@@ -276,10 +280,10 @@ async def test_real_vector_search_reuses_embedding_and_reports_retrieval_details
             for p in ("authorization", "queue", "embedding", "vector_search", "hydration", "materialization")
         }
 
-        def unavailable(*args, **kwargs):
+        async def unavailable(*args, **kwargs):
             raise RuntimeError("向量化失败")
 
-        monkeypatch.setattr(store._embedding_function, "embed_query", unavailable)
+        monkeypatch.setattr(store._embedding_function, "aembed_documents", unavailable)
         rows.clear()
         with reply_timing_scope(timing), pytest.raises(RuntimeError, match="向量化失败"):
             await reader.search_memory_context_for_topic("u", ["音乐"])

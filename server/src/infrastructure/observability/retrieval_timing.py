@@ -1,5 +1,6 @@
 """召回内部耗时：只记录阶段、次数与耗时，不记录查询或记忆内容。"""
 
+import asyncio
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -48,6 +49,9 @@ def retrieval_phase(name):
     status = "success"
     try:
         yield
+    except asyncio.CancelledError:
+        status = "cancelled"
+        raise
     except BaseException:
         status = "error"
         raise
@@ -64,6 +68,9 @@ def measure_retrieval(function):
         status = "success"
         try:
             return await function(*args, **kwargs)
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
         except BaseException:
             status = "error"
             logger.exception("记忆检索失败，阶段统计=%s", details)

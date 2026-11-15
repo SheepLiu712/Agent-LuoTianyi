@@ -17,9 +17,10 @@ from src.agent.skills.adapters.memory.intentional_commit import (
     IntentionalMemoryCommitMixin,
 )
 from src.agent.skills.adapters.memory.operations import MemoryOperationsMixin
-from src.domain.agent.maintenance import MaintenanceCandidate, MaintenanceMemoryType
+from src.domain.agent.maintenance import MaintenanceCandidate, MaintenanceMemoryType, MemoryWriteResult
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
+from src.infrastructure.models.llm.embedding import EmbeddingUnavailable
 from src.infrastructure.models.llm.module import LLMModule
 from src.infrastructure.persistence.database.vector_store import Document, VectorStore
 from src.utils.logger import get_logger
@@ -256,8 +257,22 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
         owner_character_id: str,
         maintenance_id: str,
         candidates: tuple[MaintenanceCandidate, ...],
-    ) -> None:
-        """以 (maintenance_id, candidate_index) 写正本和稳定向量投影。"""
+    ) -> MemoryWriteResult:
+        """Prepare all vectors before writing canonical records and stable projections."""
+        if not candidates:
+            return MemoryWriteResult.EMPTY
+        try:
+            vectors = await vector_store.prepare_embeddings([candidate.content for candidate in candidates])
+        except EmbeddingUnavailable as exc:
+            logger.warning(
+                "Maintenance memory skipped maintenance_id=%s candidates=%s reason=%s attempts=%s status=%s",
+                maintenance_id,
+                len(candidates),
+                exc.reason,
+                exc.attempts,
+                exc.status_code,
+            )
+            return MemoryWriteResult.SKIPPED_EMBEDDING
         for index, candidate in enumerate(candidates):
             identity = f"{maintenance_id}:{index}"
             record_id = str(uuid5(_MAINTENANCE_MEMORY_NAMESPACE, identity))
@@ -289,7 +304,9 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
                 },
                 id=vector_id,
             )
-            await complete_owned(asyncio.to_thread(vector_store.upsert_documents, [document], [vector_id]))
+            await complete_owned(
+                asyncio.to_thread(vector_store.upsert_documents, [document], [vector_id], embeddings=[vectors[index]])
+            )
             await complete_owned(
                 asyncio.to_thread(
                     memory_store.link_agent_memory_embeddings,
@@ -298,3 +315,5 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
                     embedding_ids=[vector_id],
                 )
             )
+
+        return MemoryWriteResult.WRITTEN
