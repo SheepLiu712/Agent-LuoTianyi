@@ -191,7 +191,10 @@ def _prepare_touch(payload: dict, values: dict) -> _PreparedInput:
         raise ValueError("invalid touch areas")
     if any(not isinstance(region, str) or not region.strip() or len(region) > 64 for region in raw_regions):
         raise ValueError("invalid touch area")
-    body_regions = tuple(d.BodyRegion(value=region) for region in dict.fromkeys(r.strip() for r in raw_regions))
+    # Normalize only the explicitly supported left/right aliases at the wire boundary.
+    aliases = {"左腿": "腿", "右腿": "腿", "左手": "手", "右手": "手"}
+    normalized = (aliases.get(region.strip(), region.strip()) for region in raw_regions)
+    body_regions = tuple(d.BodyRegion(value=region) for region in dict.fromkeys(normalized))
 
     raw_frequency = payload.get("click_frequency")
     click_frequency = None

@@ -1,6 +1,6 @@
 """触摸预制反应的资源选择技能。"""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,106 +9,6 @@ from src.agent.skills.contracts import SkillInvocation
 from src.agent.skills.expression._touch_resources import TouchFastReplyBuilder
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.utils.logger import get_logger
-
-_DEFAULT_REGIONS = frozenset(
-    {
-        "head",
-        "body",
-        "legs",
-        "hands",
-        "头",
-        "辫子",
-        "耳机",
-        "袖",
-        "左腿",
-        "右腿",
-        "身体",
-        "裙子",
-        "8",
-        "左手",
-        "右手",
-    }
-)
-_DEFAULT_MAX_TOUCHES_10S = 8
-_DEFAULT_MAX_TOUCHES_30S = 16
-
-
-def _positive_int(value: object, name: str, default: int) -> int:
-    """校验频率上限；缺省时沿用默认值，非法值直接报错。"""
-    if value is None:
-        return default
-    if type(value) is not int:
-        raise TypeError(f"touch policy {name} must be an integer")
-    if value <= 0:
-        raise ValueError(f"touch policy {name} must be a positive integer")
-    return value
-
-
-def _regions(value: object, default: frozenset[str]) -> frozenset[str]:
-    """校验允许的区域别名集合；缺省时沿用默认集合。"""
-    if value is None:
-        return default
-    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
-        raise TypeError("touch policy allowed_regions must be a collection of region names")
-    regions = tuple(value)
-    if not regions or any(not isinstance(item, str) or not item.strip() for item in regions):
-        raise ValueError("touch policy allowed_regions must contain nonblank region names")
-    return frozenset(regions)
-
-
-@dataclass(frozen=True, slots=True)
-class TouchPolicy:
-    """按已知区域和 10/30 秒聚合频率上限决定是否接受快速反应。
-
-    频率窗口由领域 `TouchClickFrequency` 固定（10 秒 / 30 秒），可配置的是
-    **上限**与**允许的区域别名**；默认值保持旧链行为。
-    """
-
-    allowed_regions: frozenset[str] = _DEFAULT_REGIONS
-    max_touches_10s: int = _DEFAULT_MAX_TOUCHES_10S
-    max_touches_30s: int = _DEFAULT_MAX_TOUCHES_30S
-
-    def __post_init__(self) -> None:
-        if isinstance(self.allowed_regions, (str, bytes)) or not isinstance(self.allowed_regions, Iterable):
-            raise TypeError("touch policy allowed_regions must be a collection of region names")
-        regions = tuple(self.allowed_regions)
-        if not regions or any(not isinstance(item, str) or not item.strip() for item in regions):
-            raise ValueError("touch policy allowed_regions must contain nonblank region names")
-        for name in ("max_touches_10s", "max_touches_30s"):
-            value = getattr(self, name)
-            if type(value) is not int:
-                raise TypeError(f"touch policy {name} must be an integer")
-            if value <= 0:
-                raise ValueError(f"touch policy {name} must be a positive integer")
-
-    @classmethod
-    def from_config(cls, config: object = None) -> "TouchPolicy":
-        """从角色 `reflex.touch.fast_reply.policy` 读取策略；缺省或未提供时用默认值。"""
-        if config is None:
-            return cls()
-        if not isinstance(config, Mapping):
-            raise TypeError("touch policy config must be a mapping")
-        defaults = cls()
-        return cls(
-            allowed_regions=_regions(config.get("allowed_regions"), defaults.allowed_regions),
-            max_touches_10s=_positive_int(config.get("max_touches_10s"), "max_touches_10s", defaults.max_touches_10s),
-            max_touches_30s=_positive_int(config.get("max_touches_30s"), "max_touches_30s", defaults.max_touches_30s),
-        )
-
-    def allows(self, stimulus: d.TouchInteraction) -> bool:
-        return self.rejection_reason(stimulus) is None
-
-    def rejection_reason(self, stimulus: d.TouchInteraction) -> str | None:
-        """Explain policy decisions without changing the accepted region/frequency boundaries."""
-        if any(region.value not in self.allowed_regions for region in stimulus.body_regions):
-            return "unsupported_region"
-        frequency = stimulus.click_frequency
-        if frequency is not None:
-            if frequency.count_10s > self.max_touches_10s:
-                return "rate_limit_10s"
-            if frequency.count_30s > self.max_touches_30s:
-                return "rate_limit_30s"
-        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +20,7 @@ class TouchReaction:
 
 
 class TouchReactionSkill:
-    """共享所有角色的触摸策略和预制资源选择器。"""
+    """共享所有角色的触摸预制资源选择器；部位契约在输入边界校验。"""
 
     def __init__(
         self,
@@ -139,45 +39,21 @@ class TouchReactionSkill:
         character_id: str,
         config: Mapping[str, object],
         prepared_speech: PreparedSpeechCatalog,
-    ) -> tuple[TouchFastReplyBuilder, dict[object, str], TouchPolicy]:
+    ) -> tuple[TouchFastReplyBuilder, dict[object, str]]:
         try:
             entries = prepared_speech.entries(character_id)
         except KeyError:
             raise ValueError(f"touch fast reply requires prepared speech catalog for {character_id}") from None
         builder = TouchFastReplyBuilder(config, entries)
         media_ids = {entry.audio_path: entry.name for entry in entries}
-        return builder, media_ids, TouchPolicy.from_config(config.get("policy"))
-
-    def allows(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> bool:
-        return self.rejection_reason(invocation, stimulus) is None
-
-    def rejection_reason(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> str | None:
-        resources = self._resources.get(invocation.character_id)
-        policy = resources[2] if resources is not None else None
-        reason = policy.rejection_reason(stimulus) if policy is not None else "resources_unconfigured"
-        if reason is not None:
-            log = get_logger(__name__).info if reason.startswith("rate_limit") else get_logger(__name__).warning
-            frequency = stimulus.click_frequency
-            log(
-                "Touch rejected stimulus_id=%s character_id=%s reason=%s regions=%s "
-                "count_10s=%s limit_10s=%s count_30s=%s limit_30s=%s",
-                stimulus.stimulus_id,
-                invocation.character_id,
-                reason,
-                [region.value for region in stimulus.body_regions],
-                frequency.count_10s if frequency else None,
-                policy.max_touches_10s if policy else None,
-                frequency.count_30s if frequency else None,
-                policy.max_touches_30s if policy else None,
-            )
-        return reason
+        return builder, media_ids
 
     def choose(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> TouchReaction | None:
         """返回可读取的随机触摸资源；未命中或资源失败时返回 None。"""
         resources = self._resources.get(invocation.character_id)
         if resources is None:
             return None
-        builder, media_ids, _policy = resources
+        builder, media_ids = resources
         if not builder.should_use_fast_path():
             get_logger(__name__).error("Touch fast path missed")
             return None

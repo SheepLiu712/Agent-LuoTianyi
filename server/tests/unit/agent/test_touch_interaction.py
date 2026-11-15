@@ -12,7 +12,6 @@ from src.agent.handlers.action.restore_expression import RestoreExpressionHandle
 from src.agent.handlers.stimulus.touch import TouchInteractionHandler
 from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.expression.touch import (
-    TouchPolicy,
     TouchReaction,
     TouchReactionSkill,
 )
@@ -22,9 +21,6 @@ from src.agent_runtime.agent_runtime import AgentRuntime
 @dataclass(frozen=True, slots=True)
 class ReactionSkill:
     reaction: TouchReaction | None
-
-    def rejection_reason(self, skill_invocation, stimulus: d.TouchInteraction):
-        return TouchPolicy().rejection_reason(stimulus)
 
     def choose(self, skill_invocation, stimulus: d.TouchInteraction) -> TouchReaction | None:
         return self.reaction
@@ -120,7 +116,7 @@ def test_touch_skill_rejects_directory_only_configuration(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatch, caplog):
+async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatch):
     import json
     import wave
 
@@ -158,17 +154,6 @@ async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatc
     )
     monkeypatch.setattr("src.agent.skills.expression._touch_resources.random.choice", lambda files: next(iter(files)))
 
-    import logging
-    monkeypatch.setattr("src.agent.skills.expression.touch.get_logger", lambda _: logging.getLogger("test.touch.reason"))
-    with caplog.at_level(logging.INFO):
-        assert skill.rejection_reason(invocation(), touch_request(
-            frequency=d.TouchClickFrequency(count_10s=9, count_30s=9)
-        ).stimulus) == "rate_limit_10s"
-        assert skill.rejection_reason(invocation(), touch_request(regions=("unknown",)).stimulus) == "unsupported_region"
-    assert "count_10s=9 limit_10s=8" in caplog.text
-    assert "regions=['unknown']" in caplog.text
-    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
-
     reaction = skill.choose(invocation(), touch_request().stimulus)
 
     assert reaction == TouchReaction(
@@ -178,101 +163,6 @@ async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatc
     from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 
     assert (await catalog.read_audio("luotianyi", "voice")).data == audio.read_bytes()
-
-
-@pytest.mark.parametrize(
-    "regions,frequency",
-    [
-        (("unknown",), None),
-        (("head",), d.TouchClickFrequency(count_10s=9, count_30s=9)),
-        (("head",), d.TouchClickFrequency(count_10s=8, count_30s=17)),
-    ],
-)
-def test_touch_policy_rejects_unknown_region_and_throttled_frequency(regions, frequency):
-    assert TouchPolicy().allows(touch_request(regions=regions, frequency=frequency).stimulus) is False
-
-
-def test_touch_policy_allows_legacy_region_with_frequency_at_limit():
-    frequency = d.TouchClickFrequency(count_10s=8, count_30s=16)
-    assert TouchPolicy().allows(touch_request(regions=("head", "辫子"), frequency=frequency).stimulus) is True
-
-
-def test_touch_policy_defaults_apply_when_config_absent():
-    default = TouchPolicy.from_config(None)
-
-    assert default == TouchPolicy()
-    assert TouchPolicy.from_config({}) == TouchPolicy()
-    assert (
-        default.allows(
-            touch_request(
-                regions=("头", "辫子"),
-                frequency=d.TouchClickFrequency(count_10s=8, count_30s=16),
-            ).stimulus
-        )
-        is True
-    )
-
-
-def test_touch_policy_config_override_changes_limits_and_regions():
-    strict = TouchPolicy.from_config({"max_touches_10s": 1, "allowed_regions": ["head"]})
-
-    assert (
-        strict.allows(
-            touch_request(
-                regions=("head",),
-                frequency=d.TouchClickFrequency(count_10s=2, count_30s=2),
-            ).stimulus
-        )
-        is False
-    )
-    assert strict.allows(touch_request(regions=("辫子",)).stimulus) is False
-    assert strict.allows(touch_request(regions=("head",)).stimulus) is True
-
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        {"max_touches_10s": 0},
-        {"max_touches_30s": -1},
-        {"max_touches_10s": "8"},
-        {"max_touches_30s": True},
-        {"allowed_regions": []},
-        {"allowed_regions": "head"},
-        {"allowed_regions": ["  "]},
-        ["not", "a", "mapping"],
-    ],
-)
-def test_touch_policy_invalid_config_is_rejected(config):
-    with pytest.raises((TypeError, ValueError)):
-        TouchPolicy.from_config(config)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "regions,frequency",
-    [
-        (("unknown",), None),
-        (("head",), d.TouchClickFrequency(count_10s=9, count_30s=9)),
-    ],
-)
-async def test_touch_handler_distinguishes_rate_limit_from_unsupported_region(regions, frequency):
-    request = touch_request(regions=regions, frequency=frequency)
-    sink = Sink()
-    plans = _plans(request, sink)
-    handler = TouchInteractionHandler(
-        ReactionSkill(TouchReaction(audio_ref=d.MediaRef(media_id="touch_voice"), expression_id="happy"))
-    )
-
-    report = await handler.handle(request, plans)
-
-    limited = frequency is not None
-    assert report.request_status is (
-        d.HandlingRequestStatus.COMPLETED if limited else d.HandlingRequestStatus.FAILED
-    )
-    assert report.error_code is (None if limited else d.HandlingErrorCode.UNSUPPORTED_INTERACTION)
-    assert report.retryable is False
-    assert report.emitted_plan_ids == ()
-    assert sink.values == []
 
 
 @pytest.mark.asyncio

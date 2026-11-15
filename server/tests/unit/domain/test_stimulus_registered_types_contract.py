@@ -136,7 +136,7 @@ def _valid_stimulus_kwargs(type_name: str) -> dict[str, object]:
         "TouchInteraction": lambda: {
             "body_regions": (
                 agent_domain.BodyRegion(value="头"),
-                agent_domain.BodyRegion(value="辫子"),
+                agent_domain.BodyRegion(value="身体"),
             ),
             "click_frequency": agent_domain.TouchClickFrequency(
                 count_10s=2,

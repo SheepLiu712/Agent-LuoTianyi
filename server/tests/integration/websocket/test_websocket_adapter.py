@@ -739,7 +739,7 @@ async def test_touch_and_image_selection_business_events_become_typed_stimuli():
             event_type="user_touch",
             client_msg_id="touch",
             payload={
-                "touchArea": ["head", "hand", "head"],
+                "touchArea": ["头", "手", "头"],
                 "click_frequency": {"count_10s": 2, "count_30s": 5},
             },
         ),
@@ -752,7 +752,7 @@ async def test_touch_and_image_selection_business_events_become_typed_stimuli():
 
     touch, opened, closed = stage.stimuli
     assert isinstance(touch, d.TouchInteraction)
-    assert tuple(region.value for region in touch.body_regions) == ("head", "hand")
+    assert tuple(region.value for region in touch.body_regions) == ("头", "手")
     assert touch.click_frequency == d.TouchClickFrequency(count_10s=2, count_30s=5)
     assert isinstance(opened, d.ImageSelectionOpened)
     assert isinstance(closed, d.ImageSelectionClosed)
