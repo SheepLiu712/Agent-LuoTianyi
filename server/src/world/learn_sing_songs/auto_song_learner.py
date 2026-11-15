@@ -302,7 +302,7 @@ class AutoSongLearner:
                 audio_path = song_dir / f"{song_name}.cleaned.mp3"
                 if not audio_path.is_file():
                     audio_path = song_dir / f"{song_name}.mp3"
-                if not playable_segments(song_data.get("segments"), audio_path):
+                if not playable_segments(song_data.get("segments"), audio_path, metadata=song_data):
                     continue
                 title = str(song_data.get("title") or "")
             except Exception:
@@ -520,7 +520,7 @@ class AutoSongLearner:
                 f"SL093 finalize: 关键文件缺失: audio={has_audio}, json={has_json}, lyrics={has_lyrics}",
             )
             return None
-        if not playable_segments(data.get("segments"), cleaned_target):
+        if not playable_segments(data.get("segments"), cleaned_target, metadata=data):
             self._handle_failure(requested_name, "SL094 finalize: 没有可演唱的有效唱段")
             return None
 
