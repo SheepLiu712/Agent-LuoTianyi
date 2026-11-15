@@ -433,3 +433,31 @@ async def test_parallel_generation_failure_drains_siblings_without_freezing(fail
     assert finished == set(started)
     assert ctx.conversation.batch is None and ctx.conversation.progress is None
     assert memory.writes == [] and ctx.user.updates == []
+
+
+@pytest.mark.asyncio
+async def test_embedding_outage_skips_memory_but_commits_profile_summary_and_progress():
+    from src.agent.skills.adapters.memory.writer import MemoryWriter
+    from src.infrastructure.models.llm.embedding import EmbeddingUnavailable
+
+    async def unavailable(texts):
+        raise EmbeddingUnavailable("total_timeout")
+
+    class OutageMemory(Memory):
+        async def write_maintenance_candidates(self, **kwargs):
+            return await MemoryWriter({}, None).write_maintenance_candidates(
+                **kwargs, owner_character_id="luotianyi",
+                vector_store=SimpleNamespace(prepare_embeddings=unavailable),
+                memory_store=SimpleNamespace(),  # any canonical write would fail
+            )
+
+    ctx = context((entry(1), entry(2), entry(3), entry(4)))
+    memory = OutageMemory()
+    result = await skill(memory, Compaction(required=True, keep=0)).maintain(
+        invocation(), request=MaintenanceRequest(reason=MaintenanceReason.INTERACTION_ENDING, context=ctx)
+    )
+    assert result.status is MaintenanceStatus.COMPLETED
+    assert result.memory_skipped_count > 0
+    assert ctx.user.read().profile.description == "新画像"
+    assert ctx.conversation.compactions[0].summary.text == "新总结"
+    assert ctx.conversation.progress == "e4"

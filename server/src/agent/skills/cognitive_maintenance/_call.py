@@ -14,6 +14,7 @@ from src.agent.context import UserProfile
 from src.agent.skills.cognitive.call_settlement import render_call_turns
 from src.agent.skills.contracts import SkillInvocation
 from src.domain.agent import MaintenanceCandidate
+from src.domain.agent.maintenance import MemoryWriteResult
 from src.domain.call import CallFinalSnapshot
 from src.domain.call.contracts import CallMaintenanceSnapshot
 from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
@@ -29,7 +30,7 @@ class CallMaintenanceMemory(Protocol):
 
     async def write_maintenance_candidates(
         self, *, user_id: str, maintenance_id: str, candidates: tuple[MaintenanceCandidate, ...]
-    ) -> None: ...
+    ) -> MemoryWriteResult: ...
 
     async def propose_user_profile(self, *, history: dict[str, object], current_profile: str) -> str | None: ...
 

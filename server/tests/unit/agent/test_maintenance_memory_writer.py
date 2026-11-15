@@ -13,7 +13,10 @@ class VectorStore:
     def __init__(self):
         self.documents = {}
 
-    def upsert_documents(self, documents, ids):
+    async def prepare_embeddings(self, texts):
+        return [[1.0] for text in texts]
+
+    def upsert_documents(self, documents, ids, *, embeddings=None):
         for document, identity in zip(documents, ids):
             existing = self.documents.get(identity)
             value = (document.get_content(), document.get_metadata())
@@ -91,4 +94,18 @@ async def test_retry_changed_candidate_content_is_rejected():
         await writer.write_maintenance_candidates(
             **common,
             candidates=(MaintenanceCandidate(MaintenanceMemoryType.USER_FACT, "喜欢咖啡"),),
+        )
+
+
+@pytest.mark.asyncio
+async def test_database_failure_is_not_treated_as_embedding_degradation():
+    class BrokenStore(MemoryStore):
+        def write_agent_memory_record_if_absent(self, record):
+            raise OSError("database unavailable")
+
+    with pytest.raises(OSError, match="database unavailable"):
+        await MemoryWriter({}, LLM()).write_maintenance_candidates(
+            vector_store=VectorStore(), memory_store=BrokenStore(), user_id="u",
+            owner_character_id="luotianyi", maintenance_id="batch",
+            candidates=(MaintenanceCandidate(MaintenanceMemoryType.USER_FACT, "喜欢茶"),),
         )

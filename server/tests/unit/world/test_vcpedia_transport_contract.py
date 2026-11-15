@@ -220,3 +220,15 @@ def test_disabled_fetcher_does_not_touch_the_network(wire, tmp_path):
     """关闭时不发请求，返回值语义保持原样（空字符串）。"""
     assert VCPediaFetcher({"activated": False, "data_dir": str(tmp_path)}).fetch_entity_description("歌曲") == ""
     assert not wire.calls
+
+
+@pytest.mark.parametrize("code,level", [("missingtitle", "INFO"), ("ratelimited", "WARNING")])
+def test_detail_reports_api_reason_without_logging_missing_page_as_failure(wire, tmp_path, caplog, code, level):
+    import logging
+    wire.body = json.dumps({"error": {"code": code, "info": "untrusted upstream content"}})
+    instance = fetcher(tmp_path)
+    instance.logger = logging.getLogger("test.vcpedia.reason")
+    with caplog.at_level(logging.INFO):
+        assert instance._fetch_page("歌曲") is None
+    assert any(code in r.getMessage() and r.levelname == level for r in caplog.records)
+    assert "untrusted upstream content" not in caplog.text

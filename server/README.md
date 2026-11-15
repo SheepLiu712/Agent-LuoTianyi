@@ -301,3 +301,9 @@ TTS 数值由父进程后台批量写 SQLite，音频路径不等待数据库提
 再从 `server` 执行 `python scripts/check_admin_metrics_ui.py --output-dir <截图目录>`
 （需安装 Playwright 及 Chromium）。脚本使用临时 SQLite 和模拟管理 API，验证桌面、
 窄屏、UTC+8 时间展示、时间范围切换及移除的入口；它不调用生产服务。
+
+### Embedding 请求与维护降级
+
+向量库的 `embedding_model` 配置可设置 `connect_timeout_seconds`（默认 5）、`read_timeout_seconds`（默认 10）、`request_timeout_seconds`（单次完整请求默认 10）、`total_timeout_seconds`（整批含重试默认 30）和 `max_attempts`（默认 3，允许 1–5）。每次重试仍受整批预算约束；查询与维护共用此策略。环境代理与 NO_PROXY 继续由 HTTP 客户端读取，不写死代理。
+
+维护候选先整批生成向量，再持久化。Embedding 耗尽重试时本次记忆跳过，画像、摘要与进度仍更新；日志 `Maintenance memory skipped` 保存批次 ID、候选数、原因、尝试数及 HTTP 状态，不记录记忆正文或密钥。不会自动补写已跳过的批次。数据库错误仍使维护失败。回复前检索最终失败的处理方式未改变。

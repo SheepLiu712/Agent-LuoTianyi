@@ -1,5 +1,6 @@
 """Internal MediaWiki transport shared by template and detail fetching."""
 import json
+import re
 import shutil
 import subprocess
 from typing import Callable
@@ -99,11 +100,22 @@ def _run_curl(curl, url, encoded, timeout, post):
     return int(status), body
 
 
+class WikiAPIError(ValueError):
+    """Safe MediaWiki category without echoing arbitrary upstream content."""
+
+    def __init__(self, code):
+        self.code = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(code))[:80]
+        super().__init__(f"VCPedia API error code={self.code}")
+
+
 def _parse_document(document, decode_error, params):
     if decode_error is not None:
         raise decode_error
-    if not isinstance(document, dict) or "error" in document:
-        raise ValueError("VCPedia API error response")
+    if not isinstance(document, dict):
+        raise WikiAPIError("invalid_document")
+    if "error" in document:
+        error = document["error"]
+        raise WikiAPIError(error.get("code", "unknown") if isinstance(error, dict) else "invalid_error")
     parsed = document.get("parse")
     source = parsed.get(params["prop"]) if isinstance(parsed, dict) else None
     if isinstance(source, dict):

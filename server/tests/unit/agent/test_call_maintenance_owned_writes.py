@@ -25,6 +25,9 @@ async def test_cancelled_maintenance_waits_for_started_write_and_does_not_start_
             raise AssertionError("cancelled operation must not start embedding link")
 
     class Vector:
+        async def prepare_embeddings(self, texts):
+            return [[1.0] for text in texts]
+
         def upsert_documents(self, *args, **kwargs):
             raise AssertionError("cancelled operation must not start vector write")
 
@@ -52,3 +55,30 @@ async def test_cancelled_maintenance_waits_for_started_write_and_does_not_start_
     with pytest.raises(asyncio.CancelledError):
         await task
     assert store.records == ["first"]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_embedding_stops_preparation_without_writes_or_degradation(caplog):
+    from types import SimpleNamespace
+
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    class Vector:
+        async def prepare_embeddings(self, texts):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+    task = asyncio.create_task(MemoryWriter({}, None).write_maintenance_candidates(
+        vector_store=Vector(), memory_store=SimpleNamespace(), user_id="user",
+        owner_character_id="luotianyi", maintenance_id="cancelled",
+        candidates=(d.MaintenanceCandidate(d.MaintenanceMemoryType.USER_FACT, "fact"),),
+    ))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert stopped.is_set()
+    assert "Maintenance memory skipped" not in caplog.text

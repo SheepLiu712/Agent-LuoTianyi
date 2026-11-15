@@ -79,9 +79,13 @@ class VectorStore(ABC):
         """添加文档到向量库"""
         pass
 
-    def upsert_documents(self, documents: List[BaseDocument], ids: List[str]) -> List[str]:
+    def upsert_documents(self, documents: List[BaseDocument], ids: List[str], *, embeddings=None) -> List[str]:
         """按调用方提供的稳定 ID 幂等写入；旧实现须显式选择支持。"""
         raise NotImplementedError("vector store does not support deterministic upsert")
+
+    async def prepare_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """Prepare the complete projection before any canonical memory writes."""
+        raise NotImplementedError("vector store does not support prepared embeddings")
 
     @abstractmethod
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
@@ -141,6 +145,7 @@ class ChromaVectorStore(VectorStore):
         # 专用线程池，避免 Chroma 的同步 HTTP 调用耗尽 asyncio 默认线程池
         max_workers = config.get("vector_store_threads", 4)
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="chroma")
+        self._embedding_slots = asyncio.Semaphore(max_workers)
         self._close_lock = threading.Lock()
         self._closed = False
 
@@ -171,9 +176,12 @@ class ChromaVectorStore(VectorStore):
                     "connect_timeout_seconds",
                     5.0,
                 ),
+                request_timeout_seconds=self.embedding_model_config.get("request_timeout_seconds", 10.0),
+                total_timeout_seconds=self.embedding_model_config.get("total_timeout_seconds", 30.0),
+                max_attempts=self.embedding_model_config.get("max_attempts", 3),
                 read_timeout_seconds=self.embedding_model_config.get(
                     "read_timeout_seconds",
-                    30.0,
+                    10.0,
                 ),
             )
 
@@ -212,7 +220,16 @@ class ChromaVectorStore(VectorStore):
         self.logger.info(f"成功添加 {len(documents)} 个文档")
         return ids
 
-    def upsert_documents(self, documents: List[BaseDocument], ids: List[str]) -> List[str]:
+    async def prepare_embeddings(self, texts: list[str]) -> list[list[float]]:
+        if self._closed:
+            raise RuntimeError("Vector store is closed")
+        queued_at = time.perf_counter()
+        async with self._embedding_slots:
+            record_retrieval_phase("queue", queued_at)
+            with retrieval_phase("embedding"):
+                return await self._embedding_function.aembed_documents(texts)
+
+    def upsert_documents(self, documents: List[BaseDocument], ids: List[str], *, embeddings=None) -> List[str]:
         if len(documents) != len(ids):
             raise ValueError("documents 与 ids 数量必须一致")
         for doc in documents:
@@ -233,6 +250,7 @@ class ChromaVectorStore(VectorStore):
             if persisted is not None and persisted != expected:
                 raise ValueError("vector identity conflicts with persisted document")
         self.collection.upsert(
+            embeddings=embeddings,
             documents=[doc.get_content() for doc in documents],
             metadatas=[doc.get_metadata() for doc in documents],
             ids=ids,
@@ -240,14 +258,7 @@ class ChromaVectorStore(VectorStore):
         return list(ids)
 
     async def embed_query(self, query: str) -> list[float]:
-        if self._closed:
-            raise RuntimeError("Vector store is closed")
-
-        def embed():
-            with retrieval_phase("embedding"):
-                return self._embedding_function.embed_query(query)
-
-        return await self._run_search_work(embed)
+        return (await self.prepare_embeddings([query]))[0]
 
     async def _run_search_work(self, work):
         context = copy_context()

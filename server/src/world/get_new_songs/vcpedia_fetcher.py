@@ -20,7 +20,7 @@ from src.world.get_new_songs.source_extraction import (  # noqa: E402
     merge_missing,
 )
 from src.world.get_new_songs.text_conversion import convert_text  # noqa: E402
-from src.world.get_new_songs.wiki_api import fetch_wikitext, user_agent  # noqa: E402
+from src.world.get_new_songs.wiki_api import WikiAPIError, fetch_wikitext, user_agent  # noqa: E402
 from src.world.get_new_songs.wikitext_parser import parse_extraction  # noqa: E402
 
 
@@ -161,8 +161,17 @@ class VCPediaFetcher:
     def _fetch_page(self, page_name: str) -> Optional[str]:
         try:
             return fetch_wikitext(self.base_url, page_name, self.session.get, 10)
+        except WikiAPIError as exc:
+            log = self.logger.info if exc.code == "missingtitle" else self.logger.warning
+            log("VCPedia fetch page=%s reason=%s", page_name, exc.code)
+            return None
         except Exception as exc:
-            self.logger.error(f"Error fetching {page_name}: {exc}")
+            self.logger.error(
+                "VCPedia fetch page=%s reason=%s status=%s",
+                page_name,
+                type(exc).__name__,
+                getattr(getattr(exc, "response", None), "status_code", None),
+            )
             return None
 
 

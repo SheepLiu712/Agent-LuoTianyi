@@ -524,3 +524,31 @@ async def test_unified_call_maintenance_reports_skipped_and_processed_scope(setu
     )
     assert again.status is d.MaintenanceStatus.SKIPPED
     assert len(setup.memory.inputs) == len(setup.memory.writes) == 1
+
+
+@pytest.mark.asyncio
+async def test_call_embedding_outage_keeps_threshold_summary_profile_and_ending_progress(setup):
+    from src.agent.skills.adapters.memory.writer import MemoryWriter
+    from src.infrastructure.models.llm.embedding import EmbeddingUnavailable
+
+    async def unavailable(texts):
+        raise EmbeddingUnavailable("total_timeout")
+
+    async def write(**kwargs):
+        return await MemoryWriter({}, None).write_maintenance_candidates(
+            **kwargs, owner_character_id="luotianyi",
+            vector_store=SimpleNamespace(prepare_embeddings=unavailable), memory_store=SimpleNamespace(),
+        )
+
+    setup.memory.write_maintenance_candidates = write
+    context, turns = await context_with_turns()
+    await threshold(setup, context, turns)
+    assert context.conversation.read_call_maintenance_progress() == 17
+    assert context.user.read().profile.description == "safe profile"
+    assert context.conversation.read_working().summary.text == "private working summary"
+    result = await setup.call_skill.maintain_ending(
+        SkillInvocation("luotianyi", "user", "call", d.CancellationToken()),
+        context, final_snapshot(setup, turns, 17),
+    )
+    assert result == 32
+    assert context.conversation.read_call_maintenance_progress() == 32
