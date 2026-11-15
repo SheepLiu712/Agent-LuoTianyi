@@ -31,16 +31,6 @@ class TouchInteractionHandler:
             interaction_id=identity.interaction_id,
             cancellation=request.cancellation,
         )
-        reason = self._reactions.rejection_reason(invocation, request.stimulus)
-        if reason is not None:
-            if reason.startswith("rate_limit"):
-                return self._report(request, plans)
-            return self._report(
-                request,
-                plans,
-                status=d.HandlingRequestStatus.FAILED,
-                error_code=d.HandlingErrorCode.UNSUPPORTED_INTERACTION,
-            )
         reaction = self._reactions.choose(invocation, request.stimulus)
         if reaction is None:
             get_logger(__name__).error(

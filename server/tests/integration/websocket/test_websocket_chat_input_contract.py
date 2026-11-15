@@ -85,7 +85,7 @@ async def run_ingress(events, *, negative_ack=True, adapter_config=None):
 @pytest.mark.parametrize(
     ("event_type", "payload", "stimulus_type"),
     [
-        ("user_touch", {"touchArea": ["head"]}, d.TouchInteraction),
+        ("user_touch", {"touchArea": ["头"]}, d.TouchInteraction),
         ("user_image_selecting", {}, d.ImageSelectionOpened),
         ("user_image_selecting_cancel", {}, d.ImageSelectionClosed),
     ],
@@ -230,3 +230,29 @@ async def test_valid_image_is_acknowledged_regardless_of_mime_declaration(tmp_pa
     )
     assert len(stimuli) == 1
     assert sent[0]["payload"]["ok"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,regions,expected", [
+    ("touchArea", ["头", "身体", "腿", "手"], ["头", "身体", "腿", "手"]),
+    ("touchArea", ["左腿", "右腿", "腿", "右手", "左手", "手"], ["腿", "手"]),
+    ("touch_area", " 左腿 ", ["腿"]),
+])
+async def test_touch_ingress_normalizes_sides_without_duplicate_regions(field, regions, expected):
+    sent, stimuli = await run_ingress([event("user_touch", {
+        field: regions, "click_frequency": {"count_10s": 10, "count_30s": 30},
+    })])
+    assert sent[0]["payload"]["ok"] is True
+    assert [r.value for r in stimuli[0].body_regions] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [
+    {"touchArea": ["head"]}, {"touchArea": ["辫子"]}, {"touchArea": ["身体", "unknown"]},
+    {"touchArea": []}, {"touchArea": [42]},
+    {"touchArea": ["头"], "click_frequency": {"count_10s": -1, "count_30s": 3}},
+])
+async def test_nonstandard_or_malformed_touch_is_rejected_before_stage(payload):
+    sent, stimuli = await run_ingress([event("user_touch", payload)])
+    assert not stimuli
+    assert sent[0]["payload"]["code"] == "BAD_MESSAGE"

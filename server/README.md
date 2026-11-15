@@ -307,3 +307,9 @@ TTS 数值由父进程后台批量写 SQLite，音频路径不等待数据库提
 向量库的 `embedding_model` 配置可设置 `connect_timeout_seconds`（默认 5）、`read_timeout_seconds`（默认 10）、`request_timeout_seconds`（单次完整请求默认 10）、`total_timeout_seconds`（整批含重试默认 30）和 `max_attempts`（默认 3，允许 1–5）。每次重试仍受整批预算约束；查询与维护共用此策略。环境代理与 NO_PROXY 继续由 HTTP 客户端读取，不写死代理。
 
 维护候选先整批生成向量，再持久化。Embedding 耗尽重试时本次记忆跳过，画像、摘要与进度仍更新；日志 `Maintenance memory skipped` 保存批次 ID、候选数、原因、尝试数及 HTTP 状态，不记录记忆正文或密钥。不会自动补写已跳过的批次。数据库错误仍使维护失败。回复前检索最终失败的处理方式未改变。
+
+### 触摸位置契约
+
+服务端内部只接受 `头`、`身体`、`腿`、`手`。`user_touch` 的 `touchArea` 数组或 `touch_area` 字符串/数组可携带 `左腿`、`右腿`、`左手`、`右手`，入口归一并去重；其他名称（包括英文名和模型细分命中区）返回 BAD_MESSAGE，不进入 Stage。App 已将模型命中区转换为四种标准位置。
+
+客户端负责触摸节流；服务端保留 `click_frequency` 格式校验，但不根据计数再次拒绝有效触摸，旧 `touch_reaction.characters.<角色>.policy` 配置不再参与处理。预制语音资源选择、音频交付、表情恢复及瞬时消息不写聊天记录的行为保持不变。

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._stimulus_contract import (
+    InvalidStimulusError,
     _ContractValueMeta,
     _raise_invalid,
     _require_instance,
@@ -51,12 +52,16 @@ class SourceRef(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BodyRegion(metaclass=_ContractValueMeta):
-    """规范化的触摸部位代码，value 为非空白字符串。"""
+    """规范化触摸部位，仅允许头、身体、腿、手。"""
 
     value: str
 
     def __post_init__(self) -> None:
         _require_nonblank_string(self.value)
+        if self.value not in {"头", "身体", "腿", "手"}:
+            raise InvalidStimulusError(
+                "Unsupported touch region; expected 头/身体/腿/手", code="CONTRACT_INVALID_STIMULUS"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

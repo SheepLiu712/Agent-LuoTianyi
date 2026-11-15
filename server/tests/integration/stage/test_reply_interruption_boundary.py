@@ -96,7 +96,7 @@ async def test_committed_reply_is_preserved_at_every_stage(kind, phase):  # noqa
     try:
         if phase == "queued":
             stage.stimulus_input_sink.submit(
-                stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="head"),), click_frequency=None)
+                stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="头"),), click_frequency=None)
             )
             await until(lambda: len(executions) == 1)
         stage.stimulus_input_sink.submit(original)
@@ -183,7 +183,7 @@ async def test_other_handles_are_not_candidates_even_if_their_permission_is_true
     gate = asyncio.Event()
     requests = []
     original = (
-        stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="head"),), click_frequency=None)
+        stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="头"),), click_frequency=None)
         if input_kind == "touch"
         else trigger(input_kind)
     )

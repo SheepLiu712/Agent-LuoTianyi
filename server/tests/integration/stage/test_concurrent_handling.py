@@ -50,7 +50,7 @@ class _NoCompaction:
 
 
 def touch():
-    return stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="head"),), click_frequency=None)
+    return stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="头"),), click_frequency=None)
 
 
 @pytest.mark.asyncio
