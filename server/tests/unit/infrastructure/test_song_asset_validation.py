@@ -109,3 +109,30 @@ def test_unfinished_learning_is_not_reported_as_broken_song(tmp_path, monkeypatc
     (directory / "workflow_status.json").unlink()
     manager.reload_songs()
     assert any("Config file missing" in str(call) for call in logger.warning.call_args_list)
+
+
+def test_verified_duration_survives_restart_and_invalidates_when_audio_changes(tmp_path, monkeypatch):
+    from src.infrastructure.media import song_asset_validation as validation
+
+    directory = write_song(tmp_path, "时长", [{"description": "尾段", "start_time": 1, "end_time": 2, "lyrics": []}])
+    monkeypatch.setattr(validation, "mediainfo", lambda _: {"duration": "1.2"})
+    SingingManager({"resource_path": str(tmp_path)})
+    config = json.loads((directory / "时长.json").read_text())
+    assert config["audio_duration"]["seconds"] == 2
+    validation._duration_state.cache_clear()  # Simulate losing process memory on restart.
+    with monkeypatch.context() as unavailable:
+
+        def fail_decode(_):
+            raise AssertionError("unchanged audio should use its persisted duration")
+
+        unavailable.setattr(validation, "_decode_duration", fail_decode)
+        manager = SingingManager({"resource_path": str(tmp_path)})
+        assert manager.can_i_sing_song("时长") == ("时长", ["尾段"])
+    audio_path = directory / "时长.mp3"
+    with wave.open(str(audio_path), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\x01\x00" * 24000)
+    assert validation.audio_duration_seconds(audio_path, exact=True, metadata=config) == 3
+    assert config["audio_duration"]["seconds"] == 3

@@ -23,6 +23,7 @@ def song_files(tmp_path, lrc):
 def test_generated_tail_ends_at_real_audio_end(tmp_path, lrc):
     directory = song_files(tmp_path, lrc)
     result = json.loads(generate_song_json(directory).read_text())
+    assert result["audio_duration"]["seconds"] == 2
     assert result["segments"][0]["end_time"] == 2
     assert result["segments"][0]["lyrics"] == [{"duration": 1, "content": "尾句"}]
 

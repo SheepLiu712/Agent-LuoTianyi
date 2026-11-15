@@ -5,6 +5,7 @@ import pathlib
 import random
 import re
 import traceback
+from contextlib import suppress
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.domain.music_type import OneLyricLine, SongMetadata, SongSegment, WishEntry
@@ -96,7 +97,9 @@ class SingingManager:
         if not isinstance(emotion_tags, list):
             emotion_tags = []
         raw_segments = song_config.get("segments", [])
-        segments = playable_segments(raw_segments, audio_file)
+        previous_duration = song_config.get("audio_duration")
+        segments = playable_segments(raw_segments, audio_file, metadata=song_config)
+        self._save_audio_duration(config_file, song_config, previous_duration)
         if not segments:
             self.logger.warning(f"No playable segments for song {song}")
             return None
@@ -111,6 +114,19 @@ class SingingManager:
             emotion_tags=[str(tag).strip() for tag in emotion_tags if str(tag).strip()],
         )
         return metadata, [title, song, config_file.stem]
+
+    def _save_audio_duration(self, config_file: pathlib.Path, song_config: dict, previous_duration: Any) -> None:
+        if song_config.get("audio_duration") == previous_duration:
+            return
+        temporary = config_file.with_suffix(".duration.tmp")
+        try:
+            temporary.write_text(json.dumps(song_config, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.replace(config_file)
+        except OSError as exc:
+            self.logger.warning(f"Cannot persist verified song duration: {config_file}: {exc}")
+        finally:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
 
     def _index_song_aliases(self, canonical_key: str, aliases: List[str]) -> None:
         for alias in aliases:

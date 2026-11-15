@@ -170,7 +170,7 @@ def _bounded_lyric_end(song_name: str, start: float, end: float, audio_duration:
         if start >= audio_duration:
             raise ValueError(f"歌词起点超出音频: song={song_name}, start={start}, duration={audio_duration}")
         end = min(end, audio_duration)
-    if start < 0 or end <= start:
+    if start < 0 or end < start:
         raise ValueError(f"歌词时间未递增: song={song_name}, start={start}, end={end}")
     return end
 
@@ -278,6 +278,8 @@ def generate_song_json(song_dir: Path) -> Path:
         llm_segments=llm_segments,
         audio_duration=audio_duration_seconds(audio_path, exact=True),
     )
+
+    audio_duration_seconds(audio_path, exact=True, metadata=payload)
 
     out_json_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=4) + "\n",

@@ -16,16 +16,12 @@ logger = get_logger(__name__)
 
 
 @lru_cache(maxsize=512)
-def _audio_duration_seconds(path: str, size: int, modified_ns: int, exact: bool) -> float:
-    """Cache probes and decoded durations independently for each audio revision."""
-    _ = size, modified_ns
-    try:
-        duration = float(mediainfo(path).get("duration", ""))
-        if not exact and math.isfinite(duration) and duration > 0:
-            return duration
-    except (TypeError, ValueError, OSError):
-        pass
+def _duration_state(path: str, size: int, modified_ns: int) -> dict:
+    """One duration per audio revision; verified values replace estimates."""
+    return {}
 
+
+def _decode_duration(path: Path) -> float:
     from pydub import AudioSegment
 
     duration = len(AudioSegment.from_file(path)) / 1000
@@ -34,12 +30,44 @@ def _audio_duration_seconds(path: str, size: int, modified_ns: int, exact: bool)
     return duration
 
 
-def audio_duration_seconds(audio_path: str | Path, *, exact: bool = False) -> float:
+def _restore_duration(metadata: dict | None, identity: dict) -> float | None:
+    record = (metadata or {}).get("audio_duration")
+    if not isinstance(record, dict) or any(record.get(key) != value for key, value in identity.items()):
+        return None
+    try:
+        seconds = float(record["seconds"])
+        return seconds if math.isfinite(seconds) and seconds > 0 else None
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _probe_duration(path: Path) -> float | None:
+    try:
+        seconds = float(mediainfo(path).get("duration", ""))
+        return seconds if math.isfinite(seconds) and seconds > 0 else None
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def audio_duration_seconds(audio_path: str | Path, *, exact: bool = False, metadata: dict | None = None) -> float:
     path = Path(audio_path)
     stat = path.stat()
     if stat.st_size == 0:
         raise ValueError(f"Audio file is empty: {path}")
-    return _audio_duration_seconds(str(path.resolve()), stat.st_size, stat.st_mtime_ns, exact)
+    identity = {"file": path.name, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    state = _duration_state(str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    restored = _restore_duration(metadata, identity)
+    if restored is not None:
+        state.update(seconds=restored, verified=True)
+    if not state and not exact:
+        estimated = _probe_duration(path)
+        if estimated is not None:
+            state.update(seconds=estimated, verified=False)
+    if not state or (exact and not state["verified"]):
+        state.update(seconds=_decode_duration(path), verified=True)
+    if metadata is not None and state["verified"]:
+        metadata["audio_duration"] = {**identity, "seconds": state["seconds"]}
+    return state["seconds"]
 
 
 def _valid_lyrics(raw_lyrics: Any) -> list[OneLyricLine] | None:
@@ -105,14 +133,14 @@ def _clip_tail(segment: SongSegment, duration: float) -> SongSegment | None:
     return SongSegment(segment.description, segment.start_time, duration, lyrics)
 
 
-def playable_segments(raw_segments: Any, audio_path: str | Path) -> list[SongSegment]:
+def playable_segments(raw_segments: Any, audio_path: str | Path, *, metadata: dict | None = None) -> list[SongSegment]:
     """Validate against rendered audio, recovering metadata errors and clipping only the tail."""
     if not isinstance(raw_segments, list) or not raw_segments:
         return []
     try:
-        duration = audio_duration_seconds(audio_path)
+        duration = audio_duration_seconds(audio_path, metadata=metadata)
         if any(_segment_end(raw) > duration for raw in raw_segments):
-            duration = audio_duration_seconds(audio_path, exact=True)
+            duration = audio_duration_seconds(audio_path, exact=True, metadata=metadata)
     except Exception as exc:
         logger.warning(f"Cannot validate song audio {audio_path}: {type(exc).__name__}: {exc}")
         return []
