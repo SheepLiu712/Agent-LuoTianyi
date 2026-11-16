@@ -28,7 +28,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { signal: controller.signal, cache: 'no-store' });
   } finally {
     clearTimeout(timer);
   }
@@ -95,17 +95,15 @@ export type EncryptPasswordResult =
  * 公钥获取失败时自动重试；返回结构化结果以便上层区分失败原因并给出明确提示。
  */
 export async function encryptPassword(password: string): Promise<EncryptPasswordResult> {
-  // 优先使用已缓存的公钥，未缓存时才发起网络请求
-  let publicKey = cachedForgeKey;
-  if (!publicKey) {
-    const outcome = await fetchPublicKeyWithRetry();
-    if (!outcome.ok) {
-      addDebugTrace('crypto', 'encrypt failed: public key unavailable', { reason: outcome.reason });
-      return { ok: false, reason: outcome.reason };
-    }
-    publicKey = outcome.publicKey;
-    cachedForgeKey = publicKey;
+  // 密码操作必须获取当前密钥：服务重启会轮换 RSA，启动时缓存可能已经失效。
+  const outcome = await fetchPublicKeyWithRetry();
+  if (!outcome.ok) {
+    clearCachedPublicKey();
+    addDebugTrace('crypto', 'encrypt failed: public key unavailable', { reason: outcome.reason });
+    return { ok: false, reason: outcome.reason };
   }
+  const publicKey = outcome.publicKey;
+  cachedForgeKey = publicKey;
 
   try {
     // 1. 将字符串转为 UTF-8 字节编码

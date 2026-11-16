@@ -39,6 +39,8 @@ class SongLearningQueue(Protocol):
 
     def mark_learned(self, safe_name: str) -> None: ...
 
+    def mark_abandoned(self, safe_name: str, reason: str = "") -> None: ...
+
     def mark_redirected(self, requested_name: str, redirected_to: str, **kwargs) -> None: ...
 
     def update_redirect_status(self, requested_name: str, redirected_status: str, reason: str = "") -> None: ...
@@ -390,6 +392,13 @@ class AutoSongLearner:
             else:
                 self._handle_failure(safe_name, failure_reason)
             return None
+
+        for line in proc.stdout.splitlines():
+            if line.startswith("[SONGLEARNER_STOP] "):
+                reason = line.removeprefix("[SONGLEARNER_STOP] ")
+                self.wishlist.mark_abandoned(safe_name, reason)
+                self.logger.info(f"Stopped learning {safe_name}: {reason}")
+                return None
 
         # Locate the final output directory under the music library.
         learned_name = self._parse_songlearner_result(proc.stdout) or safe_name

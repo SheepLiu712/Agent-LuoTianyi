@@ -69,6 +69,10 @@ _REFRESH_PRESERVED_FIELDS = (
 )
 
 
+class SongNotFound(Exception):
+    """A successful search has no candidate matching the requested song."""
+
+
 class QQMusicCredentialError(RuntimeError):
     """Raised when QQ Music credential is missing, invalid, or rejected by SDK."""
 
@@ -477,9 +481,16 @@ def qq_search_songs(song_name: str, timeout: int = 20) -> List[Dict]:
     )
     resp.raise_for_status()
     data = resp.json()
-    songs = data.get("request", {}).get("data", {}).get("body", {}).get("song", {}).get("list", [])
+    if data.get("code") != 0 or data.get("request", {}).get("code") != 0:
+        raise RuntimeError("QQ 音乐搜索接口返回失败状态")
+    try:
+        songs = data["request"]["data"]["body"]["song"]["list"]
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError("QQ 音乐搜索响应缺少歌曲列表") from exc
+    if not isinstance(songs, list):
+        raise RuntimeError("QQ 音乐搜索返回的歌曲列表格式无效")
     if not songs:
-        raise RuntimeError(f"未在 QQ 音乐搜索到歌曲: {song_name}")
+        raise SongNotFound(f"未在 QQ 音乐搜索到歌曲: {song_name}")
     return songs
 
 
@@ -655,7 +666,7 @@ def download_song_and_lyric(
     songs = qq_search_songs(song_name + " " + singer_name, timeout=timeout)
     singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
     if not singer_songs:
-        raise RuntimeError(
+        raise SongNotFound(
             f"搜索到 {singer_name} 的歌曲，但没有标题匹配请求: {song_name}"
         )
     matched_failures: List[str] = []
