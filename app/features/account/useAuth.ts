@@ -148,6 +148,7 @@ export function useAuth() {
         return { success: false, message: '用户名或密码不能为空' };
       }
 
+      const serverUrl = server_config.BASE_URL;
       // 加密密码
       const encrypted = await encryptPassword(password);
       if (!encrypted.ok) {
@@ -155,7 +156,7 @@ export function useAuth() {
         return { success: false, message: describeEncryptFailure('登录', encrypted.reason) };
       }
       // 发送登录请求
-      const response = await fetch(`${server_config.BASE_URL}/auth/login`, {
+      const response = await fetch(`${serverUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -168,6 +169,9 @@ export function useAuth() {
         return { success: false, message: result.detail || '登录失败' };
       }
 
+      if (serverUrl !== server_config.BASE_URL) {
+        return { success: false, message: '服务器地址已变更，请重新登录' };
+      }
       // 保存自动登录设置
       if (autoLogin) {
         await AsyncStorage.setItem(AUTO_LOGIN_KEY, 'true');
@@ -180,7 +184,7 @@ export function useAuth() {
       addDebugTrace('auth', 'login ok', { username });
       setAuthState(prev => ({
         ...prev,
-        session: { username, token: result.message_token, serverUrl: server_config.BASE_URL },
+        session: { username, token: result.message_token, serverUrl },
       }));
 
       return { success: true, message: '登录成功' };

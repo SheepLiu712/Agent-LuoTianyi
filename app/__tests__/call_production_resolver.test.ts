@@ -1,10 +1,17 @@
+import React from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { useCallFeature } from '../features/call/useCallFeature';
 import { NativeCallOwnership, ProductionCallResolver, requestCallMicrophonePermission } from '../features/call/call_session/production_resolver';
 import { Audio } from 'expo-av';
 let credentials: { username: string; token: string };
 
 jest.mock('expo-av', () => ({ Audio: { getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn() } }));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { executionEnvironment: 'standalone' } }));
-jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
+jest.mock('react-native', () => ({ Platform: { OS: 'android' },
+  AppState: { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) },
+  BackHandler: { addEventListener: () => ({ remove: jest.fn() }) },
+}));
+jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: () => null }));
 jest.mock('../features/call/call_audio/native_call_audio', () => {
   class FakeAudio {
     progressListener: ((progress: { rms: number }) => void) | undefined;
@@ -374,7 +381,7 @@ describe('production call resolver', () => {
         ok: true, status: 200,
         json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
       })) as unknown as typeof fetch,
-      createNativeAudio: () => audio,
+      createNativeAudio: () => audio, nativeOwnership: new NativeCallOwnership(),
     });
     await resolver.refreshCapability();
     const attempt = resolver.createAttempt();
@@ -386,4 +393,42 @@ describe('production call resolver', () => {
     expect(mouthBridge.reset).not.toHaveBeenCalled();
     expect(audio.close).toHaveBeenCalledTimes(1);
   });
+});
+
+it('换号后旧设备迟到释放，新账号在同一页面恢复拨号', async () => {
+  let finishInitialize!: (value: string) => void;
+  const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
+  audio.initialize = () => new Promise(resolve => { finishInitialize = resolve; });
+  const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+  } as Response);
+  const switchPort = { prepare: jest.fn() };
+  const first = new ProductionCallResolver({
+    characterId: 'luotianyi', switchPort, credentials: { username: 'alice', token: 'a' },
+    createNativeAudio: () => audio, nativeInitializeTimeoutMs: 1,
+  });
+  let call!: ReturnType<typeof useCallFeature>;
+  function Bob() {
+    call = useCallFeature({ characterId: 'luotianyi', switchPort, username: 'bob', token: 'b',
+      onAuthRequired: jest.fn(), onReturnToChat: jest.fn(), onCallRecord: jest.fn(), onBackConfirmation: jest.fn() });
+    return null;
+  }
+  let tree: ReactTestRenderer | undefined;
+  try {
+    await first.refreshCapability();
+    await expect(first.createAttempt().initializeNative()).resolves.toBe(false);
+    await first.close();
+    await act(async () => { tree = create(React.createElement(Bob)); });
+    expect(call.canStart).toBe(false);
+    await act(async () => { finishInitialize('available'); });
+    expect(call.canStart).toBe(true);
+    // 保持系统权限查询在途，以直接观察第二位用户已经进入拨号流程。
+    jest.mocked(Audio.getPermissionsAsync).mockImplementationOnce(() => new Promise(() => {}));
+    await act(async () => { expect(await call.start()).toBe(true); });
+    expect(call.state.phase).toBe('REQUESTING_PERMISSION');
+  } finally {
+    await act(async () => { tree?.unmount(); });
+    await first.close();
+    fetchMock.mockRestore();
+  }
 });

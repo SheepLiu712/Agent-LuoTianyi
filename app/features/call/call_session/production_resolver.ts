@@ -55,6 +55,12 @@ export interface ProductionCallResolverOptions {
 
 export class NativeCallOwnership {
   private owner: symbol | null = null;
+  private readonly listeners = new Set<() => void>();
+
+  subscribe(listener: () => void) {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
 
   available(): boolean {
     return this.owner === null;
@@ -63,11 +69,14 @@ export class NativeCallOwnership {
   acquire(owner: symbol): boolean {
     if (this.owner !== null) return false;
     this.owner = owner;
+    this.listeners.forEach(listener => listener());
     return true;
   }
 
   release(owner: symbol): void {
-    if (this.owner === owner) this.owner = null;
+    if (this.owner !== owner) return;
+    this.owner = null;
+    this.listeners.forEach(listener => listener());
   }
 }
 
@@ -132,6 +141,10 @@ export class ProductionCallResolver {
     if (!this.isCurrentProbe(generation, token, characterId)) return this.staleProbeResult(characterId);
     this.capability = body as ServerCallCapability;
     return this.capability;
+  }
+
+  subscribeDeviceAvailability(listener: () => void) {
+    return this.nativeOwnership.subscribe(listener);
   }
 
   currentCapabilities(): CallCapabilities {

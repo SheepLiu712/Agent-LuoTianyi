@@ -37,17 +37,20 @@ export function useProductionCallComposition(options: {
     });
     resolverRef.current = resolver;
     setCapabilities(unavailable);
-    void resolver.refreshCapability().then(() => {
+    const publishCapabilities = () => {
       if (generation === generationRef.current && resolverRef.current === resolver) {
         setCapabilities(resolver.currentCapabilities());
       }
-    }).catch((error) => {
+    };
+    const unsubscribe = resolver.subscribeDeviceAvailability(publishCapabilities);
+    void resolver.refreshCapability().then(publishCapabilities).catch((error) => {
       if (generation !== generationRef.current || resolverRef.current !== resolver) return;
       setCapabilities({ serverAvailable: false, nativeAvailable: resolver.technicalNativeAvailable() });
       if (error instanceof Error && error.message === 'CALL_AUTH_REQUIRED') onAuthRequiredRef.current();
       else onErrorRef.current(error);
     });
     return () => {
+      unsubscribe();
       if (resolverRef.current === resolver) resolverRef.current = null;
       generationRef.current += 1;
       void resolver.close();

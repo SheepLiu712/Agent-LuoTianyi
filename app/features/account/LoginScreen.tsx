@@ -54,7 +54,20 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount }: Login
   // 服务器地址弹窗
   const [showServer, setShowServer] = useState(false);
   const [serverUrl, setServerUrl] = useState(server_config.BASE_URL);
-  const [verifying, setVerifying] = useState(false);
+  const [serverPhase, setServerPhase] = useState<'idle' | 'verifying' | 'saving'>('idle');
+  const serverRequest = useRef<AbortController | 'saving' | null>(null);
+
+  useEffect(() => () => {
+    if (serverRequest.current instanceof AbortController) serverRequest.current.abort();
+  }, []);
+
+  const cancelServer = () => {
+    if (serverRequest.current === 'saving') return;
+    serverRequest.current?.abort();
+    serverRequest.current = null;
+    setServerPhase('idle');
+    setShowServer(false);
+  };
 
   useEffect(() => {
     let active = true;
@@ -152,15 +165,27 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount }: Login
       Alert.alert('错误', '请输入服务器地址');
       return;
     }
-    setVerifying(true);
+    if (serverRequest.current !== null) return;
+    const request = new AbortController();
+    serverRequest.current = request;
+    setServerPhase('verifying');
     try {
-      await switchServer(url);
+      await switchServer(url, {
+        signal: request.signal,
+        onCommit: () => {
+          serverRequest.current = 'saving';
+          setServerPhase('saving');
+        },
+      });
+      if (request.signal.aborted) return;
       Alert.alert('成功', '服务器地址验证成功，地址已保存');
       setShowServer(false);
     } catch (e: any) {
+      if (request.signal.aborted) return;
       Alert.alert('验证失败', `无法连接到服务器: ${e.message}`);
     }
-    setVerifying(false);
+    serverRequest.current = null;
+    setServerPhase('idle');
   };
 
   return (
@@ -381,7 +406,7 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount }: Login
         </Modal>
 
         {/* ========== 服务器地址弹窗 ========== */}
-        <Modal visible={showServer} transparent animationType="fade">
+        <Modal visible={showServer} onRequestClose={cancelServer} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
               <Text style={[styles.modalTitle, { color: theme.text }]}>服务器地址</Text>
@@ -400,17 +425,18 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount }: Login
               <View style={styles.modalButtons}>
                 <TouchableOpacity
                   style={[styles.modalBtn, { backgroundColor: theme.surfaceAlt }]}
-                  onPress={() => setShowServer(false)}
+                  onPress={cancelServer}
+                  disabled={serverPhase === 'saving'}
                 >
                   <Text style={[styles.modalBtnText, { color: theme.textSoft }]}>取消</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalBtn, { backgroundColor: theme.accent }, verifying && styles.buttonDisabled]}
+                  style={[styles.modalBtn, { backgroundColor: theme.accent }, serverPhase !== 'idle' && styles.buttonDisabled]}
                   onPress={handleVerifyServer}
-                  disabled={verifying}
+                  disabled={serverPhase !== 'idle'}
                 >
                   <Text style={[styles.modalBtnText, { color: modalTextColor }]}>
-                    {verifying ? '验证中...' : '验证并保存'}
+                    {serverPhase === 'saving' ? '保存中...' : serverPhase === 'verifying' ? '验证中...' : '验证并保存'}
                   </Text>
                 </TouchableOpacity>
               </View>

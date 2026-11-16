@@ -34,6 +34,7 @@ describe('production call composition lifecycle', () => {
         options,
         refreshCapability: jest.fn(() => new Promise<void>((resolve) => { resolveProbe = resolve; })),
         resolveProbe: () => resolveProbe(),
+        subscribeDeviceAvailability: () => () => {},
         currentCapabilities: jest.fn(() => ({ serverAvailable: true, nativeAvailable: true })),
         technicalNativeAvailable: jest.fn(() => true),
         createAttempt: jest.fn(() => ({ session: { owner: options.credentials.username } })),

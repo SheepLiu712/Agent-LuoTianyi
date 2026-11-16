@@ -20,9 +20,11 @@ export async function clearSavedLogin() {
   await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
 }
 
-export async function switchServer(url: string) {
-  const response = await fetch(url + '/auth/public_key');
+export async function switchServer(url: string, verification?: { signal: AbortSignal; onCommit(): void }) {
+  const response = await fetch(url + '/auth/public_key', { signal: verification?.signal });
+  if (verification?.signal.aborted) return;
   if (!response.ok) throw new Error('服务器返回状态码 ' + response.status);
+  verification?.onCommit();
   await clearSavedLogin();
   await AsyncStorage.setItem('custom_server_url', url);
   clearCachedPublicKey();
