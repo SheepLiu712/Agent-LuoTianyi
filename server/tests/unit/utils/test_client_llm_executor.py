@@ -241,7 +241,8 @@ async def test_delegate_error_raises_without_fallback(executor, fake_ws):
 
 
 @pytest.mark.asyncio
-async def test_delegate_timeout(executor, fake_ws):
+async def test_delegate_timeout(fake_ws):
+    executor = ClientLLMExecutor(timeout_seconds=0.05)
     executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]})))
     with pytest.raises(ClientLLMTimeout):
         await executor.delegate("u1", module="m", model_type="对话模型", prompt="p", params=None)

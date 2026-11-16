@@ -398,7 +398,7 @@ async def test_provider_usage_metric_reports_numeric_usage_and_unknown_cost_only
             captured.append(metric)
 
     factory = AliyunRealtimeSpeechSessionFactory(
-        provider_config(), connector=FakeAliyunConnector(socket), call_metrics=Metrics()
+        provider_config(close_timeout_seconds=0.02), connector=FakeAliyunConnector(socket), call_metrics=Metrics()
     )
     session = await factory.create(uuid4())
     await session.start(RealtimeSpeechConfig())

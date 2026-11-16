@@ -5,23 +5,24 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-
 from support.aliyun_realtime_speech import FakeAliyunConnector, FakeAliyunWebSocket
-from support.call_output import output_sink
-from support.stage_lifecycle import finish_call, observe_release, wait_call_finished
 from support.call_omni import (
-    factory,
-    send_reply,
-    create_stage,
     Retrieval,
     _eventually,
     _receipt,
     call_setup,
+    create_stage,
+    factory,
+    send_reply,
 )
+from support.call_output import output_sink
+from support.stage_lifecycle import finish_call, observe_release, wait_call_finished
+
 import src.domain.agent as d
 from src.agent.context import ContextFactory
 from src.agent.facade import Agent
 from src.agent.handlers.action.call_memory import LookupCallMemoryHandler
+from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.call import (
     CallAnswerRequestedHandler,
     CallEndingHandler,
@@ -31,22 +32,21 @@ from src.agent.handlers.stimulus.call import (
     CallTimeLimitWarningHandler,
     CallTurnCompletedHandler,
 )
-from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.skills.cognitive.call_settlement import render_call_turns
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.memory_retrieval import MemorySearchResult
-from src.agent.skills.cognitive.call_settlement import render_call_turns
 from src.domain import MemoryHit
-from src.domain.call import CallState, CallEndReason
+from src.domain.call import CallEndReason, CallState
 from src.domain.call.omni import (
     AudioFrame,
     InstructionText,
-    MemoryLookupResult,
     MemoryLookupHit,
     MemoryLookupRequested,
-    ReplyStarted,
-    ReplySegment,
+    MemoryLookupResult,
     ReplyFinished,
+    ReplySegment,
+    ReplyStarted,
     TranscriptFinal,
 )
 from src.infrastructure.models.realtime_speech.config import AliyunRealtimeSpeechConfig
@@ -444,6 +444,15 @@ async def test_silence_uses_one_control_request_after_playback_and_waits_during_
     stage, socket, _, _ = await create_stage(call_setup)
     try:
         stage._cancel_task(stage._silence_task)
+        # Advance the timer without changing asyncio.sleep for other modules/tasks.
+        from types import SimpleNamespace
+
+        from src.stage.call import call_stage
+
+        async def elapsed(_delay):
+            await asyncio.sleep(0)
+
+        monkeypatch.setattr(call_stage, "asyncio", SimpleNamespace(**{**vars(asyncio), "sleep": elapsed}))
         monkeypatch.setattr(stage._playback, "silence_elapsed", lambda: True)
         stage._tool_calls["pending"] = "opening"
         await stage._await_silence()

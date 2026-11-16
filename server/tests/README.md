@@ -48,6 +48,22 @@ python -m pytest tests/e2e/external -q --run-external --tb=short
 
 真实 LLM 的可选测试仍需额外传入 `--run-real-llm`。CI 的强制门禁只包含可重复的单元、集成和离线 E2E；外部 E2E 用作具备相应环境时的人工/专项验收证据。
 
+## 离线 CI 的并行方式
+
+CI 在同一环境中分别启动 unit 与 integration 两个独立 pytest 进程，二者结束后再运行离线 e2e。
+真实网络与进程重启测试不与其他测试进程争用资源，继续保留原有等待上限。
+测试目录、外部测试排除规则及断言不因分组而减少；每组单独生成 XML 和日志，合并报告仍检查零跳过、零失败。
+
+在具备上述测试依赖和离线配置的环境中运行：
+
+```bash
+python ../.github/scripts/run_server_tests.py
+python ../.github/scripts/check_pytest_results.py test-results.xml
+```
+
+每组输出最慢 30 个 setup/call/teardown 阶段，脚本报告分组及总墙钟时间。
+本机测试应保证 localhost/127.0.0.1 不经过代理；测试服务使用临时实例，不要指向生产配置和数据库。
+
 ## 覆盖率口径
 
 覆盖率只统计首阶段 Agent 重构范围：

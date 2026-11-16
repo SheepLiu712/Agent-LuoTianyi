@@ -198,21 +198,29 @@ class TestAuthentication:
         assert reset_result is False
         assert result_str == "邀请码无效"
 
-    def test_update_login_time(self, db_manager: "DatabaseManager", sample_invite_code: str):
+    def test_update_login_time(self, db_manager: "DatabaseManager", sample_invite_code: str, monkeypatch):
         """更新登录时间"""
+        from src.infrastructure.persistence.database.services import credential_service
+
+        class Clock(datetime):
+            current = datetime(2026, 1, 1)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.current
+
+        monkeypatch.setattr(credential_service, "datetime", Clock)
         db_manager.credential_service.register_user("timeuser", "pass123", sample_invite_code)
         auth_result = db_manager.credential_service.authenticate_password_login("timeuser", "pass123")
         assert auth_result is not None
         login_time = auth_result["elapsed_from_last_login"]
         assert login_time is None  # 首次登录，应该为 None
 
-        import time
-
-        time.sleep(1)  # 等待一秒钟
+        Clock.current += timedelta(seconds=1)
         auth_result2 = db_manager.credential_service.authenticate_password_login("timeuser", "pass123")
         assert auth_result2 is not None
         login_time2 = auth_result2["elapsed_from_last_login"]
-        assert login_time2 > 0.7 and login_time2 < 2.0  # 应该大约为 1 秒
+        assert login_time2 == 1.0
 
 
 # ═══════════════════════════════════════════════════════════════
