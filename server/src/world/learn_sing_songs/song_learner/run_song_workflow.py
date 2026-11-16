@@ -303,6 +303,9 @@ def main() -> None:
                 )
                 if song_name != safe_song_name:
                     print(f"[REDIRECT] requested_song_name={song_name} actual_song_name={safe_song_name}")
+        except download_qq_song.SongNotFound as exc:
+            print(f"[SONGLEARNER_STOP] {format_error_message(str(exc))}")
+            return
         except Exception as exc:
             if isinstance(exc, download_qq_song.QQMusicCredentialError):
                 raise_step_error(21, "qq_credential", exc)
