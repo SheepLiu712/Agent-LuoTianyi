@@ -4,6 +4,7 @@ from dataclasses import fields
 from typing import Callable, List, Tuple
 
 from . import AuthApi, WsTransport
+from .auth import AccountRequest
 from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
@@ -29,6 +30,8 @@ class NetworkClient:
 
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
+        self._account_identity = object()
+        self._account_revision = 0
 
         self.user_id: str | None = None
         self.message_token: str | None = None
@@ -47,6 +50,7 @@ class NetworkClient:
         """更新服务器地址，同步更新 AuthApi、WsTransport 和 HTTP 会话。"""
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
+        self._account_revision += 1
         self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
@@ -61,6 +65,7 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
+            self._account_revision += 1
 
             if request_token:
                 credential.save_credentials(self.user_id, self.login_token, True)
@@ -81,12 +86,48 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
+            self._account_revision += 1
             credential.save_credentials(self.user_id, self.login_token, True)
             self.ws_transport.start()
             return True
         except Exception as exc:
             self.logger.error(f"Auto login error: {exc}")
             return False
+
+    def account_context(self) -> tuple:
+        return (self._account_identity, self._account_revision, self.base_url, self.user_id, self.message_token)
+
+    def prepare_account_request(
+        self,
+        action: str,
+        username: str = "",
+        password: str = "",
+        invite: str = "",
+        remember: bool = False,
+        server_url: str | None = None,
+    ) -> AccountRequest:
+        return AccountRequest(
+            self.account_context(), action, server_url or self.base_url, username, password, invite, remember
+        )
+
+    def apply_account_result(self, request: AccountRequest, result: tuple) -> tuple[bool, str]:
+        """由有效 UI ticket 调用；这里不执行认证 HTTP 或等待 WS 就绪。"""
+        if request.context != self.account_context():
+            return False, "账号或服务器已变更，请重试"
+        success, message, data = result
+        if not success:
+            return False, message
+        if request.action == "login":
+            self.user_id = data.get("user_id")
+            self.login_token = data.get("login_token")
+            self.message_token = data.get("message_token")
+            self._account_revision += 1
+            credential.save_credentials(self.user_id, self.login_token if request.remember else None, request.remember)
+            self.ws_transport.start()
+        elif request.action == "server":
+            self.set_base_url(request.base_url, verify_ssl=True)
+            credential.save_server_url(request.base_url, verify_ssl=True)
+        return True, message
 
     def register(self, username: str, password: str, invite_code: str) -> Tuple[bool, str]:
         try:

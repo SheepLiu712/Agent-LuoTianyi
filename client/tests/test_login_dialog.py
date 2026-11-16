@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from unittest.mock import Mock
 
 import pytest
@@ -16,12 +17,42 @@ def qapp():
     yield app
 
 
+@dataclass(frozen=True)
+class _AccountResultRequest:
+    action: str
+    username: str = ""
+    password: str = ""
+    invite: str = ""
+    remember: bool = False
+    context: tuple = ()
+
+    def execute(self, cancelled):
+        return True, "ok", {}
+
+
+def wait_for(predicate):
+    for _ in range(500):
+        if predicate():
+            return
+        QTest.qWait(10)
+    assert predicate()
+
+
 @pytest.fixture
 def dialog(qapp, monkeypatch):
     monkeypatch.setattr(dialog_module.credential, "load_credentials", lambda: None)
     binder = Mock(spec=dialog_module.AgentBinder)
     binder.on_login.return_value = (True, "ok")
     binder.on_register.return_value = (True, "ok")
+    binder.prepare_account_request.side_effect = lambda action, **values: _AccountResultRequest(action, **values)
+    binder.account_context.return_value = ()
+
+    def apply(request, result):
+        if request.action == "login":
+            return binder.on_login(request.username, request.password, do_auto_login=request.remember)
+        return binder.on_register(request.username, request.password, request.invite)
+
+    binder.apply_account_result.side_effect = apply
     window = LoginDialog(binder)
     yield window
     window.close()
@@ -95,6 +126,7 @@ def test_successful_login_still_accepts_dialog(dialog, qapp, submit_with):
         dialog.l_btn.setFocus()
         QTest.keyClick(dialog.l_btn, Qt.Key.Key_Return)
 
+    wait_for(lambda: accepted.count() == 1)
     dialog.binder.on_login.assert_called_once()
     assert accepted.count() == 1
     assert dialog.result() == QDialog.DialogCode.Accepted
@@ -113,6 +145,7 @@ def test_successful_registration_still_returns_to_login(dialog, qapp, monkeypatc
     finished = QSignalSpy(dialog.finished)
 
     QTest.mouseClick(dialog.r_btn, Qt.MouseButton.LeftButton)
+    wait_for(lambda: dialog.binder.on_register.call_count == 1)
 
     dialog.binder.on_register.assert_called_once()
     assert dialog.isVisible()
