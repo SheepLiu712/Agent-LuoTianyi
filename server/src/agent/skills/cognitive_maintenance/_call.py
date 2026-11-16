@@ -84,6 +84,7 @@ class _CallMaintenance:
                     history={"summary": "", "recent_conversation": list(lines)},
                     current_profile=current_profile,
                 ),
+                cancellation=invocation.cancellation,
             )
             self._check_cancelled(invocation)
             proposed = CallMaintenanceBatch(
