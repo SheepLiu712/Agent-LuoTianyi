@@ -81,12 +81,15 @@ export function AppNotices({ children }: React.PropsWithChildren) {
   }), [publish, remove]);
   return <Context.Provider value={context}>
     <View style={{ flex: 1 }}>{children}
-      {visible && <NoticeView notice={visible.notice} choose={button => {
-        const current = entries.current.find(entry => blocks(entry.notice)) ?? entries.current[0];
-        if (current !== visible) return;
-        afterDismiss.current = button?.action;
-        remove(visible.id);
-      }} />}
+      {/* 常驻宿主接收键盘事件，提示在键盘已展开时也能按可见高度布局。 */}
+      <KeyboardAvoidingView pointerEvents="box-none" behavior="padding" style={[StyleSheet.absoluteFill, { zIndex: 1000 }]}>
+        {visible && <NoticeView notice={visible.notice} choose={button => {
+          const current = entries.current.find(entry => blocks(entry.notice)) ?? entries.current[0];
+          if (current !== visible) return;
+          afterDismiss.current = button?.action;
+          remove(visible.id);
+        }} />}
+      </KeyboardAvoidingView>
     </View>
   </Context.Provider>;
 }
@@ -96,16 +99,15 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
   const { width, fontScale } = useWindowDimensions();
   const blocking = blocks(notice);
   const position = notice.position ?? (notice.cancel ? 'center' : 'top');
-  const banner = (notice.layout ?? (position === 'center' || notice.cancel ? 'card' : 'banner')) === 'banner';
+  const banner = !notice.cancel && (notice.layout ?? (position === 'center' ? 'card' : 'banner')) === 'banner';
   const compact = width / Math.max(1, fontScale) < 320;
   const theme = notice.theme;
   const primary = notice.primary ?? { label: '知道了' };
-  const overlay = <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    pointerEvents={blocking ? 'auto' : 'box-none'} style={[StyleSheet.absoluteFill, {
-      zIndex: 1000, elevation: 10, paddingHorizontal: 16, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8,
+  const overlay = <View pointerEvents={blocking ? 'auto' : 'box-none'} style={{
+      flex: 1, paddingHorizontal: 16, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8,
       justifyContent: position === 'center' ? 'center' : position === 'bottom' ? 'flex-end' : 'flex-start',
       backgroundColor: (notice.dimmed ?? Boolean(notice.cancel)) ? 'rgba(0,0,0,0.45)' : 'transparent',
-    }]}>
+    }}>
     <View accessibilityRole="alert" style={{ backgroundColor: theme.surface, borderColor: theme.border,
       borderWidth: 1, borderRadius: 14, padding: 14, maxHeight: '100%', maxWidth: 520, width: '100%', alignSelf: 'center',
       flexDirection: banner && !compact ? 'row' : 'column', alignItems: 'center' }}>
@@ -121,7 +123,11 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
           </Pressable>)}
       </View>
     </View>
-  </KeyboardAvoidingView>;
+  </View>;
   // Android dispatches back to the modal before the underlying business screen.
-  return blocking ? <Modal transparent visible onRequestClose={() => choose(notice.cancel)}>{overlay}</Modal> : overlay;
+  return blocking ? <Modal transparent visible onRequestClose={() => choose(notice.cancel)}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      {overlay}
+    </KeyboardAvoidingView>
+  </Modal> : overlay;
 }

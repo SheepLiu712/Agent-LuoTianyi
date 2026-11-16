@@ -42,3 +42,24 @@ it('阻挡提示依次插队；切页清除原页提示，旧的关闭动作不�
   expect(shown()).toContain('新结果');
   act(() => root.unmount());
 });
+
+it.each([
+  { twoButtons: true, direction: 'column' },
+  { twoButtons: false, direction: 'row' },
+])('显式窄条在双按钮时使用卡片，在单按钮时保留横排：$twoButtons', ({ twoButtons, direction }) => {
+  function Page() {
+    const show = usePageNotices('聊天');
+    React.useEffect(() => show({
+      message: '继续操作？', theme: THEMES.light, layout: 'banner',
+      primary: { label: '继续' }, cancel: twoButtons ? { label: '取消' } : undefined,
+    }), [show]);
+    return null;
+  }
+  let root!: ReactTestRenderer;
+  act(() => { root = create(<AppNotices><Page /></AppNotices>); });
+  const card = root.root.findByProps({ accessibilityRole: 'alert' });
+  expect(card.props.style.flexDirection).toBe(direction);
+  expect(root.root.findAllByType(Pressable).map(button => button.findByType(Text).props.children))
+    .toEqual(twoButtons ? ['取消', '继续'] : ['继续']);
+  act(() => root.unmount());
+});
