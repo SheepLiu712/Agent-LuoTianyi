@@ -1,5 +1,21 @@
 # AI 决策记录
 
+## 2026-11-17 #439 通话历史与重置准入的测试同步
+
+**待定问题**：f5d8全量原E2E在历史可见后立即reset，实际409 USER_INTERACTION_BUSY（15passed/1failed）。历史写入先于context关闭与Manager所有权释放，不能把history或call.ended当可重置前置。
+
+**背景约束**：lead task16/Oracle设计1/3仅准测试宿主、原E2E与本文，不改生产guard/预算/回收。原fullgate失败保留；旧纯ee真实SQL保存后门实验8.828秒证明history可见不等idle，但不复原本次exactowner；CallStage及support对ee不同，不做sameblob全免责。生产对31ff→f5d8零差异。
+
+**调研参考**：现Manager._own_termination返回包含真实operation与release的原owned task，完成结果可只读快照；reset实际先查用户交互再fence。沿既有/test/call_state测试端点，不新生产接口。
+
+**候选方案**：1 原终止task donecallback仅存completed/resources/failed布尔，GET瞬读原repo身份/Managerbusy/fence/lease，原case有界等ready再唯一POST；2 bounded POSTretry BUSY直到200，会改变原恰一次语义并可能掩guard，否决。**选择**1；缺快照/异常/取消/身份不符均notready，wrapper在任何call绑定前安装、返回原task，不持旧Stage或长期task、不再次terminate/notdoneexception。
+
+**实施**：只测试宿主扩现call_state reset_readiness；GET用原账本内部取用户身份，不回传secret，Managerclosed/fence缺失或resetting/owned未完/lease存在均拒ready。原E2E history后只GET观察真实idle，再唯一reset；原SQL删除、重登和隐私断言不改。受控验证只在本树原save成功后暂停，证明history可见readyfalse且reset0，放门自然释放后readytrue、唯一200/SQL清空/重登。所有控制finally先放门、有界收进程，独立父60秒含启动，一次失败不重试，不全16/1200/Linux。
+
+**验证方式**：首轮新观测接缝失败job pwsh-e0abe3a1c34e4b51：旧call_state计算ready后仍读不存在stage._inputs，ASGI500/clientJSONDecodeError，reset0/serverexit0/父16.5秒；不是产品red/green，原材料保留。lead准精确query reset_readiness_only=True早返，旧默认state不顺手修；原新E2E/controller显式true。仅route函数预检pwsh-ccbf5260cfc74a9e exit0（无server）验证绕旧段/非法notready。run2真实原case+原save成功后门job pwsh-e8560c64e6b04551 exit0：父11.438秒<60、启动5.407、场景及清理7.657/serverexit0/killedfalse；history200且savedtrue/releasedfalse时readyfalse/用户busy与leaseownedtrue/reset0，放门自然释放到completed/resourcestrue、用户busyfalse/fence0/leasefalse，再唯一reset200；原SQL清空/重登/privacy断言全通过。仅底层外部模型保既有离线端口，不重复旧ee或全16/1200/Linux；精确命令/原回执/三hash保留外部报告，静态后冻结待独立实现gate，不提交推送。
+
+**风险与回滚**：只读观测必须不改变生命周期，task完成资源失败不能missing当safe；新业务并发不由测试端点加锁保护，当前隔离case没有其他账号工作。有限GET等待不是产品SLA，不放松resetguard或重试写请求。回退本test-only单元不改产品；新全量/远端结果必须归新SHA。
+
 ## 2026-11-17 #439 preclaim 超时后的测试无界等待
 
 **待定问题**：原账本阻塞测试只有 20ms 的通话建立预算；真实仓库预查询先耗尽预算时，create 不进入，started 永不置位。测试忽略 started.wait(1) 返回 False 后仍 await 无限 heartbeat，无法走到原 TimeoutError 断言。
