@@ -1,5 +1,19 @@
 # AI 决策记录
 
+## 2026-11-17 #441 preclaim 测试同步与有限清理（task15顺序记录）
+
+**待定问题**：旧建立前置请求测试把“已进入create”当成超时前必达条件；若请求在find返回后已耗尽预算，create不会发生，旧heartbeat可能无限等待。怎样保留真实early/late边界而不修改生产预算？
+
+**背景约束与来源**：lead仅准handoff测试与本记录两个路径，desktop-repair只改测试，startup-spec仅顺序写AI；当前父为Secrets提交 `256af59fd6520417a02aedbaf322babe1f51cbb4`，本单元尚未提交，不预填新SHA。复用已审 `f5d8deab6012002839247686471c101b18160110` 的单文件测试同步契约，原目标test blob87f98ca4、StageManager c8965145、CallRecords d48c5140与来源父31ff相同，两个support接口也相同；不merge/cherry-pick生产改动。
+
+**候选方案**：①分开early/late并有界清理：late仅本Manager实例时钟固定100，在真实create进入且release未开时检查3次heartbeat，再推进100.03并放门；early保真实时钟，原find真None后Event延迟.06，要求Timeout/create0/lease空。两者均保原.02预算，finally先release/cancel再有限等待及close。②延长等待或放大预算：改变被测边界，仍可能混淆未进入create和已进入create。③删heartbeat或补假FAILED：失去事件循环可用性或真实补偿证据。选择①，因为按真实阶段验证且不改变产品；不选②③的掩盖与伪造风险。
+
+**验证方式与实际证据**：来源受控find(None)后延迟.063秒，真实Manager先Timeout、create/started未进入，旧heartbeat无界等待；相关原始blob相同支持复用该条件性漏洞负证，**不是本树重新悬挂，也不是原Linux30分钟取消的exact cause复原**。desktop-repair本树唯一focused运行job `pwsh-4466006d83c24eae`：**5passed,2warnings in0.16s**，父7.812秒<20、killed=false/reaped=true，SOURCES硬断测试/StageManager均来自issue-412及既有V2。覆盖late、early、direct_ledger_failure、shutdown_waits_blocking_direct_repo、setup_deadline_captured；真实内存仓库super建立PREPARING后由Manager补偿FAILED/SETUP_TIMEOUT，**不称SQL**。
+
+测试仅逐diff变更cleanuphelper/late/early，+90/-13，未整文件覆盖或改变其他case；最终test SHA256 `6fe6be23634dfdbaecf19566017fcf8621f40529e3db438b721ee48794ba420c`、blob e5de9e24与来源相等。定向Ruff/Black/diff-check通过；2个support预加载重写警告及pydub缺ffmpeg路径提示如实保留，本例不编解码。以上来自已读外部task15短冻结报告，startup未重跑5节点、17/95或全门禁；生产两个SHA未变。
+
+**风险与回滚**：局部时钟不能扩展为全局时钟或产品超时放宽，early真实时钟与有限finally保证仍须保留；清理后pending应明确失败，不能软通过。仅证明已受控条件的测试同步漏洞修复，不倒写旧远端失败/取消或宣完整验收。test与本记录冻结后统一实施gate、同一自然新提交，单独回滚不改变建立预算/准入/仓库生产逻辑，不删除数据；最终合成HEAD原七作业与Draft更新由lead另行调度，当前无push/自动all/ready/closegoal。
+
 ## 2026-11-17 #441 opening 测试就绪契约复用（task13顺序补记）
 
 **待定问题**：本分支未包含独立#410的测试helper修复，真实远端lookup失败场景在opening创建时固定1秒等待超时；怎样补对本树测试契约而不混入通话预算生产功能？

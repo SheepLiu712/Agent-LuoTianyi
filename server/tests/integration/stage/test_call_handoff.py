@@ -571,28 +571,52 @@ async def test_direct_ledger_failure_releases_transition_ownership():
     assert stage_manager._lease_registry.current("user", "luotianyi") is None
 
 
+async def _finish_repository_claim_test(stage_manager, release, *tasks):
+    release.set()
+    owned = {task for task in tasks if task is not None}
+    for task in owned:
+        if not task.done():
+            task.cancel()
+    done, pending = await asyncio.wait(owned, timeout=1)
+    for task in done:
+        if not task.cancelled():
+            task.exception()
+    closing = asyncio.create_task(stage_manager.close(), name="repository-test-close")
+    closed, closing_pending = await asyncio.wait({closing}, timeout=1)
+    if closing_pending:
+        closing.cancel()
+        await asyncio.wait({closing}, timeout=0.1)
+    if closed:
+        closing.result()
+    assert not pending and not closing_pending, "repository claim cleanup did not finish within watchdogs"
+
+
 @pytest.mark.asyncio
 async def test_blocking_repository_runs_off_loop_and_late_create_is_failed_after_deadline():
     started = threading.Event()
     release = threading.Event()
+    created = []
 
     class BlockingRepository(InMemoryCallSessionRepository):
         def create_if_absent(self, record):
             started.set()
             assert release.wait(5)
-            return super().create_if_absent(record)
+            persisted = super().create_if_absent(record)
+            created.append(persisted)
+            return persisted
 
     stage_manager, repository, _ = manager(
         repository=BlockingRepository(),
         config={"offline_timeout": 60.0, "call_setup_timeout": 0.02},
     )
+    clock = [100.0]
+    stage_manager._monotonic = lambda: clock[0]
     ticks = 0
 
     async def heartbeat():
         nonlocal ticks
-        while not started.is_set():
-            await asyncio.sleep(0)
         for _ in range(3):
+            assert started.is_set() and not release.is_set() and not start.done()
             ticks += 1
             await asyncio.sleep(0)
 
@@ -604,17 +628,70 @@ async def test_blocking_repository_runs_off_loop_and_late_create_is_failed_after
             client_request_id="request-direct",
         )
     )
-    pulse = asyncio.create_task(heartbeat())
-    await asyncio.to_thread(started.wait, 1)
-    await pulse
-    assert ticks == 3
-    time.sleep(0.03)
-    release.set()
-    with pytest.raises(TimeoutError, match="timed out"):
-        await start
+    pulse = None
+    entered = asyncio.create_task(asyncio.to_thread(started.wait, 1))
+    try:
+        done, _ = await asyncio.wait({entered}, timeout=2)
+        assert entered in done and entered.result(), "repository create was not entered"
+        pulse = asyncio.create_task(heartbeat())
+        done, _ = await asyncio.wait({pulse}, timeout=1)
+        assert pulse in done, "heartbeat did not respond while the repository was blocked"
+        await pulse
+        assert ticks == 3 and not start.done() and not release.is_set()
+        clock[0] = 100.03
+        release.set()
+        done, _ = await asyncio.wait({start}, timeout=1)
+        assert start in done, "late repository creation did not finish"
+        with pytest.raises(TimeoutError, match="timed out"):
+            start.result()
 
-    assert repository.find_by_request("request-direct").state is CallState.FAILED
-    assert stage_manager._lease_registry.current("user", "luotianyi") is None
+        assert len(created) == 1 and created[0].state is CallState.PREPARING
+        persisted = repository.find_by_request("request-direct")
+        assert persisted.state is CallState.FAILED and persisted.end_reason is CallEndReason.SETUP_TIMEOUT
+        assert stage_manager._lease_registry.current("user", "luotianyi") is None
+    finally:
+        await _finish_repository_claim_test(stage_manager, release, entered, pulse, start)
+
+
+@pytest.mark.asyncio
+async def test_repository_lookup_timeout_before_create_finishes_without_waiting_for_create():
+    release = threading.Event()
+    read_finished = threading.Event()
+    create_calls = []
+
+    class SlowLookupRepository(InMemoryCallSessionRepository):
+        def find_by_request(self, request_id):
+            original = super().find_by_request(request_id)
+            assert original is None
+            release.wait(0.06)
+            read_finished.set()
+            return original
+
+        def create_if_absent(self, record):
+            create_calls.append(record)
+            return super().create_if_absent(record)
+
+    stage_manager, _, _ = manager(
+        repository=SlowLookupRepository(),
+        config={"offline_timeout": 60.0, "call_setup_timeout": 0.02},
+    )
+    start = asyncio.create_task(
+        stage_manager._claim_call(
+            user_id="user",
+            character_id="luotianyi",
+            source_interaction_id=None,
+            client_request_id="request-direct",
+        )
+    )
+    try:
+        done, _ = await asyncio.wait({start}, timeout=1)
+        assert start in done, "preclaim lookup timeout did not finish"
+        with pytest.raises(TimeoutError, match="timed out"):
+            start.result()
+        assert read_finished.is_set() and create_calls == []
+        assert stage_manager._lease_registry.current("user", "luotianyi") is None
+    finally:
+        await _finish_repository_claim_test(stage_manager, release, start)
 
 
 @pytest.mark.asyncio
