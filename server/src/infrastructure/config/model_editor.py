@@ -11,6 +11,10 @@ def build_llm_config_view(config: dict[str, Any]) -> dict[str, Any]:
         "available_vlms": llm_service.get("available_vlms", {}),
         "available_audio_models": llm_service.get("available_audio_models", {}),
         "call_transport": copy.deepcopy(config.get("call_transport", {})),
+        "component_startup": {
+            "speaking_enabled": _get_by_path(config, "agent_runtime.skills.speaking.enabled") is not False,
+            "vector_store_enabled": _get_by_path(config, "agent_runtime.vector_store.enabled") is not False,
+        },
         "client_model_types": llm_service.get("client_model_types", []),
         "module_bindings": collect_module_bindings(config),
     }
@@ -50,6 +54,7 @@ def collect_module_bindings(config: dict[str, Any]) -> list[dict[str, Any]]:
 
 def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     next_config = copy.deepcopy(config)
+    _apply_component_startup(next_config, payload)
     llm_service = next_config.setdefault("llm_service", {})
     for key in ("available_llms", "available_vlms", "available_audio_models"):
         if key in payload:
@@ -85,6 +90,35 @@ def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> d
             module_cfg["use_json"] = use_json
             module_cfg["params"] = params
     return next_config
+
+
+class ComponentStartupDraftError(ValueError):
+    """组件面板输入错误；只映射这条新增契约为 HTTP 422。"""
+
+
+def _apply_component_startup(config: dict[str, Any], payload: dict[str, Any]) -> None:
+    if "component_startup" not in payload:
+        return
+    draft = payload["component_startup"]
+    if not isinstance(draft, dict):
+        raise ComponentStartupDraftError("component_startup 必须是对象")
+    paths = {
+        "speaking_enabled": ("agent_runtime", "skills", "speaking", "enabled"),
+        "vector_store_enabled": ("agent_runtime", "vector_store", "enabled"),
+    }
+    for key, value in draft.items():
+        path = f"component_startup.{key}"
+        if key not in paths:
+            raise ComponentStartupDraftError(f"{path} 未定义")
+        if type(value) is not bool:
+            raise ComponentStartupDraftError(f"{path} 必须是布尔值")
+        target = config
+        for name in paths[key][:-1]:
+            child = target.setdefault(name, {})
+            if not isinstance(child, dict):
+                raise ComponentStartupDraftError(f"{path} 无法写入：{name} 必须是对象")
+            target = child
+        target["enabled"] = value
 
 
 def _normalize_client_model_types(value: Any) -> list[dict[str, Any]]:

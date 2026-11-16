@@ -391,3 +391,40 @@ python -B -m pytest tests/unit/world/test_world_runtime.py tests/unit/world/test
 ```
 
 **风险与回滚**：world关闭会停止清理/提醒/学习等，明确不保证补跑；M1-S是整项citywalk跳过而非只少索引。AMAP重新请求true时需准备key，JWT不放宽。恢复具体开关/依赖并重启；不删除用户数据/资源/凭据。当前仅组合根与条件校验闭合，未证明完整注册登录/网络WS/历史/媒体/管理UI或资源性能。真实资源前置已确认资产存在与路径/密钥缺口，但只stat不能冒称可推理/full-min收益；不fakebenchmark、不擅自付费调用/迁移现用路径。3A未提交，等Oracle与lead明确许可。
+
+## 2026-11-17 Phase3B：管理DTO逐叶映射与原保存重启契约
+
+**待定问题**：如何在不重构管理工作流的前提下，让两个组件开关可读取/保存，并准确拒绝非法输入、不覆盖角色/模型/密钥占位、不破坏旧owner安全停止？
+
+**背景约束**：3A已在同attempt1增量PASS后由lead授权原子提交 `80739a5b86a1e1d3f3b8096b5017ff58ebb6b969`，未推送；task7rev6仅五路径：model_editor/admin_interface/两个新测试/本AI。UI/README/build由desktop-ui独占另scope，完整真实A4/A5与资源测量在后续；不并发改AI、不改Supervisor内部或world/模板。
+
+**调研参考**：沿[已审管理DTO契约](<docs/specs/component-startup-switches.md#L297-L315>)和现有 `apply_llm_config_draft→validator→ConfigStore.write_raw→RuntimeSupervisor.restart`，不新增研究/热切换端点。
+
+**候选方案**
+1. **新增DTO投影+专用组件输入校验**：GET始终给两个有效bool（缺省true）；POST对象/叶可省略；严格bool/未知叶由ComponentStartupDraftError携完整DTO路径，route只把这个新增错误映射422；逐叶merge到原raw owner节点。
+2. **保存整个UI草稿到raw或统一catch所有ValueError**：便于处理，却可能丢characters/embedding/model/$VAR，或改变旧模型错误语义。
+3. **独立组件热应用/新Supervisor**：额外端点和并发资源切换，超出既定重启规则。
+
+**选择**：候选1。新component parser为窄helper，主apply函数调用它但不增加额外分支（避免C901从10到11）；仅新错误映射422，旧call_transport/model分支行为不变。component_startup不是新持久配置节点。GET使用现有路径读取，正常保存后反映false/true，默认缺省兼容。
+
+**选择理由**：最小改动就能复用备份/原子写、校验和原Supervisor安全owner门禁。没有新restart逻辑；`restarted=true`仍只表示曾运行并请求重启，response.runtime.state/running反映实际失败/成功，UI阶段据此展示。
+
+**未选原因**
+- 候选2：覆盖整raw会把本面板外内容混入，或改写占位/配置；泛捕旧ValueError使非本契约报错改变，难定位与回滚。
+- 候选3：不满足复用现有保存/重启要求，增加在途资源引用竞争及维护面。
+
+**实际红→绿证据**（agent Python3.10.21/Ruff0.14.10/Black26.5.1）：
+
+- 默认投影首红 `pwsh-8d6c2ab3edf440bb`：KeyError component_startup，`1 failed in0.61s`；最小projection后同条 `pwsh-a0458d7a7ce34612`：`1 passed in0.03s`。
+- 单叶patch映raw红 `pwsh-b74bd328377a4097`：speaking.enabled没写，`1 failed in0.61s`；新helper映射后新/旧字段真实配置比较通过，输入副本不变、另叶/characters/embedding/$VAR全保留、无持久DTO节点。
+- 真实AdminAuth setup/login/Bearer管理route非法输入红 `pwsh-a6481893b7cf482c`：stringfalse、int0、未知叶、对象null均200，`4 failed,2warnings in3.14s`；专用新增错误422后新两文件绿灯。
+- 中间fixture每例真实登录消耗同进程5次/300s限流，`pwsh-8c67ea829ef04dab` 得 `7passed,3errors,2warnings in9.26s`。这是测试隔离错误，不是组件产品红灯；沿已有 `_reset_rate_limit_state` 在测试fixture重置，不改生产限流/不跳鉴权/不等sleep。
+- 完整新DTO/管理集成 `pwsh-3ec5040fe56a44fc`：`12passed,2warnings in4.62s`。实际使用临时ConfigStore、SecretStore、validator、FastAPI路由与AdminAuth；检查未鉴权401、非法422无写无restart、validation失败不写不停、停止保存只validate不自启、运行调用原重启、备份字节等原raw。
+- 两条使用**真实RuntimeSupervisor**的重启集成保留其stop/start方法，只替换外部昂贵ServerRuntime.initialize和旧owner资源；成功事件为old.shutdown→new.initialize，旧shutdown抛清理未完成时不构造新runtime、保留旧owner、response显示failed/running=false。不是用自定义restart结果自证安全，也不冒称完整ServerRuntime或实际浏览器A4。
+- 最终相关旧管理字段回归 `pwsh-5169ea34903c4064`：5文件 `95passed,2warnings in4.60s`；旧音频模型/config/module_bindings/skills配置保障保留。Ruff对两生产/两新增测试通过，Black对应四文件通过；唯一先前静态C901已用窄新helper修正，不重写旧core。
+
+```text
+python -B -m pytest tests/unit/infrastructure/test_component_startup_config.py tests/integration/system/test_component_startup_admin.py tests/unit/infrastructure/test_admin_audio_config.py tests/integration/agent/test_skill_configuration.py tests/integration/system/test_admin_runtime.py -q -p no:cacheprovider
+```
+
+**风险与回滚**：控制台前端尚待3C，本阶段真实route+受控资源端口不能当实际浏览器A4；实际业务初始化失败与旧资源清理失败继续由原Supervisor报告，不因HTTP200/written/restarted误称运行成功。未进行真实LLM/TTS/full-min性能/完整A5，不修改现用config/secret、不付费调用。五路径候选冻结后交Oracle gate，未提交推送；UI脚本导入backend需待本阶段明确commit ready后运行。
