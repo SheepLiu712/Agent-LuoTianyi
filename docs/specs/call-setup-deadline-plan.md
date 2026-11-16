@@ -132,12 +132,12 @@
 
 ## Fun-ASR 独立诊断路径
 
-[diagnose_fun_asr.py](<../../server/scripts/diagnose_fun_asr.py>) 目前直连写死 open/ready 10 秒，`--adapter` 则直接套生产 mapping。拟改为：
+[diagnose_fun_asr.py](<../../server/scripts/diagnose_fun_asr.py>) 的U2改动仅脚本与入口测试，生产配置/adapter实现不改：
 
 - 脚本明确提供 `--connect-timeout-seconds` 与 `--session-timeout-seconds`，缺省各 10，正有限数字；这是**诊断操作参数**而非管理员生产配置。
 - 直连将第一项交库 `open_timeout`，第二项约束 run-task/等待 task-started；`--adapter` 使用完全相同的脚本参数显式构造 Fun-ASR 的诊断限时，再调用现有厂商 session。
 - provider 的 endpoint/model/key 等连接材料仍从既有配置解析，不记录 Key；不从 Manager 获得 deadline，不创建呼叫账本，不自动重放采集写入。
-- 验证不触发线上 ASR：参数解析/adapter 装配回归用公开脚本入口及假外部 socket；真实供应商诊断保留为明确 external/手动证据，不能用 offline passed 代表线上识别通过。
+- 验证不触发线上 ASR：参数解析/adapter 装配回归用公开脚本main入口及假外部 socket；有效红灯为旧非法配置在factory解析阻断（1failed/.65s），脚本覆盖后1passed/.08s；最终两路径连接/就绪限时、取消清理、CLI/main非法值及既有Fun-ASR定向回归见U2gate归档。真实供应商诊断保留为明确external/手动证据，不能用offline passed代表线上识别通过。
 
 ## 验证计划、预算与实施顺序
 
