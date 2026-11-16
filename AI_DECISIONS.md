@@ -258,3 +258,42 @@
 **验证方式**：离线精确文本与实际模型实际正文分开记录，均校验 terminal/history/后续消息/零 world timer；本轮只做文档静态核对，未执行这两路验收。
 
 **风险与回滚**：真实模型失败、无正文、失败终态或历史丢失依旧是需诊断的真实结果，不以自由生成放宽这些标准。无需变更运行代码/配置来修正文本判据。
+
+## 2026-11-17 Phase412-1：在既有语音 Skill 内显式禁用，普通 SAY 正常完成
+
+**待定问题**：按已审完整规格实施第一自然阶段，怎样证明 false 真正不创建 TTS 资源，而不是只返回空流或绕过生产选择接缝？
+
+**背景约束**：规格提交 `b50ab5309b3c0a5ec99d7d5fbc856c85d30bdb29`，D3 attempt 2 已通过；lead 将 task-7 CAS 至 revision 3，仅授权配置/TTS/合法文字、相应测试与模板。向量、world、AMAP 条件重构、DTO/UI/README 及完整 A1–A6 闭环属后续阶段；Oracle 实现 gate 前不提交本阶段。不改现用配置、密钥或依赖环境。
+
+**调研参考**：沿规格已核实的 FastAPI 官方资源生命周期原则与本项目 SpeakingSkill/SpeechBackend/SharedSkills/SayHandler Interface，不再扩展技术研究。预期来源为 [已审规格 A2/输出契约](<docs/specs/component-startup-switches.md#L209-L226>)，而不是从测试替身返回值推断。
+
+**候选方案**
+1. **既有 Skill 显式禁用状态**：严格解析默认 true 的 bool；false 时不创建 SpeechBackend/AsyncTTS，公开只读 enabled、Call false、幂等 stop/abort，直接 speak 抛 SpeakingDisabledError；普通非 CALL SAY 在 prepared/TTS 分流前输出正文/表情和唯一成功终态。
+2. **新建平行 DisabledSpeaking 类并改所有装配调用者**：可行，但当前 Skill 已拥有资源与生命周期，额外层对本阶段没有更多行为收益。
+3. **None/空流/吞错误降级**：少改构造，但会走 EmptySpeechError/失败终态，或丢 prepared 限制，不能证明不持有资源。
+
+**选择**：候选 1。SharedSkills 的现有 `SpeakingSkill(config.get("speaking"))` 已是完整选择接缝，保持该文件零差异；不为显示“有装配变更”而添加无用工厂。SAY 读取 enabled 时为既有测试/预制调用的无能力属性替身保留默认 true，仅显式 false 进入新分支；真实 Skill 始终提供严格 bool。CALL 在已有许可校验后返回 DEPENDENCY_UNAVAILABLE，不走文字成功回退；Sing 未修改。
+
+**选择理由**：最小实现集中拥有资源的 owner，无新全局框架。启用分支的 TTS、预制音频、取消、故障、输出回执规则均不改；禁用 speak 在计量/供应商工作前明确拒绝。validator 只对 false 跳过 TTS 专属资源，缺省/true 仍按原必需；模板只增加 true 新叶。
+
+**未选原因**
+- 候选 2：会扩大 facade/类型/测试面，两个行为分支在同一资源 owner 内即可清楚表达；本阶段无需新层。
+- 候选 3：空流是音频故障，不满足合法纯文字成功；prepared 还有独立读取分支，不能只关合成；吞 sink 失败又会虚报交付。
+
+**验证方式与本轮实际证据**：使用已安装 Python `3.10.21`，pytest 默认不跑外部/真实模型。
+
+- 首条红灯：新增 `test_disabled_speaking_creates_no_backend_and_closes_idempotently`，真实构造 false 仍调用 SpeechBackend，触发禁止资源构造陷阱，`1 failed in 0.66s`；最小改动后 `1 passed in 0.10s`。
+- 直接 speak 红灯为 `_tts=None` 后 AttributeError，`1 failed in 0.66s`；明确禁用异常后两条语音资源/直接拒绝用例 `2 passed in 0.08s`。最终还覆盖默认注入 engine 保持启用、false 不使用注入 engine、非法值矩阵。
+- SkillsConfig 公开解析对六类非 bool 原先均未抛出，`6 failed in 0.63s`；严格校验后，含真实 SharedSkills/AgentMemory/MemoryStore 装配共 `7 passed in 0.07s`。装配测试只给模型注册端口和现有向量依赖，不替换技能类或 speaking 选择；它证明共享技能子系统选择，不冒称完整 ServerRuntime 启动。
+- 普通 SAY 经真实 Agent 与公开 Adapter `open/next_output/complete_output`，初始得到 AUDIO_GENERATION_FAILED，`1 failed in 1.53s`；prepared/瞬时反应原先仍触读取陷阱、未交付终态，`2 failed in 5.28s`。修复后该三场景 `3 passed in 0.57s`，后续补上纯文字无 sound_content、Call（含 prepared）拒绝、sink 失败不伪发成功、消息身份/序号/唯一终态。
+- validator false 无 TTS 配置原为 `core_ok=false`，`1 failed in 2.89s`；条件化后纳入定向绿灯。补 false 留有失效路径也不检查、非法 bool 仍阻断、true/省略仍要求资源。
+- 中间一次新增 ChatEndpoint 忘记 `connection_generation`，导致 `3 failed,180 passed in 7.75s`；这是新增测试端口缺字段，不是产品红灯/平台差异。补齐真实 Adapter 所需端口后相同 12 文件回归 `183 passed in 5.84s`；再补无音源 SAY 用例后 `184 passed in 5.53s`。最终冻结回归结果在交 lead 的阶段报告中列出，不能把这些中间数字当全量验收。
+- 最终候选执行上述 12 文件：`185 passed, 2 warnings in 5.76s`（job `pwsh-935d3a94355e4e73`，exit 0）。小范围 Ruff `0.14.10` / Black `26.5.1` 对五份改动生产源码通过；对两新增测试及 Call 追加测试也通过。旧测试文件原有格式未顺手全格式化。所有新增文件仍按最终状态检查差异空白/路径白名单。
+
+当前重复回归命令（cwd 为 `server/`，`python` 指已安装的 agent 环境）：
+
+```text
+python -B -m pytest tests/unit/agent/test_speaking.py tests/unit/agent/test_speaking_module_ownership.py tests/unit/agent/test_call_say_permit.py tests/unit/agent/test_call_say_output_metadata.py tests/unit/agent/test_tts_cancellation_boundary.py tests/unit/test_call_transport_capability.py tests/unit/web/test_call_capability.py tests/integration/runtime/test_component_speaking_startup.py tests/integration/websocket/test_disabled_speaking.py tests/integration/websocket/test_websocket_adapter.py tests/integration/system/test_admin_runtime.py tests/integration/agent/test_skill_configuration.py -q -p no:cacheprovider
+```
+
+**风险与回滚**：最初 PATH 找不到 ffmpeg，测试有 pydub warning；ci-verifier 实际确认 agent 环境 `Library/bin` 的 ffmpeg/ffprobe `8.1.2`，仅测试子进程临时前置该目录，后续无 ffmpeg warning，未安装或修改全局 PATH。剩余 Starlette BlockingPortal 与 zhconv/pkg_resources 弃用警告如实保留。未运行全量 CI、真实 TTS 权重、完整账号/HTTP/WS/SQL 闭环、浏览器、真实模型或资源对比；Phase412-1 局部绿灯不等于 A1–A6 通过。要恢复语音需操作者准备原资源、设 true 并重启；不用删除用户数据。当前阶段实现未提交，等待 lead/Oracle gate。

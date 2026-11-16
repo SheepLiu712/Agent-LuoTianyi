@@ -16,16 +16,20 @@ from src.infrastructure.observability.tts_metrics import tts_request
 class _SpeakingConfig:
     """说话 Skill 的角色 TTS 配置。"""
 
+    enabled: bool
     characters: dict[str, dict[str, Any]]
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "_SpeakingConfig":
         if not isinstance(config, dict):
             raise TypeError("speaking 必须是字典")
-        characters = config.get("characters", {})
+        enabled = config.get("enabled", True)
+        if type(enabled) is not bool:
+            raise TypeError("agent_runtime.skills.speaking.enabled 必须是布尔值")
+        characters = config.get("characters", {}) if enabled else {}
         if not isinstance(characters, dict):
             raise TypeError("speaking.characters 必须是字典")
-        return cls(characters)
+        return cls(enabled, characters)
 
 
 @dataclass(frozen=True)
@@ -41,14 +45,26 @@ class EmptySpeechError(Exception):
     """TTS 正常结束，但没有产生任何有效音频。"""
 
 
+class SpeakingDisabledError(RuntimeError):
+    """配置主动关闭语音，不是供应商错误或空音频。"""
+
+
 class SpeakingSkill:
     """角色共享的语音生成技能，不处理表情、输出身份或消息终止。"""
 
     def __init__(self, config: dict[str, Any], tts_engine: AsyncTTS | None = None) -> None:
         """构造角色 TTS worker；测试可注入已初始化的 tts_engine。"""
         self._config = _SpeakingConfig.from_dict(config)
-        self._backend = None if tts_engine is not None else SpeechBackend(self._config.characters)
-        self._tts = tts_engine or AsyncTTS(self._backend)
+        self._backend = None
+        self._tts = None
+        if self.enabled:
+            self._backend = None if tts_engine is not None else SpeechBackend(self._config.characters)
+            self._tts = tts_engine if tts_engine is not None else AsyncTTS(self._backend)
+
+    @property
+    def enabled(self) -> bool:
+        """是否配置启用语音；禁用不拥有后端或音频流资源。"""
+        return self._config.enabled
 
     async def stop(self) -> None:
         """停止该 Skill 拥有的所有共享 TTS worker。"""
@@ -57,6 +73,8 @@ class SpeakingSkill:
 
     def supports_call_audio(self, character_id: str) -> bool:
         """Report whether the configured character has a live CALL PCM backend."""
+        if not self.enabled:
+            return False
         if self._backend is None:
             return True
         module = self._backend.tts_module.get(character_id)
@@ -79,6 +97,8 @@ class SpeakingSkill:
 
         调用方提前停止消费时须关闭生成器；可使用 contextlib.aclosing。
         """
+        if not self.enabled:
+            raise SpeakingDisabledError("speaking is disabled")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("朗读文本不能为空")
         if not isinstance(tone, Tone):

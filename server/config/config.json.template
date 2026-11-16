@@ -223,6 +223,7 @@
                 }
             },
             "speaking": {
+                "enabled": true,
                 "characters": {
                     "luotianyi": {
                         "character_name": "luotianyi",

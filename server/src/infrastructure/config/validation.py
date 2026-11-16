@@ -400,12 +400,7 @@ class RuntimeConfigValidator:
             result.append(self._path_item("core", f"resource.{name}", raw))
         result.extend(self._validate_song_knowledge_resources(config))
 
-        tts_cfg = config.get("agent_runtime", {}).get("skills", {}).get("speaking", {}).get("characters", {})
-        if not tts_cfg:
-            result.append(ValidationItem("core", "resource.tts", "error", "未配置 TTS"))
-        for character, item in tts_cfg.items():
-            for key in self.TTS_RESOURCE_KEYS:
-                result.append(self._path_item("core", f"resource.tts.{character}.{key}", item.get(key)))
+        result.extend(self._validate_tts_resources(config))
 
         sing_cfg = config.get("agent_runtime", {}).get("skills", {}).get("singing", {})
         characters_cfg = sing_cfg.get("characters")
@@ -420,6 +415,21 @@ class RuntimeConfigValidator:
                         item.get("resource_path"),
                     )
                 )
+        return result
+
+    def _validate_tts_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
+        speaking = self._get(config, "agent_runtime.skills.speaking") or {}
+        if not isinstance(speaking, dict):
+            return [ValidationItem("core", "resource.tts", "error", "speaking 必须是对象")]
+        if speaking.get("enabled", True) is False:
+            return [ValidationItem("core", "resource.tts", "disabled", "语音合成已由配置关闭，不加载 TTS 资源")]
+        tts_cfg = speaking.get("characters", {})
+        if not isinstance(tts_cfg, dict) or not tts_cfg:
+            return [ValidationItem("core", "resource.tts", "error", "未配置 TTS")]
+        result = []
+        for character, item in tts_cfg.items():
+            for key in self.TTS_RESOURCE_KEYS:
+                result.append(self._path_item("core", f"resource.tts.{character}.{key}", item.get(key)))
         return result
 
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:

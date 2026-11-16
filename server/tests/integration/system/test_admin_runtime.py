@@ -642,3 +642,52 @@ def test_audio_model_secret_references_are_visible():
         "call_transport": {"realtime_speech": {"api_key": "$REALTIME_MODEL_KEY"}},
     }
     assert _collect_llm_api_key_names(config) == {"AUDIO_MODEL_KEY", "REALTIME_MODEL_KEY"}
+
+
+@pytest.mark.parametrize("characters", [None, {"luotianyi": {"server_config_path": "missing/tts.yaml"}}])
+def test_validator_allows_disabled_speaking_without_tts_resources(tmp_path, monkeypatch, characters):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"] = {"enabled": False}
+    if characters is not None:
+        config["agent_runtime"]["skills"]["speaking"]["characters"] = characters
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    tts_items = [item for item in result["items"] if item["name"].startswith("resource.tts")]
+    assert len(tts_items) == 1
+    assert tts_items[0]["status"] == "disabled"
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_validator_rejects_non_boolean_speaking_enabled(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"]["enabled"] = value
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(
+        item["status"] == "error" and "agent_runtime.skills.speaking.enabled" in item["message"]
+        for item in result["items"]
+    )
+
+
+@pytest.mark.parametrize("speaking", [{}, {"enabled": True}])
+def test_validator_enabled_or_omitted_speaking_still_requires_tts_resources(tmp_path, monkeypatch, speaking):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"] = speaking
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == "resource.tts" and item["status"] == "error" for item in result["items"])
