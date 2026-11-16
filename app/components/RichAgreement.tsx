@@ -91,9 +91,6 @@ function BlockView({ block, textColor }: BlockViewProps) {
   const lineHeight = blockLineHeight(block);
   const textAlign = blockTextAlign(block);
   const lines = splitRunsOnNewline(block.runs);
-  // Android 的 justify 只能拉伸空格；Android 上所有 justify 行统一交给字符级
-  // 对齐组件。纯英文/中英混合行也会加字间距，与 Android 15 的
-  // JUSTIFICATION_MODE_INTER_CHARACTER 行为一致。
   const useAndroidJustify = Platform.OS === 'android' && textAlign === 'justify';
 
   return (
