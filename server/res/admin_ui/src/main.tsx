@@ -126,6 +126,32 @@ type LlmConfigInfo = {
   module_bindings: ModuleBinding[];
 };
 
+const modelPanels = [
+  {
+    title: '模型 Interface（供应商接口）',
+    Editor: LlmInterfacesDraftEditor,
+    select: ({ available_llms, available_vlms, available_audio_models }: LlmConfigInfo) =>
+      ({ available_llms, available_vlms, available_audio_models }),
+  },
+  {
+    title: '客户端模型需求',
+    Editor: ClientModelTypesDraftEditor,
+    select: ({ client_model_types }: LlmConfigInfo) => ({ client_model_types }),
+  },
+  {
+    title: '实时音频模型配置',
+    Editor: RealtimeSpeechDraftEditor,
+    select: ({ call_transport }: LlmConfigInfo) => ({ call_transport }),
+  },
+  {
+    title: '模型 module（调用模块）绑定',
+    Editor: LlmModuleBindingDraftEditor,
+    select: ({ module_bindings }: LlmConfigInfo) => ({ module_bindings }),
+  },
+] as const;
+
+type ModelPanelTitle = typeof modelPanels[number]['title'];
+
 function validateClientModelTypes(
   types: ClientModelType[],
   bindings: ModuleBinding[],
@@ -1307,7 +1333,8 @@ function ConfigPage() {
   const { data: secrets, error: secretError, loading: secretLoading } = usePolling<SecretStatus>(`/admin/api/secrets/status?nonce=${secretRefreshNonce}`, 10000);
   const { data: validation, error: validationError, loading: validationLoading } = usePolling<RuntimeValidation>('/admin/api/config/validation', 10000);
   const { data: qqCredentialStatus, error: qqCredentialError, loading: qqCredentialLoading } = usePolling<QQMusicCredentialStatus>('/admin/api/qq-music/credential/status', 3000);
-  const [llmDraft, setLlmDraft] = useState<LlmConfigInfo | null>(null);
+  const [savedConfig, setSavedConfig] = useState<LlmConfigInfo | null>(null);
+  const [panelDrafts, setPanelDrafts] = useState<Partial<Record<ModelPanelTitle, Partial<LlmConfigInfo>>>>({});
   const [llmLoading, setLlmLoading] = useState(true);
   const [secretUpdates, setSecretUpdates] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1315,15 +1342,15 @@ function ConfigPage() {
   const [runtimeOverride, setRuntimeOverride] = useState<RuntimeStatus | null>(null);
   const [qqCredentialOverride, setQqCredentialOverride] = useState<QQMusicCredentialStatus | null>(null);
   const [qrImageNonce, setQrImageNonce] = useState(0);
-  const [llmApplyStatus, setLlmApplyStatus] = useState<LocalActionStatus | null>(null);
-  const [llmApplying, setLlmApplying] = useState(false);
+  const [llmApplyStatus, setLlmApplyStatus] = useState<(LocalActionStatus & { panel: ModelPanelTitle }) | null>(null);
+  const [applyingPanel, setApplyingPanel] = useState<ModelPanelTitle | null>(null);
   const [newSecretKey, setNewSecretKey] = useState('');
   const [newSecretValue, setNewSecretValue] = useState('');
 
   async function loadLlmConfig() {
     setLlmLoading(true);
     try {
-      setLlmDraft(await fetchJson<LlmConfigInfo>('/admin/api/llm/config'));
+      setSavedConfig(await fetchJson<LlmConfigInfo>('/admin/api/llm/config'));
       setActionError(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -1491,44 +1518,39 @@ function ConfigPage() {
     }
   }
 
-  async function applyLlmConfig() {
-    if (!llmDraft) {
+  function updatePanelDraft(panel: ModelPanelTitle, draft?: Partial<LlmConfigInfo>) {
+    setPanelDrafts(previous => ({ ...previous, [panel]: draft }));
+    setLlmApplyStatus(previous => previous?.panel === panel ? null : previous);
+  }
+
+  async function applyLlmConfig(panel: ModelPanelTitle, patch: Partial<LlmConfigInfo>) {
+    if (!savedConfig) return;
+    const candidate = { ...savedConfig, ...patch };
+    const errors = validateClientModelTypes(candidate.client_model_types, candidate.module_bindings);
+    if (errors.length) {
+      setLlmApplyStatus({ panel, tone: 'error', message: `配置未写入：${errors[0]}` });
       return;
     }
-    const clientModelErrors = validateClientModelTypes(
-      llmDraft.client_model_types || [],
-      llmDraft.module_bindings || [],
-    );
-    if (clientModelErrors.length > 0) {
-      const message = `配置未写入：${clientModelErrors[0]}`;
-      setActionError(message);
-      setLlmApplyStatus({ tone: 'error', message });
-      setActionMessage(null);
-      return;
-    }
-    setLlmApplying(true);
-    setLlmApplyStatus({ tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
+    setApplyingPanel(panel);
+    setLlmApplyStatus({ panel, tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
     try {
-      const result = await postJson<{ ok: boolean; validation: RuntimeValidation; runtime: RuntimeStatus; written: boolean; restarted: boolean }>('/admin/api/llm/config/apply', llmDraft);
+      const result = await postJson<{ ok: boolean; config: LlmConfigInfo; validation: RuntimeValidation; restarted: boolean }>(
+        '/admin/api/llm/config/apply', patch,
+      );
       if (!result.ok) {
-        const errors = result.validation.items.filter((item) => item.status === 'error' && item.scope !== 'world');
-        const message = `配置未写入：${errors[0]?.message || '核心配置校验失败'}`;
-        setActionError(message);
-        setLlmApplyStatus({ tone: 'error', message });
-        setActionMessage(null);
+        const error = result.validation.items.find(item => item.status === 'error' && item.scope !== 'world');
+        setLlmApplyStatus({ panel, tone: 'error', message: `配置未写入：${error?.message || '核心配置校验失败'}` });
         return;
       }
+      setSavedConfig(result.config);
+      updatePanelDraft(panel);
       const message = result.restarted ? '配置已写入，runtime 已重启' : '配置已写入，runtime 当前未启动';
-      setActionError(null);
-      setActionMessage(message);
-      setLlmApplyStatus({ tone: 'success', message });
-      await loadLlmConfig();
+      setLlmApplyStatus({ panel, tone: 'success', message });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setActionError(message);
-      setLlmApplyStatus({ tone: 'error', message: `配置写入失败：${message}` });
+      setLlmApplyStatus({ panel, tone: 'error', message: `配置写入失败：${message}` });
     } finally {
-      setLlmApplying(false);
+      setApplyingPanel(null);
     }
   }
 
@@ -1600,25 +1622,28 @@ function ConfigPage() {
           </div>
         )}
       </Panel>
-      <Panel title="模型 Interface（供应商接口）">
-        <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
-      </Panel>
-      <Panel title="实时音频模型配置">
-        <RealtimeSpeechDraftEditor draft={llmDraft} onChange={setLlmDraft} />
-      </Panel>
-      <Panel title="客户端模型需求">
-        <ClientModelTypesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
-      </Panel>
-      <Panel title="模型 module（调用模块）绑定">
-        <LlmModuleBindingDraftEditor
-          draft={llmDraft}
-          onChange={setLlmDraft}
-          onApply={() => void applyLlmConfig()}
-          onReload={() => void loadLlmConfig()}
-          applyStatus={llmApplyStatus}
-          applying={llmApplying}
-        />
-      </Panel>
+      {modelPanels.map(({ title, Editor, select }) => {
+        const draft = savedConfig && { ...savedConfig, ...panelDrafts[title] };
+        const applying = applyingPanel === title;
+        return (
+          <Panel key={title} title={title}>
+            <fieldset className="model-panel-fields" disabled={applying}>
+              <Editor draft={draft} onChange={next => updatePanelDraft(title, select(next))} />
+            </fieldset>
+            <div className="action-row">
+              <button disabled={!draft || applyingPanel !== null} onClick={() => draft && void applyLlmConfig(title, select(draft))}>
+                {applying ? '修改中...' : '修改'}
+              </button>
+              <button className="secondary-button" disabled={!draft || applying} onClick={() => updatePanelDraft(title)}>
+                放弃草稿
+              </button>
+            </div>
+            {llmApplyStatus?.panel === title && (
+              <div className={`inline-status ${llmApplyStatus.tone}`}>{llmApplyStatus.message}</div>
+            )}
+          </Panel>
+        );
+      })}
       <Panel title="配置检查">
         <ValidationTable rows={validationItems} />
       </Panel>
@@ -1818,17 +1843,9 @@ function ClientModelTypesDraftEditor({
 function LlmModuleBindingDraftEditor({
   draft,
   onChange,
-  onApply,
-  onReload,
-  applyStatus,
-  applying,
 }: {
   draft: LlmConfigInfo | null;
   onChange: (draft: LlmConfigInfo) => void;
-  onApply: () => void;
-  onReload: () => void;
-  applyStatus: LocalActionStatus | null;
-  applying: boolean;
 }) {
   if (!draft) {
     return <div className="empty-state">暂无模块绑定</div>;
@@ -1852,11 +1869,6 @@ function LlmModuleBindingDraftEditor({
         clientTypes={currentDraft.client_model_types}
         onChange={updateBindings}
       />
-      <div className="action-row">
-        <button disabled={applying} onClick={onApply}>{applying ? '修改中...' : '修改'}</button>
-        <button className="secondary-button" disabled={applying} onClick={onReload}>放弃草稿</button>
-      </div>
-      {applyStatus && <div className={`inline-status ${applyStatus.tone}`}>{applyStatus.message}</div>}
     </div>
   );
 }
@@ -1930,7 +1942,11 @@ function InterfaceEditor({
       </div>
       {Object.entries(rows).map(([name, item]) => (
         <div className="interface-card" key={name}>
-          <input className="interface-name-input" defaultValue={name} onBlur={(event) => updateName(name, event.target.value)} />
+          <input className="interface-name-input" defaultValue={name} onBlur={(event) => {
+            const nextName = event.target.value.trim() || name;
+            event.target.value = nextName;
+            updateName(name, nextName);
+          }} />
           <input className="interface-type-input" value={String(item.api_type || '')} onChange={(event) => updateField(name, 'api_type', event.target.value)} placeholder="api_type" />
           <input className="interface-model-input" value={String(item.model || '')} onChange={(event) => updateField(name, 'model', event.target.value)} placeholder="model" />
           <input className="interface-key-input" value={String(item.api_key || '')} onChange={(event) => updateField(name, 'api_key', event.target.value)} placeholder="$API_KEY" />

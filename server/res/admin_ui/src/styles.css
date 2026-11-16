@@ -1103,3 +1103,10 @@ th {
   .panel { padding: 12px; }
   .table-overflow table { min-width: 520px; }
 }
+
+.model-panel-fields {
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+  min-width: 0;
+}
