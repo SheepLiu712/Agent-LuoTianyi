@@ -1,5 +1,5 @@
-import { initialCallState, getCallActiveDurationMs, reduceCallState } from '../utils/call_state';
-import type { CallEvent, CallTransition } from '../types/call';
+import { initialCallState, getCallActiveDurationMs, reduceCallState } from '../features/call/call_state';
+import type { CallEvent, CallTransition } from '../features/call/call';
 
 function reduce(events: CallEvent[]): CallTransition {
   return events.reduce<CallTransition>((current, event) => reduceCallState(current.state, event), {

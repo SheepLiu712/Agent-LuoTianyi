@@ -5,8 +5,8 @@ import {
   buildChatCompletionsPayload,
   callLlmProvider,
   fetchClientModelTypes,
-} from '../utils/llm_client';
-import type { ClientModelType } from '../utils/llm_client';
+} from '../shared/client-model/llm_client';
+import type { ClientModelType } from '../shared/client-model/llm_client';
 
 const TYPES: ClientModelType[] = [
   {

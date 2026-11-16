@@ -6,7 +6,7 @@ import {
   BinaryAudioFrameCodec,
   type AudioFrameCodec,
   type WireAudioFrame,
-} from '../utils/call_protocol/audio_codec';
+} from '../features/call/call_protocol/audio_codec';
 
 type ContractFrame = {
   version: number;

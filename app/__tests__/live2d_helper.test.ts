@@ -4,7 +4,7 @@
  */
 
 // Mock the config module before importing the helper
-jest.mock('../config/live2d', () => ({
+jest.mock('../shared/character/live2d', () => ({
   LIVE2D_CONFIG: {
     expression_projection: {
       微笑脸: 'normal',
@@ -20,7 +20,7 @@ jest.mock('../config/live2d', () => ({
   },
 }));
 
-import { setExpression } from '../utils/live2d_helper';
+import { setExpression } from '../shared/character/live2d_helper';
 import { WebView } from 'react-native-webview';
 
 describe('setExpression', () => {

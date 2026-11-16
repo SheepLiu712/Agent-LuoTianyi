@@ -1,8 +1,8 @@
 import { createElement } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { Linking } from 'react-native';
-import { useMicrophonePermission } from '../hooks/useMicrophonePermission';
-import type { VoiceRecorderApi } from '../utils/voice_recorder';
+import { useMicrophonePermission } from '../features/chat/useMicrophonePermission';
+import type { VoiceRecorderApi } from '../features/chat/voice_recorder';
 
 jest.mock('react-native', () => ({
   AppState: { currentState: 'active' },

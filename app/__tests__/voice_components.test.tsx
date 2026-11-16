@@ -1,9 +1,9 @@
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
-import { MessageItem } from '../components/ChatBubbles';
-import { VoiceBubble } from '../components/VoiceBubble';
-import { VoiceInputBar } from '../components/VoiceInputBar';
+import { MessageItem } from '../features/chat/ChatBubbles';
+import { VoiceBubble } from '../features/chat/VoiceBubble';
+import { VoiceInputBar } from '../features/chat/VoiceInputBar';
 
 jest.mock('react-native', () => ({
   Image: 'Image', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View',
@@ -11,7 +11,7 @@ jest.mock('react-native', () => ({
   Keyboard: { dismiss: jest.fn() },
 }));
 
-jest.mock('../components/CachedImage', () => ({ CachedImage: 'CachedImage' }));
+jest.mock('../features/chat/CachedImage', () => ({ CachedImage: 'CachedImage' }));
 
 jest.mock('@expo/vector-icons/MaterialIcons', () => 'MaterialIcons');
 
@@ -33,7 +33,7 @@ describe('voice components', () => {
   it('routes the failed voice retry control to sending instead of playback and removes it after success', () => {
     const retry = jest.fn();
     const play = jest.fn();
-    const item = MessageItem({ message: { ...message, sendStatus: 'failed' }, onRetryVoice: retry, onToggleVoicePlayback: play }) as React.ReactElement<Parameters<typeof VoiceBubble>[0]>;
+    const item = MessageItem({ session: { username: 'alice', token: 'test', serverUrl: 'https://example.test' }, message: { ...message, sendStatus: 'failed' }, onRetryVoice: retry, onToggleVoicePlayback: play }) as React.ReactElement<Parameters<typeof VoiceBubble>[0]>;
     const failed = VoiceBubble(item.props);
     const button = collect(failed, 'TouchableOpacity').find((node) => node.props.accessibilityLabel === '重试发送语音');
     button.props.onPress();

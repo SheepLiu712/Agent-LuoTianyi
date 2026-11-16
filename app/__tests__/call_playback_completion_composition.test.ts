@@ -1,12 +1,12 @@
 import type { CallAudioNativeModule } from '../modules/call-audio/src/CallAudioModule';
 import type { NativeCapability, NativePlaybackCompleted } from '../modules/call-audio/src/CallAudio.types';
-import type { CallClock, CallSocket, CallSocketData, CallSocketEventMap } from '../types/call_transport';
-import { AndroidCallAudio, CAPTURE_FORMAT, PLAYBACK_FORMAT } from '../utils/call_audio/native_call_audio';
-import { BinaryAudioFrameCodec } from '../utils/call_protocol/audio_codec';
-import { encodeControlMessage } from '../utils/call_protocol/control';
-import { CallTransportSession } from '../utils/call_transport/call_transport';
-import { NativeCallOwnership, ProductionCallResolver } from '../utils/call_session/production_resolver';
-import { createCallMouthBridge } from '../utils/call_audio/playback_progress';
+import type { CallClock, CallSocket, CallSocketData, CallSocketEventMap } from '../features/call/call_transport/contracts';
+import { AndroidCallAudio, CAPTURE_FORMAT, PLAYBACK_FORMAT } from '../features/call/call_audio/native_call_audio';
+import { BinaryAudioFrameCodec } from '../features/call/call_protocol/audio_codec';
+import { encodeControlMessage } from '../features/call/call_protocol/control';
+import { CallTransportSession } from '../features/call/call_transport/call_transport';
+import { NativeCallOwnership, ProductionCallResolver } from '../features/call/call_session/production_resolver';
+import { createCallMouthBridge } from '../features/call/call_audio/playback_progress';
 
 jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: jest.fn(() => ({})) }));
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));

@@ -8,7 +8,7 @@ import {
   encodeControlMessage,
   type ControlContext,
   type ControlMessage,
-} from '../utils/call_protocol/control';
+} from '../features/call/call_protocol/control';
 
 type ValidCase = ControlContext & { id: string; raw: string; message: ControlMessage };
 type InvalidCase = ControlContext & {

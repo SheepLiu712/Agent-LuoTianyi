@@ -1,16 +1,16 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { CallScreen } from '../components/call/CallScreen';
-import { useCallSession } from '../hooks/useCallSession';
-import { CallSession } from '../utils/call_session/call_session';
-import { CallTransportSession } from '../utils/call_transport/call_transport';
-import { encodeControlMessage } from '../utils/call_protocol/control';
+import { CallScreen } from '../features/call/CallScreen';
+import { useCallSession } from '../features/call/useCallSession';
+import { CallSession } from '../features/call/call_session/call_session';
+import { CallTransportSession } from '../features/call/call_transport/call_transport';
+import { encodeControlMessage } from '../features/call/call_protocol/control';
 import type {
   CallClock, CallNativeAudioPort, CallSocket, CallSocketData, CallSocketEventMap, CallSocketFactory,
-} from '../types/call_transport';
-import type { PlaybackConsumptionReceipt } from '../utils/call_audio_contracts';
-import { THEMES } from '../utils/theme';
-import { callMonotonicNowMs } from '../utils/call_clock';
+} from '../features/call/call_transport/contracts';
+import type { PlaybackConsumptionReceipt } from '../features/call/call_audio_contracts';
+import { THEMES } from '../shared/ui/theme';
+import { callMonotonicNowMs } from '../features/call/call_clock';
 
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('react-native', () => ({

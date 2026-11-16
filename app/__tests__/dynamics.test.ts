@@ -6,7 +6,7 @@ import {
   getDynamics,
   getDynamicUnreadStatus,
   markDynamicsRead,
-} from '../utils/dynamics';
+} from '../features/dynamics/dynamics';
 
 jest.mock('../config', () => ({
   server_config: {

@@ -1,9 +1,9 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { CallScreen } from '../components/call/CallScreen';
-import { useCallSession } from '../hooks/useCallSession';
-import type { CallState } from '../types/call';
-import { THEMES } from '../utils/theme';
+import { CallScreen } from '../features/call/CallScreen';
+import { useCallSession } from '../features/call/useCallSession';
+import type { CallState } from '../features/call/call';
+import { THEMES } from '../shared/ui/theme';
 
 import { activateKeepAwakeAsync as activate, deactivateKeepAwake as deactivate } from 'expo-keep-awake';
 jest.mock('react-native-safe-area-context', () => ({

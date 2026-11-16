@@ -1,22 +1,24 @@
+import { AppNotices, usePageNotices } from '../shell/notices/AppNotices';
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { AppState } from 'react-native';
-import { CallFailureBanner } from '../components/call/CallFailureBanner';
-import { useCallSession } from '../hooks/useCallSession';
-import { CallSession } from '../utils/call_session/call_session';
-import { CallTransportSession } from '../utils/call_transport/call_transport';
-import { encodeControlMessage } from '../utils/call_protocol/control';
-import type { CallEnded, CallEndReason } from '../utils/call_protocol/control_types';
-import type { CallClock, CallNativeAudioPort, CallSocket, CallSocketData, CallSocketEventMap, CallSocketFactory } from '../types/call_transport';
-import type { PlaybackConsumptionReceipt } from '../utils/call_audio_contracts';
-import { THEMES } from '../utils/theme';
+import { CallFailureBanner } from '../features/call/CallFailureBanner';
+import { useCallSession } from '../features/call/useCallSession';
+import { CallSession } from '../features/call/call_session/call_session';
+import { CallTransportSession } from '../features/call/call_transport/call_transport';
+import { encodeControlMessage } from '../features/call/call_protocol/control';
+import type { CallEnded, CallEndReason } from '../features/call/call_protocol/control_types';
+import type { CallClock, CallNativeAudioPort, CallSocket, CallSocketData, CallSocketEventMap, CallSocketFactory } from '../features/call/call_transport/contracts';
+import type { PlaybackConsumptionReceipt } from '../features/call/call_audio_contracts';
+import { THEMES } from '../shared/ui/theme';
 
 jest.mock('react-native', () => ({
   __esModule: true,
   Platform: { OS: 'android' },
   AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
   BackHandler: { addEventListener: () => ({ remove: jest.fn() }) },
-  Pressable: 'Pressable', Text: 'Text', View: 'View',
+  useWindowDimensions: () => ({ width: 390, fontScale: 1 }), KeyboardAvoidingView: 'KeyboardAvoidingView', ScrollView: 'ScrollView', Pressable: 'Pressable', Text: 'Text', View: 'View',
   StyleSheet: { absoluteFillObject: {}, create: (styles: any) => styles },
 }));
 
@@ -96,11 +98,12 @@ function mountCall() {
     return new CallSession(transport, { prepare: async () => {} }, 'luotianyi', release);
   }
   function Harness() {
+    const show = usePageNotices('chat');
     result = useCallSession({ createSession, capabilities: { serverAvailable: true, nativeAvailable: true },
       requestPermission: async () => 'granted', onFailure, onReturnToChat, onCallRecord, now });
-    return result.failureNotice ? <CallFailureBanner notice={result.failureNotice} theme={THEMES.dark} onDismiss={result.dismissFailure} /> : null;
+    return result.failureNotice ? <CallFailureBanner show={show} notice={result.failureNotice} theme={THEMES.dark} onDismiss={result.dismissFailure} /> : null;
   }
-  act(() => { tree = create(<Harness />); });
+  act(() => { tree = create(<AppNotices><Harness /></AppNotices>); });
   return {
     sockets, onFailure, onReturnToChat, onCallRecord, clock, release, unsubscribeConsumption, audio,
     get result() { return result; },
@@ -303,10 +306,11 @@ describe('call failure production composition', () => {
     let result: any;
     let tree!: ReturnType<typeof create>;
     function Harness() {
+      const show = usePageNotices('chat');
       result = useCallSession({ session, capabilities: { serverAvailable: true, nativeAvailable: true }, requestPermission: async () => 'granted' });
-      return result.failureNotice ? <CallFailureBanner notice={result.failureNotice} theme={THEMES.dark} onDismiss={result.dismissFailure} /> : null;
+      return result.failureNotice ? <CallFailureBanner show={show} notice={result.failureNotice} theme={THEMES.dark} onDismiss={result.dismissFailure} /> : null;
     }
-    act(() => { tree = create(<Harness />); });
+    act(() => { tree = create(<AppNotices><Harness /></AppNotices>); });
     await act(async () => { expect(await result.start(false)).toBe(true); });
     act(() => { sockets.socket.message(JSON.stringify({ type: 'system_ready', payload: {} })); });
     act(() => { sockets.socket.message(JSON.stringify({ type: 'auth_ok', payload: {} })); });

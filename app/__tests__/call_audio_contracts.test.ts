@@ -1,4 +1,4 @@
-import { canStartRealtimeAudio } from '../utils/call_audio_contracts';
+import { canStartRealtimeAudio } from '../features/call/call_audio_contracts';
 
 describe('call audio capability boundary', () => {
   it.each(['unresolved', 'unavailable'] as const)('does not start real-time audio while %s', (capability) => {

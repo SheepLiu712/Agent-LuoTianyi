@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
-import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
-import { THEMES } from '../utils/theme';
+import { VoiceRecordingOverlay } from '../features/chat/VoiceRecordingOverlay';
+import { THEMES } from '../shared/ui/theme';
 
 jest.mock('react-native', () => ({
   View: 'View', Text: 'Text',

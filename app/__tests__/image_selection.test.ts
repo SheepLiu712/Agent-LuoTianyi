@@ -6,7 +6,7 @@ import {
   IMAGE_SELECTION_ERROR_MESSAGE,
   IMAGE_SELECTION_RESET_ERROR_MESSAGE,
   runImageSelection,
-} from '../utils/image_selection';
+} from '../features/chat/image_selection';
 
 const asset: ImagePickerAsset = { uri: 'file://image.jpg', width: 100, height: 100 };
 const canceledResult: ImagePickerResult = { canceled: true, assets: null };

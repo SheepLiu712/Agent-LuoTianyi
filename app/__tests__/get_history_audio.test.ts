@@ -1,4 +1,4 @@
-import { getHistory, mapHistoryMessage } from '../utils/getHistory';
+import { getHistory, mapHistoryMessage } from '../features/chat/getHistory';
 
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn().mockResolvedValue({ exists: false }) }));
 jest.mock('../config', () => ({ server_config: { BASE_URL: 'http://localhost:60030' } }));

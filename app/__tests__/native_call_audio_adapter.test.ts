@@ -5,7 +5,7 @@ import type {
   NativePlaybackCompleted,
   NativePlaybackStopped,
 } from '../modules/call-audio/src/CallAudio.types';
-import { AndroidCallAudio, CAPTURE_FORMAT, PLAYBACK_FORMAT } from '../utils/call_audio/native_call_audio';
+import { AndroidCallAudio, CAPTURE_FORMAT, PLAYBACK_FORMAT } from '../features/call/call_audio/native_call_audio';
 import { clearDebugTrace, getDebugTraceSnapshot } from '../utils/debug_trace';
 
 jest.mock('expo-modules-core', () => ({

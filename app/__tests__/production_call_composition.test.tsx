@@ -1,10 +1,10 @@
 import React, { StrictMode } from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
-import { useProductionCallComposition } from '../hooks/useProductionCallComposition';
-import { ProductionCallResolver } from '../utils/call_session/production_resolver';
+import { useProductionCallComposition } from '../features/call/useProductionCallComposition';
+import { ProductionCallResolver } from '../features/call/call_session/production_resolver';
 
-jest.mock('../utils/call_session/production_resolver', () => ({
+jest.mock('../features/call/call_session/production_resolver', () => ({
   ProductionCallResolver: jest.fn(),
 }));
 
@@ -37,7 +37,6 @@ describe('production call composition lifecycle', () => {
         currentCapabilities: jest.fn(() => ({ serverAvailable: true, nativeAvailable: true })),
         technicalNativeAvailable: jest.fn(() => true),
         createAttempt: jest.fn(() => ({ session: { owner: options.credentials.username } })),
-        initializeSession: jest.fn(async () => true),
         close: jest.fn(async () => undefined),
       };
       resolvers.push(resolver);
@@ -63,7 +62,7 @@ describe('production call composition lifecycle', () => {
     expect(composition.capabilities.serverAvailable).toBe(false);
     await act(async () => { second.resolveProbe(); await Promise.resolve(); });
     expect(composition.capabilities.serverAvailable).toBe(true);
-    expect(composition.createSession()).toEqual({ owner: 'bob' });
+    expect(composition.createAttempt().session).toEqual({ owner: 'bob' });
     await act(async () => root.unmount());
     expect(second.close).toHaveBeenCalledTimes(1);
   });
@@ -77,7 +76,7 @@ describe('production call composition lifecycle', () => {
     expect(resolvers.length).toBeGreaterThanOrEqual(2);
     const current = resolvers.at(-1);
     await act(async () => { current.resolveProbe(); await Promise.resolve(); });
-    expect(composition.createSession()).toEqual({ owner: 'alice' });
+    expect(composition.createAttempt().session).toEqual({ owner: 'alice' });
     expect(resolvers.slice(0, -1).every((resolver) => resolver.close.mock.calls.length === 1)).toBe(true);
     await act(async () => root.unmount());
     expect(current.close).toHaveBeenCalledTimes(1);

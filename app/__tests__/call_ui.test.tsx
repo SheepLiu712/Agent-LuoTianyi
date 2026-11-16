@@ -1,11 +1,11 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { CallScreen } from '../components/call/CallScreen';
-import { CallHistoryBubble } from '../components/call/CallHistoryBubble';
-import { useCallSession } from '../hooks/useCallSession';
-import { initialCallState } from '../utils/call_state';
-import { THEMES } from '../utils/theme';
-import type { CallSession } from '../utils/call_session/call_session';
+import { CallScreen } from '../features/call/CallScreen';
+import { CallHistoryBubble } from '../features/chat/CallHistoryBubble';
+import { useCallSession } from '../features/call/useCallSession';
+import { initialCallState } from '../features/call/call_state';
+import { THEMES } from '../shared/ui/theme';
+import type { CallSession } from '../features/call/call_session/call_session';
 
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('react-native', () => {
@@ -48,10 +48,9 @@ describe('call UI', () => {
     let result: any;
     let root!: ReturnType<typeof create>;
     const render = () => <Probe options={{
-      createSession: () => session,
+      createAttempt: () => ({ session, close: session.close, initializeNative: () => initialize(session) }),
       capabilities: { serverAvailable: true, nativeAvailable: true },
       requestPermission: permission, ringtone,
-      initializeAttempt: (owned) => initialize(owned),
       onReturnToChat: () => undefined,
       onCleanupError: () => undefined,
     }} onState={(value) => { result = value; }} />;

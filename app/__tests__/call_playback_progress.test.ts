@@ -1,4 +1,4 @@
-import { createCallMouthBridge } from '../utils/call_audio/playback_progress';
+import { createCallMouthBridge } from '../features/call/call_audio/playback_progress';
 
 describe('call playback visual bridge', () => {
   it('injects only a bounded numeric RMS value and never audio payload', () => {
