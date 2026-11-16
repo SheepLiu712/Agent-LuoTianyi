@@ -72,6 +72,23 @@ class IntentionalMemoryCommitMixin:
             source="chat",
             content=text,
         )
+        if not getattr(vector_store, "enabled", True):
+            if not commit:
+                existing = await run_sync_owned(memory_store.get_agent_memory_record, record_id)
+                if existing is None:
+                    return "", False
+                if (
+                    existing.owner_character_id != record.owner_character_id
+                    or existing.subject_user_id != record.subject_user_id
+                    or existing.memory_type != record.memory_type
+                    or existing.visibility != record.visibility
+                    or existing.source != record.source
+                    or existing.content != record.content
+                ):
+                    raise ValueError("memory identity conflicts with persisted content")
+                return record_id, False
+            created = await run_sync_owned(memory_store.write_agent_memory_record_if_absent, record)
+            return record_id, created
         created = await self._write_canonical_record(memory_store, record, commit)
         if not created:
             return record_id, False

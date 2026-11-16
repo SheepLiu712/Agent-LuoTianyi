@@ -691,3 +691,29 @@ def test_validator_enabled_or_omitted_speaking_still_requires_tts_resources(tmp_
 
     assert result["core_ok"] is False
     assert any(item["name"] == "resource.tts" and item["status"] == "error" for item in result["items"])
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_validator_rejects_non_boolean_vector_enabled(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": value}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == "agent_runtime.vector_store.enabled" and item["status"] == "error" for item in result["items"])
+
+
+def test_validator_reports_disabled_vectors_without_embedding_configuration(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": False}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    assert any(item["name"] == "resource.vector_store" and item["status"] == "disabled" for item in result["items"])

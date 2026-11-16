@@ -59,6 +59,7 @@ class MemoryWriteResult:
     status: MemoryWriteStatus
     memory_ids: tuple[str, ...]
     source_id: str
+    retrieval_enabled: bool = True
 
 
 class MemoryWriteSkill:
@@ -126,6 +127,7 @@ class MemoryWriteSkill:
     async def _commit(self, invocation, value, identity, candidates) -> MemoryWriteResult:
         identifiers = []
         created = False
+        retrieval_enabled = getattr(self._vectors, "enabled", True)
         for index, (kind, content) in enumerate(candidates):
             record_id = str(uuid5(NAMESPACE_URL, f"memory:{identity}:{index}"))
             vector_id = str(uuid5(NAMESPACE_URL, f"memory-vector:{identity}:{index}"))
@@ -143,6 +145,10 @@ class MemoryWriteSkill:
             )
             try:
                 new = await complete_owned(asyncio.to_thread(self._store.write_agent_memory_record_if_absent, record))
+                if not retrieval_enabled:
+                    identifiers.append(record_id)
+                    created = created or new
+                    continue
                 document = Document(
                     content,
                     {
@@ -172,4 +178,4 @@ class MemoryWriteSkill:
         status = MemoryWriteStatus.CREATED if created else MemoryWriteStatus.DUPLICATE
         if not candidates:
             status = MemoryWriteStatus.NO_CANDIDATE
-        return MemoryWriteResult(status, tuple(identifiers), value.source_id)
+        return MemoryWriteResult(status, tuple(identifiers), value.source_id, retrieval_enabled)

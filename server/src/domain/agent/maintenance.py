@@ -19,6 +19,7 @@ class MaintenanceStatus(str, Enum):
 
 class MemoryWriteResult(str, Enum):
     WRITTEN = "written"
+    CANONICAL_ONLY = "canonical_only"
     EMPTY = "empty"
     SKIPPED_EMBEDDING = "skipped_embedding"
 

@@ -88,6 +88,7 @@ class RuntimeConfigValidator:
         items.extend(self._validate_client_model_types(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
+        items.extend(self._validate_vector_store(config))
         items.extend(self._validate_world_optionals(config))
         has_core_error = any(item.scope != "world" and item.status == "error" for item in items)
         return {
@@ -416,6 +417,26 @@ class RuntimeConfigValidator:
                     )
                 )
         return result
+
+    def _validate_vector_store(self, config: dict[str, Any]) -> list[ValidationItem]:
+        vectors = self._get(config, "agent_runtime.vector_store")
+        if vectors is None:
+            return []
+        if not isinstance(vectors, dict):
+            return [ValidationItem("core", "agent_runtime.vector_store", "error", "vector_store 必须是对象")]
+        enabled = vectors.get("enabled", True)
+        if type(enabled) is not bool:
+            return [
+                ValidationItem(
+                    "core",
+                    "agent_runtime.vector_store.enabled",
+                    "error",
+                    "agent_runtime.vector_store.enabled 必须是布尔值",
+                )
+            ]
+        if not enabled:
+            return [ValidationItem("core", "resource.vector_store", "disabled", "长期记忆向量检索已关闭，正本仍保存")]
+        return []
 
     def _validate_tts_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
         speaking = self._get(config, "agent_runtime.skills.speaking") or {}

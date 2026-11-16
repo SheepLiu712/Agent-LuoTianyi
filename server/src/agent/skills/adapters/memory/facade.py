@@ -66,6 +66,11 @@ class AgentMemory:
             raise RuntimeError("AgentMemory dependency is missing: memory_store")
 
     @property
+    def retrieval_enabled(self) -> bool:
+        """长期召回是否配置启用，不代表正本/画像被关闭。"""
+        return getattr(self.vector_store, "enabled", True)
+
+    @property
     def memory_store(self) -> "MemoryStore":
         """返回数据库层的记忆存储服务。"""
         memory_store = self.database_manager.memory_store
@@ -107,7 +112,7 @@ class AgentMemory:
         向量库只作为召回索引使用；命中向量后会批量回查 MemoryStore 中
         的规范记忆正本，并把正本挂到 MemoryHit 上。
         """
-        if not queries:
+        if not queries or not self.retrieval_enabled:
             return MemoryContext()
 
         with retrieval_phase("authorization"):

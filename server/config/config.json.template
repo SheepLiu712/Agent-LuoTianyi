@@ -440,6 +440,7 @@
             }
         },
         "vector_store": {
+            "enabled": true,
             "store_type": "chroma",
             "embedding_model": {
                 "api_type": "openai",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING, Any
+from uuid import NAMESPACE_URL, uuid5
 
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
@@ -38,6 +39,8 @@ class MemoryOperationsMixin:
         if not text:
             return False
 
+        if not getattr(vector_store, "enabled", True):
+            return await self._write_canonical_only(memory_store, user_id, text, owner_character_id, commit=commit)
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
         is_dup = await self._has_similar_user_memory(vector_store, user_id, text, threshold)
         if is_dup:
@@ -101,6 +104,10 @@ class MemoryOperationsMixin:
             return False
 
         today = time.strftime("%Y-%m-%d")
+        if not getattr(vector_store, "enabled", True):
+            return await self._write_canonical_only(
+                memory_store, user_id, text, owner_character_id, commit=commit, event_date=today
+            )
         if await self._is_same_day_duplicate_event_memory(vector_store, user_id, text, today):
             logger.debug(f"Skip same-day duplicate event_memory for user {user_id}: {text[:50]}")
             return False
@@ -137,6 +144,39 @@ class MemoryOperationsMixin:
             commit=commit,
         )
         return True
+
+    async def _write_canonical_only(
+        self, memory_store, user_id: str, text: str, owner_character_id: str, *, commit: bool, event_date: str = ""
+    ) -> bool:
+        identity = "\x1f".join((owner_character_id, user_id, event_date, self._normalize_text(text)))
+        record_id = (
+            str(uuid5(NAMESPACE_URL, f"agent-luotianyi:sql-only-event:{identity}"))
+            if event_date
+            else self._user_fact_record_id(owner_character_id, user_id, text)
+        )
+        record = DomainMemoryRecord(
+            id=record_id,
+            owner_character_id=owner_character_id,
+            subject_user_id=user_id,
+            memory_type=MemoryType.INTERACTION_EVENT if event_date else MemoryType.USER_FACT,
+            visibility=MemoryVisibility.PRIVATE,
+            source="chat",
+            content=text,
+            metadata={"event_date": event_date} if event_date else {},
+        )
+        if not commit:
+            existing = await run_sync_owned(memory_store.get_agent_memory_record, record_id)
+            if existing is not None and (
+                existing.owner_character_id != record.owner_character_id
+                or existing.subject_user_id != record.subject_user_id
+                or existing.memory_type != record.memory_type
+                or existing.visibility != record.visibility
+                or existing.source != record.source
+                or existing.content != record.content
+            ):
+                raise ValueError("memory identity conflicts with persisted content")
+            return False
+        return await run_sync_owned(memory_store.write_agent_memory_record_if_absent, record)
 
     async def _has_similar_user_memory(
         self,

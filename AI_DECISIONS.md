@@ -297,3 +297,55 @@ python -B -m pytest tests/unit/agent/test_speaking.py tests/unit/agent/test_spea
 ```
 
 **风险与回滚**：最初 PATH 找不到 ffmpeg，测试有 pydub warning；ci-verifier 实际确认 agent 环境 `Library/bin` 的 ffmpeg/ffprobe `8.1.2`，仅测试子进程临时前置该目录，后续无 ffmpeg warning，未安装或修改全局 PATH。剩余 Starlette BlockingPortal 与 zhconv/pkg_resources 弃用警告如实保留。未运行全量 CI、真实 TTS 权重、完整账号/HTTP/WS/SQL 闭环、浏览器、真实模型或资源对比；Phase412-1 局部绿灯不等于 A1–A6 通过。要恢复语音需操作者准备原资源、设 true 并重启；不用删除用户数据。当前阶段实现未提交，等待 lead/Oracle gate。
+
+## 2026-11-17 Phase412-2：禁用向量保留真实 SQL 正本，不伪造投影
+
+**待定问题**：按照已审 §3.5，在向量资源完全不启动时，怎样保持显式写入、维护、授权召回与旧入口的真实持久化/失败语义？
+
+**背景约束**：Phase412-1 已在 Oracle implementation attempt 1/3 PASS 后由 lead 授权原子提交 `42ce9e9843bf62b1af022d53c4d950c61be6b6c8`，工作树干净且未推送。lead 将 task-7 CAS 至 revision 4 授权本阶段 exact19路径；只做向量/SQL-only，不能修改 MemoryStore/schema、world/M1-S、AMAP、DTO/UI/README 或自动回填。Phase2 gate 前不提交推送；阶段绿灯不是 A1–A6 全交付。
+
+**调研参考**：沿用 [已审 §3.5](<docs/specs/component-startup-switches.md#L228-L295>) 与既有正本/向量 Interface；call-repair 提供独立只读五项安全输入，指出 legacy 补偿、无条件 True、maintenance_id 跨角色碰撞与 reset 隐私边界。本轮不重新研究/扩架构，不把辅助提示当实际测试或 gate。
+
+**候选方案**
+1. **非空 DisabledVectorStore + 正本成功后跳投影**：真实工厂在 Chroma/embedding/线程池/目录之前选择禁用实现；低层读空、误写/嵌入明确拒绝，正本/维护写入口依明确能力事实绕过投影与 link；保留原受信身份/冻结/SQL幂等和错误传播。
+2. **Null 实现返回输入 ID 或空向量，再照旧链接/补偿**：caller 少改，但不存在的索引会被写入关联，或 legacy 无 ID 补偿反而删除正本。
+3. **统一移除向量、重写事务/旧记忆体系或自动补索引**：能统一接口，却扩大到 schema/存储 owner、数据迁移与新平台，超出本阶段及工单。
+
+**选择**：候选1。复用 `init_vector_store`/工厂与 AgentRuntime 原装配；AgentRuntime、CognitiveMaintenanceSkill 保持零差异。Base VectorStore 的只读 enabled 默认 true，禁用实现 false；缺省/true 仍原 Chroma，不把真实故障转 disabled。MemoryWriteResult 仅新增默认 true 的 `retrieval_enabled` 事实供确认材料，不造通用状态平台。
+
+**选择理由**：原 SQL 是正本，向量为可选召回投影；if_absent 的真实身份/内容冲突检查已足够，不改 MemoryStore。维护 CANONICAL_ONLY 是正本已可靠保存而没有投影，不混同 SKIPPED_EMBEDDING；原维护 owner 在所有写成功后才提交画像/摘要/进度，真实 SQL 错误/取消/冲突继续向上。
+
+**未选原因**
+- 候选2：假 ID、假计数会破坏正本→真实向量不变量；返回空值会令旧补偿链当损坏并删除合法 SQL-only 正本。直接查询也不能先触 embedding 再故障降级。
+- 候选3：不需要新增事务/迁移/删除队列就能达成已审契约；新平台扩大回滚/授权风险，也违反无自动回填与当前19路径限制。
+
+**受限旧入口 commit=False 裁定**：lead 已明确要求“本次不提交则不得声称已保存”，不改变 enabled 原行为。disabled 的 `commit_user_memory` 若没有已持久同身份正本，返回 `("",False)` 且不写正本/update/link；已存在则严格核 owner/user/type/visibility/source/content 后返回真实旧 ID+False，冲突拒绝。disabled 两个 bool 入口同样不写且返回 False；False 是“本次未保存”，不是正常保存成功。三个入口的 commit=True 都走真实严格 if_absent，跨入口用户事实使用原稳定 ID、同日事件使用 owner/user/date/规范文本确定 ID，不伪造向量标识。风险是旧 caller 不能再把 disabled+commit=False 当已持久化承诺；主 `commit_fact` 始终真提交，不受这条旧接口限制影响。
+
+**已实施的最小契约**：
+
+- 真实工厂 strict bool，false 不建目录、Chroma、embedding 或专用池；低层 search/get_by_id 空，add/upsert/update/prepare/embed 明确 VectorStoreDisabledError，close 幂等。strict delete 对不存在/已确认空路径才0，非空/文件/符号链接/不可判断均 VectorDeletionUnavailable，不开旧Chroma、不删数据。reset沿既有部分成功/HTTP500/fence释放，不新增错误协议。
+- 显式/事件写保持稳定来源身份、冻结候选复用、真实 SQL ID与 CREATED/DUPLICATE/NO_CANDIDATE；disabled跳upsert/link而非假返回。用户确认只在实际正本成功后，材料明确“已保存正文；长期检索关闭，恢复时不自动建索引”，不强制模型逐字措辞。
+- 维护 disabled 非空候选全部 SQL 成功后 CANONICAL_ONLY/日志 index=disabled；无 embedding/link，memory_skipped_count=0。维护批次ID算法不改；同 maintenance_id/index 的敌对跨角色或跨用户碰撞由既有 if_absent 拒绝，不吞成重复或覆盖。真实部分 SQL失败/取消/冲突不推进画像/摘要/进度，允许原 owned-operation 已完成的部分正本留待同批重试。
+- MemoryRetrievalSkill 先校 USER身份/角色/MemoryQuery，再屏蔽 USER/CHARACTER含 YesterdayCityWalk；公共歌曲 SQL/目录不变。AgentMemory一般话题召回也提前空，避免直接调用先 embed。重新创建真实启用Chroma不自动将 SQL-only 记录补入；既有索引和数据不删除。
+
+**红→绿与实际证据**（agent Python `3.10.21`，Ruff `0.14.10`、Black `26.5.1`，cwd `server/`）：
+
+| 垂直片 | 原始红灯 | 修复后已执行证据 |
+| --- | --- | --- |
+| 公开 init_vector_store 资源构造 | `pwsh-691dcbf5265940b1`：false 仍走真实 Chroma 构造并触 ThreadPoolExecutor 陷阱，`1 failed in 1.42s` | 同条 `pwsh-12d9ac6784ea4521`：`1 passed in 0.07s`；strictbool/误写拒绝/strictdelete矩阵随后 `12 passed in 0.10s`。未替换工厂/ChromaVectorStore自证。 |
+| 显式 SQL-only | `pwsh-86f642289ff04e0b`：正本后仍 upsert，VectorStoreDisabledError，`1 failed in 1.51s` | 三个C/U组合/异内容冲突/无关联/SQL失败与维护首批及旧enabled记忆回归 `16 passed in 3.84s`。 |
+| 维护候选 | `pwsh-8fe00488508649b3`：仍 prepare_embeddings，`1 failed in 0.92s` | CANONICAL_ONLY、同批重试、敌对跨C/U冲突、真实维护成功/第二SQL失败/取消/冲突不越进度均进入最终集合；enabled embedding outage保持原skip。 |
+| 授权召回 | `pwsh-83c292bb63b040f9`：仍先 embed_query，`1 failed in 2.88s` | 私有/角色/Yesterday空、身份错误仍拒绝、公共歌曲真实SQL，`2 passed in 0.54s`及最终集合。 |
+| legacy intentional/bool | `pwsh-deb843fa8d044def`：add触禁用拒绝，`1 failed in 0.95s`；`pwsh-6f99db71487848f9`：bool两入口 `2 failed,1 passed in 1.60s` | 窄 disabled 正本分支+原enabled投影补偿基线 `8 passed in 0.78s`；commitFalse无写/已存仍在/冲突与SQL异常后续加入。 |
+| 确认材料 | `pwsh-d5d89fa8a1524ab3`：没有“已保存正文/长期检索关闭”材料，`1 failed in 0.72s` | 真实Handler编排+相关记忆用例 `24 passed in 3.85s`。 |
+| validator strictbool | `pwsh-97c63735866b45a1`：六非法值 core_ok仍true，`6 failed in 3.24s` | strictbool/disabled状态报告与AgentRuntime真实工厂装配加入最终集合。 |
+
+**非产品失败如实排除**：新 AgentRuntime 测试首次提供 media_resolver=None 后调用 ensure_dependencies，导致夹具缺依赖（`1 failed,6 passed in 19.48s`）；补非空媒体端口后误断言 Agent 公开 character_id（实际无此属性），`1 failed,1 passed in 1.82s`。均仅修测试，不能算产品红灯/平台差异。旧enabled真实Chroma回归使用临时库并替换 embedding HTTP方法，不表示使用真实供应商；未删/跳该基线。
+
+**最终阶段验证**：`pwsh-b50507fbcb0e4f21` 执行下列精确相关集合，`163 passed, 3 warnings in 14.28s`，exit0。其中warning为 zhconv/pkg_resources 与两处 Chroma embedding get_config弃用；未称零告警。十份生产改动 Ruff/Black通过，三新增测试 Ruff/Black通过；受影响旧测试只追加，不全格式化。源码最终版本与新增文件全部进入外部冻结manifest；本阶段不重跑Phase1的185或全量CI。
+
+```text
+python -B -m pytest tests/unit/infrastructure/test_disabled_vector_store.py tests/integration/persistence/test_disabled_vector_memory.py tests/integration/runtime/test_component_vector_startup.py tests/unit/agent/test_intentional_memory.py tests/unit/agent/test_maintenance_memory_writer.py tests/integration/persistence/test_memory_write_skill.py tests/integration/persistence/test_intentional_memory_storage.py tests/integration/persistence/test_memory_retrieval_skill.py tests/integration/persistence/test_maintenance_memory_projection.py tests/integration/agent/test_topic_reply_pipeline.py tests/integration/system/test_admin_runtime.py tests/unit/agent/test_cognitive_maintenance.py::test_embedding_outage_skips_memory_but_commits_profile_summary_and_progress tests/unit/agent/test_cognitive_maintenance.py::test_cas_conflict_does_not_compact_or_overwrite_progress tests/unit/agent/test_cognitive_maintenance.py::test_cancellation_before_progress_does_not_advance_marker tests/integration/agent/test_call_threshold_maintenance.py::test_call_embedding_outage_keeps_threshold_summary_profile_and_ending_progress -q -p no:cacheprovider
+```
+
+**风险与回滚**：无自动回填，SQL-only 记录重新启用也不保证可长期召回；旧非空/未知索引reset会明确部分失败，不代表事务回滚。恢复向量需操作者准备原资源并设true重启，不删SQL/目录。Phase3 M1-S城市漫步依赖降级尚未实施，本阶段不得宣称 vector=false/citywalk=true 已安全完成；AMAP core必需、world、UI与真实闭环/真实模型/真实full-min资源对比仍待后续，不预判资产缺失，也不以静态估值或fakebenchmark交付。本阶段未提交推送，等lead/Oracle实现gate。
