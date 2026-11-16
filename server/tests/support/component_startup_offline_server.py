@@ -13,6 +13,7 @@ import socket
 import sqlite3
 import sys
 import wave
+import weakref
 from pathlib import Path
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
@@ -219,10 +220,49 @@ def install_external_interfaces() -> dict[str, int]:
     return forbidden
 
 
+class RuntimeObserver:
+    """只记代号/生命周期事件；弱引用不改变真实运行时的所有权。"""
+
+    def __init__(self):
+        self.handles = []
+        self.events = []
+        self.next_id = 1
+
+    def runtime_id(self, runtime):
+        return next((name for name, reference in self.handles if reference() is runtime), None)
+
+    def install(self):
+        from src.server_runtime import ServerRuntime
+
+        initialize = ServerRuntime.initialize.__func__
+        shutdown = ServerRuntime.shutdown
+        observer = self
+
+        async def observed_initialize(cls, *args, **kwargs):
+            runtime_id = f"runtime-{observer.next_id}"
+            observer.next_id += 1
+            observer.events.append({"event": "initialize.begin", "runtime_id": runtime_id})
+            runtime = await initialize(cls, *args, **kwargs)
+            observer.handles.append((runtime_id, weakref.ref(runtime)))
+            observer.events.append({"event": "initialize.complete", "runtime_id": runtime_id})
+            return runtime
+
+        async def observed_shutdown(runtime):
+            runtime_id = observer.runtime_id(runtime)
+            observer.events.append({"event": "shutdown.begin", "runtime_id": runtime_id})
+            await shutdown(runtime)
+            observer.events.append({"event": "shutdown.complete", "runtime_id": runtime_id})
+
+        ServerRuntime.initialize = classmethod(observed_initialize)
+        ServerRuntime.shutdown = observed_shutdown
+
+
 def main() -> None:
     root = Path(sys.argv[1]).resolve()
     prepare_instance(root)
     forbidden = install_external_interfaces()
+    observer = RuntimeObserver()
+    observer.install()
     import server_main
     from src.application.server_lifecycle import ServerLifecycle
 
@@ -242,6 +282,8 @@ def main() -> None:
         return {
             "running": True,
             "runtime_type": type(runtime).__name__,
+            "runtime_id": observer.runtime_id(runtime),
+            "lifecycle_events": list(observer.events),
             "runtime_source": inspect.getfile(type(runtime)),
             "world_task_count": len(world.tasks),
             "world_interval_count": len(world.world_clock._interval_actions),

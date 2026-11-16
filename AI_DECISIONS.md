@@ -474,3 +474,32 @@ python -B -m pytest tests/unit/infrastructure/test_component_startup_config.py t
 - **字节边界**：11.72媒体在bundlecopy变化前（当时代码bundle硬链接版、媒体不读取UI）；真实consolegreen基于copyfile版；后仅三个新文件Black/import排序、host固定copy/model重写与E2E环境小helper的原语提取、print字符串拆分，无等待预算/执行顺序/生产行为变化。按lead允许分层复用旧场景，不声称当前全文重跑；新三文件Ruff/Black最终PASS（job `pwsh-8272b78f732345af`）。
 
 **证据限制与风险/回滚**：实际console只停止态保存/刷新与TTS拒写，**不等同运行中apply实际restart/真资源恢复的完整A4**；正常exit0/Lifecycleclosed不等全句柄泄漏审计；媒体原字节权限+处理终态不等已独立核音频history条目（文字history已核）。知识库合法空表不等公开歌曲查询全验。独立server-handoff只读证据桥认可保真链并提出以上三披露，不是另一次运行PASS。真实freeLLM、完整模型/full-min同口径3次30秒RSS收益未验证；资产存在的stat不是可推理或性能证据，工单证据仍未齐。3D局部可提交请求review而非验收闭合；未自行GH/push/goalcomplete，最终固定HEAD全CI另由verifier执行。四路径当前候选冻结待Oracle/lead，不删除数据，回滚证据代码不影响生产配置。
+
+## 2026-11-17 A4补验：实际运行态保存、更换owner及同库继续聊天
+
+**待定问题**：Draft #441中真实控制台只证明停止态保存/拒写，怎样在不启用重资源、不改生产的范围内证明运行中保存真的安全重启，而不相信restarted布尔？
+
+**背景约束**：已提交633aa32/Draft441保持原历史；task7rev9新增仅旧host/旧actualconsole/本AI三路径，独立gate/新commit，不amend。两组件及九world始终false，仅外部模型API接口确定化，真实Supervisor/Runtime/SQL/RSA/Stage不替。一个实例/一次运行态保存，总≤90s，不复跑旧停态或整个17/95集合；供应商/真资源恢复/A6/V5仍非本单元。
+
+**调研参考**：沿已存在真实run_server及Supervisor.restart的stop→start顺序；Playwright Python v1.63官方文档查询确认expect_response配合真实点击读取响应，沿旧浏览器鉴权和已有E2E网络helper，不加依赖/endpoint平台。
+
+**候选方案**
+1. **只观察原Runtime生命周期并从真模型面板触发重启**：测试host用弱引用给实例代号，包装原initialize/shutdown并逐次await原方法，记录begin/complete；模型字段发生真实变化，重启后同库账号重新WS和HTTP历史验证。
+2. **只看restarted/running或同false点保存**：无需观测，但前者不能排除未换owner，后者UI no-op根本不发HTTP，证据不成立。
+3. **启用真TTS/vector或替一个成功owner**：前者需要未授权资源/供应商，后者绕掉实际重启，两者都不满足当前证据目标。
+
+**选择/理由**：候选1。RuntimeObserver只持weakref.ref和无凭据序号/事件，不强持旧owner，不更改原Supervisor。脚本`--running-restart`模式从真实模型面板将非空模型标识改为offline-restart-verified，两组件false不动；真实API校验/写入/备份/原restart，随后同账号重新连WS并GET history。旧停态模式保留复用，不混入本次一次保存。
+
+**未选原因**：候选2是请求状态误证或no-op；候选3或越权或成功替身自证。字段变化不证明真实供应商用了新模型；只用于启动原重启工作流。
+
+**验证方式与实际结果**：先建立assert_running_restart，标准库AST单独抽出断言，对“响应ok/written/restarted/running都true但owner相同”输入真实失败`restarted response retained the old runtime owner`。这是**断言敏感性红灯，不是产品功能原先失败**。还要求旧/新ID均非None、不同，新增事件恰为old shutdown.begin→complete→new initialize.begin→complete，两能力false、四资源计数0。
+
+首有界运行`pwsh-6f6ff5634e1c4a50`生产初始化成功后，脚本helper导入被已安装tests命名空间遮挡，ModuleNotFoundError: tests.e2e，发生在管理员setup/模型保存之前；finally正常退出0/closedtrue，无业务重启执行，不算产品红。lead准仅按确定文件路径importlib加载既有E2E helper，纯导入preflight `pwsh-52070b31241c4b07` PASS（文件位置/三callable/无项目业务启动、无全局path改动）。
+
+修后唯一场景`pwsh-033880145eb8404a` exit0：`ACTUAL_CONSOLE_API=PASS; running-restart/same-account-ws-history; not full TTS/provider reenabling`。实际runtime-1→runtime-2；旧shutdown完整结束先于新initialize；TTS/Chroma/embedding/vector-executor计数全0；重启前后同一账号分别得到核心链路412/第二条回复、真实history包含二者，pageerror0；原关闭链退出0/closedtrue、父子总<90s断言完成。两源码最终Ruff/Black PASS（`pwsh-dbf8eda47fbc4306`），没有额外矩阵/全量CI，未改生产/UI/README/E2E文件。
+
+```text
+python -B scripts/check_component_startup_console.py --running-restart --output <外部无凭据结果JSON>
+```
+
+**风险与回滚/准确结论**：本单元消除了“实际运行态保存工作流、新owner和重启后聊天未验证”这一局部缺证，**不是TTS/embedding true资源恢复，更不是A4全部步骤/A6非作者README/V5真实RSS或供应商验收**。Observer事件仅成功await原方法后标complete，若原方法抛错不会补成功事件；弱引用观察不是逐句柄泄漏审计。回滚后续证据自然提交即可，不回滚已发布633或删除数据。候选冻结后交独立Oracle gate，未经明确新许可不commit/push/GH/ready/closegoal；原633全量及远端CI结果不能倒写为新补丁完整通过。

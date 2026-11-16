@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import subprocess
@@ -34,6 +35,117 @@ def wait_server(process, root, http):
     raise TimeoutError("production console instance did not become ready in45s")
 
 
+def assert_running_restart(before, after, result):
+    """重启请求成功不是证据：必须真实换 owner，且旧关闭先于新初始化。"""
+    assert result["ok"] and result["written"] and result["restarted"]
+    assert result["runtime"]["state"] == "running" and result["runtime"]["running"]
+    assert before["running"] and after["running"]
+    old_id, new_id = before["runtime_id"], after["runtime_id"]
+    assert old_id is not None and new_id is not None, "runtime observer failed to identify an owner"
+    assert old_id != new_id, "restarted response retained the old runtime owner"
+    assert after["lifecycle_events"][len(before["lifecycle_events"]) :] == [
+        {"event": "shutdown.begin", "runtime_id": old_id},
+        {"event": "shutdown.complete", "runtime_id": old_id},
+        {"event": "initialize.begin", "runtime_id": new_id},
+        {"event": "initialize.complete", "runtime_id": new_id},
+    ], "runtime lifecycle did not close the old owner before creating the new one"
+    assert after["speaking_enabled"] is False and after["vector_enabled"] is False
+    assert not any(after["resource_attempts"].values())
+
+
+def open_console(page, url, root):
+    page.goto(url + "/admin/")
+    page.get_by_placeholder("Setup token").fill((root / "config/admin_setup_token.txt").read_text(encoding="utf-8"))
+    page.get_by_placeholder("Admin password").fill("isolated-console-password")
+    with page.expect_response(lambda response: response.url.endswith("/admin/api/admin-auth/setup")) as setup:
+        page.get_by_role("button", name="完成初始化", exact=True).click()
+    assert setup.value.status == 200
+    expect(page.get_by_role("heading", name="控制台登录", exact=True)).to_be_visible()
+    page.get_by_placeholder("Admin password").fill("isolated-console-password")
+    with page.expect_response(lambda response: response.url.endswith("/admin/api/admin-auth/login")) as login:
+        page.get_by_role("button", name="登录", exact=True).click()
+    assert login.value.status == 200
+    page.get_by_role("button", name="服务配置", exact=True).click()
+    return {"Authorization": "Bearer " + login.value.json()["token"]}
+
+
+def load_chat_helpers():
+    path = SERVER / "tests/e2e/chat/test_component_startup.py"
+    spec = importlib.util.spec_from_file_location("component_startup_chat_helpers", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_running_restart(url, root, screenshot=None):
+    helpers = load_chat_helpers()
+    connect_chat, register_login, send_text = helpers.connect_chat, helpers.register_login, helpers.send_text
+
+    errors = []
+    with sync_playwright() as driver, requests.Session() as http:
+        http.trust_env = False
+        browser = driver.chromium.launch()
+        try:
+            page = browser.new_page()
+            page.set_default_timeout(10000)
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            headers = open_console(page, url, root)
+            username = "spec412_restart"
+            token = register_login(http, url, headers, username)
+            ws = connect_chat(url, username, token)
+            try:
+                first, _ = send_text(ws, "请只回复：核心链路412")
+            finally:
+                ws.close()
+            before = http.get(url + "/test/evidence", timeout=5).json()
+            assert before["speaking_enabled"] is False and before["vector_enabled"] is False
+            model_panel = page.locator("section.panel").filter(
+                has=page.get_by_role("heading", name="模型 Interface（供应商接口）", exact=True)
+            )
+            model_panel.get_by_placeholder("model", exact=True).first.fill("offline-restart-verified")
+            with page.expect_response(lambda response: response.url.endswith("/admin/api/llm/config/apply")) as saved:
+                model_panel.get_by_role("button", name="修改", exact=True).click()
+            assert saved.value.status == 200
+            result = saved.value.json()
+            after = http.get(url + "/test/evidence", timeout=5).json()
+            assert_running_restart(before, after, result)
+            assert result["config"]["component_startup"] == {"speaking_enabled": False, "vector_store_enabled": False}
+            assert result["config"]["available_llms"]["dsv4-flash"]["model"] == "offline-restart-verified"
+            ws = connect_chat(url, username, token)
+            try:
+                second, _ = send_text(ws, "请只回复：第二条")
+            finally:
+                ws.close()
+            assert first == "核心链路412" and second == "第二条回复"
+            history = http.get(
+                url + "/history",
+                headers={"Authorization": "Bearer " + token},
+                params={"username": username, "count": 100, "end_index": -1},
+                timeout=5,
+            )
+            assert history.status_code == 200
+            content = json.dumps(history.json(), ensure_ascii=False)
+            assert first in content and second in content
+            assert errors == []
+            if screenshot:
+                page.screenshot(path=str(screenshot), full_page=True)
+            return {
+                "actual_api": True,
+                "intercepted_api": False,
+                "running_restart": True,
+                "old_runtime_id": before["runtime_id"],
+                "new_runtime_id": after["runtime_id"],
+                "restart_events": after["lifecycle_events"][len(before["lifecycle_events"]) :],
+                "components_remain_disabled": True,
+                "resource_attempts": after["resource_attempts"],
+                "ws_before_after": [first, second],
+                "same_account_history": True,
+                "page_errors": errors,
+            }
+        finally:
+            browser.close()
+
+
 def run_console(url, root, screenshot=None):
     requests_seen = []
     errors = []
@@ -50,18 +162,7 @@ def run_console(url, root, screenshot=None):
                 else None
             ),
         )
-        page.goto(url + "/admin/")
-        page.get_by_placeholder("Setup token").fill((root / "config/admin_setup_token.txt").read_text(encoding="utf-8"))
-        page.get_by_placeholder("Admin password").fill("isolated-console-password")
-        with page.expect_response(lambda response: response.url.endswith("/admin/api/admin-auth/setup")) as setup:
-            page.get_by_role("button", name="完成初始化", exact=True).click()
-        assert setup.value.status == 200
-        expect(page.get_by_role("heading", name="控制台登录", exact=True)).to_be_visible()
-        page.get_by_placeholder("Admin password").fill("isolated-console-password")
-        with page.expect_response(lambda response: response.url.endswith("/admin/api/admin-auth/login")) as login:
-            page.get_by_role("button", name="登录", exact=True).click()
-        assert login.value.status == 200
-        page.get_by_role("button", name="服务配置", exact=True).click()
+        open_console(page, url, root)
         panel = page.locator("section.panel").filter(has=page.get_by_role("heading", name="组件启动", exact=True))
         tts = panel.get_by_label("启用语音合成（TTS）", exact=True)
         vector = panel.get_by_label("启用长期记忆向量库", exact=True)
@@ -125,6 +226,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path)
     parser.add_argument("--screenshot", type=Path)
+    parser.add_argument("--running-restart", action="store_true", help="只补验实际运行态重启，不重复停止态场景")
     args = parser.parse_args()
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="component-console-") as directory:
@@ -154,13 +256,16 @@ def main():
             url = None
             try:
                 url = wait_server(process, root, http)
-                result = run_console(url, root, args.screenshot)
+                check = run_running_restart if args.running_restart else run_console
+                result = check(url, root, args.screenshot)
                 if args.output:
                     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                print(
-                    "ACTUAL_CONSOLE_API=PASS; stopped-save/refresh/tts-validation-reject; "
-                    "not full TTS/provider reenabling"
+                mode = (
+                    "running-restart/same-account-ws-history"
+                    if args.running_restart
+                    else "stopped-save/refresh/tts-reject"
                 )
+                print(f"ACTUAL_CONSOLE_API=PASS; {mode}; not full TTS/provider reenabling")
             except BaseException:
                 log.flush()
                 print((root / "server.log").read_text(encoding="utf-8"), file=sys.stderr)
