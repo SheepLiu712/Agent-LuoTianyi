@@ -248,18 +248,18 @@ class MessageProcessor:
 
             if response.audio:
                 self.multimedia_stream.feed(response.audio)
+
+            if is_audio_terminal(response):
+                if display_in_chat and audio_saved and self.update_bubble_signal:
+                    # 通知UI对应的气泡有本地音频可播放
+                    try:
+                        self.update_bubble_signal(response.uuid, "has_audio")
+                    except Exception as exc:
+                        self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={response.uuid}): {exc}")
         finally:
             if is_audio_terminal(response):
                 # 终止包即使播放失败也必须释放在线语音占用；异常仍交给线程边界记录。
                 self.multimedia_stream.finish_one_sentense()
-
-        if is_audio_terminal(response):
-            if display_in_chat and audio_saved and self.update_bubble_signal:
-                # 通知UI对应的气泡有本地音频可播放
-                try:
-                    self.update_bubble_signal(response.uuid, "has_audio")
-                except Exception as exc:
-                    self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={response.uuid}): {exc}")
 
     def _prepare_agent_message(self, response: AgentMessage) -> PreparedAgentMessage:
         """在收包线程中聚合并落盘，不等待该句话展示或播放。"""
