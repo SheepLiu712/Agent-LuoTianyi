@@ -428,3 +428,49 @@ python -B -m pytest tests/unit/infrastructure/test_component_startup_config.py t
 ```
 
 **风险与回滚**：控制台前端尚待3C，本阶段真实route+受控资源端口不能当实际浏览器A4；实际业务初始化失败与旧资源清理失败继续由原Supervisor报告，不因HTTP200/written/restarted误称运行成功。未进行真实LLM/TTS/full-min性能/完整A5，不修改现用config/secret、不付费调用。五路径候选冻结后交Oracle gate，未提交推送；UI脚本导入backend需待本阶段明确commit ready后运行。
+
+## 2026-11-17 Phase3C：组件启动独立面板与使用说明（顺序转录）
+
+**待定问题**：两个开关如何加入原四面板而不串草稿、不把请求重启误说成就绪？
+
+**背景约束**：3B已由lead许可提交 `f8f6f9263f26c9752db9691340e0b00252d191a6`；desktop-ui仅拥有UI/README/资源锁scope，不并写AI。本条由startup-spec按lead明确要求从外部UI报告第2节顺序摘录；UI经Oracle implementation1/3 PASS和lead许可精确七记录提交 `80b783ad24942828fc6787cdbc870e8967a2849e`，不夹本阶段宿主。
+
+**调研参考**：desktop-ui查询React官方受控checkbox/不可变对象更新，沿本仓原panelDraft/select工作流与原生标签，不新控件库。
+
+**候选方案**
+1. **独立第五面板/逐叶提交**：两个严格bool checkbox，只提交相对savedConfig有变的叶；成功仅清本面板，其他草稿保留；实际runtime.state/running决定就绪文案。
+2. **整面板/raw替换**：省事，但覆盖其他配置/未保存草稿并放大输入面。
+3. **restarted即成功/重设计布局**：反馈简单但虚报starting/failed；换布局/控件库额外风险且无需求。
+
+**选择**：候选1。默认true，当前面板无变化不HTTP写；failed/blocked明确检查last_error，running且true才称运行中；旧四模型面板顺序/机制不变。README说明两新键与九world默认/严格bool、M1-S整项跳过、SQL-only无回填、SAY/Sing/Call区别、隔离路径与JWT/AMAP条件、管理员邀请/RSA登录/两轮聊天后真实`/history`刷新（不是initial-history缓存）。
+
+**选择理由/未选原因**：原工作流足够且保草稿边界；候选2会把面板外内容带入，候选3把请求当完成或无需求扩大改动。
+
+**验证方式与实际证据**：原真实旧bundle对五面板契约红（4≠5，job `pwsh-55161cc9afab4a33`）；固定3B ready后同树Node22.23.5/npm10.9.9执行npm ci与tsc/Vite7.3.6构建，最终stub Chromium脚本exit0/pageerror0，验证隔离草稿、单叶payload、刷新、实际状态文案。该stub拦截API，仅证前端交互，不是实际A4重启。安装报告6漏洞（1moderate/5high），未auditfix。真实整份release资源check PASS；JS `index-smbr_9OT.js` 245260B SHA256 `13625ee3a225a22dbc7de46b52173a81c9abc0a8b29679110c8f2260e04daf72`；HTML423B/CR0 SHA `7fa2c373bb070829688a71049d4d937d686a6024f90e0fc7deec2effa1f7ed7e`；CSS原内容不变。README唯一Oracle机械修正/history后候选47f192…通过，同attempt1无需重build。
+
+**风险与回滚**：原styles/布局不变不是全设备视觉验收；实际管理API与重资源恢复另验，不能借stub勾A4。可回滚UI自然提交，不删除数据；本条只有顺序决策转录，3C已提交且UI文件不属下述3D四路径。
+
+## 2026-11-17 Phase3D：真实隔离生产链与实际控制台证据
+
+**待定问题**：怎样证明关闭重资源后仍能走真实生命周期/鉴权/WS/历史，而不以fakeRuntime或付费供应商填补缺证？
+
+**背景约束**：task7rev7明确四路径（新host/E2E/真console脚本/AI），父版本为3C `80b783ad24942828fc6787cdbc870e8967a2849e`。90秒有界单探针，五DIR先于server_main导入；不改生产/现用config或secret，不下载权重、不调用真实供应商，不fake RSS。只有底层模型API factory可确定化，UI脚本用新bundle/真实API不拦截。
+
+**调研参考**：复用已有production-loopback host的run_server/ServerLifecycle接缝及真实RSA/WS/voice协议，不复制旧call宿主数百诊断路由。事前标准库AST签名/内存JSON设计核对PASS，没有项目导入或业务启动。
+
+**候选方案**
+1. **真实生产链+最底层确定性接口**：保留LLMService/PromptManager/Modules/on_delta、Runtime、SQL/RSA/Stage/Adapter/媒体，四资源构造点计数后失败，关闭时全0。
+2. **旧fake Runtime/TTS/vector装配**：容易启动，却用替身抹去本需求的资源分支/持久化/owner问题。
+3. **真实供应商/full-min现场benchmark**：更强证据，但当前key配置false/远程成本未授权，不能越权或用静态估值冒充。
+
+**选择/理由**：候选1，仅验证明确允许的离线真实生产契约。host标准库顶层先隔离CONFIG/DATA/RUNTIME/RESOURCE/ASSET，生成实例随机JWT不输出、合法persona/tone/prompt、songs空表/关键词、空唱库/prepared元信息；不复制用户数据。沿真实run_server→Lifecycle→AdminShell/validator/Supervisor→ServerRuntime→shutdown。只有LLM/VLM/audio create_interface替外部生成端，TTS/Chroma/embedding/vector执行器是触发即失败的trap而非成功替身。
+
+**未选原因**：候选2无法证明实际装配；候选3未获远端授权/资源口径未齐，不以离线fake基准或MB/百分比填空。触碰反应配置清空仅隔离fixture普通聊天接缝，不代表生产功能删减或所有能力均验。
+
+**验证方式与分层实际结果**：
+- 首真实HTTP管理员setup/login/invite生成→RSA注册登录→网络WS两轮唯一成功终态/audio空→真实文字history→全关world0/资源trap0/真实模块注册，job `pwsh-dfbeaea5abfa4db0`：`1passed in10.71s`，原run_server finally退出0。非真实模型回答。
+- 媒体fixture错误分别保留：job `pwsh-d970e0bdf9cb4ae4` 23.96s误等ack而协议server_ack；`pwsh-bd4812506aac41ed` 10.44s把finalize接纳ACK当落盘完成后立即断WS，下载404。均只修测试，不产品红；后等真实语音理解/回复终态，job `pwsh-aa2c9516daa44633`：`1passed in11.72s`，原AAC字节下载200/无token与坏token401/另一真实RSA账号404，文字history对应两轮，正常关闭/exit0。
+- 真实console最初RESOURCE隔离未提供bundle使生产ui_register fallback、Setup token超时；其次setup/login页面切换未等导致登录失败；均按原log与退出0记录为fixture问题。lead明确允许复制锁列HTML/JS/CSS三个约260KB代码产物，前后核size/SHA，不复制用户assets/权重；同步真实setup200→登录heading→login200后，job `pwsh-70e789dea7384efe` exit0：`ACTUAL_CONSOLE_API=PASS`，pageerror0。实际停止业务后vectortrue保存/刷新不自启→false还原；TTStrue缺配置validator拒写/原文件不变/草稿保留/放弃刷新。没有page.route，保存结果只含bool，不归档临时config/token。
+- **字节边界**：11.72媒体在bundlecopy变化前（当时代码bundle硬链接版、媒体不读取UI）；真实consolegreen基于copyfile版；后仅三个新文件Black/import排序、host固定copy/model重写与E2E环境小helper的原语提取、print字符串拆分，无等待预算/执行顺序/生产行为变化。按lead允许分层复用旧场景，不声称当前全文重跑；新三文件Ruff/Black最终PASS（job `pwsh-8272b78f732345af`）。
+
+**证据限制与风险/回滚**：实际console只停止态保存/刷新与TTS拒写，**不等同运行中apply实际restart/真资源恢复的完整A4**；正常exit0/Lifecycleclosed不等全句柄泄漏审计；媒体原字节权限+处理终态不等已独立核音频history条目（文字history已核）。知识库合法空表不等公开歌曲查询全验。独立server-handoff只读证据桥认可保真链并提出以上三披露，不是另一次运行PASS。真实freeLLM、完整模型/full-min同口径3次30秒RSS收益未验证；资产存在的stat不是可推理或性能证据，工单证据仍未齐。3D局部可提交请求review而非验收闭合；未自行GH/push/goalcomplete，最终固定HEAD全CI另由verifier执行。四路径当前候选冻结待Oracle/lead，不删除数据，回滚证据代码不影响生产配置。
