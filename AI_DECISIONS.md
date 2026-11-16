@@ -1,5 +1,21 @@
 # AI 决策记录
 
+## 2026-11-17 #439 preclaim 超时后的测试无界等待
+
+**待定问题**：原账本阻塞测试只有 20ms 的通话建立预算；真实仓库预查询先耗尽预算时，create 不进入，started 永不置位。测试忽略 started.wait(1) 返回 False 后仍 await 无限 heartbeat，无法走到原 TimeoutError 断言。
+
+**背景约束**：lead task14 与 Oracle 设计 gate attempt1/3 只准本测试文件和本文，不改生产 Manager/CallRecords/预算/全局 clock/执行器，不跳过测试。固定父提交31ff341f；旧原函数外部唯一受控红已实跑：实例原 find 返回 None 后约63ms，真实 Manager817 TimeoutError、create未进入/startedFalse、原测试609 awaitpulse与heartbeat594栈四判全真；父6.75秒、取栈后才canceljoin回收，原源码前后三hash同。只证条件性测试漏洞可达，不认原Linux30分钟取消 exact cause。2秒 faulthandler 已arm但实际未打印线程栈，async任务栈与原异常trace已取得，不补重复红。
+
+**调研参考**：复用生产构造已有 monotonic 接缝与本测试文件313–314既有单实例覆盖先例；本文件 manager(clock=) 仅wall_clock，不能误作单调时钟。Python asyncio.wait不自动取消被观察任务，适合把测试看门狗与产品取消分开。
+
+**候选方案**：1 分清 late/early：late仅本Manager单调时钟固定100，真实create已进入且仍阻塞时heartbeat有限3ticks，然后推进100.03并release；early真实单调时钟+原读后60ms控制延迟，要求真实TimeoutError/create0且不等待create事件。2 只assert started返回值+有限pulse，仍有20ms前置调度竞争，负载下可能未测晚补偿就失败。3 抬时限/删heartbeat/skip，弱化原off-loop与晚提交保证。**选择**1；不改业务时限，局部时钟只选择原deadline分支，不伪造仓库写入或结果。
+
+**实施**：late原20ms保持；明确核started=True，在release未开且start未done时运行有限3tick，推进实例clock后释放，要求原super真实创建PREPARING、原abort更新FAILED/SETUP_TIMEOUT且lease释放。early用原repo读取None后Event.wait(.06)，真实clock超时、create_calls空、lease释放，无无限pulse。所有新等待用asyncio.wait失败看门狗，finally先release，再cancel并有界等待自有tasks、close Manager也有界；如未收完明确失败，不宣称已清理，外部父20秒硬限兜底而不无界finally。原repo是InMemory，不称真实SQL集成。
+
+**验证方式**：不重跑旧63ms红、不全1200/不新Linux矩阵。唯一短集合job pwsh-0e36c11b50e34615：两个新/改节点及邻近direct ledger failure、shutdown owned、deadline捕获，共5passed/2warnings/.16s；父6.75秒<20、killed=false、已收子进程。测试实际导入本issue410源；原20ms配置保留，Manager/_call_records字节hash与受控红前相同。单测试文件Ruff/Black/diff-check通过，冻结外部报告保留exact5nodes/命令/两文件hash，AI仅后补此回执不重跑。仅两个文件待实现gate，不提前commit/push。
+
+**风险与回滚**：测试局部clock与真实IO分离需明确，early保真实读延迟使原条件仍被覆盖；所有失败路径门先释放，未完成任务不能被无界gather掩盖。回退本test-only单元不改变任何产品逻辑。远端原失败记录保留，后续新SHA CI另验，不能将本地小集合绿当原运行根因已确认。
+
 ## 2026-11-17 #439 CI 开场装配就绪的测试同步修复
 
 **待定问题**：远端run43934219460在aa42唯一失败为lookup-failure测试的create_stage开场response.create等待1秒，尚未进入lookup业务断言。不能用本地平台异常豁免，也不能默认flaky或rerun碰绿。
