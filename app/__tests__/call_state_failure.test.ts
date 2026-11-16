@@ -1,4 +1,4 @@
-import { initialCallState, reduceCallState } from '../utils/call_state';
+import { initialCallState, reduceCallState } from '../features/call/call_state';
 
 describe('call failure lifecycle classification', () => {
   it('retains a safe internal code for a failed establishment and returns once', () => {

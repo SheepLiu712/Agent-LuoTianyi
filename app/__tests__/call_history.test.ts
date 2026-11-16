@@ -1,6 +1,7 @@
-import { localCallHistory, mergeLoadedHistory } from '../utils/call_history';
-import { initialCallState, reduceCallState } from '../utils/call_state';
-import type { CallState } from '../types/call';
+import { mergeLoadedHistory } from '../features/chat/mergeHistory';
+import { localCallHistory } from '../features/call/call_history';
+import { initialCallState, reduceCallState } from '../features/call/call_state';
+import type { CallState } from '../features/call/call';
 import type { ChatMessage } from '../types/chat';
 
 const active: CallState = { ...initialCallState, phase: 'ACTIVE', callId: 'call-1', activeStartedAtMs: 100 };

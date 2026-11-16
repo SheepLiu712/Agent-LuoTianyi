@@ -1,10 +1,10 @@
-import { BinaryAudioFrameCodec } from '../utils/call_protocol/audio_codec';
-import { encodeControlMessage } from '../utils/call_protocol/control';
-import { CallTransportSession } from '../utils/call_transport/call_transport';
-import { CallSession } from '../utils/call_session/call_session';
-import { IncomingCallSequence } from '../utils/call_transport/incoming_sequence';
-import { ReliableCallOutbox } from '../utils/call_transport/reliable_outbox';
-import { createPlatformCallSocketFactory } from '../utils/call_transport/websocket_adapter';
+import { BinaryAudioFrameCodec } from '../features/call/call_protocol/audio_codec';
+import { encodeControlMessage } from '../features/call/call_protocol/control';
+import { CallTransportSession } from '../features/call/call_transport/call_transport';
+import { CallSession } from '../features/call/call_session/call_session';
+import { IncomingCallSequence } from '../features/call/call_transport/incoming_sequence';
+import { ReliableCallOutbox } from '../features/call/call_transport/reliable_outbox';
+import { createPlatformCallSocketFactory } from '../features/call/call_transport/websocket_adapter';
 import type {
   CallClock,
   CallNativeAudioPort,
@@ -12,8 +12,8 @@ import type {
   CallSocketData,
   CallSocketEventMap,
   CallSocketFactory,
-} from '../types/call_transport';
-import type { CapturedAudioFrame, PlaybackConsumptionReceipt } from '../utils/call_audio_contracts';
+} from '../features/call/call_transport/contracts';
+import type { CapturedAudioFrame, PlaybackConsumptionReceipt } from '../features/call/call_audio_contracts';
 
 const CALL_ID = '11111111-1111-1111-1111-111111111111';
 

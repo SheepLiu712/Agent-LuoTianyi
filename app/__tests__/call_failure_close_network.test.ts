@@ -2,20 +2,20 @@ import { constants, publicEncrypt } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
 import { server_config } from '../config';
-import type { CallAudioFormat, CallPlaybackChunk, CapturedAudioFrame, PlaybackConsumptionReceipt } from '../utils/call_audio_contracts';
-import { ProductionCallResolver } from '../utils/call_session/production_resolver';
-import { NetworkClient, type ConnectCallbacks } from '../utils/network_client';
+import type { CallAudioFormat, CallPlaybackChunk, CapturedAudioFrame, PlaybackConsumptionReceipt } from '../features/call/call_audio_contracts';
+import { ProductionCallResolver } from '../features/call/call_session/production_resolver';
+import { NetworkClient, type ConnectCallbacks } from '../features/chat/connection/network_client';
 import { launchCallServer, resolveCallServerSource, waitUntil } from './support/call_network_server';
 
 jest.mock('expo-file-system/legacy', () => ({}));
-jest.mock('../utils/image_compression', () => ({ compressImageForUpload: jest.fn(), MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024 }));
+jest.mock('../features/chat/image_compression', () => ({ compressImageForUpload: jest.fn(), MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024 }));
 jest.mock('expo-av', () => ({ Audio: { requestPermissionsAsync: jest.fn() } }));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { executionEnvironment: 'standalone' } }));
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
   AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
 }));
-jest.mock('../utils/call_audio/native_call_audio', () => ({
+jest.mock('../features/call/call_audio/native_call_audio', () => ({
   AndroidCallAudio: class {}, isAndroidCallAudioModuleAvailable: jest.fn(() => true),
 }));
 

@@ -1,12 +1,12 @@
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { AppState, GestureResponderEvent } from 'react-native';
-import { useVoiceInput } from '../hooks/useVoiceInput';
-import { subscribeVoiceHostStopped } from '../utils/voice_host_lifecycle';
+import { useVoiceInput } from '../features/chat/useVoiceInput';
+import { subscribeVoiceHostStopped } from '../features/chat/voice_host_lifecycle';
 jest.mock('react-native', () => ({ AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
-jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {} }));
-jest.mock('../utils/voice_host_lifecycle', () => ({ subscribeVoiceHostStopped: jest.fn(() => ({ remove: jest.fn() })) }));
+jest.mock('../features/chat/voice_recorder', () => ({ voiceRecorder: {} }));
+jest.mock('../features/chat/voice_host_lifecycle', () => ({ subscribeVoiceHostStopped: jest.fn(() => ({ remove: jest.fn() })) }));
 const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
 let tree: ReactTestRenderer;
 let state: ReturnType<typeof useVoiceInput>;

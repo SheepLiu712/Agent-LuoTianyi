@@ -1,11 +1,18 @@
-import { NativeCallOwnership, ProductionCallResolver, requestCallMicrophonePermission } from '../utils/call_session/production_resolver';
+import React from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { useCallFeature } from '../features/call/useCallFeature';
+import { NativeCallOwnership, ProductionCallResolver, requestCallMicrophonePermission } from '../features/call/call_session/production_resolver';
 import { Audio } from 'expo-av';
-import { auth } from '../components/auth';
+let credentials: { username: string; token: string };
 
 jest.mock('expo-av', () => ({ Audio: { getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn() } }));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { executionEnvironment: 'standalone' } }));
-jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
-jest.mock('../utils/call_audio/native_call_audio', () => {
+jest.mock('react-native', () => ({ Platform: { OS: 'android' },
+  AppState: { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) },
+  BackHandler: { addEventListener: () => ({ remove: jest.fn() }) },
+}));
+jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: () => null }));
+jest.mock('../features/call/call_audio/native_call_audio', () => {
   class FakeAudio {
     progressListener: ((progress: { rms: number }) => void) | undefined;
     initialize = jest.fn(async () => 'available');
@@ -59,11 +66,11 @@ describe('production call resolver', () => {
   });
   it('releases native ownership when creating the native adapter throws', async () => {
     const ownership = new NativeCallOwnership();
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     const createNativeAudio = jest.fn()
       .mockImplementationOnce(() => { throw new Error('adapter construction failed'); })
       .mockReturnValue(audio);
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
@@ -79,8 +86,7 @@ describe('production call resolver', () => {
   });
 
   beforeEach(() => {
-    auth.username = 'alice';
-    auth.message_token = 'secret';
+    credentials = { username: 'alice', token: 'secret' };
   });
 
   it.each([
@@ -92,7 +98,7 @@ describe('production call resolver', () => {
       ok: true, status: 200,
       json: async () => ({ available, character_id: 'luotianyi', reason }),
     })) as unknown as typeof fetch;
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, fetchImpl,
       sockets: { create: () => new Socket() },
     });
@@ -106,13 +112,13 @@ describe('production call resolver', () => {
   });
 
   it('treats 401 as re-login and rejects malformed capability bodies', async () => {
-    const unauthorized = new ProductionCallResolver({
+    const unauthorized = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
       fetchImpl: jest.fn(async () => ({ ok: false, status: 401 })) as unknown as typeof fetch,
     });
     await expect(unauthorized.refreshCapability()).rejects.toThrow('CALL_AUTH_REQUIRED');
 
-    const malformed = new ProductionCallResolver({
+    const malformed = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
       fetchImpl: jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ available: true }) })) as unknown as typeof fetch,
     });
@@ -121,14 +127,14 @@ describe('production call resolver', () => {
 
   it('creates a fresh owned native/session attempt and closes it without a call id', async () => {
     const audioInstances: any[] = [];
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
       })) as unknown as typeof fetch,
       sockets: { create: () => new Socket() },
       createNativeAudio: () => {
-        const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+        const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
         audioInstances.push(audio); return audio;
       },
     });
@@ -148,9 +154,9 @@ describe('production call resolver', () => {
 
   it('owns pending native initialization and closes a late available device exactly once', async () => {
     let resolveInitialize!: (value: string) => void;
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     audio.initialize = jest.fn(() => new Promise((resolve) => { resolveInitialize = resolve; }));
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
@@ -174,7 +180,7 @@ describe('production call resolver', () => {
   it('keeps pending native ownership exclusive across credential resolvers', async () => {
     let resolveInitialize!: (value: string) => void;
     const ownership = new NativeCallOwnership();
-    const firstAudio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const firstAudio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     firstAudio.initialize = jest.fn(() => new Promise((resolve) => { resolveInitialize = resolve; }));
     const capability = jest.fn(async () => ({
       ok: true, status: 200,
@@ -212,9 +218,9 @@ describe('production call resolver', () => {
       .mockResolvedValueOnce({
         ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
       }) as unknown as typeof fetch;
-    const resolver = new ProductionCallResolver({ characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, fetchImpl });
+    const resolver = new ProductionCallResolver({ credentials, characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, fetchImpl });
     const first = resolver.refreshCapability();
-    auth.message_token = 'new-token';
+    credentials.token = 'new-token';
     const second = resolver.refreshCapability();
     resolveFirst({ ok: false, status: 401 });
     await expect(first).resolves.toMatchObject({ available: false });
@@ -224,11 +230,11 @@ describe('production call resolver', () => {
   });
 
   it('maps audio focus loss to transport recovery but fatal native errors close the attempt', async () => {
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     let events: any;
     audio.setCoordinatorEvents.mockImplementation((value: any) => { events = value; });
     const socket = new Socket();
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
@@ -248,9 +254,9 @@ describe('production call resolver', () => {
   });
 
   it('wires production native playback progress to the visual-only mouth bridge', async () => {
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     const mouthBridge = { update: jest.fn(), reset: jest.fn() };
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200,
@@ -261,9 +267,12 @@ describe('production call resolver', () => {
     await resolver.refreshCapability();
     const attempt = resolver.createAttempt();
     const listener = (audio.subscribePlaybackProgress as jest.Mock).mock.calls[0][0];
-    listener({ kind: 'rms', rms: 0.35 });
+    const stream = { callId: 'call', responseId: 'reply', streamId: 2 };
+    listener({ stream, kind: 'rms', rms: 0.35 });
     expect(mouthBridge.update).toHaveBeenCalledWith(0.35);
-    listener({ kind: 'reset' });
+    listener({ stream: { ...stream, streamId: 1 }, kind: 'reset' });
+    expect(mouthBridge.reset).not.toHaveBeenCalled();
+    listener({ stream, kind: 'reset' });
     expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
     await attempt.close();
     expect(mouthBridge.reset).toHaveBeenCalledTimes(1);
@@ -271,10 +280,10 @@ describe('production call resolver', () => {
   });
 
   it('cleans the visual subscription exactly once when native initialization is unavailable', async () => {
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     audio.initialize.mockResolvedValue('unavailable');
     const mouthBridge = { update: jest.fn(), reset: jest.fn() };
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200,
@@ -298,10 +307,10 @@ describe('production call resolver', () => {
   });
 
   it.each(['initialize_failed', 'MICROPHONE_PERMISSION_DENIED'])('cleans native initialization rejection and preserves permission errors: %s', async (code) => {
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     audio.initialize.mockRejectedValue(new Error(code));
     const mouthBridge = { update: jest.fn(), reset: jest.fn() };
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200,
@@ -332,10 +341,10 @@ describe('production call resolver', () => {
 
   it('cleans visuals at timeout and does not repeat cleanup when late availability closes native audio', async () => {
     let resolveInitialize!: (value: string) => void;
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     audio.initialize = jest.fn(() => new Promise((resolve) => { resolveInitialize = resolve; }));
     const mouthBridge = { update: jest.fn(), reset: jest.fn() };
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200,
@@ -363,16 +372,16 @@ describe('production call resolver', () => {
   });
 
   it('keeps visual cleanup idempotent when native close rejects', async () => {
-    const audio = new (jest.requireMock('../utils/call_audio/native_call_audio').AndroidCallAudio)();
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
     audio.close.mockRejectedValue(new Error('native_close_failed'));
     const mouthBridge = { update: jest.fn(), reset: jest.fn() };
-    const resolver = new ProductionCallResolver({
+    const resolver = new ProductionCallResolver({ credentials,
       characterId: 'luotianyi', switchPort: { prepare: jest.fn() }, mouthBridge,
       fetchImpl: jest.fn(async () => ({
         ok: true, status: 200,
         json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
       })) as unknown as typeof fetch,
-      createNativeAudio: () => audio,
+      createNativeAudio: () => audio, nativeOwnership: new NativeCallOwnership(),
     });
     await resolver.refreshCapability();
     const attempt = resolver.createAttempt();
@@ -384,4 +393,42 @@ describe('production call resolver', () => {
     expect(mouthBridge.reset).not.toHaveBeenCalled();
     expect(audio.close).toHaveBeenCalledTimes(1);
   });
+});
+
+it('换号后旧设备迟到释放，新账号在同一页面恢复拨号', async () => {
+  let finishInitialize!: (value: string) => void;
+  const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
+  audio.initialize = () => new Promise(resolve => { finishInitialize = resolve; });
+  const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+  } as Response);
+  const switchPort = { prepare: jest.fn() };
+  const first = new ProductionCallResolver({
+    characterId: 'luotianyi', switchPort, credentials: { username: 'alice', token: 'a' },
+    createNativeAudio: () => audio, nativeInitializeTimeoutMs: 1,
+  });
+  let call!: ReturnType<typeof useCallFeature>;
+  function Bob() {
+    call = useCallFeature({ characterId: 'luotianyi', switchPort, username: 'bob', token: 'b',
+      onAuthRequired: jest.fn(), onReturnToChat: jest.fn(), onCallRecord: jest.fn(), onBackConfirmation: jest.fn() });
+    return null;
+  }
+  let tree: ReactTestRenderer | undefined;
+  try {
+    await first.refreshCapability();
+    await expect(first.createAttempt().initializeNative()).resolves.toBe(false);
+    await first.close();
+    await act(async () => { tree = create(React.createElement(Bob)); });
+    expect(call.canStart).toBe(false);
+    await act(async () => { finishInitialize('available'); });
+    expect(call.canStart).toBe(true);
+    // 保持系统权限查询在途，以直接观察第二位用户已经进入拨号流程。
+    jest.mocked(Audio.getPermissionsAsync).mockImplementationOnce(() => new Promise(() => {}));
+    await act(async () => { expect(await call.start()).toBe(true); });
+    expect(call.state.phase).toBe('REQUESTING_PERMISSION');
+  } finally {
+    await act(async () => { tree?.unmount(); });
+    await first.close();
+    fetchMock.mockRestore();
+  }
 });

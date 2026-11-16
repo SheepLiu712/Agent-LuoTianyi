@@ -1,8 +1,8 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { AgentBinder } from '../utils/binder';
-import { MessageProcessor } from '../utils/message_processor';
-import { NetworkClient } from '../utils/network_client';
-import { VoiceRecorder } from '../utils/voice_recorder';
+import type { ChatFeedback } from '../features/chat/message_processor';
+import { MessageProcessor } from '../features/chat/message_processor';
+import { NetworkClient } from '../features/chat/connection/network_client';
+import { VoiceRecorder } from '../features/chat/voice_recorder';
 
 jest.mock('react-native', () => ({ AppState: { currentState: 'active' } }));
 jest.mock('expo-av', () => ({ Audio: {
@@ -25,7 +25,7 @@ jest.mock('expo-file-system/legacy', () => ({
 function setup(sendVoicePhase: jest.Mock) {
   const binder = { emitMessageStatus: jest.fn(), emitErrorText: jest.fn() };
   const network = { sendVoicePhase, sendVoiceRecordingCancelled: jest.fn().mockResolvedValue({ ok: true }), sendChat: jest.fn().mockResolvedValue({ ok: true }) };
-  const processor = new MessageProcessor(network as unknown as NetworkClient, binder as unknown as AgentBinder, jest.fn());
+  const processor = new MessageProcessor(network as unknown as NetworkClient, binder as unknown as ChatFeedback, jest.fn());
   return { processor, binder, network };
 }
 

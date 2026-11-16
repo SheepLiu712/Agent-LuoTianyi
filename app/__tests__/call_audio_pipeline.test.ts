@@ -1,9 +1,9 @@
-import type { SequencedCapturedAudioFrame } from '../utils/call_audio_contracts';
-import { PlaybackGenerationLedger } from '../utils/call_audio/playback_ledger';
+import type { SequencedCapturedAudioFrame } from '../features/call/call_audio_contracts';
+import { PlaybackGenerationLedger } from '../features/call/call_audio/playback_ledger';
 import {
   CaptureRecoveryBuffer,
   MAX_RECOVERY_BYTES,
-} from '../utils/call_audio/recovery_buffer';
+} from '../features/call/call_audio/recovery_buffer';
 
 const format = { encoding: 'pcm_s16le', sampleRateHz: 16_000, channels: 1 };
 

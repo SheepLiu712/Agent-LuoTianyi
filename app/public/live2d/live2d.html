@@ -351,7 +351,7 @@
     
     // 初始化 dataArray
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = new Float32Array(analyser.fftSize);
     window.ReactNativeWebView?.postMessage(JSON.stringify({
       type: 'mouthAnalysisWindow', sampleRate: audioCtx.sampleRate, samples: bufferLength,
     }));
@@ -365,24 +365,28 @@
     let nextStartTime = 0;
     let isWaitingForEnd = false;
     let isPlaying = false;
+    let chatGeneration = 0;
+    let visualOwner = null;
     let callMouthRms = 0;
-    let callMouthActive = false;
-    window.setCallMouthRms = (value) => {
-      callMouthRms = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-      callMouthActive = true;
-    };
-    window.resetCallMouth = () => {
-      callMouthRms = 0;
-      callMouthActive = false;
+    const resetMouth = (owner) => {
+      if (visualOwner !== owner) return;
+      visualOwner = null;
       window.setMouthOpenY?.(-1, 1);
     };
+    window.setCallMouthRms = (value) => {
+      visualOwner = 'call';
+      callMouthRms = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+    };
+    window.resetCallMouth = () => resetMouth('call');
     // 当前已排队的音频源，用于停止/清空队列（音频播放互斥，Bug#9）
     const activeSources = [];
     // 最后一段已排队的音频源，用于精确感知播放结束（Bug#7）
     let lastSource = null;
 
     window.feedAudioChunk = async (base64Audio, isFinal) => {
+      const generation = chatGeneration;
       if (audioCtx.state === 'suspended') await audioCtx.resume();
+      if (generation !== chatGeneration) return;
       
       if (base64Audio) {
         // 1. Base64 转 Uint8Array
@@ -431,6 +435,7 @@
 
         // 5. 排队播放
         isPlaying = true;
+        if (visualOwner !== 'call') visualOwner = generation;
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(analyser);
@@ -440,7 +445,7 @@
           if (idx >= 0) {
             activeSources.splice(idx, 1);
           }
-          if (lastSource === source) {
+          if (generation === chatGeneration && lastSource === source) {
             notifyAudioFinished();
           }
         };
@@ -460,12 +465,13 @@
       // 6. 处理结束标志
       if (isFinal) {
         isWaitingForEnd = true;
-        checkFinished();
+        checkFinished(generation);
       }
     };
 
     // 停止并清空所有已排队的音频（用于音频播放互斥）
     window.stopServerAudio = () => {
+      resetMouth(chatGeneration++);
       for (const src of activeSources.slice()) {
         try {
           src.stop();
@@ -487,11 +493,11 @@
     // 检测是否播放完毕：主信号是最后一段音频的 onended（精确、不受 rAF 节流影响，
     // 页面被节流/切后台时 rAF 会停摆，导致 audio_finished 丢失、回复中的后续句子迟迟不出现），
     // rAF 轮询作为兜底（onended 异常丢失时也能收敛）。
-    function checkFinished() {
-      if (!isWaitingForEnd) return;
+    function checkFinished(generation) {
+      if (generation !== chatGeneration || !isWaitingForEnd) return;
       // 还有音频排队未播完：继续轮询兜底
       if (lastSource && audioCtx.currentTime < nextStartTime) {
-        requestAnimationFrame(checkFinished);
+        requestAnimationFrame(() => checkFinished(generation));
         return;
       }
       // 没有待播音频，或已全部播完：立即通知
@@ -507,6 +513,7 @@
       nextStartTime = 0;
       // 保留 lastSource 的 onended（负责从 activeSources 移除），仅解除引用
       lastSource = null;
+      resetMouth(chatGeneration++);
       // 通知 RN 播放完成
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_finished' }));
@@ -515,18 +522,19 @@
     // 浏览器原生的 60FPS 渲染循环
     const renderLoop = () => {
       requestAnimationFrame(renderLoop);
-      if (isPlaying === false && !callMouthActive) return;
+      if (visualOwner === null && isPlaying) visualOwner = chatGeneration;
+      if (visualOwner === null) return;
 
       // 3. 实时提取幅值 (RMS / 响度)
       let rms = callMouthRms;
-      if (!callMouthActive && isPlaying) {
-        analyser.getByteTimeDomainData(dataArray);
+      if (visualOwner !== 'call' && isPlaying) {
+        analyser.getFloatTimeDomainData(dataArray);
         let sumSquares = 0.0;
-        for (let i = 0; i < dataArray.length; i++) {
-          const norm = (dataArray[i] / 128.0) - 1.0;
+        for (let i = dataArray.length - bufferLength; i < dataArray.length; i++) {
+          const norm = dataArray[i];
           sumSquares += norm * norm;
         }
-        rms = Math.sqrt(sumSquares / dataArray.length);
+        rms = Math.sqrt(sumSquares / bufferLength);
       }
       // 4. 将幅值映射并写入底层模型，加上一点平滑系数防止高频抖动
       const targetMouthY = Math.max(Math.min(1.0, rms * 25 - 1), -1); // 简单线性映射，调整系数以适配嘴部张开程度

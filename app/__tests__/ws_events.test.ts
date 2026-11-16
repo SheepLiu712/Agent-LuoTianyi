@@ -2,7 +2,7 @@
  * WSEventType 常量测试
  * 验证常量值与服务端 Python enum 一致，且没有重复值。
  */
-import { WSEventType } from '../types/ws_events';
+import { WSEventType } from '../features/chat/connection/ws_events';
 
 describe('WSEventType constants', () => {
   it('should have all required keys', () => {

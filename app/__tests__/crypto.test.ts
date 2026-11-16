@@ -3,7 +3,7 @@
  * 覆盖公钥获取的重试、超时、缓存，以及密码加密失败原因区分（Bug#1）。
  */
 import forge from 'node-forge';
-import { clearCachedPublicKey, encryptPassword, getPublicKey } from '../utils/crypto';
+import { clearCachedPublicKey, encryptPassword, getPublicKey } from '../features/account/crypto';
 import { server_config } from '../config';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({

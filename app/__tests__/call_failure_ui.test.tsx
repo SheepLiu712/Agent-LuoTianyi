@@ -1,17 +1,19 @@
+import { AppNotices, usePageNotices } from '../shell/notices/AppNotices';
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { CallFailureBanner } from '../components/call/CallFailureBanner';
-import { useCallSession } from '../hooks/useCallSession';
-import { getCallFailureNotice } from '../utils/call_failure';
-import { THEMES } from '../utils/theme';
-import type { CallSession } from '../utils/call_session/call_session';
+import { CallFailureBanner } from '../features/call/CallFailureBanner';
+import { useCallSession } from '../features/call/useCallSession';
+import { getCallFailureNotice } from '../features/call/call_failure';
+import { THEMES } from '../shared/ui/theme';
+import type { CallSession } from '../features/call/call_session/call_session';
 
 jest.mock('react-native', () => ({
   __esModule: true,
   Platform: { OS: 'android' },
   AppState: { addEventListener: () => ({ remove: jest.fn() }) },
   BackHandler: { addEventListener: () => ({ remove: jest.fn() }) },
-  Pressable: 'Pressable', Text: 'Text', View: 'View',
+  useWindowDimensions: () => ({ width: 390, fontScale: 1 }), KeyboardAvoidingView: 'KeyboardAvoidingView', ScrollView: 'ScrollView', Pressable: 'Pressable', Text: 'Text', View: 'View',
   StyleSheet: { absoluteFillObject: {}, create: (styles: any) => styles },
 }));
 
@@ -62,11 +64,15 @@ describe('call failure user-visible feedback', () => {
   it('renders a dismissible banner using the normal app theme affordance', () => {
     const onDismiss = jest.fn();
     let tree!: ReturnType<typeof create>;
-    act(() => { tree = create(<CallFailureBanner notice={getCallFailureNotice('CALL_CONNECTION_LOST')} theme={THEMES.dark} onDismiss={onDismiss} />); });
+    function BannerProbe() {
+      const show = usePageNotices('chat');
+      return <CallFailureBanner notice={getCallFailureNotice('CALL_CONNECTION_LOST')} theme={THEMES.dark} show={show} onDismiss={onDismiss} />;
+    }
+    act(() => { tree = create(<AppNotices><BannerProbe /></AppNotices>); });
     const renderedText = tree.root.findAllByType('Text' as any).map(textOf).join('');
     expect(renderedText).toContain('通话连接失败');
     expect(renderedText).toContain('检查网络后重试');
-    tree.root.findByProps({ accessibilityLabel: '关闭通话提示' }).props.onPress();
+    act(() => tree.root.findByProps({ accessibilityLabel: '关闭通话提示' }).props.onPress());
     expect(onDismiss).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
   });

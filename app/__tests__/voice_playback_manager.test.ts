@@ -2,7 +2,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { VoicePlaybackManager, VOICE_CACHE_LIMIT_BYTES } from '../utils/voice_playback_manager';
+import { VoicePlaybackManager, VOICE_CACHE_LIMIT_BYTES } from '../features/chat/voice_playback_manager';
 import { VoiceFileSystem } from './helpers/voice_filesystem';
 
 jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));

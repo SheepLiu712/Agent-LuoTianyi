@@ -1,4 +1,4 @@
-import { NativeCallRingtone } from '../utils/call_session/ringtone';
+import { NativeCallRingtone } from '../features/call/call_session/ringtone';
 
 const native = { startRingtone: jest.fn(), stopRingtone: jest.fn() };
 jest.mock('expo-modules-core', () => ({ requireOptionalNativeModule: () => native }));

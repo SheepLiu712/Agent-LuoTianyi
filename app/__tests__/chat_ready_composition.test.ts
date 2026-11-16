@@ -1,7 +1,7 @@
-import { NetworkClient, type ConnectCallbacks } from '../utils/network_client';
+import { NetworkClient, type ConnectCallbacks } from '../features/chat/connection/network_client';
 
 jest.mock('expo-file-system/legacy', () => ({}));
-jest.mock('../utils/image_compression', () => ({
+jest.mock('../features/chat/image_compression', () => ({
   compressImageForUpload: jest.fn(),
   MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024,
 }));

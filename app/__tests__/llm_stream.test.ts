@@ -1,7 +1,7 @@
 import { TextDecoder, TextEncoder } from 'util';
 import { fetch as streamingFetch } from 'expo/fetch';
-import { callLlmProvider } from '../utils/llm_client';
-import { WebSocketTransport } from '../utils/ws_transport';
+import { callLlmProvider } from '../shared/client-model/llm_client';
+import { WebSocketTransport } from '../features/chat/connection/ws_transport';
 
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
 jest.mock('react-native', () => ({ AppState: {

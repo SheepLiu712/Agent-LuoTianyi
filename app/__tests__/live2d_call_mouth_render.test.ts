@@ -40,6 +40,8 @@ describe('production Live2D call mouth bridge', () => {
       height: { get: () => 100 * modelScale },
     });
     model.scale.set.mockImplementation((value: number) => { modelScale = value; });
+    const sample = new Int16Array(128).fill(1536);
+    const lastSources: { onended?: () => void }[] = [];
     const context: any = {
       innerWidth: 360,
       innerHeight: 400,
@@ -54,7 +56,7 @@ describe('production Live2D call mouth bridge', () => {
       Number,
       JSON,
       performance: { now: () => 0 },
-      atob: () => '',
+      atob: (value: string) => Buffer.from(value, 'base64').toString('binary'),
       fetch: jest.fn(async () => { throw new Error('asset fixture omitted'); }),
       document: { getElementById: jest.fn(() => canvas) },
       requestAnimationFrame: jest.fn((callback: () => void) => { frame = callback; return 1; }),
@@ -62,12 +64,21 @@ describe('production Live2D call mouth bridge', () => {
         sampleRate = 48_000;
         state = 'running';
         destination = {};
+        currentTime = 0;
+        createBuffer(channels: number, frames: number, rate: number) {
+          return { duration: frames / rate, getChannelData: () => new Float32Array(frames) };
+        }
+        createBufferSource() {
+          const source = { connect: jest.fn(), start: jest.fn(), stop: jest.fn(), onended: undefined };
+          lastSources.push(source);
+          return source;
+        }
         createAnalyser() {
           return {
             fftSize: 256,
             frequencyBinCount: 128,
             connect: jest.fn(),
-            getByteTimeDomainData: (target: Uint8Array) => { target[0] = 128; },
+            getFloatTimeDomainData: (target: Float32Array) => target.set(Array.from(sample, x => x / 32768), 128),
           };
         }
       },
@@ -127,6 +138,22 @@ describe('production Live2D call mouth bridge', () => {
     expect(context.ReactNativeWebView.postMessage).toHaveBeenCalledWith(JSON.stringify({
       type: 'mouthAnalysisWindow', sampleRate: 48_000, samples: 128,
     }));
+    const pcm = Buffer.from(sample.buffer).toString('base64');
+    await context.feedAudioChunk(pcm, false);
+    frame?.();
+    const chatValue = parameterWrites.at(-1);
+    context.stopServerAudio();
+    expect(parameterWrites.at(-1)).toBe(-1);
+    context.setCallMouthRms(1536 / 32768);
+    frame?.();
+    expect(parameterWrites.at(-1)).toBeCloseTo(chatValue!);
+    lastSources[0].onended?.();
+    expect(parameterWrites.at(-1)).toBeCloseTo(chatValue!);
+    context.resetCallMouth();
+    await context.feedAudioChunk(pcm, false);
+    await context.feedAudioChunk('', true);
+    lastSources.at(-1)?.onended?.();
+    expect(parameterWrites.at(-1)).toBe(-1);
     const mouthBridgeSource = context.setCallMouthRms.toString();
     expect(mouthBridgeSource).not.toContain('feedAudioChunk');
   });

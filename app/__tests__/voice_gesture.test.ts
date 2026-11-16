@@ -1,4 +1,4 @@
-import { voiceStateForMove } from '../utils/voice_gesture';
+import { voiceStateForMove } from '../features/chat/voice_gesture';
 
 describe('voice gesture state', () => {
   it('enters cancel zone at 80dp and recovers when moved back', () => {

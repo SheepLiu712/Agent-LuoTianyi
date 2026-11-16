@@ -1,5 +1,5 @@
-import { normalizeServerAck } from '../utils/ws_ack';
-import { WebSocketTransport } from '../utils/ws_transport';
+import { normalizeServerAck } from '../features/chat/connection/ws_ack';
+import { WebSocketTransport } from '../features/chat/connection/ws_transport';
 
 jest.mock('react-native', () => ({
   AppState: {

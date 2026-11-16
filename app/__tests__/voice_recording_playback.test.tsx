@@ -3,23 +3,23 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { Audio } from 'expo-av';
 import { AppState, GestureResponderEvent } from 'react-native';
-import { useChatLogic } from '../hooks/useChatLogic';
-import { useCallSession } from '../hooks/useCallSession';
-import { useHistoryLogic } from '../hooks/useHistoryLogic';
-import type { CallTransportListener } from '../types/call_transport';
-import { NetworkClient } from '../utils/network_client';
+import { useChatLogic } from '../features/chat/useChatLogic';
+import { useCallSession } from '../features/call/useCallSession';
+import { useHistoryLogic } from '../features/chat/useHistoryLogic';
+import type { CallTransportListener } from '../features/call/call_transport/contracts';
+import { NetworkClient } from '../features/chat/connection/network_client';
 import { VoiceFileSystem } from './helpers/voice_filesystem';
-import { VoicePlaybackManager, voicePlaybackManager } from '../utils/voice_playback_manager';
-import { voiceRecorder } from '../utils/voice_recorder';
+import { VoicePlaybackManager, voicePlaybackManager } from '../features/chat/voice_playback_manager';
+import { voiceRecorder } from '../features/chat/voice_recorder';
 
 jest.mock('react-native', () => ({ Platform: { OS: 'android' }, BackHandler: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) }, AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
 jest.mock('expo-file-system/legacy', () => jest.requireActual('./helpers/voice_filesystem').createVoiceFileSystem());
-jest.mock('../utils/live2d_helper', () => ({ setExpression: jest.fn() }));
-jest.mock('../utils/network_client', () => ({ NetworkClient: jest.fn() }));
-jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {
+jest.mock('../shared/character/live2d_helper', () => ({ setExpression: jest.fn() }));
+jest.mock('../features/chat/connection/network_client', () => ({ NetworkClient: jest.fn() }));
+jest.mock('../features/chat/voice_recorder', () => ({ voiceRecorder: {
   getPermission: jest.fn().mockResolvedValue('granted'), start: jest.fn(),
   stop: jest.fn().mockResolvedValue({ localUri: 'file://recording.m4a', durationMs: 1000 }),
   cancel: jest.fn(), dispose: jest.fn(),
