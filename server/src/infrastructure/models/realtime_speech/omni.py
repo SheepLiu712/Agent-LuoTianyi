@@ -8,7 +8,7 @@ import json
 import struct
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from uuid import UUID, uuid4
 
@@ -63,15 +63,25 @@ class QwenOmniSessionFactory:
     def is_configured(self):
         return self._config is not None
 
-    async def open(self, call_id: UUID, instructions: str) -> QwenOmniSession:
+    async def open(
+        self,
+        call_id: UUID,
+        instructions: str,
+        *,
+        remaining_setup_time: Callable[[], float],
+        on_session_created: Callable[[QwenOmniSession], None],
+    ) -> QwenOmniSession:
         if self._config is None:
             raise RealtimeSpeechUnavailable("实时模型未配置")
+        remaining_setup_time()
         session = QwenOmniSession(self._config, call_id, connector=self._connector)
         try:
-            await session.start(instructions)
+            on_session_created(session)
         except BaseException:
             await session.close()
             raise
+        # 登记成功后调用方是唯一 owner；失败也必须先传播而非等待清理。
+        await session.start(instructions, remaining_setup_time=remaining_setup_time)
         return session
 
 
@@ -98,18 +108,41 @@ class QwenOmniSession:
         self._active_windows = deque(maxlen=8000)
         self._speech_floor = 0
 
-    async def start(self, instructions):
-        self._socket = await asyncio.wait_for(
-            self._connector(
+    async def start(self, instructions, *, remaining_setup_time):
+        phase = "connect"
+        try:
+            remaining = remaining_setup_time()
+            self._socket = await self._connector(
                 self._config.websocket_url,
                 additional_headers={"Authorization": f"Bearer {self._config.api_key}"},
-                open_timeout=self._config.connect_timeout_seconds,
+                open_timeout=remaining,
                 close_timeout=self._config.close_timeout_seconds,
                 max_size=4 * 1024 * 1024,
-            ),
-            self._config.connect_timeout_seconds,
+            )
+            phase = "session_ready"
+            remaining = remaining_setup_time()
+            self._reader = asyncio.create_task(self._read(), name=f"omni-read-{self._call_id}")
+            await asyncio.wait_for(self._initialize(instructions), remaining)
+        except BaseException as error:
+            self._log_setup_failure(phase, error, remaining_setup_time)
+            raise
+
+    def _log_setup_failure(self, phase, error, remaining_setup_time):
+        try:
+            remaining = remaining_setup_time()
+        except asyncio.TimeoutError:
+            remaining = 0.0
+        except asyncio.CancelledError:
+            remaining = None
+        get_logger(__name__).warning(
+            "Realtime setup failed call=%s phase=%s type=%s remaining=%s",
+            self._call_id,
+            phase,
+            type(error).__name__,
+            remaining,
         )
-        self._reader = asyncio.create_task(self._read(), name=f"omni-read-{self._call_id}")
+
+    async def _initialize(self, instructions):
         await self._send(
             "session.update",
             session={
@@ -136,7 +169,7 @@ class QwenOmniSession:
                 "tool_choice": "auto",
             },
         )
-        await asyncio.wait_for(self._ready.wait(), self._config.session_timeout_seconds)
+        await self._ready.wait()
         self._check_open()
 
     def _check_open(self):
