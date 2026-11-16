@@ -58,6 +58,23 @@
 - 原17测试完整行为断言保留；fixture新增纯成功request与GUI apply替身，原binder.on_login/on_register Mock只在有效GUI apply中用于保留一次处理观测，不在worker调用。两个成功用例只增加Qt等待，不删Esc/close/accepted/页签/子窗断言。真实NetworkClient与Session链另由新账号测试证明，不能把Mock别名当生产仍走旧同步Binder。
 - 账号行为最终10例覆盖公钥在途、四动作POST/服务器GET在途重复mouse/明确按钮Return、失败手动重试且无自动重放；真实RSA解密验证实际密文使用新取公钥；取钥与POST同独立Session且HTTP线程非GUI；成功登录保存只在GUI、WS只启动一次；父关闭POST迟成功不改identity/save/WS；公钥阶段关闭不发后续POST；子关闭实际槽不释放、旧child删除不取消后续登录；身份变化拒迟登录；旧同步login/register/reset返回形状和成功副作用兼容。
 - 相关命令在`client`：指定解释器执行pytest `tests/test_window_requests.py tests/test_login_dialog.py tests/test_password_key_rotation.py tests/test_tls_connections.py tests/test_credential.py -q --tb=short -p no:cacheprovider`。实际最终 `40 passed,4 warnings in22.72s`（新账号10、旧登录17、密钥轮换1、TLS9、凭据3）；4警告为既有websockets legacy弃用。PySide6/Qt仍6.11.0，Python3.10.21；来源打印均issue-376树。新独立会话真实HTTPS trusted/wrong-host/untrusted含环境CA和verifyFalse不降级，旧缓存HTTPS/WSS仍保留。
-- black26.5.1定向8文件检查通过；ruff0.14.10新增/改动无既有导入债务的7文件通过；auth原未用requests和GUI/Binder/main原告警按HEAD对照，不混无关清理。全量CI、CI6.9.2、真实账号/打包视觉未验；动态runtime无改，账号phase不能关闭#376。
+- black26.5.1定向8文件检查通过；ruff0.14.10新增/改动无既有导入债务的7文件通过；auth原未用requests和GUI/Binder/main原告警按HEAD对照，不混无关清理。全量CI、CI6.9.2、真实账号/打包视觉未验；当时动态runtime无改，账号phase不能关闭#376。账号phase经Oracle实施1/3 PASS及lead明确授权，已原子提交`42ffeb8659e567e781a12f9c2053bb876e99d2d7`。
+
+**动态phase实施与证据**：
+
+- lead按已审设计另CAS八路径放行。实际无需修改`window_operation.py`，直接使用三个固定实例；无registry/dispatcher/globalpool，账号runner与旧40行为保持。新增纯`DynamicRequest`冻结身份/URL/ID/正文/cursor，五类原同步动态方法与后台共用同fetch，不改`get_dynamic_unread_status`。
+- 首屏装配后Qt首事件发读，加载态先显示；列表单槽，失败不推进cursor不清旧列表，成功去重/恢复选择/翻页滚动。评论读单槽只合并一个最新ID，feed/selection/identity/visible代际匹配才呈现。成功首屏才标读；写槽包含post/comment/read，markread反复触发只dirty一个，终态不busy-loop，不自动重发用户写。
+- 隐藏只invalidate接收，三个timer继续回收实际终态；重开不能绕过在途POST。草稿按动态ID保持，成功清理只作用于同一目标/输入。编辑器直接删除后只在GUI用`shiboken6.isValid`判断，不引入额外callback sentinel；worker始终无Qt引用。
+- 首有效红：真实`DynamicsDialog`构造→真实NC.list→Session.send门控首GET，Qt50ms心跳/刷新探针预期`(True,True,True,1)`，实际`(False,False,True,2)`，`1 failed in8.15s`，job`pwsh-b8ae441203d64094`已收集1。相同业务测试最小fix后`1 passed in6.32s`，不改判据。
+- 六个动态场景+原账号40组合`46 passed,4 warnings in26.29s`，job`pwsh-bfd12e7b50614aee`已收集0；4条均既有websockets弃用。最后GUI编辑器删除有效性保护补一必要场景，动态7例定向`7 passed in5.83s`。不把这两次相加成单次47通过。
+- 七场景覆盖慢构造单请求、A/B评论迟到/失败分页cursor保持再成功去重、comment按钮+Return单POST/失败草稿/markread双触发只一次/隐藏重开实际busy、首屏失败不标读及手动恢复、发布编辑器失败稿/手动retry、身份变化丢评论/删除、在途编辑器实际delete后无Qt callback错误。真实transport与UI控件观测，不用内部flag当验收。
+- 已精准glob/grep确认本独立基线无旧动态测试文件，不删除其他root可能有的用例；账号原17保留。动态4py black26.5.1/ruff0.14.10定向通过、diffcheck0；scope允许runner但0diff，main_ui/auth/Binder/main/default均无本阶段diff。全#376的CI6.9.2与完整离线门禁由verifier下一轮统一一次，不用Qt6.11局部46/7冒充全量绿。
+
+**C3-2 attempt1 必修与 attempt2 证据**：
+
+- Oracle implementation attempt1/3 不通过提交，仅确认一项真实分页竞态：请求开始选A，等待期间用户选B，旧成功回调仍按请求开始snapshot把选择抢回A。原7例只测分页前后A，不能证明这一新交互。
+- 依lead最窄授权增强原分页门控例（不新增机械矩阵）：page GET未完成时真实切B，再释放响应；候选上实际`assert 'A' == 'B'`，`1 failed in3.04s`。只在`_list_completed`成功且原identity/feed守卫通过后，清单变更前读取完成时current ID与scroll，增加3行，不改runner/协议/账号/外部未读。
+- 修后仅动态文件定向`7 passed in4.49s`：同例仍核cursor推进、IDs A/B/C一次、分页失败保旧cursor、评论最新与HTTP非GUI。没有重跑46/40，也不把第一次gate写成PASS。
+- 边界补充：基线主窗口open尾刷新以及mark-read成功的外部on_read_callback都可能同步查询未读，属于已排#371；本单只保证自己拥有的HTTP离开GUI，不声称整条父回调链无同步HTTP。firstshot在实际main同栈show后执行；构造从不show或delete-before-firstshot没有独立实测，不把当前delete-after-request证据冒充全生命周期覆盖。
 
 **风险与回滚**：daemon只取消结果接收，不能强停已在途HTTP或保证退出finally；Session timeout非墙钟，server已成功但客户端未收到的写入有结果未知风险，必须明示不自动重试。凭据保存/WSstart是本地有效apply，不保证底层磁盘/DPAPI完全无耗时，禁止在其路径增加网络或wait。实现可按账号/动态两个相关原子单元推进，但最终单个#376 PR须覆盖全规格；出错回退窗口runner接入和纯请求/apply拆分，无配置/凭据格式/服务器迁移。未合入#402/#371未来冲突仅按钮装配、会话创建和identity同点对齐，不预先merge/rebase/cherry-pick；完整spec经设计gate后才允许runtime，最终实现另经Oracle才commit，当前不push/GitHub写。
