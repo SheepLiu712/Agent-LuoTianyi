@@ -38,8 +38,6 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
-
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
         "database.memory_store": "database.memory_store.llm_module",
@@ -81,7 +79,7 @@ class RuntimeConfigValidator:
                 SkillsConfig.from_runtime(config["agent_runtime"])
             except (ValueError, TypeError) as error:
                 items.append(ValidationItem("core", "agent_runtime.skills", "error", str(error)))
-        items.extend(self._validate_secrets())
+        items.extend(self._validate_secrets(config))
         items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
         items.extend(self._validate_realtime_speech(config))
@@ -89,6 +87,7 @@ class RuntimeConfigValidator:
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
         items.extend(self._validate_vector_store(config))
+        items.extend(self._validate_world_switches(config))
         items.extend(self._validate_world_optionals(config))
         has_core_error = any(item.scope != "world" and item.status == "error" for item in items)
         return {
@@ -115,10 +114,15 @@ class RuntimeConfigValidator:
                 world.setdefault("auto_song_learner", {})["enabled"] = False
         return next_config
 
-    def _validate_secrets(self) -> list[ValidationItem]:
+    @staticmethod
+    def required_secret_keys(config: dict[str, Any]) -> list[str]:
+        citywalk_disabled = RuntimeConfigValidator._get(config, "world.citywalk.enabled") is False
+        return ["JWT_SECRET"] if citywalk_disabled else ["JWT_SECRET", "AMAP_KEY"]
+
+    def _validate_secrets(self, config: dict[str, Any]) -> list[ValidationItem]:
         result = []
         secrets = self.secret_store.read()
-        for key in self.REQUIRED_SECRET_KEYS:
+        for key in self.required_secret_keys(config):
             configured = bool(secrets.get(key) or os.environ.get(key))
             result.append(
                 ValidationItem(
@@ -472,24 +476,92 @@ class RuntimeConfigValidator:
             self._path_item("core", "resource.song lyric keywords", lyric_file),
         ]
 
+    def _validate_world_switches(self, config: dict[str, Any]) -> list[ValidationItem]:
+        result = []
+        world = config.get("world", {})
+        if not isinstance(world, dict):
+            return [ValidationItem("core", "world", "error", "world 必须是对象")]
+        for task in (
+            "citywalk",
+            "auto_song_learner",
+            "qq_music_credential_refresh",
+            "song_knowledge",
+            "bili_dynamic_fetcher",
+            "dynamic_interaction",
+            "diary",
+            "proactive_topic_check",
+            "expired_event_cleanup",
+        ):
+            section = world.get(task, {})
+            if not isinstance(section, dict):
+                result.append(ValidationItem("core", f"world.{task}", "error", f"world.{task} 必须是对象"))
+                continue
+            if type(section.get("enabled", True)) is not bool:
+                path = f"world.{task}.enabled"
+                result.append(ValidationItem("core", path, "error", f"{path} 必须是布尔值"))
+            overrides = section.get("characters", section.get("per_character", {}))
+            if isinstance(overrides, dict):
+                for character, override in overrides.items():
+                    if isinstance(override, dict) and type(override.get("enabled", True)) is not bool:
+                        path = f"world.{task}.characters.{character}.enabled"
+                        result.append(ValidationItem("core", path, "error", f"{path} 必须是布尔值"))
+        return result
+
     def _validate_world_optionals(self, config: dict[str, Any]) -> list[ValidationItem]:
         result = []
         world = config.get("world", {})
+        if not isinstance(world, dict):
+            return result
+        citywalk_enabled = self._get(world, "citywalk.enabled") is not False
         citywalk_key = self._get(world, "citywalk.amap.api_key")
-        result.append(
-            ValidationItem(
-                "world",
-                "citywalk",
-                "ok" if citywalk_key and not str(citywalk_key).startswith("$") else "disabled",
-                (
-                    "高德地图 key 已配置"
-                    if citywalk_key and not str(citywalk_key).startswith("$")
-                    else "缺少 AMAP_KEY，将禁用 citywalk"
-                ),
-                severity="warning",
+        if not citywalk_enabled:
+            result.append(ValidationItem("world", "citywalk", "disabled", "城市漫步已由配置关闭", severity="warning"))
+        else:
+            result.append(
+                ValidationItem(
+                    "world",
+                    "citywalk",
+                    "ok" if citywalk_key and not str(citywalk_key).startswith("$") else "disabled",
+                    (
+                        "高德地图 key 已配置"
+                        if citywalk_key and not str(citywalk_key).startswith("$")
+                        else "缺少 AMAP_KEY，将禁用 citywalk"
+                    ),
+                    severity="warning",
+                )
             )
-        )
+            if self._get(config, "agent_runtime.vector_store.enabled") is False:
+                result.append(
+                    ValidationItem(
+                        "world",
+                        "citywalk.vector_projection",
+                        "warning",
+                        "城市漫步已请求开启，但向量库关闭；本次运行跳过整个城市漫步，"
+                        "未生成报告、SQL travel 或观察事实；启用向量库并重启可恢复",
+                        severity="warning",
+                    )
+                )
 
+        if self._get(world, "bili_dynamic_fetcher.enabled") is False:
+            result.append(
+                ValidationItem(
+                    "world", "bili_dynamic_fetcher", "disabled", "B站动态任务已由配置关闭", severity="warning"
+                )
+            )
+        else:
+            result.extend(self._validate_bili_credential(world))
+        if self._get(world, "auto_song_learner.enabled") is False:
+            result.append(
+                ValidationItem(
+                    "world", "auto_song_learner.qq_music", "disabled", "自动学歌已由配置关闭", severity="warning"
+                )
+            )
+        else:
+            result.extend(self._validate_qq_credential(world))
+        return result
+
+    def _validate_bili_credential(self, world: dict[str, Any]) -> list[ValidationItem]:
+        result = []
         bili_cookie = self._get(world, "bili_dynamic_fetcher.bili_cookie_file")
         bili_cookie_path = self._resolve_path(bili_cookie) if bili_cookie else None
         result.append(
@@ -514,6 +586,10 @@ class RuntimeConfigValidator:
             )
         )
 
+        return result
+
+    def _validate_qq_credential(self, world: dict[str, Any]) -> list[ValidationItem]:
+        result = []
         qq_credential = self._get(world, "auto_song_learner.qq_credential_file") or "config/qq_music_credential.json"
         qq_path = self._resolve_path(qq_credential)
         legacy_qq_path = (

@@ -349,3 +349,45 @@ python -B -m pytest tests/unit/infrastructure/test_disabled_vector_store.py test
 ```
 
 **风险与回滚**：无自动回填，SQL-only 记录重新启用也不保证可长期召回；旧非空/未知索引reset会明确部分失败，不代表事务回滚。恢复向量需操作者准备原资源并设true重启，不删SQL/目录。Phase3 M1-S城市漫步依赖降级尚未实施，本阶段不得宣称 vector=false/citywalk=true 已安全完成；AMAP core必需、world、UI与真实闭环/真实模型/真实full-min资源对比仍待后续，不预判资产缺失，也不以静态估值或fakebenchmark交付。本阶段未提交推送，等lead/Oracle实现gate。
+
+## 2026-11-17 Phase3A：world 组合根门控与条件依赖同步
+
+**待定问题**：怎样在不改任务内部算法/周期的范围内，让全部 world 定时任务真正不构造/不注册，并诚实处理 citywalk 请求开启但向量关闭的混合组合？
+
+**背景约束**：Phase2 在163定向+Oracle implementation1/3 PASS后由lead许可原子提交 `6c3f5e7d7c7419535c375fe556dad566b57b017e`，未推送；task-7 revision5批准本单元exact8路径。3B DTO、3C UI/README、3D实际隔离闭环、真实模型/资源比较另行分阶段，不能在此顺带实现。用户现用config/密钥不改，不新preset/env；非作者D3 attempt2已接受G1/M1-S，不重开产品取舍。
+
+**调研参考**：沿既有 WorldRuntime 构造→initialize→注册与 CitywalkTask 的公开可空 citywalk_service/早返回接缝；validator 与 Secrets管理原接口。设计依据是[已审world/M1-S契约](<docs/specs/component-startup-switches.md#L181-L208>)与[混合组合](<docs/specs/component-startup-switches.md#L281-L295>)。独立phase3只读准备报告只作定位，不是运行证据；本轮不新增研究。
+
+**候选方案**
+1. **既有组合根补三门控、合法空集合与依赖选择**：三项默认true；任务基础初始化后/注册前，向量false使已请求citywalk的optional service=None，保留原请求开关/定时名称/周期，触发真实skipped。AMAP条件与Secrets共用同一规则，显式disabled凭据不检查。
+2. **改任务内部/调整周期或非法type冒充关闭**：能少改某些构造，但不满足无任务/零执行或超出内部流程排除。
+3. **自动关citywalk或混合组合阻断整个服务**：表面避免写向量，却改变逐项请求或让可选依赖导致聊天起不来。
+
+**选择**：候选1。World目录生产差异仅WorldRuntime；不编辑Task/RuntimeService/Ingestor/WorldClock。三门控外只移除“已完成初始化但tasks空仍拒绝”的检查。保留一次性ensure_holidays，零world定时动作不冒称全进程零后台。
+
+**选择理由**：已有owner与Seam足够，不需重构注册系统。M1-S在任何任务执行前完成，既有Task.run_once自然返回 `ok=true,skipped=true,message=citywalk service is unavailable,data={}`；无report/SQL travel/观察/向量成功计数。重新构造向量true实例恢复原service，不补跑/删数据。
+
+**未选原因**
+- 候选2：延迟不是disable，0频率非法，改任务内部则违排除；不能用猴补丁生产Task或假vector消除错误。
+- 候选3：raw requested=true不代表依赖一定ready，但不可悄悄持久化false；warning必须非disabled并保留apply_world_disablements现有规则，不因向量关闭丧失整个聊天可用。
+
+**条件校验**：九任务顶层enabled严格bool，代表非法值与角色覆盖校验不truthiness；缺省true。`required_secret_keys(config)`由validator对外提供，JWT始终必需，仅顶层citywalk=false解除AMAP，角色true不能反开顶层false；mixed citywalk=true/vector=false仍AMAP必需。Secrets.status使用同一规则，不读/写真实值。显式关闭B站/自动学歌不检查其credential路径；mixed增加world citywalk.vector_projection warning，不走自动关。模板补齐缺少的七个true叶，已有auto_song_learner/qq_refresh true保留，其他配置不改。
+
+**实际红→绿**（agent Python3.10.21，Ruff0.14.10/Black26.5.1）：
+
+| 断言与来源 | 红灯 | 绿灯/覆盖 |
+| --- | --- | --- |
+| 已审A5改变旧三无条件任务错误预期 | `pwsh-66cddd390c3342ae`：disabled仍注册三项，`1 failed,1 warning in1.51s` | 三构造门控后同条 `pwsh-b99faf22db2240a6`：`1 passed,1 warning in0.77s`。不是为了绿灯降旧保证，而是已审契约改变条件行为。 |
+| 真实九项构造trap+原Clock全空 | `pwsh-eb336ec89ebd49fb`：所有Task未构造但tasks=[]被ensure拒绝，`1 failed,1 warning in1.08s` | 合法空集合后 `pwsh-43d432fad47d45ea`：`1 passed,1 warning in0.51s`；一次holiday工作仍启动/清理，原Clock注册表与运行任务都0。 |
+| 真实M1-S初始化与执行入口 | `pwsh-a252ebc6c87f4210`：原城市服务仍存在，`1 failed,1 warning in1.31s` | 根依赖选择后两个真实world场景 `pwsh-20029638bc924423`：`2 passed,1 warning in0.82s`；Task.initialize/run_once未替换，SQLite event无写、无观察，服务执行设trap不触发，恢复true service可重建/周期不变。 |
+| AMAP条件 | `pwsh-cec97631e8954522`：citywalk=false缺key仍core阻断，`1 failed,1 warning in2.36s` | shared条件后JWT保留、顶层false压角色true，mixedtrue仍AMAP必需。 |
+| Secrets.required一致性 | `pwsh-f6aa6d9f3f5a46e9`：AMAP仍required，`1 failed,1 passed,1 warning in2.63s` | 管理页投影使用validator同一条件，不维护第二份hardcode列表。 |
+| world strictbool代表 | `pwsh-03607ee1107e4cf6`：九任务字符串false未拒，`9 failed,45 deselected,1 warning in2.54s` | 同一验证helper九任务代表非法值覆盖（不继续机械9x6矩阵），默认/角色顶层优先与enabled周期原回归保留。 |
+
+**候选主体及窄修验证**：下列5文件先完成 `106 passed,1 warning in3.25s`，job `pwsh-fe165188d6e14b29` exit0；三生产源Ruff/Black PASS。随后lead指出本新增world容器路径须安全报告：required_secret_keys已用安全_get，但_validate_world_switches遇world=[]仍.get抛AttributeError。根/section两个代表用例 `pwsh-61a13d603b3943ee` 得 `1 failed,1 passed,1 warning in3.07s`；仅给new switches根容器core.world error、optionals非法根直接跳过，原8scope不扩。修后代表/邻近AMAP/Secrets/mixedwarning/禁用credential/真实world共 `8 passed,1 warning in2.14s`（`pwsh-c24bd1e220424972`），validation Ruff/Black通过；不重跑106/163。旧candidate 0c9bce…仅修前，不算当前已通过，按新manifest冻结再交同attempt1增量审核。新world证据文件Ruff/Black及原world测试Ruff也通过（先前综合job `pwsh-5951e1b1a05f4c74`），唯一警告为既有zhconv/pkg_resources弃用。没有业务夹具红失败误记为产品修复，格式初查行宽/Black问题已在授权文件内修正。
+
+```text
+python -B -m pytest tests/unit/world/test_world_runtime.py tests/unit/world/test_world_clock.py tests/integration/world/test_disabled_world_startup.py tests/integration/system/test_admin_runtime.py tests/unit/world/test_world_task_citywalk.py -q -p no:cacheprovider
+```
+
+**风险与回滚**：world关闭会停止清理/提醒/学习等，明确不保证补跑；M1-S是整项citywalk跳过而非只少索引。AMAP重新请求true时需准备key，JWT不放宽。恢复具体开关/依赖并重启；不删除用户数据/资源/凭据。当前仅组合根与条件校验闭合，未证明完整注册登录/网络WS/历史/媒体/管理UI或资源性能。真实资源前置已确认资产存在与路径/密钥缺口，但只stat不能冒称可推理/full-min收益；不fakebenchmark、不擅自付费调用/迁移现用路径。3A未提交，等Oracle与lead明确许可。

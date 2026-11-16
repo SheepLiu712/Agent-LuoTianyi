@@ -51,9 +51,6 @@ def config_read_http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=detail)
 
 
-REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
-
-
 def _extract_env_name(value: Any) -> str | None:
     raw = str(value or "").strip()
     if not raw.startswith("$"):
@@ -250,13 +247,14 @@ async def secrets_status() -> dict[str, Any]:
         config = {}
     referenced_llm_keys = _collect_llm_api_key_names(config)
     stored_keys = set(shell.secret_store.read().keys())
-    keys = _ordered_secret_names(REQUIRED_SECRET_KEYS, referenced_llm_keys, stored_keys)
+    required_keys = shell.validator.required_secret_keys(config)
+    keys = _ordered_secret_names(required_keys, referenced_llm_keys, stored_keys)
     status = shell.secret_store.status(keys)
     for key, item in status.items():
-        item["required"] = key in REQUIRED_SECRET_KEYS
+        item["required"] = key in required_keys
         item["referenced"] = key in referenced_llm_keys
         item["category"] = (
-            "required" if key in REQUIRED_SECRET_KEYS else "llm_api_key" if key in referenced_llm_keys else "custom"
+            "required" if key in required_keys else "llm_api_key" if key in referenced_llm_keys else "custom"
         )
     return status
 

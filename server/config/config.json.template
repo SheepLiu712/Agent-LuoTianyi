@@ -454,6 +454,7 @@
     },
     "world": {
         "dynamic_interaction": {
+            "enabled": true,
             "clock_config": {
                 "type": "interval",
                 "params": {
@@ -463,6 +464,7 @@
             }
         },
         "citywalk": {
+            "enabled": true,
             "clock_config": {
                 "type": "daily",
                 "params": {
@@ -566,6 +568,7 @@
             }
         },
         "song_knowledge": {
+            "enabled": true,
             "clock_config": {
                 "type": "daily",
                 "params": {
@@ -634,6 +637,7 @@
             }
         },
         "bili_dynamic_fetcher": {
+            "enabled": true,
             "clock_config": {
                 "type": "interval",
                 "params": {
@@ -665,6 +669,7 @@
             }
         },
         "proactive_topic_check": {
+            "enabled": true,
             "clock_config": {
                 "type": "interval",
                 "params": {
@@ -674,6 +679,7 @@
             }
         },
         "diary": {
+            "enabled": true,
             "clock_config": {
                 "type": "daily",
                 "params": {
@@ -683,6 +689,7 @@
             }
         },
         "expired_event_cleanup": {
+            "enabled": true,
             "clock_config": {
                 "type": "daily",
                 "params": {
