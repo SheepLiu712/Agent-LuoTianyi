@@ -3,6 +3,9 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleShee
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AppTheme } from '../../shared/ui/theme';
 
+// 与聊天输入栏 image_button_activate.png 的主色一致。
+const noticeButtonColor = '#7E84F7';
+
 interface Button {
   label: string;
   accessibilityLabel?: string;
@@ -81,12 +84,15 @@ export function AppNotices({ children }: React.PropsWithChildren) {
   }), [publish, remove]);
   return <Context.Provider value={context}>
     <View style={{ flex: 1 }}>{children}
-      {visible && <NoticeView notice={visible.notice} choose={button => {
-        const current = entries.current.find(entry => blocks(entry.notice)) ?? entries.current[0];
-        if (current !== visible) return;
-        afterDismiss.current = button?.action;
-        remove(visible.id);
-      }} />}
+      {/* 常驻宿主接收键盘事件，提示在键盘已展开时也能按可见高度布局。 */}
+      <KeyboardAvoidingView pointerEvents="box-none" behavior="padding" style={[StyleSheet.absoluteFill, { zIndex: 1000 }]}>
+        {visible && <NoticeView notice={visible.notice} choose={button => {
+          const current = entries.current.find(entry => blocks(entry.notice)) ?? entries.current[0];
+          if (current !== visible) return;
+          afterDismiss.current = button?.action;
+          remove(visible.id);
+        }} />}
+      </KeyboardAvoidingView>
     </View>
   </Context.Provider>;
 }
@@ -96,16 +102,15 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
   const { width, fontScale } = useWindowDimensions();
   const blocking = blocks(notice);
   const position = notice.position ?? (notice.cancel ? 'center' : 'top');
-  const banner = (notice.layout ?? (position === 'center' || notice.cancel ? 'card' : 'banner')) === 'banner';
+  const banner = !notice.cancel && (notice.layout ?? (position === 'center' ? 'card' : 'banner')) === 'banner';
   const compact = width / Math.max(1, fontScale) < 320;
   const theme = notice.theme;
   const primary = notice.primary ?? { label: '知道了' };
-  const overlay = <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    pointerEvents={blocking ? 'auto' : 'box-none'} style={[StyleSheet.absoluteFill, {
-      zIndex: 1000, elevation: 10, paddingHorizontal: 16, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8,
+  const overlay = <View pointerEvents={blocking ? 'auto' : 'box-none'} style={{
+      flex: 1, paddingHorizontal: 16, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8,
       justifyContent: position === 'center' ? 'center' : position === 'bottom' ? 'flex-end' : 'flex-start',
       backgroundColor: (notice.dimmed ?? Boolean(notice.cancel)) ? 'rgba(0,0,0,0.45)' : 'transparent',
-    }]}>
+    }}>
     <View accessibilityRole="alert" style={{ backgroundColor: theme.surface, borderColor: theme.border,
       borderWidth: 1, borderRadius: 14, padding: 14, maxHeight: '100%', maxWidth: 520, width: '100%', alignSelf: 'center',
       flexDirection: banner && !compact ? 'row' : 'column', alignItems: 'center' }}>
@@ -113,15 +118,43 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
         {notice.title ? <Text style={{ color: theme.text, fontWeight: 'bold' }}>{notice.title}</Text> : null}
         <Text style={{ color: theme.text }}>{notice.message}</Text>
       </ScrollView>
-      <View style={{ flexDirection: compact ? 'column' : 'row', alignSelf: notice.cancel ? 'stretch' : 'flex-end', marginLeft: banner && !compact ? 'auto' : 0 }}>
-        {[...(notice.cancel ? [notice.cancel] : []), primary].map((button, index) =>
-          <Pressable key={index} accessibilityRole="button" accessibilityLabel={button.accessibilityLabel} onPress={() => choose(button)}
-            style={{ flexGrow: notice.cancel ? 1 : 0, flexBasis: notice.cancel && !compact ? 0 : 'auto', padding: 8, minHeight: 44, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: theme.accentText }}>{button.label}</Text>
-          </Pressable>)}
-      </View>
+      <NoticeButtons key={JSON.stringify([width, fontScale, notice.cancel?.label, primary.label])}
+        cancel={notice.cancel} primary={primary} choose={choose} inline={banner && !compact} />
     </View>
-  </KeyboardAvoidingView>;
+  </View>;
   // Android dispatches back to the modal before the underlying business screen.
-  return blocking ? <Modal transparent visible onRequestClose={() => choose(notice.cancel)}>{overlay}</Modal> : overlay;
+  return blocking ? <Modal transparent visible onRequestClose={() => choose(notice.cancel)}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      {overlay}
+    </KeyboardAvoidingView>
+  </Modal> : overlay;
+}
+
+function NoticeButtons({ cancel, primary, choose, inline }: {
+  cancel?: Button; primary: Button; choose(button: Button): void; inline: boolean;
+}) {
+  const [rowWidth, setRowWidth] = useState(0);
+  const [cancelWidth, setCancelWidth] = useState(0);
+  const [primaryWidth, setPrimaryWidth] = useState(0);
+  const buttonPadding = 8;
+  const stacked = cancel && rowWidth > 0 && Math.max(cancelWidth, primaryWidth) + 2 * buttonPadding > rowWidth / 2;
+  return <View onLayout={cancel ? event => setRowWidth(event.nativeEvent.layout.width) : undefined}
+    style={{ flexDirection: stacked ? 'column' : 'row', alignSelf: cancel ? 'stretch' : 'flex-end',
+      marginLeft: inline ? 'auto' : 0 }}>
+    {cancel && (
+      // 独立测量完整标签，临时窗口宽度和当前按钮排列不会锁定下一次布局。
+      <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+        style={{ position: 'absolute', left: 0, right: 0, opacity: 0, alignItems: 'flex-start' }}>
+        <Text onLayout={event => setCancelWidth(event.nativeEvent.layout.width)}>{cancel.label}</Text>
+        <Text onLayout={event => setPrimaryWidth(event.nativeEvent.layout.width)}>{primary.label}</Text>
+      </View>
+    )}
+    {(cancel ? [cancel, primary] : [primary]).map((button, index) =>
+      <Pressable key={index} accessibilityRole="button" accessibilityLabel={button.accessibilityLabel}
+        onPress={() => choose(button)}
+        style={{ flexGrow: cancel ? 1 : 0, flexBasis: cancel && !stacked ? 0 : 'auto', padding: buttonPadding,
+          minHeight: 44, justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ color: noticeButtonColor, textAlign: 'center' }}>{button.label}</Text>
+      </Pressable>)}
+  </View>;
 }
