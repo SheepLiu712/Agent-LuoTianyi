@@ -3,6 +3,9 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleShee
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AppTheme } from '../../shared/ui/theme';
 
+// 与聊天输入栏 image_button_activate.png 的主色一致。
+const noticeButtonColor = '#7E84F7';
+
 interface Button {
   label: string;
   accessibilityLabel?: string;
@@ -116,7 +119,7 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
         <Text style={{ color: theme.text }}>{notice.message}</Text>
       </ScrollView>
       <NoticeButtons key={JSON.stringify([width, fontScale, notice.cancel?.label, primary.label])}
-        cancel={notice.cancel} primary={primary} theme={theme} choose={choose} inline={banner && !compact} />
+        cancel={notice.cancel} primary={primary} choose={choose} inline={banner && !compact} />
     </View>
   </View>;
   // Android dispatches back to the modal before the underlying business screen.
@@ -127,8 +130,8 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
   </Modal> : overlay;
 }
 
-function NoticeButtons({ cancel, primary, theme, choose, inline }: {
-  cancel?: Button; primary: Button; theme: AppTheme; choose(button: Button): void; inline: boolean;
+function NoticeButtons({ cancel, primary, choose, inline }: {
+  cancel?: Button; primary: Button; choose(button: Button): void; inline: boolean;
 }) {
   const [stacked, setStacked] = useState(false);
   return <View style={{ flexDirection: stacked ? 'column' : 'row', alignSelf: cancel ? 'stretch' : 'flex-end',
@@ -138,7 +141,7 @@ function NoticeButtons({ cancel, primary, theme, choose, inline }: {
         onPress={() => choose(button)}
         style={{ flexGrow: cancel ? 1 : 0, flexBasis: cancel && !stacked ? 0 : 'auto', padding: 8,
           minHeight: 44, justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ color: theme.accentText, textAlign: 'center' }}
+        <Text style={{ color: noticeButtonColor, textAlign: 'center' }}
           onTextLayout={cancel && !stacked ? event => {
             if (event.nativeEvent.lines.length > 1) setStacked(true);
           } : undefined}>{button.label}</Text>
