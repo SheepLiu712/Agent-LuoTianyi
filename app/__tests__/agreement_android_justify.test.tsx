@@ -24,7 +24,6 @@ const RUNS: [string, boolean][] = [
   ['重点', true],
   ['内容。', false],
 ];
-const RUNS_NO_BOLD: [string, boolean][] = [['第一条 重点内容。', false]];
 
 function flattenStyle(style: unknown): Record<string, unknown> {
   if (Array.isArray(style)) {
@@ -90,14 +89,8 @@ function emitSecond(tree: ReactTestRenderer, lines: { text: string; width: numbe
 
 function runFullPass(tree: ReactTestRenderer) {
   layout(tree, 100);
-  emitFirst(tree, [
-    { text: '第一条 ', width: 40 },
-    { text: '重点内容。', width: 60 },
-  ]);
-  emitSecond(tree, [
-    { text: '第一条\n', width: 30 },
-    { text: '重点内容。', width: 60 },
-  ]);
+  emitFirst(tree, [{ text: '第一条 ', width: 40 }, { text: '重点内容。', width: 60 }]);
+  emitSecond(tree, [{ text: '第一条\n', width: 30 }, { text: '重点内容。', width: 60 }]);
 }
 
 beforeEach(() => {
@@ -106,62 +99,31 @@ beforeEach(() => {
 });
 
 describe('AndroidJustifiedText（模拟测量事件，不验证原生绘制）', () => {
-  it('宽度未知时保留原文和系统 justify 占位，不启动测量', () => {
+  it.each([[1, 35], [2, 17.5]])('fontScale=%s 时按可见宽度计算，保留原文、粗体和统一断行策略', (fontScale, spacing) => {
+    mockWindow.fontScale = fontScale;
     const tree = renderComponent();
     const placeholder = byTestId(tree, 'agreement-justify-placeholder');
     expect(textContent(placeholder)).toBe('第一条 重点内容。');
+    expect(placeholder.props.textBreakStrategy).toBe('simple');
     expect(flattenStyle(placeholder.props.style)).toMatchObject({
       fontSize: 16, lineHeight: 24, color: '#111111', textAlign: 'justify',
     });
     expect(allByTestId(tree, 'agreement-justify-measure-first')).toHaveLength(0);
-  });
-
-  it('占位、自然测量、可见宽度测量和最终显示统一使用 simple 断行', () => {
-    const tree = renderComponent();
-    expect(byTestId(tree, 'agreement-justify-placeholder').props.textBreakStrategy).toBe('simple');
     layout(tree, 100);
     expect(byTestId(tree, 'agreement-justify-measure-first').props.textBreakStrategy).toBe('simple');
-    emitFirst(tree, [
-      { text: '第一条 ', width: 40 }, { text: '重点内容。', width: 60 },
-    ]);
-    expect(byTestId(tree, 'agreement-justify-measure-second').props.textBreakStrategy).toBe('simple');
-    emitSecond(tree, [
-      { text: '第一条\n', width: 30 }, { text: '重点内容。', width: 60 },
-    ]);
-    expect(byTestId(tree, 'agreement-justify-final').props.textBreakStrategy).toBe('simple');
-  });
-
-  it('有折行空格时只在第二遍测量文本中裁剪，显示占位仍保留原文', () => {
-    const tree = renderComponent();
-    layout(tree, 100);
-    emitFirst(tree, [
-      { text: '第一条 ', width: 40 }, { text: '重点内容。', width: 60 },
-    ]);
-    expect(textContent(byTestId(tree, 'agreement-justify-measure-second'))).toBe('第一条\n重点内容。');
+    emitFirst(tree, [{ text: '第一条 ', width: 40 }, { text: '重点内容。', width: 60 }]);
+    const second = byTestId(tree, 'agreement-justify-measure-second');
+    expect(second.props.textBreakStrategy).toBe('simple');
+    expect(textContent(second)).toBe('第一条\n重点内容。');
     expect(textContent(byTestId(tree, 'agreement-justify-placeholder'))).toBe('第一条 重点内容。');
     expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
-  });
-
-  it('没有非末行尾部空格时只测一遍，末行的尾部空格不触发重测', () => {
-    const tree = renderComponent([['甲乙丙丁戊末行  ', false]]);
-    layout(tree, 100);
-    emitFirst(tree, [
-      { text: '甲乙丙丁戊', width: 50 }, { text: '末行  ', width: 30 },
-    ]);
+    emitSecond(tree, [{ text: '第一条\n', width: 30 }, { text: '重点内容。', width: 60 }]);
     const final = byTestId(tree, 'agreement-justify-final');
-    expect(textContent(final)).toBe('甲乙丙丁戊末行  ');
-    expect(textWithStyle(final, 'letterSpacing', 12.5)).toBe('甲乙丙丁');
-    expect(textWithStyle(final, 'letterSpacing', undefined)).toBe('戊末行  ');
-    expect(allByTestId(tree, 'agreement-justify-measure-second')).toHaveLength(0);
-  });
-
-  it('使用第二遍的可见宽度计算间距，最后可见字符和尾部空格不加间距', () => {
-    const tree = renderComponent();
-    runFullPass(tree);
-    const final = byTestId(tree, 'agreement-justify-final');
+    expect(final.props.textBreakStrategy).toBe('simple');
     expect(textContent(final)).toBe('第一条 重点内容。');
-    expect(textWithStyle(final, 'letterSpacing', 35)).toBe('第一');
+    expect(textWithStyle(final, 'letterSpacing', spacing)).toBe('第一');
     expect(textWithStyle(final, 'letterSpacing', undefined)).toBe('条 重点内容。');
+    expect(textWithStyle(final, 'fontWeight', 'bold')).toBe('重点');
     expect(flattenStyle(final.props.style)).toMatchObject({
       fontSize: 16, lineHeight: 24, color: '#111111', textAlign: 'justify', width: 100,
     });
@@ -172,7 +134,7 @@ describe('AndroidJustifiedText（模拟测量事件，不验证原生绘制）',
   it.each([
     ['甲  乙', '甲  ', '甲', '乙', 10, 0],
     ['hello  world', 'hello  ', 'hello', 'world', 50, 12.5],
-  ])('最终 Text 完整保留 %s 的连续空格', (source, first, visible, last, width, spacing) => {
+  ])('最终显示完整保留 %s 的连续空格', (source, first, visible, last, width, spacing) => {
     const tree = renderComponent([[source, false]]);
     layout(tree, 100);
     emitFirst(tree, [{ text: first, width: width + 20 }, { text: last, width: 50 }]);
@@ -180,59 +142,54 @@ describe('AndroidJustifiedText（模拟测量事件，不验证原生绘制）',
     const displayed = byTestId(tree, spacing > 0 ? 'agreement-justify-final' : 'agreement-justify-placeholder');
     expect(textContent(displayed)).toBe(source);
     expect(textWithStyle(displayed, 'letterSpacing', undefined)).toContain('  ');
-    if (spacing > 0) {
-      expect(textWithStyle(displayed, 'letterSpacing', spacing)).toBe('hell');
-    } else {
-      expect(textWithStyle(displayed, 'letterSpacing', undefined)).toBe(source);
-    }
+    expect(textWithStyle(displayed, 'letterSpacing', spacing || undefined)).toBe(spacing ? 'hell' : source);
   });
 
-  it('自然折行内有分隔空格时保留默认排版、连续空格和跨片段粗体', () => {
-    const runs: [string, boolean][] = [
-      ['中文 ', false], ['API ', true], [' 重点', false], ['内容', true],
-    ];
+  it.each([
+    {
+      name: '纯英文双空格',
+      runs: [['hello  world  office', false]] as [string, boolean][],
+      lines: [{ text: 'hello  world  ', width: 95 }, { text: 'office', width: 40 }],
+      bold: '',
+    },
+    {
+      name: '混排空格跨粗体片段',
+      runs: [['中文 ', false], ['API ', true], [' 重点', false], ['内容', true]] as [string, boolean][],
+      lines: [{ text: '中文 API  ', width: 80 }, { text: '重点内容', width: 40 }],
+      bold: 'API 内容',
+    },
+  ])('$name 的非末行有词间空格时保留默认排版', ({ runs, lines, bold }) => {
     const tree = renderComponent(runs);
     layout(tree, 100);
-    emitFirst(tree, [{ text: '中文 API  ', width: 80 }, { text: '重点内容', width: 40 }]);
+    emitFirst(tree, lines);
+    const source = runs.map(([text]) => text).join('');
     const fallback = byTestId(tree, 'agreement-justify-placeholder');
-    expect(textContent(fallback)).toBe('中文 API  重点内容');
-    expect(textWithStyle(fallback, 'fontWeight', 'bold')).toBe('API 内容');
+    expect(textContent(fallback)).toBe(source);
+    expect(textWithStyle(fallback, 'fontWeight', 'bold')).toBe(bold);
+    expect(textWithStyle(fallback, 'letterSpacing', undefined)).toBe(source);
     expect(flattenStyle(fallback.props.style).textAlign).toBe('justify');
     expect(allByTestId(tree, 'agreement-justify-measure-second')).toHaveLength(0);
     expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
   });
 
-  it('同段英文行使用默认对齐，后续中文行补齐且不插入软换行字符', () => {
+  it('同段只补齐不足宽的中文行，默认英文行、满宽行和带空格末行保持自然排版', () => {
     const runs: [string, boolean][] = [
-      ['英文 ', false], ['office ', true], ['甲乙丙丁末行', false],
+      ['英文 ', false], ['office ', true], ['甲乙丙丁戊己庚辛末行 API  ', false],
     ];
     const tree = renderComponent(runs);
     layout(tree, 100);
     expect(flattenStyle(byTestId(tree, 'agreement-justify-measure-first').props.style).textAlign).toBe('justify');
     emitFirst(tree, [
-      { text: '英文 office ', width: 80 },
-      { text: '甲乙丙丁', width: 64 },
-      { text: '末行', width: 32 },
+      { text: '英文 office ', width: 80 }, { text: '甲乙丙丁', width: 100 },
+      { text: '戊己庚辛', width: 64 }, { text: '末行 API  ', width: 60 },
     ]);
     const final = byTestId(tree, 'agreement-justify-final');
-    expect(textContent(final)).toBe('英文 office 甲乙丙丁末行');
-    expect(textWithStyle(final, 'letterSpacing', 12)).toBe('甲乙丙');
-    expect(textWithStyle(final, 'letterSpacing', undefined)).toBe('英文 office 丁末行');
+    expect(textContent(final)).toBe('英文 office 甲乙丙丁戊己庚辛末行 API  ');
+    expect(textWithStyle(final, 'letterSpacing', 12)).toBe('戊己庚');
+    expect(textWithStyle(final, 'letterSpacing', undefined)).toBe('英文 office 甲乙丙丁辛末行 API  ');
     expect(textWithStyle(final, 'fontWeight', 'bold')).toBe('office ');
     expect(flattenStyle(final.props.style)).toMatchObject({ textAlign: 'justify', width: 100 });
     expect(allByTestId(tree, 'agreement-justify-measure-second')).toHaveLength(0);
-  });
-
-  it('同段已满宽的中文行不调整，只给仍不足宽的行加字间距', () => {
-    const tree = renderComponent([['甲乙丙丁戊己庚辛末行', false]]);
-    layout(tree, 100);
-    emitFirst(tree, [
-      { text: '甲乙丙丁', width: 100 }, { text: '戊己庚辛', width: 64 }, { text: '末行', width: 32 },
-    ]);
-    const final = byTestId(tree, 'agreement-justify-final');
-    expect(textContent(final)).toBe('甲乙丙丁戊己庚辛末行');
-    expect(textWithStyle(final, 'letterSpacing', 12)).toBe('戊己庚');
-    expect(textWithStyle(final, 'letterSpacing', undefined)).toBe('甲乙丙丁辛末行');
   });
 
   it('补充平面汉字在最后可见字符处分割后保持完整', () => {
@@ -245,43 +202,16 @@ describe('AndroidJustifiedText（模拟测量事件，不验证原生绘制）',
     expect(textWithStyle(final, 'letterSpacing', undefined)).toBe('𠀀末行');
   });
 
-  it('末行的局部粗体保持 bold 且不被拉伸', () => {
-    const tree = renderComponent();
-    runFullPass(tree);
-    const final = byTestId(tree, 'agreement-justify-final');
-    expect(textWithStyle(final, 'fontWeight', 'bold')).toBe('重点');
-    expect(textWithStyle(final, 'letterSpacing', undefined)).toContain('重点内容。');
-  });
-
   it('文本不变但粗体值变化时重新测量', () => {
     const tree = renderComponent();
     runFullPass(tree);
     act(() => {
       tree.update(
-        <AndroidJustifiedText runs={RUNS_NO_BOLD} fontSize={16} lineHeight={24} color="#111111" />,
+        <AndroidJustifiedText runs={[['第一条 重点内容。', false]]} fontSize={16} lineHeight={24} color="#111111" />,
       );
     });
     expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
     expect(allByTestId(tree, 'agreement-justify-measure-first')).toHaveLength(1);
-  });
-
-  it('letterSpacing 按系统字号缩放折算，空格宽度不再次缩放', () => {
-    mockWindow.fontScale = 2;
-    const tree = renderComponent();
-    runFullPass(tree);
-    const final = byTestId(tree, 'agreement-justify-final');
-    expect(textWithStyle(final, 'letterSpacing', 17.5)).toBe('第一');
-    expect(flattenStyle(final.props.style).width).toBe(100);
-  });
-
-  it('单行保留自然排版和原文空格', () => {
-    const tree = renderComponent([['短句  ', false]]);
-    layout(tree, 100);
-    emitFirst(tree, [{ text: '短句  ', width: 50 }]);
-    const placeholder = byTestId(tree, 'agreement-justify-placeholder');
-    expect(textContent(placeholder)).toBe('短句  ');
-    expect(textWithStyle(placeholder, 'letterSpacing', undefined)).toBe('短句  ');
-    expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
   });
 
   it('第一遍无法映射回原文时保留原文占位', () => {
@@ -332,8 +262,7 @@ describe('AndroidJustifiedText（模拟测量事件，不验证原生绘制）',
     const tree = renderComponent([['甲乙丙丁末行', false]]);
     layout(tree, 64);
     emitFirst(tree, [{ text: '甲乙丙丁', width: 64 }, { text: '末行', width: 32 }]);
-    const fallback = byTestId(tree, 'agreement-justify-placeholder');
-    expect(textContent(fallback)).toBe('甲乙丙丁末行');
+    expect(textContent(byTestId(tree, 'agreement-justify-placeholder'))).toBe('甲乙丙丁末行');
     expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
     expect(allByTestId(tree, 'agreement-justify-measure-second')).toHaveLength(0);
   });
@@ -346,18 +275,6 @@ describe('AndroidJustifiedText（模拟测量事件，不验证原生绘制）',
     const final = byTestId(tree, 'agreement-justify-final');
     expect(textWithStyle(final, 'letterSpacing', 5)).toBe('第一');
     expect(textContent(final)).toBe('第一条 重点内容。');
-  });
-
-  it('英文非末行有词间空格时直接回退，保留双空格和原文', () => {
-    const tree = renderComponent([['hello  world  office', false]]);
-    layout(tree, 100);
-    emitFirst(tree, [{ text: 'hello  world  ', width: 95 }, { text: 'office', width: 40 }]);
-    const fallback = byTestId(tree, 'agreement-justify-placeholder');
-    expect(textContent(fallback)).toBe('hello  world  office');
-    expect(flattenStyle(fallback.props.style).textAlign).toBe('justify');
-    expect(textWithStyle(fallback, 'letterSpacing', undefined)).toBe('hello  world  office');
-    expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
-    expect(allByTestId(tree, 'agreement-justify-measure-second')).toHaveLength(0);
   });
 
   it('已复现的连字候选词混排样例直接回退，保留原文和粗体', () => {
@@ -378,15 +295,6 @@ describe('AndroidJustifiedText（模拟测量事件，不验证原生绘制）',
     expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
     layout(tree, 200);
     expect(allByTestId(tree, 'agreement-justify-measure-first')).toHaveLength(1);
-  });
-
-  it('仅末行有分隔空格不影响前面的中文行补齐', () => {
-    const tree = renderComponent([['甲乙丙丁末行 API', false]]);
-    layout(tree, 100);
-    emitFirst(tree, [{ text: '甲乙丙丁', width: 64 }, { text: '末行 API', width: 60 }]);
-    const final = byTestId(tree, 'agreement-justify-final');
-    expect(textWithStyle(final, 'letterSpacing', 12)).toBe('甲乙丙');
-    expect(textContent(final)).toBe('甲乙丙丁末行 API');
   });
 
   it('宽度变化后忽略旧一轮的测量回调', () => {
@@ -450,14 +358,17 @@ describe('RichAgreement 的平台和显式换行边界', () => {
     roots.forEach((root) => {
       act(() => { root.props.onLayout({ nativeEvent: { layout: { width: 100 } } }); });
     });
-    const measures = allByTestId(tree, 'agreement-justify-measure-first');
-    measures.forEach((measure) => {
+    allByTestId(tree, 'agreement-justify-measure-first').forEach((measure) => {
       act(() => { measure.props.onTextLayout({
         nativeEvent: { lines: [{ text: textContent(measure), width: 40 }] },
       }); });
     });
     expect(allByTestId(tree, 'agreement-justify-final')).toHaveLength(0);
-    expect(allByTestId(tree, 'agreement-justify-placeholder').map(textContent)).toEqual(['甲  ', '乙']);
+    const placeholders = allByTestId(tree, 'agreement-justify-placeholder');
+    expect(placeholders.map(textContent)).toEqual(['甲  ', '乙']);
+    placeholders.forEach((node) => {
+      expect(textWithStyle(node, 'letterSpacing', undefined)).toBe(textContent(node));
+    });
     const emptyLines = tree.root.findAllByType(TEXT).filter((node) => node.children.length === 0);
     expect(emptyLines).toHaveLength(1);
     expect(flattenStyle(emptyLines[0].props.style).lineHeight).toBe(24);
