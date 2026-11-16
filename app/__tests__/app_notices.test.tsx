@@ -1,12 +1,12 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Modal, Pressable, Text } from 'react-native';
+import { Modal, Pressable, Text, useWindowDimensions } from 'react-native';
 import { AppNotices, usePageNotices } from '../shell/notices/AppNotices';
 import { THEMES } from '../shared/ui/theme';
 
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 jest.mock('react-native', () => ({
-  useWindowDimensions: () => ({ width: 390, fontScale: 1 }), Platform: { OS: 'android' },
+  useWindowDimensions: jest.fn(() => ({ width: 390, fontScale: 1 })), Platform: { OS: 'android' },
   KeyboardAvoidingView: 'KeyboardAvoidingView', View: 'View', ScrollView: 'ScrollView',
   Modal: 'Modal', Pressable: 'Pressable', Text: 'Text', StyleSheet: {},
 }));
@@ -62,4 +62,30 @@ it.each([
   expect(root.root.findAllByType(Pressable).map(button => button.findByType(Text).props.children))
     .toEqual(twoButtons ? ['取消', '继续'] : ['继续']);
   act(() => root.unmount());
+});
+
+it('窄屏大字号下两个按钮先等宽同行；文字实际折行才改为上下排列', () => {
+  jest.mocked(useWindowDimensions).mockReturnValue({ width: 286, height: 629, scale: 3.5, fontScale: 1.5 });
+  function Page() {
+    const show = usePageNotices('聊天');
+    React.useEffect(() => show({ message: '权限', theme: THEMES.light,
+      cancel: { label: '取消' }, primary: { label: '去设置' } }), [show]);
+    return null;
+  }
+  let root!: ReactTestRenderer;
+  try {
+    act(() => { root = create(<AppNotices><Page /></AppNotices>); });
+    const buttons = () => root.root.findAllByType(Pressable);
+    const direction = () => buttons()[0].parent!.props.style.flexDirection;
+    expect(direction()).toBe('row');
+    expect(buttons().map(button => button.props.style.flexBasis)).toEqual([0, 0]);
+    const label = buttons()[1].findByType(Text);
+    act(() => label.props.onTextLayout({ nativeEvent: { lines: [{}] } }));
+    expect(direction()).toBe('row');
+    act(() => label.props.onTextLayout({ nativeEvent: { lines: [{}, {}] } }));
+    expect(direction()).toBe('column');
+  } finally {
+    act(() => root?.unmount());
+    jest.mocked(useWindowDimensions).mockReturnValue({ width: 390, height: 800, scale: 1, fontScale: 1 });
+  }
 });

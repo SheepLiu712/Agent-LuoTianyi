@@ -115,13 +115,8 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
         {notice.title ? <Text style={{ color: theme.text, fontWeight: 'bold' }}>{notice.title}</Text> : null}
         <Text style={{ color: theme.text }}>{notice.message}</Text>
       </ScrollView>
-      <View style={{ flexDirection: compact ? 'column' : 'row', alignSelf: notice.cancel ? 'stretch' : 'flex-end', marginLeft: banner && !compact ? 'auto' : 0 }}>
-        {[...(notice.cancel ? [notice.cancel] : []), primary].map((button, index) =>
-          <Pressable key={index} accessibilityRole="button" accessibilityLabel={button.accessibilityLabel} onPress={() => choose(button)}
-            style={{ flexGrow: notice.cancel ? 1 : 0, flexBasis: notice.cancel && !compact ? 0 : 'auto', padding: 8, minHeight: 44, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: theme.accentText }}>{button.label}</Text>
-          </Pressable>)}
-      </View>
+      <NoticeButtons key={JSON.stringify([width, fontScale, notice.cancel?.label, primary.label])}
+        cancel={notice.cancel} primary={primary} theme={theme} choose={choose} inline={banner && !compact} />
     </View>
   </View>;
   // Android dispatches back to the modal before the underlying business screen.
@@ -130,4 +125,23 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
       {overlay}
     </KeyboardAvoidingView>
   </Modal> : overlay;
+}
+
+function NoticeButtons({ cancel, primary, theme, choose, inline }: {
+  cancel?: Button; primary: Button; theme: AppTheme; choose(button: Button): void; inline: boolean;
+}) {
+  const [stacked, setStacked] = useState(false);
+  return <View style={{ flexDirection: stacked ? 'column' : 'row', alignSelf: cancel ? 'stretch' : 'flex-end',
+    marginLeft: inline ? 'auto' : 0 }}>
+    {(cancel ? [cancel, primary] : [primary]).map((button, index) =>
+      <Pressable key={index} accessibilityRole="button" accessibilityLabel={button.accessibilityLabel}
+        onPress={() => choose(button)}
+        style={{ flexGrow: cancel ? 1 : 0, flexBasis: cancel && !stacked ? 0 : 'auto', padding: 8,
+          minHeight: 44, justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ color: theme.accentText, textAlign: 'center' }}
+          onTextLayout={cancel && !stacked ? event => {
+            if (event.nativeEvent.lines.length > 1) setStacked(true);
+          } : undefined}>{button.label}</Text>
+      </Pressable>)}
+  </View>;
 }
