@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import struct
 import time
 from collections import deque
@@ -13,6 +14,7 @@ from dataclasses import asdict, dataclass
 from uuid import UUID, uuid4
 
 from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 
 from src.domain.call.omni import (
     AudioFrame,
@@ -97,6 +99,7 @@ class QwenOmniSession:
         self._close_task = None
         self._closed = False
         self._error = None
+        self._setup_provider_code = None
         self._ready = asyncio.Event()
         self._events = asyncio.Queue(config.event_queue_size)
         self._available = asyncio.Event()
@@ -138,12 +141,26 @@ class QwenOmniSession:
             remaining = 0.0
         except asyncio.CancelledError:
             remaining = None
+        outcome = (
+            "cancelled"
+            if isinstance(error, asyncio.CancelledError)
+            else "timeout" if isinstance(error, asyncio.TimeoutError) else "failed"
+        )
+        status = None
+        if isinstance(error, InvalidStatus):
+            response = vars(error).get("response")
+            candidate = vars(response).get("status_code") if hasattr(response, "__dict__") else None
+            if type(candidate) is int and 100 <= candidate <= 599:
+                status = candidate
         get_logger(__name__).warning(
-            "Realtime setup failed call=%s phase=%s type=%s remaining=%s",
+            "Realtime setup failed call=%s phase=%s type=%s remaining=%s outcome=%s provider_code=%s http_status=%s",
             self._call_id,
             phase,
             type(error).__name__,
             remaining,
+            outcome,
+            self._setup_provider_code,
+            status,
         )
 
     async def _initialize(self, instructions):
@@ -284,6 +301,9 @@ class QwenOmniSession:
         kind = event["type"]
         if kind == "error":
             code = event.get("error", {}).get("code", "unknown")
+            self._setup_provider_code = (
+                code if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,96}", code) else None
+            )
             raise RuntimeError(f"Qwen protocol error: {code}")
         if kind == "session.updated":
             self._ready.set()

@@ -2,11 +2,15 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 from support.aliyun_realtime_speech import FakeAliyunConnector, FakeAliyunWebSocket
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.stage_manager import CallConversationStore
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
@@ -195,7 +199,10 @@ def _provider(socket, connector=None, close_timeout=5.0):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("close_failure", [False, True], ids=["slow-close", "failed-close"])
-async def test_auth_failure_at_four_seconds_keeps_reason_and_cleanup_ownership(monkeypatch, close_failure):
+async def test_auth_failure_at_four_seconds_keeps_reason_and_cleanup_ownership(
+    monkeypatch, close_failure, caplog, capture_project_log
+):
+    capture_project_log("src.infrastructure.models.realtime_speech.omni")
     loop, clock, began = _controlled_clock(monkeypatch)
     socket = _GateSocket(close_failure=close_failure, block_close=not close_failure)
     manager, repository, outputs = _manager_for(_provider(socket, close_timeout=60), loop, clock, began, 30.0)
@@ -203,7 +210,9 @@ async def test_auth_failure_at_four_seconds_keeps_reason_and_cleanup_ownership(m
     try:
         await socket.send_started.wait()
         clock["now"] = began + 4.0
-        await socket.server_event({"type": "error", "error": {"code": "invalid_api_key"}})
+        await socket.server_event(
+            {"type": "error", "error": {"code": "invalid_api_key", "message": "sensitive-auth-body"}}
+        )
         await _flush_ready_tasks()
         await socket.close_started.wait()
         terminal = next(item for item in outputs if isinstance(item, CallTerminated))
@@ -217,6 +226,11 @@ async def test_auth_failure_at_four_seconds_keeps_reason_and_cleanup_ownership(m
             reasons.append(str(cause))
             cause = cause.__cause__
         assert any("invalid_api_key" in reason for reason in reasons)
+        diagnostic = next(record for record in caplog.records if record.funcName == "_log_setup_failure")
+        assert "phase=session_ready" in diagnostic.getMessage()
+        assert "outcome=failed" in diagnostic.getMessage()
+        assert "provider_code=invalid_api_key" in diagnostic.getMessage()
+        assert "sensitive-auth-body" not in diagnostic.getMessage()
         with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
             await manager.begin_user_data_reset("user")
         clock["now"] = began + 31.0
@@ -309,3 +323,80 @@ async def test_user_cancel_waits_for_late_connected_socket_and_closes_once(monke
         if stop is not None:
             await stop
         await manager.close()
+
+
+async def _failed_owned_open(socket, connector, remaining):
+    """直接factory消费者显式持有session；异常/取消都由本地owner清理。"""
+    owned = []
+    try:
+        return await _provider(socket, connector).open(
+            uuid4(), "background", remaining_setup_time=remaining, on_session_created=owned.append
+        )
+    finally:
+        for session in owned:
+            await session.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, True, 700], ids=["http401", "bool-rejected", "range-rejected"])
+async def test_connect_rejection_diagnostic_has_only_safe_http_status(caplog, capture_project_log, status):
+    capture_project_log("src.infrastructure.models.realtime_speech.omni")
+    response = Response(status, "sensitive-reason", Headers({"Authorization": "sensitive-header"}), b"sensitive-body")
+    error = InvalidStatus(response)
+
+    async def connector(_url, **_options):
+        raise error
+
+    with pytest.raises(InvalidStatus) as failed:
+        await _failed_owned_open(_GateSocket(), connector, lambda: 30.0)
+    assert failed.value is error
+    line = next(record.getMessage() for record in caplog.records if record.funcName == "_log_setup_failure")
+    assert "phase=connect" in line and "outcome=failed" in line
+    assert f"http_status={401 if type(status) is int and status == 401 else None}" in line
+    assert "sensitive-" not in line and "provider.invalid" not in line
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["not safe\nsensitive-token", "x" * 97, {"token": "sensitive-token"}])
+async def test_provider_freeform_error_is_not_in_new_structured_diagnostic(caplog, capture_project_log, code):
+    capture_project_log("src.infrastructure.models.realtime_speech.omni")
+    socket = _GateSocket()
+
+    async def connector(_url, **_options):
+        await socket.server_event({"type": "error", "error": {"code": code, "message": "sensitive-body"}})
+        return socket
+
+    with pytest.raises(RuntimeError, match="session failed"):
+        await _failed_owned_open(socket, connector, lambda: 30.0)
+    line = next(record.getMessage() for record in caplog.records if record.funcName == "_log_setup_failure")
+    assert "phase=session_ready" in line and "outcome=failed" in line
+    assert "provider_code=None" in line
+    assert "sensitive-" not in line and "x" * 97 not in line
+    assert socket.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True], ids=["timeout", "cancelled"])
+async def test_connect_timeout_or_cancel_diagnostic_does_not_replace_original_error(
+    caplog, capture_project_log, cancelled
+):
+    capture_project_log("src.infrastructure.models.realtime_speech.omni")
+    state = {"expired": False}
+    error = asyncio.CancelledError("sensitive-cancel") if cancelled else asyncio.TimeoutError("sensitive-timeout")
+
+    def remaining():
+        if state["expired"]:
+            raise asyncio.TimeoutError("sensitive-clock")
+        return 30.0
+
+    async def connector(_url, **_options):
+        state["expired"] = True
+        raise error
+
+    with pytest.raises(type(error)) as failed:
+        await _failed_owned_open(_GateSocket(), connector, remaining)
+    assert failed.value is error
+    line = next(record.getMessage() for record in caplog.records if record.funcName == "_log_setup_failure")
+    assert f"outcome={'cancelled' if cancelled else 'timeout'}" in line
+    assert "phase=connect" in line and "remaining=0.0" in line
+    assert "sensitive-" not in line
