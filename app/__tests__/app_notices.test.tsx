@@ -79,10 +79,16 @@ it('窄屏大字号下两个按钮先等宽同行；文字实际折行才改为�
     const direction = () => buttons()[0].parent!.props.style.flexDirection;
     expect(direction()).toBe('row');
     expect(buttons().map(button => button.props.style.flexBasis)).toEqual([0, 0]);
-    const label = buttons()[1].findByType(Text);
-    act(() => label.props.onTextLayout({ nativeEvent: { lines: [{}] } }));
+    const measureRow = (width: number) => buttons()[0].parent!.props.onLayout({ nativeEvent: { layout: { width } } });
+    const label = root.root.findAllByType(Text).find(node => node.props.children === '去设置' && node.props.onLayout)!;
+    act(() => {
+      measureRow(60);
+      label.props.onLayout({ nativeEvent: { layout: { width: 63 } } });
+    });
+    expect(direction()).toBe('column');
+    act(() => measureRow(224));
     expect(direction()).toBe('row');
-    act(() => label.props.onTextLayout({ nativeEvent: { lines: [{}, {}] } }));
+    act(() => label.props.onLayout({ nativeEvent: { layout: { width: 108 } } }));
     expect(direction()).toBe('column');
   } finally {
     act(() => root?.unmount());

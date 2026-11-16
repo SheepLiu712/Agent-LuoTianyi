@@ -12,11 +12,11 @@ function NoticeExamples() {
   const [offset, setOffset] = useState(0);
   const [choice, setChoice] = useState('未选择');
   const theme = THEMES.light;
-  const showChoice = (blocking: boolean) => show({
+  const showChoice = (blocking: boolean, primaryLabel = '去设置') => show({
     title: '麦克风权限',
     message: '仍未获得麦克风权限，可前往系统设置为本应用开启麦克风权限。请确认以下选择。',
     layout: 'banner', theme, blocking,
-    primary: { label: '去设置', action: () => setChoice('已确认') },
+    primary: { label: primaryLabel, action: () => setChoice('已确认') },
     cancel: { label: '取消', action: () => setChoice('已取消') },
   });
   return <SafeAreaView style={{ flex: 1, paddingHorizontal: 12, backgroundColor: '#ffffff' }}>
@@ -29,6 +29,7 @@ function NoticeExamples() {
     <Text>{`点击 ${clicks}，滚动 ${offset}，${choice}`}</Text>
     <ScrollView style={{ flex: 1 }} scrollEventThrottle={32}
       onScroll={event => setOffset(Math.round(event.nativeEvent.contentOffset.y))}>
+      <Button title="长文案双按钮" onPress={() => showChoice(true, '打开系统设置并启用麦克风权限')} />
       {Array.from({ length: 80 }, (_, i) =>
         <Text key={i} style={{ paddingVertical: 12 }}>{`列表项 ${i + 1}`}</Text>)}
     </ScrollView>

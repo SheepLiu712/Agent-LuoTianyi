@@ -133,18 +133,28 @@ function NoticeView({ notice, choose }: { notice: Notice; choose(button?: Button
 function NoticeButtons({ cancel, primary, choose, inline }: {
   cancel?: Button; primary: Button; choose(button: Button): void; inline: boolean;
 }) {
-  const [stacked, setStacked] = useState(false);
-  return <View style={{ flexDirection: stacked ? 'column' : 'row', alignSelf: cancel ? 'stretch' : 'flex-end',
-    marginLeft: inline ? 'auto' : 0 }}>
+  const [rowWidth, setRowWidth] = useState(0);
+  const [cancelWidth, setCancelWidth] = useState(0);
+  const [primaryWidth, setPrimaryWidth] = useState(0);
+  const buttonPadding = 8;
+  const stacked = cancel && rowWidth > 0 && Math.max(cancelWidth, primaryWidth) + 2 * buttonPadding > rowWidth / 2;
+  return <View onLayout={cancel ? event => setRowWidth(event.nativeEvent.layout.width) : undefined}
+    style={{ flexDirection: stacked ? 'column' : 'row', alignSelf: cancel ? 'stretch' : 'flex-end',
+      marginLeft: inline ? 'auto' : 0 }}>
+    {cancel && (
+      // 独立测量完整标签，临时窗口宽度和当前按钮排列不会锁定下一次布局。
+      <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+        style={{ position: 'absolute', left: 0, right: 0, opacity: 0, alignItems: 'flex-start' }}>
+        <Text onLayout={event => setCancelWidth(event.nativeEvent.layout.width)}>{cancel.label}</Text>
+        <Text onLayout={event => setPrimaryWidth(event.nativeEvent.layout.width)}>{primary.label}</Text>
+      </View>
+    )}
     {(cancel ? [cancel, primary] : [primary]).map((button, index) =>
       <Pressable key={index} accessibilityRole="button" accessibilityLabel={button.accessibilityLabel}
         onPress={() => choose(button)}
-        style={{ flexGrow: cancel ? 1 : 0, flexBasis: cancel && !stacked ? 0 : 'auto', padding: 8,
+        style={{ flexGrow: cancel ? 1 : 0, flexBasis: cancel && !stacked ? 0 : 'auto', padding: buttonPadding,
           minHeight: 44, justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ color: noticeButtonColor, textAlign: 'center' }}
-          onTextLayout={cancel && !stacked ? event => {
-            if (event.nativeEvent.lines.length > 1) setStacked(true);
-          } : undefined}>{button.label}</Text>
+        <Text style={{ color: noticeButtonColor, textAlign: 'center' }}>{button.label}</Text>
       </Pressable>)}
   </View>;
 }
