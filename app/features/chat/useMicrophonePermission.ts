@@ -54,7 +54,12 @@ export function useMicrophonePermission(recorder: VoiceRecorderApi) {
     try {
       permission = await recorder.getPermission();
     } catch {
-      if (generation.current === beforeQuery && foreground.current) display(permissionMessages.error);
+      if (generation.current === beforeQuery && foreground.current) {
+        // 查询失败已给出本次操作的结果，在途申请仍由 Android 完成。
+        generation.current += 1;
+        dismissPermissionNotice(shown.current);
+        display(permissionMessages.error);
+      }
       return false;
     }
     if (generation.current !== beforeQuery || !foreground.current) return false;

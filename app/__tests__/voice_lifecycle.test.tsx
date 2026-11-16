@@ -180,6 +180,22 @@ it.each(['granted', 'blocked'] as const)('重复按住保留同一系统请求�
   } finally { jest.useRealTimers(); }
 });
 
+it('重复按住时查询失败，用错误替换等待提示，早先申请的结果不能覆盖错误', async () => {
+  const answer = deferPermission();
+  await mount();
+  await press();
+  await press();
+  expect(state.permissionNotice?.message).toContain('尚未结束');
+  options.recorder.getPermission.mockRejectedValueOnce(new Error('query failed'));
+  await press();
+  expect(state.permissionNotice?.message).toBe(permissionErrorText);
+  await answer('blocked');
+  expect(state.permissionNotice?.message).toBe(permissionErrorText);
+  expect(state.captureState).toBe('VoiceReady');
+  expect(options.recorder.start).not.toHaveBeenCalled();
+  expect(options.onNotice).not.toHaveBeenCalled();
+});
+
 it.each(['getPermission', 'requestPermission'])('权限接口 %s 抛错时在当前界面提示，之后仍可重新按住录音', async (method) => {
   options.recorder.getPermission.mockResolvedValueOnce('denied');
   if (method === 'getPermission') options.recorder.getPermission.mockReset().mockRejectedValueOnce(new Error('error'));
