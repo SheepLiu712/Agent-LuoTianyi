@@ -20,7 +20,6 @@ export interface LineDescriptor {
 export interface JustifiedLine extends LineDescriptor {
   letterSpacing: number;
   codePointCount: number;
-  trailingWidth: number;
 }
 
 export function isLineEndSpace(ch: string): boolean {
@@ -160,16 +159,18 @@ export function computeLetterSpacing(
   return extra / (codePointCount - 1) / fontScale;
 }
 
+export function usesNativeJustification(line: LineDescriptor): boolean {
+  return line.isLast || /\S +\S/u.test(line.visibleText);
+}
+
 export function buildJustifiedLines(
   descriptors: readonly LineDescriptor[],
   visibleWidths: readonly number[],
-  fullWidths: readonly number[],
   containerWidth: number,
   fontScale: number,
 ): JustifiedLine[] | null {
   if (
     descriptors.length !== visibleWidths.length ||
-    descriptors.length !== fullWidths.length ||
     !Number.isFinite(containerWidth) ||
     containerWidth <= 0 ||
     !(fontScale > 0)
@@ -181,13 +182,7 @@ export function buildJustifiedLines(
   for (let index = 0; index < descriptors.length; index += 1) {
     const descriptor = descriptors[index];
     const visibleWidth = visibleWidths[index];
-    const fullWidth = fullWidths[index];
-    if (
-      !Number.isFinite(visibleWidth) ||
-      visibleWidth < 0 ||
-      !Number.isFinite(fullWidth) ||
-      fullWidth < 0
-    ) {
+    if (!Number.isFinite(visibleWidth) || visibleWidth < 0) {
       return null;
     }
 
@@ -195,10 +190,9 @@ export function buildJustifiedLines(
     result.push({
       ...descriptor,
       codePointCount,
-      letterSpacing: descriptor.isLast
+      letterSpacing: usesNativeJustification(descriptor)
         ? 0
         : computeLetterSpacing(visibleWidth, containerWidth, codePointCount, fontScale),
-      trailingWidth: Math.max(0, fullWidth - visibleWidth),
     });
   }
   return result;

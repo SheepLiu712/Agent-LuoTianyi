@@ -6,6 +6,7 @@ import {
   buildJustifiedLines,
   buildLineDescriptors,
   sliceRuns,
+  usesNativeJustification,
 } from '../utils/agreement_justify';
 import type { JustifiedLine, JustifyRun, LineDescriptor } from '../utils/agreement_justify';
 
@@ -22,7 +23,6 @@ interface JustifyState {
   key: string;
   result: Result;
   descriptors?: LineDescriptor[];
-  fullWidths?: number[];
 }
 
 function renderRunSpans(runs: readonly JustifyRun[]) {
@@ -103,23 +103,21 @@ export function AndroidJustifiedText({ runs, fontSize, lineHeight, color }: Prop
         if (!nextDescriptors) {
           return { key: measureKey, result: 'native' };
         }
-        const fullWidths = measured.map((line) => line.width);
-        if (nextDescriptors.some((line) => line.trailingText.length > 0)) {
-          return {
-            key: measureKey,
-            result: 'second',
-            descriptors: nextDescriptors,
-            fullWidths,
-          };
+        if (nextDescriptors.some((line) =>
+          !usesNativeJustification(line) && line.trailingText.length > 0,
+        )) {
+          return { key: measureKey, result: 'second', descriptors: nextDescriptors };
         }
         const nextLines = buildJustifiedLines(
           nextDescriptors,
-          fullWidths,
-          fullWidths,
+          measured.map((line) => line.width),
           containerWidth,
           fontScale,
         );
-        return { key: measureKey, result: nextLines ?? 'native' };
+        return {
+          key: measureKey,
+          result: nextLines?.some((line) => line.letterSpacing > 0) ? nextLines : 'native',
+        };
       });
     },
     [containerWidth, fontScale, justifyRuns, measureKey],
@@ -132,44 +130,41 @@ export function AndroidJustifiedText({ runs, fontSize, lineHeight, color }: Prop
         if (
           current.key !== measureKey ||
           current.result !== 'second' ||
-          !current.descriptors ||
-          !current.fullWidths
+          !current.descriptors
         ) {
           return current;
         }
         const nextLines = buildJustifiedLines(
           current.descriptors,
           measured.map((line) => line.width),
-          current.fullWidths,
           containerWidth,
           fontScale,
         );
-        return { key: measureKey, result: nextLines ?? 'native' };
+        return {
+          key: measureKey,
+          result: nextLines?.some((line) => line.letterSpacing > 0) ? nextLines : 'native',
+        };
       });
     },
     [containerWidth, fontScale, measureKey],
   );
-
-  const finalWidth =
-    containerWidth + Math.max(0, ...(finalLines ?? []).map((line) => line.trailingWidth)) + 1;
 
   return (
     <View style={styles.container} onLayout={handleLayout} testID="agreement-justify-root">
       {measurable && finalLines ? (
         <Text
           testID="agreement-justify-final"
-          style={[styles.final, { width: finalWidth, fontSize, lineHeight, color }]}
+          textBreakStrategy="simple"
+          style={{ width: containerWidth, fontSize, lineHeight, color, textAlign: 'justify' }}
         >
           {finalLines.map((line, index) => (
-            <React.Fragment key={index}>
-              {renderJustifiedLine(line)}
-              {index < finalLines.length - 1 ? '\n' : null}
-            </React.Fragment>
+            <React.Fragment key={index}>{renderJustifiedLine(line)}</React.Fragment>
           ))}
         </Text>
       ) : (
         <Text
           testID="agreement-justify-placeholder"
+          textBreakStrategy="simple"
           style={{ fontSize, lineHeight, color, textAlign: 'justify' }}
         >
           {renderRuns(justifyRuns)}
@@ -184,7 +179,8 @@ export function AndroidJustifiedText({ runs, fontSize, lineHeight, color }: Prop
         >
           <Text
             testID="agreement-justify-measure-first"
-            style={[styles.measureText, { width: containerWidth, fontSize, lineHeight }]}
+            textBreakStrategy="simple"
+            style={{ width: containerWidth, fontSize, lineHeight, textAlign: 'justify' }}
             onTextLayout={handleFirstLayout}
           >
             {renderRuns(justifyRuns)}
@@ -200,7 +196,8 @@ export function AndroidJustifiedText({ runs, fontSize, lineHeight, color }: Prop
         >
           <Text
             testID="agreement-justify-measure-second"
-            style={[styles.measureText, { width: containerWidth, fontSize, lineHeight }]}
+            textBreakStrategy="simple"
+            style={{ width: containerWidth, fontSize, lineHeight, textAlign: 'left' }}
             onTextLayout={handleSecondLayout}
           >
             {descriptors.map((line, index) => (
@@ -218,8 +215,6 @@ export function AndroidJustifiedText({ runs, fontSize, lineHeight, color }: Prop
 
 const styles = StyleSheet.create({
   container: { alignSelf: 'stretch' },
-  final: { textAlign: 'left' },
   measureLayer: { position: 'absolute', left: 0, top: 0, opacity: 0 },
-  measureText: { textAlign: 'left' },
   bold: { fontWeight: 'bold' },
 });

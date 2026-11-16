@@ -173,23 +173,27 @@ describe('agreement_justify', () => {
       )!;
     }
 
-    it('非末行用可见宽度计算，末行不拉伸', () => {
-      const lines = buildJustifiedLines(createDescriptors(), [30, 60], [40, 60], 100, 1)!;
+    it('无词间空格的非末行用可见宽度计算，末行不拉伸', () => {
+      const lines = buildJustifiedLines(createDescriptors(), [30, 60], 100, 1)!;
       expect(lines[0]).toMatchObject({
-        visibleText: '第一条',
-        trailingText: ' ',
-        codePointCount: 3,
-        letterSpacing: 35,
-        trailingWidth: 10,
-        isLast: false,
+        visibleText: '第一条', trailingText: ' ', codePointCount: 3,
+        letterSpacing: 35, isLast: false,
       });
-      expect(lines[1]).toMatchObject({ letterSpacing: 0, trailingWidth: 0, isLast: true });
+      expect(lines[1]).toMatchObject({ letterSpacing: 0, isLast: true });
     });
 
-    it('letterSpacing 按 fontScale 折算，尾部空格宽度仍使用 dp', () => {
-      const lines = buildJustifiedLines(createDescriptors(), [30, 60], [40, 60], 100, 2)!;
-      expect(lines[0].letterSpacing).toBe(17.5);
-      expect(lines[0].trailingWidth).toBe(10);
+    it('letterSpacing 按 fontScale 折算', () => {
+      expect(buildJustifiedLines(createDescriptors(), [30, 60], 100, 2)![0].letterSpacing).toBe(17.5);
+    });
+
+    it('逐行短路：已满行和有词间空格的行不加间距，后续中文行仍补齐', () => {
+      const descriptors = buildLineDescriptors(
+        [{ text: '甲乙丙丁office affinity 甲乙丙丁末行', bold: false }],
+        [{ text: '甲乙丙丁' }, { text: 'office affinity ' }, { text: '甲乙丙丁' }, { text: '末行' }],
+      )!;
+      const lines = buildJustifiedLines(descriptors, [100, 80, 64, 32], 100, 1)!;
+      expect(lines.map((line) => line.letterSpacing)).toEqual([0, 0, 12, 0]);
+      expect(lines.map((line) => runsToText(line.displayRuns)).join('')).toBe('甲乙丙丁office affinity 甲乙丙丁末行');
     });
 
     it.each(['甲', ''])('可见部分为“%s”时不产生间距，仍保留原文', (visible) => {
@@ -197,20 +201,18 @@ describe('agreement_justify', () => {
       const descriptors = buildLineDescriptors(
         [{ text: source, bold: false }], [{ text: `${visible}  ` }, { text: '乙' }],
       )!;
-      const width = visible.length * 10;
-      const lines = buildJustifiedLines(descriptors, [width, 20], [width + 20, 20], 100, 1)!;
+      const lines = buildJustifiedLines(descriptors, [visible.length * 10, 20], 100, 1)!;
       expect(lines[0].letterSpacing).toBe(0);
       expect(lines.map((line) => runsToText(line.displayRuns)).join('')).toBe(source);
     });
 
     it('行数或宽度异常时返回 null', () => {
       const descriptors = createDescriptors();
-      expect(buildJustifiedLines(descriptors, [30], [40, 60], 100, 1)).toBeNull();
-      expect(buildJustifiedLines(descriptors, [30, 60], [40], 100, 1)).toBeNull();
-      expect(buildJustifiedLines(descriptors, [30, Number.NaN], [40, 60], 100, 1)).toBeNull();
-      expect(buildJustifiedLines(descriptors, [30, 60], [Number.NaN, 60], 100, 1)).toBeNull();
-      expect(buildJustifiedLines(descriptors, [30, 60], [40, 60], 0, 1)).toBeNull();
-      expect(buildJustifiedLines(descriptors, [30, 60], [40, 60], 100, 0)).toBeNull();
+      expect(buildJustifiedLines(descriptors, [30], 100, 1)).toBeNull();
+      expect(buildJustifiedLines(descriptors, [30, Number.NaN], 100, 1)).toBeNull();
+      expect(buildJustifiedLines(descriptors, [-1, 60], 100, 1)).toBeNull();
+      expect(buildJustifiedLines(descriptors, [30, 60], 0, 1)).toBeNull();
+      expect(buildJustifiedLines(descriptors, [30, 60], 100, 0)).toBeNull();
     });
   });
 });
