@@ -332,6 +332,7 @@ async def apply_llm_config(payload: dict[str, Any] = Body(default_factory=dict))
         "ok": True,
         "written": True,
         "restarted": was_running,
+        "config": build_llm_config_view(next_raw_config),
         "validation": shell.runtime_supervisor.last_validation or validation,
         "runtime": runtime_status,
     }

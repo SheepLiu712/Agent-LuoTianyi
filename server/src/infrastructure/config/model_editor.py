@@ -51,15 +51,15 @@ def collect_module_bindings(config: dict[str, Any]) -> list[dict[str, Any]]:
 def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     next_config = copy.deepcopy(config)
     llm_service = next_config.setdefault("llm_service", {})
-    llm_service["available_llms"] = _normalize_interfaces(payload.get("available_llms", {}))
-    llm_service["available_vlms"] = _normalize_interfaces(payload.get("available_vlms", {}))
-    if "available_audio_models" in payload:
-        llm_service["available_audio_models"] = _normalize_interfaces(payload["available_audio_models"])
+    for key in ("available_llms", "available_vlms", "available_audio_models"):
+        if key in payload:
+            llm_service[key] = _normalize_interfaces(payload[key])
     if "call_transport" in payload:
         if not isinstance(payload["call_transport"], dict):
             raise ValueError("call_transport 必须是对象")
         next_config["call_transport"] = copy.deepcopy(payload["call_transport"])
-    llm_service["client_model_types"] = _normalize_client_model_types(payload.get("client_model_types"))
+    if "client_model_types" in payload:
+        llm_service["client_model_types"] = _normalize_client_model_types(payload["client_model_types"])
 
     for binding in payload.get("module_bindings", []):
         kind = str(binding.get("kind") or "").strip()
