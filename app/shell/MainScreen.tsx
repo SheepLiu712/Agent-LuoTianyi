@@ -287,10 +287,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
   };
 
   const openCall = () => {
-    if (!call.canStart) {
-      Alert.alert('通话暂不可用', '服务端或设备音频能力尚未就绪。请完成后续配置后再试。');
-      return;
-    }
+    if (!call.canStart) return;
     voiceInput.leavePermissionPage();
     closeDrawer();
     void call.start(true);

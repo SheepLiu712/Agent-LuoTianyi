@@ -8,7 +8,7 @@ export function useMicrophonePermission(recorder: VoiceRecorderApi) {
   const shown = useRef<PermissionNotice | null>(null);
   const generation = useRef(0);
   const retryAfterDenial = useRef(false);
-  const pending = useRef<{ waiting: PermissionNotice | null } | null>(null);
+  const pending = useRef<{ waiting: PermissionNotice | null; deliverResult: boolean } | null>(null);
   const foreground = useRef(AppState.currentState !== 'background' && AppState.currentState !== 'inactive');
   const onResume = useRef<(() => void) | null>(null);
 
@@ -54,7 +54,13 @@ export function useMicrophonePermission(recorder: VoiceRecorderApi) {
     try {
       permission = await recorder.getPermission();
     } catch {
-      if (generation.current === beforeQuery && foreground.current) display(permissionMessages.error);
+      if (generation.current === beforeQuery && foreground.current) {
+        // 同一界面再次主动等待时，可以恢复交付这个系统请求的结果。
+        if (existing && pending.current === existing) existing.deliverResult = false;
+        else generation.current += 1;
+        dismissPermissionNotice(shown.current);
+        display(permissionMessages.error);
+      }
       return false;
     }
     if (generation.current !== beforeQuery || !foreground.current) return false;
@@ -69,6 +75,7 @@ export function useMicrophonePermission(recorder: VoiceRecorderApi) {
     if (existing) {
       // 本次按住发生在原请求返回之前，不能因权限查询较慢而追加一次申请。
       if (pending.current === existing && (!existing.waiting || shown.current !== existing.waiting)) {
+        existing.deliverResult = true;
         existing.waiting = display(permissionMessages.waiting);
       }
       return false;
@@ -77,13 +84,13 @@ export function useMicrophonePermission(recorder: VoiceRecorderApi) {
     const attempt = ++generation.current;
     onResume.current = null;
     dismissPermissionNotice(shown.current);
-    const request = { waiting: null as PermissionNotice | null };
+    const request = { waiting: null as PermissionNotice | null, deliverResult: true };
     pending.current = request;
     const isRetry = retryAfterDenial.current;
     const finish = (action: () => void) => {
       if (pending.current === request) pending.current = null;
       dismissPermissionNotice(request.waiting);
-      if (generation.current !== attempt) return;
+      if (generation.current !== attempt || !request.deliverResult) return;
       if (foreground.current) action();
       else onResume.current = action;
     };

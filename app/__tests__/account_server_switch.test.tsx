@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import LoginScreen from '../features/account/LoginScreen';
+import { AppNotices } from '../shell/notices/AppNotices';
 import { Alert, Text, TextInput, TouchableOpacity } from 'react-native';
 import { getHistory } from '../features/chat/getHistory';
 import { switchServer } from '../features/account/credentials';
@@ -59,11 +60,40 @@ jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() }, Keyboard: { dismiss: jest.fn() }, Platform: { OS: 'android' },
   KeyboardAvoidingView: 'KeyboardAvoidingView', Modal: 'Modal', View: 'View', ScrollView: 'ScrollView',
   StyleSheet: { create: (styles: unknown) => styles }, Text: 'Text', TextInput: 'TextInput',
-  TouchableOpacity: 'TouchableOpacity', useColorScheme: () => 'light',
+  TouchableOpacity: 'TouchableOpacity', Pressable: 'Pressable', useColorScheme: () => 'light',
+  useWindowDimensions: () => ({ width: 390, fontScale: 1 }),
 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-jest.mock('../shell/notices/AppNotices', () => ({ usePageNotices: () => jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({}));
+
+it('登录失败保留表单，修改密码和重提时分别保留、撤下旧提示，随后显示新的失败原因', async () => {
+  let finishRetry!: (result: { success: boolean; message: string }) => void;
+  const login = jest.fn().mockResolvedValueOnce({ success: false, message: '密码错误' })
+    .mockImplementationOnce(() => new Promise(resolve => { finishRetry = resolve; }));
+  let tree!: ReactTestRenderer;
+  await act(async () => {
+    tree = create(<AppNotices><LoginScreen onLogin={login} onRegister={jest.fn()} resetAccount={jest.fn()} /></AppNotices>);
+  });
+  const field = (name: string) => tree.root.findAllByType(TextInput).find(n => n.props.placeholder === name)!;
+  const submit = () => tree.root.findAllByType(TouchableOpacity).filter(button =>
+    button.findAllByType(Text).some(text => text.props.children === '登录')).pop()!.props.onPress();
+  const messages = () => tree.root.findAllByType(Text).map(n => n.props.children);
+  try {
+    act(() => { field('请输入用户名').props.onChangeText('alice'); field('请输入密码').props.onChangeText('first'); });
+    await act(async () => { await submit(); });
+    expect(messages()).toContain('密码错误');
+    expect(field('请输入用户名').props.value).toBe('alice');
+    expect(field('请输入密码').props.value).toBe('first');
+    act(() => field('请输入密码').props.onChangeText('second'));
+    expect(messages()).toContain('密码错误');
+    act(() => { void submit(); });
+    expect(messages()).not.toContain('密码错误');
+    expect(login).toHaveBeenLastCalledWith('alice', 'second', false);
+    await act(async () => { finishRetry({ success: false, message: '服务暂不可用' }); });
+    expect(messages()).toContain('服务暂不可用');
+    expect(messages()).not.toContain('密码错误');
+  } finally { act(() => tree.unmount()); }
+});
 
 it.each(['验证先返回', '登录先返回'])('取消验证后仍登录原服并在原服恢复会话：%s', async order => {
   const original = server_config.BASE_URL;
@@ -89,7 +119,7 @@ it.each(['验证先返回', '登录先返回'])('取消验证后仍登录原服�
   function Host() {
     account = useAuth();
     return account.isLoading || account.session ? null :
-      <LoginScreen onLogin={account.login} onRegister={account.register} resetAccount={jest.fn()} />;
+      <AppNotices><LoginScreen onLogin={account.login} onRegister={account.register} resetAccount={jest.fn()} /></AppNotices>;
   }
   function press(label: string) {
     const buttons = root.root.findAllByType(TouchableOpacity).filter(node =>
