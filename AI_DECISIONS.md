@@ -1,5 +1,21 @@
 # AI 决策记录
 
+## 2026-11-17 #441 embedding 超时测试的阶段契约
+
+**待定问题**：原633远端单元测试在真实连接EOF0后断言connected=false；该事件实际仅在完整HTTP header到达后置位，混淆了TCP接受和响应停滞。测试/实现与ee基线同blob并不豁免失败，外部真实双分支只证合法早取消同症状可达，不是远端exact cause。
+
+**背景约束**：lead task12及Oracle设计许可只改本测试文件与本记录，实施树issue-412/5ee；保同步embed_query真实wall-clock请求0.15秒、总2秒、清理1秒、单次尝试。严格响应stall必须仍有真实header和真实socket关闭证据，不生产改动、不抬等待、不加依赖或通用时钟框架，AI由本单元独占。
+
+**调研参考**：[HTTPX0.28.1 trace扩展](https://github.com/encode/httpx/blob/0.28.1/docs/advanced/extensions.md)支持异步连接/发送/响应阶段观察；只用事件名，不记录info/headers/body/密钥。[Python3.10事件循环](https://docs.python.org/3.10/library/asyncio-eventloop.html#asyncio.loop.call_later)允许计时回调提前一个时钟分辨率，[wait_for](https://docs.python.org/3.10/library/asyncio-task.html#asyncio.wait_for)超时取消且等待实际清理。项目已有局部loop.time受控验证；这里只覆盖新建客户端loop实例，pytest/server loop和全局monotonic不变。
+
+**候选方案与选择**：选择两个互补场景：原同步真实时钟入口按accepted/header/EOF/closed分类，且只认TimeoutError、attempts1；另在专用新线程/loop从请求前原点冻结time，真实header及receive_response_headers阶段后推进未到期点，再跨原0.15期限，验证原wait_for取消和真实EOF。单独放宽header断言会失去响应stall覆盖；只抬超时或去掉断言仍没有阶段保证，均不选。无需新公共helper或生产API。
+
+**验证方式**：先在原测试注入send_headers.started事件门，job pwsh-90eda9dfe8424940有效red为1failed/7deselected/0.88秒，精确header事件false与EOF0。阶段分类两分支2passed/0.47秒。严格clock初版及0.149负对照都通过，后者暴露安全网不足，不能计为有效边界证据：本机loop分辨率0.015625秒，0.149与0.14距0.15均不足一个分辨率。按官方容忍取前点0.15-2*resolution（本机0.11875），原timer观察为0.15/2.0；不跨期负对照job pwsh-01acc6d3af094a8d为1failed/8deselected/1.70秒，精确stopped仍false。恢复跨点0.16，原异常发生时虚时必须0.16并在finally恢复真实time前记录；最终本文件job pwsh-143e9e8af51d4668为9passed/0.62秒，Ruff通过。此后仅按Black整理新增部分，不重测或夹旧响应字典格式清理；静态/冻结细节另列实施归档。未重17/95或全CI，旧633失败和新5ee集成失败仍保留。
+
+**同attempt1收尾修正**：Oracle发现真实看门超时后finally无界gather会抵消watchdog，原匿名gate也不能由owner解除。新增唯一坏路径吞计时取消直到可释放网络门，外部父5秒取得gateentered后hang红（job pwsh-0b4e1f0b0d3b4e8e，tree-kill0/reapedtrue，含启动总11.57秒，非产品失败）。最窄改为只在worker仍未结束的异常看门路径线程安全放门/取消实际client POST task、先关自有server/writers，再真实有限等待worker；invoke的finally标记与Task已done共同证明同步调用及其asyncio.run已退出，不取消to_thread包装冒充join。正常产品Timeout分支不主动close，仍须自行EOF。修后job pwsh-12406541a72344e0：坏节点1passed/0.56秒，本文件10passed/1.09秒，父分别7.2113/6.250039秒均有界且reaped；仅此网络门回归可解除，不宣称可强杀任意恶意Python无限线程。随后只有新增格式静态/指纹更新，不再业务测试。
+
+**风险与回滚**：局部loop时钟只服务该严格测试，原点不在header后重置；pytest/server真实watchdog不虚时，finally恢复实例方法、关闭async client/server/writer、收齐handler与线程。前界须远于平台clock_resolution，不能声称毫秒级精度。真实worker若在有限等待内仍未退出必须明确失败，不能宣清理成功；任意不可协作线程不在此测试保证。回退本测试单元不改变产品行为；若计时器或trace依赖版本改变，测试应明确失败，不用扩大产品预算或soft-pass掩盖。
+
 本文件记录 #412 规格的推荐、否决理由与非作者裁定。完整规格已通过 D3 attempt 2/3，可作为分阶段实施依据；不表示人类此前逐项批准派生设计，也不是 A1–A6 或运行代码验收通过。具体提交/实施权限仍由 lead 逐阶段授予。
 
 - 工单：[Issue #412](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/412)，2026-11-17 读取最新 body（`updated_at=2026-11-16T15:37:16Z`），comments 为空。
