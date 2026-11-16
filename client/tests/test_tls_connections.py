@@ -78,7 +78,10 @@ def test_wss_certificate_validation(tls_server, monkeypatch, case):
 
 
 @pytest.mark.parametrize("case", ["trusted", "wrong_hostname", "untrusted"])
-def test_https_certificate_validation(tls_server, monkeypatch, case):
+@pytest.mark.parametrize(
+    "session_factory", [HttpClientFactory.get_session, HttpClientFactory.create_session], ids=["cached", "isolated"]
+)
+def test_https_certificate_validation(tls_server, monkeypatch, case, session_factory):
     context, ca = tls_server
     if case != "untrusted":
         monkeypatch.setattr(certifi, "where", lambda: str(ca))
@@ -99,7 +102,7 @@ def test_https_certificate_validation(tls_server, monkeypatch, case):
     thread.start()
     try:
         host = "127.0.0.1" if case == "wrong_hostname" else "localhost"
-        session = HttpClientFactory.get_session(False)
+        session = session_factory(False)
         # 保留代理环境配置能力，但本地测试不使用代理。
         monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
         url = f"https://{host}:{server.server_port}/"
@@ -109,6 +112,7 @@ def test_https_certificate_validation(tls_server, monkeypatch, case):
             with pytest.raises(requests.exceptions.SSLError):
                 session.get(url, verify=False, timeout=3)
     finally:
+        session.close()
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)

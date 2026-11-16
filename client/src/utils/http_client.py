@@ -33,9 +33,15 @@ class HttpClientFactory:
         if key in cls._session_cache:
             return cls._session_cache[key]
 
+        session = cls.create_session(verify_ssl=verify_ssl)
+        cls._session_cache[key] = session
+        return session
+
+    @classmethod
+    def create_session(cls, verify_ssl: bool = True) -> requests.Session:
+        """创建调用方独占的会话，保持与缓存会话相同的强制 TLS 策略。"""
         session = requests.Session()
-        adapter = TLS12HttpAdapter(verify_ssl=verify_ssl)
+        adapter = TLS12HttpAdapter(verify_ssl=True)
         session.mount("https://", adapter)
         session.mount("http://", HTTPAdapter())
-        cls._session_cache[key] = session
         return session

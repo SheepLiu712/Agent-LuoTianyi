@@ -1,6 +1,6 @@
 import os
 import re
-from dataclasses import fields
+from dataclasses import dataclass, field, fields
 from typing import Callable, List, Tuple
 
 from . import AuthApi, WsTransport
@@ -21,6 +21,56 @@ def _conversation_item_from_dict(item: dict) -> ConversationItem:
     return ConversationItem(**{key: value for key, value in item.items() if key in _CONVERSATION_ITEM_FIELDS})
 
 
+@dataclass(frozen=True)
+class DynamicUnreadRequest:
+    """调度时冻结的只读请求；不持有客户端或 UI 对象。"""
+
+    client_identity: object = field(repr=False)
+    revision: int
+    base_url: str
+    username: str | None
+    message_token: str | None = field(repr=False)
+    verify_ssl: bool = True
+
+    def fetch(self, session) -> dict:
+        if not self.username:
+            return self.failure("Not logged in")
+        try:
+            headers = {"Authorization": f"Bearer {self.message_token}"} if self.message_token else {}
+            resp = session.get(
+                f"{self.base_url}/dynamics/unread",
+                params={"username": self.username},
+                headers=headers,
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                get_logger("NetworkClient").warning(f"获取动态未读状态失败: HTTP {resp.status_code}")
+                return self.failure(detail)
+            data = resp.json()
+            data["ok"] = True
+            return data
+        except Exception as exc:
+            get_logger("NetworkClient").error(f"获取动态未读状态失败: {type(exc).__name__}")
+            return self.failure(str(exc))
+
+    @staticmethod
+    def failure(message: str) -> dict:
+        return {
+            "ok": False,
+            "message": message,
+            "has_unread": False,
+            "unread_count": 0,
+            "unread_dynamic_count": 0,
+            "unread_comment_count": 0,
+        }
+
+
 class NetworkClient:
     def __init__(self, base_url: str | None = None, verify_ssl: bool = True):
         self.logger = get_logger(self.__class__.__name__)
@@ -29,6 +79,8 @@ class NetworkClient:
 
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
+        self._identity = object()
+        self._identity_revision = 0
 
         self.user_id: str | None = None
         self.message_token: str | None = None
@@ -47,6 +99,7 @@ class NetworkClient:
         """更新服务器地址，同步更新 AuthApi、WsTransport 和 HTTP 会话。"""
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
+        self._identity_revision += 1
         self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
@@ -61,6 +114,7 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
+            self._identity_revision += 1
 
             if request_token:
                 credential.save_credentials(self.user_id, self.login_token, True)
@@ -81,6 +135,7 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
+            self._identity_revision += 1
             credential.save_credentials(self.user_id, self.login_token, True)
             self.ws_transport.start()
             return True
@@ -409,59 +464,18 @@ class NetworkClient:
             self.logger.error(f"发表评论失败: {exc}")
             return {"ok": False, "message": str(exc)}
 
-    def get_dynamic_unread_status(self) -> dict:
-        if not self.user_id:
-            return {
-                "ok": False,
-                "message": "Not logged in",
-                "has_unread": False,
-                "unread_count": 0,
-                "unread_dynamic_count": 0,
-                "unread_comment_count": 0,
-            }
+    def dynamic_unread_request(self) -> DynamicUnreadRequest:
+        return DynamicUnreadRequest(
+            self._identity,
+            self._identity_revision,
+            self.base_url,
+            self.user_id,
+            self.message_token,
+            self.verify_ssl,
+        )
 
-        try:
-            params = {
-                "username": self.user_id,
-            }
-            headers = {}
-            if self.message_token:
-                headers["Authorization"] = f"Bearer {self.message_token}"
-            resp = self.session.get(
-                f"{self.base_url}/dynamics/unread",
-                params=params,
-                headers=headers,
-                verify=self.verify_ssl,
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                self.logger.warning(f"获取动态未读状态失败: {detail}")
-                return {
-                    "ok": False,
-                    "message": detail,
-                    "has_unread": False,
-                    "unread_count": 0,
-                    "unread_dynamic_count": 0,
-                    "unread_comment_count": 0,
-                }
-            data = resp.json()
-            data["ok"] = True
-            return data
-        except Exception as exc:
-            self.logger.error(f"获取动态未读状态失败: {exc}")
-            return {
-                "ok": False,
-                "message": str(exc),
-                "has_unread": False,
-                "unread_count": 0,
-                "unread_dynamic_count": 0,
-                "unread_comment_count": 0,
-            }
+    def get_dynamic_unread_status(self) -> dict:
+        return self.dynamic_unread_request().fetch(self.session)
 
     def mark_dynamics_read(self) -> dict:
         if not self.user_id or not self.message_token:
