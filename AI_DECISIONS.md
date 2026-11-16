@@ -1,5 +1,51 @@
 # AI 决策记录
 
+## 2026-11-17 #441 opening 测试就绪契约复用（task13顺序补记）
+
+**待定问题**：本分支未包含独立#410的测试helper修复，真实远端lookup失败场景在opening创建时固定1秒等待超时；怎样补对本树测试契约而不混入通话预算生产功能？
+
+**背景约束**：task13只允许测试helper和新增readiness测试两个文件，不并写AI；该单元经Oracle implementation1/3与lead授权提交 `3805e0cb18e60454adf2579fe7b48c1ccc57e4c7`（parent5ee）。本条由startup-spec在task12提交3924并明确释放AI后，按lead要求依据外部47行task13报告顺序记录，不重跑其测试。
+
+**调研参考**：复用已审 `31ff341f81d6a9b38828e2cdc3cde4657112e1e7` 的两文件测试契约，未merge/cherry-pick其生产改动。旧helper与ee同blob7a9259…；当前factory/Agent/四元组签名不改。最终helper blob `51a23805a1e4e43f6d7cbd4939eab04992ce13d8`、新测试blob `69a31421b02e84ca9def450710078dc3b3aee1f8` 与来源对象相等。
+
+**候选方案**
+1. **具名opening就绪接缝及失败清理**：捕获当次真实_realize_task并shield等待，检查ACTIVE/非终止/socket确有response.create；创建失败真实terminate并保留原异常。
+2. **抬固定1秒或删除发送检查**：只能掩盖调度差异，不能保证实际opening已发。
+3. **跨分支合生产改动或假成功factory**：扩大工单范围，并绕掉本树真实接口验证。
+
+**选择/理由**：候选1，在本树旧接口上复用已审深度最小的测试同步契约。受控SQL ACTIVE提交返回门同时验证等待与失败分支，不用sleep当就绪条件。
+
+**未选原因**：候选2无可靠阶段证据；候选3越过test-only范围，无法独立归因与回滚。
+
+**验证方式与实际证据**：task13在本树原helper上新增2场景，真实红为 `2 failed,1warning in3.48s`（job pwsh-3c4968f8bcc84295，两个TimeoutError）；修后同新2+旧call_omni24一次 `26passed,1warning in6.30s`（job pwsh-dadbc87f8f334e92），外壳10.047/11.875秒均在20/40秒上限内。成功opening恰1次；失败保原OSError同对象、socket关闭/tasks空；finally放门/清理。定向静态通过，旧helper原I001未扩大格式化；pydub路径告警保留，不冒媒体依赖齐备。本条只转录已落原证据，不是新增运行PASS或原远端精确根因重建。
+
+**风险与回滚**：只证明测试同步/清理契约，不改变生产预算；回滚该自然提交不删除数据。不据26通过宣整个PR/远端已绿，后续Secrets/preclaim收齐后由verifier在最终HEAD统一门禁。
+
+## 2026-11-17 #441 Secrets 夹具补齐真实校验器能力
+
+**待定问题**：3A状态接口共用必需密钥策略后，旧测试shell没有validator，真实远端更新Secrets失败；应改生产还是补齐测试夹具？
+
+**背景约束**：真实AdminShell dataclass声明validator，initialize实际构造RuntimeConfigValidator并共享给Supervisor；旧测试与ee同blob但partial SimpleNamespace只提供SecretStore/read_raw/is_running。task7rev10仅原http_secret_security测试与本AI两路径；等task12提交 `3924ca6df0ef2117c5f2258d9f03e8ee66f93774` 并明确释放后才实施，不并写AI。不改production/超时/通话helper/UI/CI，不扩鉴权或实际重启平台。
+
+**调研参考**：已读AdminShell、SecretStore、ConfigStore和RuntimeConfigValidator.required_secret_keys的现有契约；无需新框架或外部研究。更新Secrets返回secrets_status，因此需要同一真实校验规则：JWT始终required，顶层citywalk=false时AMAP非required。
+
+**候选方案**
+1. **修旧夹具为真实Store/Validator**：真实临时ConfigStore与SecretStore，validator引用同一SecretStore，citywalk false/true两代表，保原changed_keys/restart_required并核条件状态。
+2. **生产status直接调用策略staticmethod**：可减少shell实例依赖，但真实AdminShell本来已有validator，为兼容失真fake改生产无必要。
+3. **getattr/hardcode或lambda假validator兜底**：容易复制策略并掩盖真实协议缺失，不能验证实际配置/密钥状态。
+
+**选择/理由**：候选1。测试以monkeypatch先登记JWT_SECRET/AMAP_KEY/RUNTIME_SECRET_TEST三个合成环境值，SecretStore之后即使覆盖也能恢复原环境；AMAP测试值保留在store，false场景直接断言required=False而非缺key。Supervisor仅is_running提示端口，不能称真实owner重启；密钥均临时合成不输出/不归档值。
+
+**未选原因**：候选2扩大生产范围且无真实owner缺陷；候选3会为测试绿灯降低真实状态保证。
+
+**验证方式与实际证据**：原节点先在本树V2运行，job `pwsh-4b80f9e31d584e3d` 原 `1failed,1warning in3.25s`，准确update_secrets→secrets_status L254 `AttributeError: SimpleNamespace has no attribute validator`，不是导入/前置错误。补真实夹具及两代表后，原文件+已有citywalk免AMAP不免JWT/Secrets.required两邻近节点，job `pwsh-56dafb7d9f6f4438` 为 **13passed,1warning in1.83s**，Ruff/Black该测试全通过/无需格式变动。警告为既有zhconv/pkg_resources弃用，不称零告警。未重95/17/0.15敏感计时或全CI。
+
+```text
+python -B -X utf8 -m pytest tests/integration/system/test_http_secret_security.py tests/integration/system/test_admin_runtime.py::test_citywalk_disabled_does_not_require_amap_but_jwt_stays_required tests/integration/system/test_admin_runtime.py::test_secrets_required_status_matches_citywalk_condition -q --tb=short -p no:cacheprovider
+```
+
+**风险与回滚**：本单元只修测试依赖契约与环境隔离；原远端失败历史不抹，不据13通过称整个PR已验。回滚后续自然test-only提交即可，不改用户配置/SecretStore或生产行为。两路径冻结交独立gate，未获明确许可不commit/push/GH/ready/closegoal；多个自然修复及preclaim收齐后，最终固定HEAD只由verifier统一执行原七作业，不每个小commit重复全量。
+
 ## 2026-11-17 #441 embedding 超时测试的阶段契约
 
 **待定问题**：原633远端单元测试在真实连接EOF0后断言connected=false；该事件实际仅在完整HTTP header到达后置位，混淆了TCP接受和响应停滞。测试/实现与ee基线同blob并不豁免失败，外部真实双分支只证合法早取消同症状可达，不是远端exact cause。
