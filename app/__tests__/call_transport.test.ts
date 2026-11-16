@@ -785,6 +785,53 @@ describe('reliable call transport', () => {
     session.close();
   });
 
+  test('resume handshake before capacity ACK preserves the cursor and allows the next captured frame', async () => {
+    const { sockets, socket, native, session } = await establish();
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 1 }));
+    native.frames[0]({ payload: new Uint8Array([2, 0]) } as CapturedAudioFrame);
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', call_id: CALL_ID, code: 'OVERLOADED',
+      message: 'queue full', retryable: true, request_seq: 2,
+    }));
+    await flush();
+    socket.emit('close', { code: 1006 });
+    const recovery = sockets.sockets[1];
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 2,
+    }));
+    recovery.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 2 }));
+    await flush();
+    expect(session.state.status).toBe('connected');
+    native.frames[0]({ payload: new Uint8Array([3, 0]) } as CapturedAudioFrame);
+    await flush();
+    const audio = recovery.sent.filter((wire): wire is Uint8Array => wire instanceof Uint8Array);
+    expect(audio.map(wire => new BinaryAudioFrameCodec().decode(wire).seq)).toEqual([2, 3]);
+    expect(new BinaryAudioFrameCodec().decode(audio[1]).payload).toEqual(new Uint8Array([3, 0]));
+    session.close();
+  });
+
+  test('still rejects a capacity ACK sent before a resume handshake with an older cursor', async () => {
+    const { sockets, socket, native, session } = await establish();
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 1 }));
+    native.frames[0]({ payload: new Uint8Array([2, 0]) } as CapturedAudioFrame);
+    await flush();
+    socket.emit('close', { code: 1006 });
+    const recovery = sockets.sockets[1];
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    recovery.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 2 }));
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 2,
+    }));
+    await flush();
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'INVALID_ACK_CURSOR' });
+    session.close();
+  });
+
   test('an enqueue accepted across disconnect commits once and does not stall the recovered stream', async () => {
     const { sockets, socket, native, session } = await establish();
     socket.message(serverControl({

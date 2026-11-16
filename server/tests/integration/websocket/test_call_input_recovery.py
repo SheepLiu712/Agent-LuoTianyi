@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
+from support.call_protocol import bind_protocol_connection
 from support.call_session_repository import InMemoryCallSessionRepository
 from support.realtime_speech import FakeRealtimeSpeechSession, FakeRealtimeSpeechSessionFactory
 from support.stage_manager import make_call_adapter, make_stage_manager
@@ -13,6 +14,8 @@ from support.stage_support import RecordingAgent, report
 
 import src.domain.agent as d
 from src.adapter.websocket.call_v1._audio_codec import BinaryAudioFrameCodec, WireAudioFrame
+from src.adapter.websocket.call_v1._binding import Binding
+from src.adapter.websocket.call_v1._protocol_translate import parse_message
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ContextFactory
 from src.application.user.reset_fence import UserResetFence
@@ -338,3 +341,85 @@ async def test_termination_while_capacity_waits_closes_without_accepting_cached_
     assert result.resources_released and result.cleanup_error is None and result.finalization_error is None
     assert call.speech.closed
     assert _payload(4) not in [frame.payload for frame in call.speech.pushed_frames]
+
+
+@pytest.mark.asyncio
+async def test_capacity_feedback_follows_resume_handshake_and_next_audio_can_be_sent(call, monkeypatch):
+    resumed_business, allow_handshake = asyncio.Event(), asyncio.Event()
+    accepted_during_handshake = asyncio.Event()
+    connection_changed = call.stage.connection_changed
+    accept_pcm = call.stage.accept_pcm
+
+    async def pause_after_business_resume(available, generation):
+        accepted = await connection_changed(available, generation)
+        if available and accepted:
+            resumed_business.set()
+            await allow_handshake.wait()
+        return accepted
+
+    def observe_acceptance(receipt, payload):
+        accepted = accept_pcm(receipt, payload)
+        if accepted and receipt.seq == 4:
+            accepted_during_handshake.set()
+        return accepted
+
+    monkeypatch.setattr(call.stage, "connection_changed", pause_after_business_resume)
+    monkeypatch.setattr(call.stage, "accept_pcm", observe_acceptance)
+    await call.fill()
+    await call.send(4)
+    await call.overloaded(4)
+    old_binding = call.adapter._bindings[call.connection]
+    session = old_binding.session
+    await call.adapter.disconnect(call.connection)
+    binding = Binding(session, connection_id=object())
+    resume = json.dumps(
+        {
+            "protocol": "call.v1",
+            "type": "call.resume",
+            "call_id": call.stage.call_id,
+            "character_id": "luotianyi",
+            "last_contiguous_server_seq": 0,
+        }
+    )
+    opening = asyncio.create_task(bind_protocol_connection(session, binding, resume))
+    try:
+        await asyncio.wait_for(resumed_business.wait(), 1)
+        # 业务已恢复 ACTIVE，协议握手仍未排队；此时才释放满载队列的一个槽位。
+        await call.speech.finish(2)
+        await call.speech.started(3)
+        await asyncio.wait_for(accepted_during_handshake.wait(), 1)
+        allow_handshake.set()
+        await asyncio.wait_for(opening, 1)
+        messages = []
+        while True:
+            output = await asyncio.wait_for(binding.next_output(), 1)
+            binding.complete_output(output.delivery_id)
+            message = json.loads(output.message)
+            messages.append(message)
+            if message["type"] == "ack" and message["ack_seq"] == 4:
+                break
+        assert messages[0]["type"] == "call.resumed"
+        cursors = [
+            message["last_contiguous_client_seq"] if message["type"] == "call.resumed" else message["ack_seq"]
+            for message in messages
+            if message["type"] in {"ack", "call.resumed"}
+        ]
+        assert cursors == sorted(cursors) and cursors[-1] == 4
+
+        await binding.receive(parse_message(_audio(5)))
+        await call.speech.finish(3)
+        await call.speech.started(4)
+        while True:
+            output = await asyncio.wait_for(binding.next_output(), 1)
+            binding.complete_output(output.delivery_id)
+            message = json.loads(output.message)
+            if message["type"] == "ack" and message["ack_seq"] == 5:
+                break
+        await call.speech.finish(4)
+        await call.speech.started(5)
+        await call.speech.finish(5)
+        call.assert_delivered(2, 3, 4, 5)
+    finally:
+        allow_handshake.set()
+        await asyncio.gather(opening, return_exceptions=True)
+        await session.detach(binding)

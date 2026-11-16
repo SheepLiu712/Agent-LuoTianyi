@@ -484,10 +484,8 @@ class Session:
                         return
                     before = self._client_cursor
                     outputs = await self._drain_pending()
-                    binding = self._binding
-                    if binding is not None and not binding.is_closed:
-                        for output in outputs:
-                            self._enqueue(binding, output)
+                    for output in outputs:
+                        await self._emit(output)
                     if self._client_cursor == before and not self._waiting_for_pcm_capacity():
                         return
         except asyncio.CancelledError:
