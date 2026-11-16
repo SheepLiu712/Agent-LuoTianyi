@@ -54,7 +54,11 @@ class QwenOmniSessionFactory:
     def from_mapping(cls, value, *, connector=connect):
         if not isinstance(value, dict) or type(value.get("enabled", False)) is not bool:
             raise ValueError("realtime_speech must be an object with boolean enabled")
-        config = AliyunRealtimeSpeechConfig.from_mapping(value) if value.get("enabled", False) else None
+        config = (
+            AliyunRealtimeSpeechConfig.from_mapping(value, use_legacy_setup_timeouts=False)
+            if value.get("enabled", False)
+            else None
+        )
         if config is not None and (not config.model.startswith("qwen") or "realtime" not in config.model):
             raise ValueError("通话必须使用 Qwen Realtime 模型")
         return cls(config, connector=connector)

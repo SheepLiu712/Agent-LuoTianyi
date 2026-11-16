@@ -1,6 +1,6 @@
 # #410 单一通话建立截止时间设计（待非作者审核）
 
-> 状态：D2设计gate attempt1/3通过，lead放行provider预算核心，正在实施gate前验证；UI/旧配置兼容/独立诊断尚未实施。基线 `ee718b21536e410ce5e4073b068f03b9bfcd68dc`；工作树分支 `bugfix/call-setup-deadline`。
+> 状态：D2核心实施gate attempt1/3通过，已按lead许可原子提交 `f3e2cb8d27dd5b236138aa8bd805060b050a4d0e`，未push。U1配置/控制台实施验证中；独立诊断和结构化安全原因观测后续单元。基线 `ee718b21536e410ce5e4073b068f03b9bfcd68dc`；工作树分支 `bugfix/call-setup-deadline`。
 > 需求依据：[维护者评论 6910783940](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/410#issuecomment-6910783940)。设计作者 issue-scout；未获实施gate与lead提交许可前不commit/push。本文为设计及证据记录，不代表整个工单已交付。
 
 ## 用户故事
@@ -178,4 +178,6 @@ lead 已确认：**Manager 公开接入 → 真实 Agent → provider factory**�
 - warning为当前环境pydub未发现ffmpeg；本测试不处理音频，未因它跳过。未启动业务服务、真实ASR、管理配置写入或完整CI；4秒鉴权、连接余额、实际控制台与诊断两路径仍列后续待测，不冒称已覆盖。
 - 实施核心绿灯：首个10/30场景2 passed in0.22s（job `pwsh-ca345c330bc549ed`）；既有会话、角色prompt、handoff及公开Manager四文件73 passed in5.88s（job `pwsh-258405949ef44995`）。后补4项门控合并最终六场景6 passed in0.73s（job `pwsh-114822102f554208`）：第4秒auth立即真实终态且close阻塞跨deadline不改原因、close抛错资源不释放/Manager拒绝关闭、connect耗15秒后update send仍只用原30余量、取消抑制late socket关闭一次。均已收集；这些是离线受控WS，不是实际厂商/OS连接实验。
 - 门控编写中两次auth失败分别因测试写死cause层数及未等close_started的测试竞态，均仅修测试，未作为产品红证据；最终用真实关闭门控收敛。全量Black对既有test_call_omni仍会指出3处本次未改的基线格式（测试不在仓库Black默认范围）；新增helper按Black格式，4生产文件Ruff/Black和diff-check通过，最终文件验证在冻结归档另列。
-- D2单owner窄核已获Oracle与lead确认；当前等待实施gate，不commit/push。UI/旧键配置校验兼容/Fun-ASR尚未实施，不能据核心绿灯关闭整个#410。
+- D2核心实施gate attempt1/3 PASS并按lead许可提交 `f3e2cb8d27dd5b236138aa8bd805060b050a4d0e`，未push。U1配置/控制台已实施：新红2 failed/.47s→77 passed/3.47s，单leaf/default/非法不写不重启、旧非法键Qwen生产忽略而独立adapter严格。4生产Ruff/Black通过。
+- U1独占时窗本tree显式Node22.23.5 npmci69packages7s+tsc/vite成功；真实新构建Chromium脚本exit0，验证default10、空不提交、30.5保存刷新、放弃仅本面板及#435其他草稿保留。JS变为index-BUblm2wq.js，size243936，SHA256 ed15f72493eaeb7bb2b1e0bfa025878267104453dd49713150ffc08030a1b815，HTML生成后仅规范混合换行至LF，最终size423、SHA256 282cec880bde7c0767ba3e84257296d457031a48fd7e733bc5b6ee2d2dbbc185同步发布清单；DOM语义和引用JS/CSS未变，未重复浏览器验收。
+- 上述浏览器只用隔离模拟API与真实构建产物，不是实际生产重启验收；诊断脚本和结构化安全code/outcome尚未实施，不能关闭整个#410。

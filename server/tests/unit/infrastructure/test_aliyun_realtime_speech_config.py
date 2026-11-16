@@ -11,6 +11,23 @@ from src.infrastructure.models.realtime_speech import (
 )
 
 
+@pytest.mark.parametrize("legacy", [True, -1, None, "bad", math.nan])
+def test_production_qwen_ignores_legacy_setup_limits_without_weakening_diagnostics(legacy):
+    from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
+
+    config = {
+        "enabled": True,
+        "api_key": "offline",
+        "model": "qwen3.5-omni-realtime",
+        "endpoint": "wss://provider.invalid/realtime",
+        "connect_timeout_seconds": legacy,
+        "session_timeout_seconds": legacy,
+    }
+    assert QwenOmniSessionFactory.from_mapping(config).is_configured
+    with pytest.raises(RealtimeSpeechConfigError):
+        AliyunRealtimeSpeechSessionFactory.from_mapping(config)
+
+
 def test_workspace_config_builds_explicit_model_url_without_exposing_secret():
     config = AliyunRealtimeSpeechConfig(api_key="secret-value", workspace_id="workspace", model="chosen-model")
 

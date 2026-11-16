@@ -302,6 +302,14 @@ TTS 数值由父进程后台批量写 SQLite，音频路径不等待数据库提
 （需安装 Playwright 及 Chromium）。脚本使用临时 SQLite 和模拟管理 API，验证桌面、
 窄屏、UTC+8 时间展示、时间范围切换及移除的入口；它不调用生产服务。
 
+### 通话建立总时限
+
+管理员在管理控制台“实时音频模型配置”面板设置“通话建立总时限（秒）”，对应 `stage_manager.call_setup_timeout`。缺省为 10 秒，必须是正的有限数字；允许小数。控制台显示实际生效的缺省或已保存值，修改后沿用配置校验和运行时重启流程。此字段只修改 `stage_manager` 下的这一项，不覆盖聊天结束维护等其他设置。
+
+同次拨号的连接、模型就绪、源聊天切换及响铃共用登记时确定的唯一截止时间，重连不续期。明确的连接拒绝、鉴权或初始化错误会立即结束；总时限不是必须等待的最小时长，也不保证网络连接成功。关闭资源可晚于用户看见终态，未确认安全释放前仍保护交互占用。
+
+生产 Qwen 通话不再使用 `call_transport.realtime_speech.connect_timeout_seconds` 和 `session_timeout_seconds`。旧文件可以保留这两项（包括旧非法值），不会用它们截断拨号或阻止生产配置校验；服务启动不自动删除或重写用户配置。请只修改总时限，不再调整旧键。关闭、清理超时和队列容量仍保留各自用途。独立 Aliyun/Fun-ASR 诊断适配器仍按其显式连接/初始化限时运行，不沿用生产 Manager 的总预算。
+
 ### Embedding 请求与维护降级
 
 向量库的 `embedding_model` 配置可设置 `connect_timeout_seconds`（默认 5）、`read_timeout_seconds`（默认 10）、`request_timeout_seconds`（单次完整请求默认 10）、`total_timeout_seconds`（整批含重试默认 30）和 `max_attempts`（默认 3，允许 1–5）。每次重试仍受整批预算约束；查询与维护共用此策略。环境代理与 NO_PROXY 继续由 HTTP 客户端读取，不写死代理。

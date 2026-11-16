@@ -75,7 +75,7 @@ class AliyunRealtimeSpeechConfig:
         return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
     @classmethod
-    def from_mapping(cls, value: object) -> AliyunRealtimeSpeechConfig:
+    def from_mapping(cls, value: object, *, use_legacy_setup_timeouts: bool = True) -> AliyunRealtimeSpeechConfig:
         if not isinstance(value, dict):
             raise RealtimeSpeechConfigError("realtime speech provider config must be an object")
         return cls(
@@ -83,8 +83,12 @@ class AliyunRealtimeSpeechConfig:
             model=_mapping_string(value, "model", required=True),
             workspace_id=_mapping_string(value, "workspace_id", required=False),
             endpoint=_mapping_string(value, "endpoint", required=False),
-            connect_timeout_seconds=_mapping_number(value, "connect_timeout_seconds", 10.0),
-            session_timeout_seconds=_mapping_number(value, "session_timeout_seconds", 10.0),
+            connect_timeout_seconds=(
+                _mapping_number(value, "connect_timeout_seconds", 10.0) if use_legacy_setup_timeouts else 10.0
+            ),
+            session_timeout_seconds=(
+                _mapping_number(value, "session_timeout_seconds", 10.0) if use_legacy_setup_timeouts else 10.0
+            ),
             close_timeout_seconds=_mapping_number(value, "close_timeout_seconds", 5.0),
             cleanup_timeout_seconds=_mapping_number(value, "cleanup_timeout_seconds", 2.0),
             write_queue_size=_mapping_int(value, "write_queue_size", 32),

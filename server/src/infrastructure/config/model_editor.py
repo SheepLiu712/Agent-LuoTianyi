@@ -11,6 +11,7 @@ def build_llm_config_view(config: dict[str, Any]) -> dict[str, Any]:
         "available_vlms": llm_service.get("available_vlms", {}),
         "available_audio_models": llm_service.get("available_audio_models", {}),
         "call_transport": copy.deepcopy(config.get("call_transport", {})),
+        "call_setup_timeout": config.get("stage_manager", {}).get("call_setup_timeout", 10.0),
         "client_model_types": llm_service.get("client_model_types", []),
         "module_bindings": collect_module_bindings(config),
     }
@@ -54,6 +55,7 @@ def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> d
     for key in ("available_llms", "available_vlms", "available_audio_models"):
         if key in payload:
             llm_service[key] = _normalize_interfaces(payload[key])
+    _apply_call_setup_budget(next_config, payload)
     if "call_transport" in payload:
         if not isinstance(payload["call_transport"], dict):
             raise ValueError("call_transport 必须是对象")
@@ -85,6 +87,11 @@ def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> d
             module_cfg["use_json"] = use_json
             module_cfg["params"] = params
     return next_config
+
+
+def _apply_call_setup_budget(config: dict[str, Any], payload: dict[str, Any]) -> None:
+    if "call_setup_timeout" in payload:
+        config.setdefault("stage_manager", {})["call_setup_timeout"] = payload["call_setup_timeout"]
 
 
 def _normalize_client_model_types(value: Any) -> list[dict[str, Any]]:
