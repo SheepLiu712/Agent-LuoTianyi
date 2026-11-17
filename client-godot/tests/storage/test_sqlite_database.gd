@@ -21,6 +21,7 @@ func run() -> void:
 	_case_initial_page_purges_stale_slots()
 	_case_slot_self_heal()
 	_case_local_tail()
+	_case_local_tail_limit()
 	_case_restart_recovery()
 	_case_confirmation()
 	_case_confirmation_keeps_sending()
@@ -216,6 +217,20 @@ func _case_local_tail() -> void:
 	var payload: Variant = JSON.parse_string(str(latest.data.messages[0].payload_json))
 	check(payload is Dictionary and str(payload.event) == "user_text", "send intent round trips")
 	check(int(_row(database, "SELECT attempts FROM local_messages WHERE id='local-1'")["attempts"]) == 1, "attempts accumulate")
+	database.close()
+
+
+func _case_local_tail_limit() -> void:
+	var scope := _scope("d1")
+	var database := _open(scope)
+	_execute(database, "save_local", scope, {"message": _local("oldest-failed", "retry me", "failed")})
+	for index in range(520):
+		_execute(database, "save_local", scope, {"message": _local("tail-%d" % index, "line %d" % index, "sent")})
+	var latest: Dictionary = _execute(database, "read_latest", scope, {"limit": 30})
+	check(latest.ok, "bounded local tail reads")
+	check(latest.data.messages.size() == 501, "local tail keeps 500 newest plus unfinished rows")
+	check(latest.data.messages.any(func(row): return str(row.id) == "oldest-failed"),
+		"unfinished row outside the newest window stays visible")
 	database.close()
 
 
