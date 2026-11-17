@@ -46,8 +46,15 @@ class Sessions:
     def __init__(self):
         self.opened = []
 
-    async def open(self, call_id, instructions):
-        handle = object()
+    async def open(self, call_id, instructions, *, remaining_setup_time, on_session_created):
+        remaining_setup_time()
+
+        class Handle:
+            async def close(self):
+                pass
+
+        handle = Handle()
+        on_session_created(handle)
         self.opened.append((call_id, instructions, handle))
         return handle
 
@@ -91,13 +98,19 @@ async def test_configured_prompt_is_loaded_when_agent_is_created_and_uses_each_s
         "src.agent.processing.omni_background.datetime", SimpleNamespace(now=lambda tz: next(utc_times).astimezone(tz))
     )
     contexts = []
+    handles = []
     try:
         # 正在运行的 Agent 已持有模板；创建会话不依赖再次访问该文件。
         prompt_file.unlink()
         for character_id, user_id in (("luotianyi", "甲"), ("miku", "乙")):
             call_id, context = await context_for(character_id, user_id)
             contexts.append(context)
-            await runtime.get_agent(character_id).open_omni_session(context, call_id)
+            await runtime.get_agent(character_id).open_omni_session(
+                context,
+                call_id,
+                remaining_setup_time=lambda: 10.0,
+                on_session_created=handles.append,
+            )
             assert context.conversation.read_working().entries == ()
         first, second = [entry[1] for entry in sessions.opened]
         assert "【本次通话开始时间】2026-11-04 23:59:59" in first
@@ -113,6 +126,8 @@ async def test_configured_prompt_is_loaded_when_agent_is_created_and_uses_each_s
             assert "禁止输出[sing]" in instructions and "[语气]" in instructions
         assert sessions.opened[0][2] is not sessions.opened[1][2]
     finally:
+        for handle in handles:
+            await handle.close()
         for context in contexts:
             await context.close()
         await runtime.shutdown()

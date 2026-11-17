@@ -307,6 +307,7 @@ class CallStage:
         self._lifecycle = CallLifecycle()
         self._context: InteractionContext | None = None
         self._provider: OmniSession | None = None
+        self._provider_close_task: asyncio.Task[None] | None = None
         self._pcm: asyncio.Queue[AudioFrame] = asyncio.Queue(self._pcm_capacity)
         self._pcm_buffered_bytes = 0
         self._receipts: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
@@ -484,10 +485,16 @@ class CallStage:
                 ),
                 cleanup=lambda context: context.close(),
             )
-            self._provider = await self._await_setup(
-                self._agent.open_omni_session(self._context, self._record.call_id),
-                cleanup=lambda provider: provider.close(),
+            provider = await self._await_setup(
+                self._agent.open_omni_session(
+                    self._context,
+                    self._record.call_id,
+                    remaining_setup_time=self._remaining_setup_time,
+                    on_session_created=self._own_provider,
+                ),
             )
+            if provider is not self._provider:
+                raise RuntimeError("provider returned a different session from its owned handle")
             if self._finish_source_interaction is not None:
                 await self._await_setup(self._finish_source_interaction(self))
             await self._transition(CallState.RINGING)
@@ -502,7 +509,7 @@ class CallStage:
             if self._termination_reason is None:
                 self._termination_reason = (
                     CallEndReason.SETUP_TIMEOUT
-                    if isinstance(error, TimeoutError) or self._setup_expired()
+                    if isinstance(error, (TimeoutError, asyncio.TimeoutError))
                     else CallEndReason.SYSTEM_FAILURE
                 )
             raise
@@ -1962,11 +1969,13 @@ class CallStage:
     async def _close_resources(self, *, close_context: bool = True) -> BaseException | None:
         cleanup_error: BaseException | None = None
         if self._provider is not None:
+            if self._provider_close_task is None:
+                self._provider_close_task = asyncio.create_task(self._provider.close(), name="call-provider-close")
             try:
-                await self._provider.close()
+                await asyncio.shield(self._provider_close_task)
             except BaseException as error:
                 cleanup_error = error
-            finally:
+            else:
                 self._provider = None
         if close_context and self._context is not None:
             try:
@@ -2009,11 +2018,26 @@ class CallStage:
             "ephemeral": True,
         }
 
-    def _require_setup_time(self) -> None:
+    def _own_provider(self, provider: OmniSession) -> None:
+        # 此回调无 await、赋值后不抛；初始化退出前 termination 不会关闭资源。
+        if provider is self._provider and self._provider is not None:
+            return
+        if self._provider is not None or self._provider_close_task is not None:
+            raise RuntimeError("provider session was already registered")
+        if provider is None or not callable(getattr(provider, "close", None)):
+            raise TypeError("provider must supply a close operation")
+        self._provider = provider
+
+    def _remaining_setup_time(self) -> float:
         if self.termination_requested:
             raise asyncio.CancelledError
-        if self._setup_expired():
-            raise TimeoutError("call setup deadline elapsed")
+        remaining = self._ownership.setup_deadline - self._monotonic()
+        if remaining <= 0:
+            raise asyncio.TimeoutError("call setup deadline elapsed")
+        return remaining
+
+    def _require_setup_time(self) -> None:
+        self._remaining_setup_time()
 
     async def _await_setup(
         self,
