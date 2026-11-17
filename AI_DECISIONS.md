@@ -1,5 +1,19 @@
 # AI 决策记录
 
+## 2026-11-17 #441 reset 测试只读就绪同步（task17顺序记录）
+
+**待定问题**：历史写入可见时，通话终止任务可能仍持有交互占用；怎样只修测试等待条件，保留真实重置准入和唯一POST？
+
+**背景约束与来源**：目标父为 `b8189f17cef14c22131cfdd5a0bff2b4ddc6e905`，仅host/E2E/本记录三路径，desktop-repair只改两代码、startup仅顺序记录AI，不预填未产生提交SHA。来源task16实现1/3 PASS后提交 `b307df6897800776cdb354ea36069c8a27000b8b`，source host b36035ab/E2E 2f493641/controller e27c620b已由实施者核验；观察接口相同，但目标保旧 `open(self,call_id,instructions)` Factory，明确排除来源新预算/owner参数，不覆盖整文件或合生产改动。
+
+**候选方案与选择**：①GET只读观察原owned终止任务完成及真实Manager busy、fence owned/resetting、lease，ready后才发原唯一POST；完成回调仅存安全布尔，不强持Stage/Task，显式 `reset_readiness_only=true` 提前返回，未知/失败/缺完成快照均notready。②重复POST等200会把删除当探针并掩盖冲突，不选。③只认history、固定sleep或降低guard断言混淆持久化与资源关闭，不选。选择①；GET不替代POST的原子准入，后来新占用导致非200须原样失败，不重试碰绿。
+
+**验证方式与目标实际结果**：来源首跑旧state `_inputs` 500为fixture错误，来源成功11.438秒不作目标成绩或原canonical 409精确根因。目标唯一运行job `pwsh-b44de775aed94b95` collect exit0：父12.375秒<60/killed=false，client8.219秒含startup6.110秒，server_exit=0，ROOT确为issue-412及既有V2。真实SQL CallHistory.save已成功但返回门未放时history200/readiness GET200，ready=false/reset0/busy及lease=true；缺完成快照的failed=true是保守默认，不称实际终止异常。放门后原任务自然完成，completed/resources=true、failed=false、busy=false、fenceowned0/resetting=false、lease=false/ready=true；唯一reset得200，四持久计数call_sessions/conversations/maintenance_batches/memories均0、profile空，原重登/凭据隐私断言通过。
+
+两代码逐diff+103/-5，旧默认state分支不顺手修；host SHA256 `47c7c3f15d4131492f94237ecfd00a26eebe201d35e28229669a42c7d6a05d68`、E2E SHA256 `2f4936417ca64d07f364d7a9e3aa32af0bbe94c4b7335e1cb1a17b1460ce2dd0`，除Factory类外host AST同来源/E2E LF字节同来源。Ruff/Black/diff-check通过，生产/config/scripts/CI差异为空；pydub缺ffmpeg PATH提示保留。依据已读目标25行短报告、53行raw与冻结静态记录转录，startup未重跑或操作索引。
+
+**风险与回滚**：观察回调不改原owned任务返回/失败语义；父看门、失败先放门及有限wait/reap只覆盖本受控宿主，不是通用无泄漏审计。唯一POST、实际guard、SQL删除与隐私保证不削弱。回滚该自然测试单元及记录不改产品重置政策、不删用户数据；三路径共同冻结后统一gate/单原子提交，不单AI提交，不push/自动all/ready/closegoal。局部成功不等远端绿、真资源恢复或完整A4/A6/V5，旧失败历史继续保留。
+
 ## 2026-11-17 #441 preclaim 测试同步与有限清理（task15顺序记录）
 
 **待定问题**：旧建立前置请求测试把“已进入create”当成超时前必达条件；若请求在find返回后已耗尽预算，create不会发生，旧heartbeat可能无限等待。怎样保留真实early/late边界而不修改生产预算？
