@@ -2,7 +2,7 @@
 
 测试包括四组headless检查以及显式图形/原生窗口验收；各组脚本清单以对应check脚本为准。另有capture视觉入口。目录表示模块职责，GPU能力由运行方式区分；未列入默认组不代表过时。
 
-现行约束与门禁见 [测试说明](../docs/testing.md)，当前整改证据见 [PR #186 整改记录](../../archive/worklog/pr-186/review-186-4th-round.md)。历史快照中的旧文件名不再作为当前运行入口。
+现行约束与门禁见 [测试说明](../docs/testing.md)，历次整改证据见 [PR #186 归档](../../archive/worklog/pr-186/)。历史快照中的旧文件名不再作为当前运行入口。
 
 ## 默认回归
 
@@ -19,7 +19,7 @@ $python = '<已安装测试依赖的python.exe>'
 
 | 分组 | 当前内容 |
 | --- | --- |
-| check | 导入、强制复杂度门禁、启动、离线样板及 Godot 模块测试，含语音错误来源/去重/恢复专项；正式检查需要 Python，ImportOnly 不需要 |
+| check | 导入、强制复杂度门禁、启动、离线样板及 Godot 模块测试，含语音错误来源/去重/恢复、TLS 信任与连通性探测；正式检查需要 Python，ImportOnly 不需要 |
 | accounts | 原服务端加密互操作及6个账户协议/会话/历史/UI/Application测试；整应用用完整HTTP/WebSocket夹具 |
 | network | 4个WebSocket/真实聊天/语音/触摸上报测试；不重复直接执行可靠队列测试 |
 | features | 历史/图片、设置/退出/模型、动态及扩展契约测试，含确定性阅读位置专项；清单以 check_features.ps1 为准 |

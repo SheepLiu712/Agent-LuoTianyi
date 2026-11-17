@@ -34,8 +34,8 @@
 常用本机路径：
 
 ```powershell
-$Godot = 'D:\godot\godot4.7.1\godot.exe'
-$Project = 'D:\01restart\langchain\lty\Agent-LuoTianyi\client-godot'
+$Godot = '<godot>'
+$Project = '<repo>\client-godot'
 ```
 
 `Resolve-Godot` 会检查 `--version` 是否等于锁文件中的 `engine.version_output`，并校验 GUI 可执行文件的 SHA-256。传入 `*_console.exe` 时会校验同目录的 GUI EXE。工具链不符时不会继续导出。
@@ -76,7 +76,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 `
   -Version '0.1.6.3' `
-  -Godot 'D:\godot\godot4.7.1\godot.exe'
+  -Godot '<godot>'
 ```
 
 只导出目录、不生成 ZIP：
@@ -84,7 +84,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 `
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 `
   -Version '0.1.6.3' `
-  -Godot 'D:\godot\godot4.7.1\godot.exe' `
+  -Godot '<godot>' `
   -Package:$false
 ```
 
@@ -126,7 +126,7 @@ artifacts/<step>.log
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_single.ps1 `
   -Version '0.1.6.3' `
-  -BuildDirectory 'D:\01restart\langchain\lty\Agent-LuoTianyi\client-godot\dist\agentluo-0.1.6.3'
+  -BuildDirectory '<repo>\client-godot\dist\agentluo-0.1.6.3'
 ```
 
 先重新构建目录版再打包：
@@ -134,7 +134,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_single.ps1 `
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_single.ps1 `
   -Version '0.1.6.3' `
-  -Godot 'D:\godot\godot4.7.1\godot.exe' `
+  -Godot '<godot>' `
   -Build
 ```
 
@@ -144,7 +144,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_single.ps1 `
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_single.ps1 `
   -Version '0.1.6.3' `
   -BuildDirectory '...\dist\agentluo-0.1.6.3' `
-  -OutputDirectory 'D:\release' `
+  -OutputDirectory '<release>' `
   -SkipRunCheck
 ```
 
@@ -279,7 +279,7 @@ python scripts/check_complexity.py
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1 `
-  -Godot 'D:\godot\godot4.7.1\godot.exe' `
+  -Godot '<godot>' `
   -Python '<python.exe>'
 ```
 
@@ -348,8 +348,8 @@ Get-ChildItem 'tmp' -Directory -Filter 'single-launcher-build-*' | Remove-Item -
 ## 10. 快速复制区
 
 ```powershell
-$Project = 'D:\01restart\langchain\lty\Agent-LuoTianyi\client-godot'
-$Godot = 'D:\godot\godot4.7.1\godot.exe'
+$Project = '<repo>\client-godot'
+$Godot = '<godot>'
 $Version = '0.1.6.3'
 
 # 1) 目录版 + ZIP

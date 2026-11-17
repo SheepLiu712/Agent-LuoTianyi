@@ -1,6 +1,6 @@
 # Godot Windows 客户端现行说明
 
-当前源码版本为 **0.1.8.2**，版本权威为 `release.json`、`project.godot` 与 `export_presets.cfg`。文档及测试保存在客户端内，不依赖上游已移除的进度/spec 目录；历史 `docs-godot/` 仅作参考，不作为现行依据。
+当前源码版本为 **0.2.0.0**，版本权威为 `release.json`、`project.godot` 与 `export_presets.cfg`。文档及测试保存在客户端内，不依赖上游已移除的进度/spec 目录；本地个人笔记不随仓库分发。
 
 ## 阅读入口
 
@@ -9,8 +9,8 @@
 - [测试与门禁](testing.md)：依赖、四组入口、GPU 与验收边界。
 - [原生 DLL 解析](native-dll.md)：`windows_security.dll` 的 PE 结构、四个源码文件、构建与 GDScript 调用链。
 - [开发者查看 SQLite](dev-database.md)：数据库路径、VS Code 插件、表结构与 WAL 注意事项。
-- [PR #186 第四轮整改证据](../../archive/worklog/pr-186/review-186-4th-round.md)：N22–N30 的处理与真实验证结果（原文已归档）。
-- [PR 描述与复审回复草稿](../../archive/worklog/pr-186/pr-186-response-draft.md)：仅供提交推送后的人工更新，不代表远端已更新。
+- [PR #186 整改归档](../../archive/worklog/pr-186/)：按轮次保留的历史记录；最新状态以 PR 评论与当前 head 为准。
+- [PR 描述修正稿](../../archive/worklog/pr-186/pr-description-current.md)：提交推送后用于更新远端描述。
 - [测试目录说明](../tests/README.md)：单脚本及截图入口。
 - [构建与使用](../README.md)：锁定工具链、版本同步与便携包要求。
 

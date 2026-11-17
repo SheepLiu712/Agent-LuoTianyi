@@ -27,6 +27,8 @@ $engine = '<锁定 Godot exe 的绝对路径>'
 
 runner 使用本地 HTTP/WebSocket 夹具和独立 APPDATA，不访问公共账户或付费模型。失败不能删断言、跳过场景或只改文档称通过。完整运行必须核对中止位置，不能将中止后未执行的检查计为通过。
 
+特性组默认超时为普通脚本 60 秒、整应用慢用例 180 秒；可用 `check_features.ps1 -TimeoutSeconds <秒>` 或 runner `--timeout` 覆盖。输出同时记录实际耗时，超时不得通过放宽断言解决。基础入口已包含 `test_connectivity_probe.gd`，非回环 HTTP 地址在发请求前返回 `INSECURE_SERVER`。
+
 ## 回复事件样例
 
 唯一回归样例为 `tests/fixtures/chat/reply_events.json`。由已知可用历史提交恢复的 9 个事件原样迁入客户端，运行器同时交给 Godot 收包链路与旧 Python 客户端 `client/src/network/event_types.py` 真实解析器。无需恢复根目录 contracts 或修改旧端代码；该文件是测试数据，不是新增的服务端协议定义。
@@ -49,6 +51,8 @@ runner 使用本地 HTTP/WebSocket 夹具和独立 APPDATA，不访问公共账�
 ```
 
 门禁编排测试使用临时工程和模拟引擎，覆盖成功、非零、缺依赖、默认 Python、SkipImport 和 ImportOnly，不代替真实引擎检查。文档测试核对自有现行入口、本地链接、版本配置、固定夹具与 `.import` 的 LF 属性；第三方 NOTICE 原文不纳入自有文档改写。
+
+CI 的 `godot-static` 作业在 `client-godot/`、根 `.gitignore` 或 workflow 改动时运行依赖边界、文档/版本、门禁编排、构建提示与复杂度检查；Godot 四组入口仍需 Windows 本机或发布前手动执行，不能以静态作业代替。
 
 ## 图形与冷缓存
 

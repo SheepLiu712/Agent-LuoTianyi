@@ -7,7 +7,7 @@
 
 ## 仓库架构
 
-本仓库是 AgentLuo（洛天依对话 Agent）项目：一个服务端 + 多个客户端（桌面 / CLI / 移动端），客户端通过 HTTP / WebSocket 使用服务端；角色认知、对话与记忆、世界任务运行在服务端。
+本仓库是 AgentLuo（洛天依对话 Agent）项目：一个服务端 + 多个客户端（Python 桌面 / Godot 桌面 / CLI / 移动端），客户端通过 HTTP / WebSocket 使用服务端；角色认知、对话与记忆、世界任务运行在服务端。
 
 | 子项目 | 职责与技术 | 入口 |
 | --- | --- | --- |
@@ -15,6 +15,7 @@
 | `client/` | Python / PySide6 桌面客户端：窗口、Live2D、消息收发、音频播放 | `client/main.py` |
 | `cli-client/` | 无 GUI 命令行客户端：注册、登录、历史、聊天、回复与场景判定 | `cli-client/cli.py` |
 | `app/` | Expo / React Native 移动客户端（当前重点 Android），Live2D 通过 WebView | `app/app/_layout.tsx`、`app/app/index.tsx` |
+| `client-godot/` | Godot 4.7.1 Windows 桌面客户端：Live2D、聊天、流式语音、SQLite 历史、动态、日志与打包 | `client-godot/src/application.gd`、`client-godot/scenes/main.tscn` |
 | 管理控制台 | 服务端附带的 Web 前端（配置、账号、运行时管理），不是角色聊天客户端 | `server/res/admin_ui/` |
 
 `server/src/` 主要模块：`domain`（共享契约）、`web`（HTTP / WS 入口）、`application`（应用用例）、`adapter`（信道语义转换）、`stage`（交互生命周期与时序）、`agent`（认知与技能）、`agent_runtime`（角色装配）、`infrastructure`（模型 / 存储 / 媒体 / 配置）、`world`（世界任务与采集）；组合根为 `server_runtime.py`。

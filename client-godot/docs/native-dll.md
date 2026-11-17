@@ -1039,7 +1039,7 @@ Default(binary)
 在 `Agent-LuoTianyi` 目录下执行（路径按你的实际 godot-cpp checkout 替换）：
 
 ```powershell
-cd D:\01restart\langchain\lty\Agent-LuoTianyi
+cd <repo>
 python client-godot\scripts\build_security.py --godot-cpp 'D:\path\to\godot-cpp'
 ```
 
@@ -1053,14 +1053,14 @@ WindowsSecurity SHA256: 037b797d14fe04de6e4ef72b5c74174f04bcf2f6089ca06c653bd812
 独立核对哈希：
 
 ```powershell
-$dll = 'D:\01restart\langchain\lty\Agent-LuoTianyi\client-godot\addons\windows_security\bin\windows_security.dll'
+$dll = '<repo>\client-godot\addons\windows_security\bin\windows_security.dll'
 Get-FileHash $dll -Algorithm SHA256 | Format-List
 ```
 
 核对发行包副本：
 
 ```powershell
-$pkg = 'D:\01restart\langchain\lty\Agent-LuoTianyi\client-godot\dist\agentluo-0.1.8.6\windows_security.dll'
+$pkg = '<repo>\client-godot\dist\agentluo-<version>\windows_security.dll'
 Get-FileHash $pkg -Algorithm SHA256 | Format-List
 ```
 
@@ -1209,15 +1209,11 @@ Cubism SDK 的精确 Core 版本没有直接取证；`CSM_MOC_VERSION_50` 与 lo
 
 `StorageVolume` 有 Unix 分支，但它只是“这个类本身可移植”，不代表整 DLL 可移植。要支持 Linux/macOS，至少需要把 DPAPI/RSA/键盘布局拆成平台实现，并新增库条目。
 
-### 10.6 版本与文档漂移
+### 10.6 版本与文档一致性
 
-这是读仓库时容易踩的坑，不属于 DLL 本身的问题：
+当前机器字段与客户端文档统一为 `0.2.0.0`：`release.json:1`、`project.godot:14`、`export_presets.cfg:48-49`、`PREVIEW.md:3`、`README.md:3`、`docs/README.md:3`。判断当前版本时仍以 `release.json` 为准；发布包是否已生成以 `dist/` 和构建记录为准，不能从源码版本推断。
 
-- `release.json:1`、`project.godot:14`、`export_presets.cfg:48-49`、`dist/agentluo-0.1.8.6/release.json` 都是 `0.1.8.6`；
-- `client-godot/README.md:3,136,142`、`docs/README.md:3`、`PREVIEW.md:3` 仍写 `0.1.8.2`；
-- `Agent-LuoTianyi/docs/代码地图.md:19` 仍称“当前 dev 尚无 Godot 源码目录”，与已存在的 `client-godot` 矛盾；该文件也没有把 `client-godot` 列进入口表。
-
-本文只提醒，不修改这些文件。判断当前版本时以 `release.json` 为准，不以 README 的叙述为准。
+仓库级[代码地图](../../docs/代码地图.md)已把 `client-godot/` 列为独立子项目；客户端内部模块入口以本文与 `client-godot/docs/` 为准。
 
 ### 10.7 常见故障的定位顺序
 
@@ -1243,9 +1239,9 @@ Cubism SDK 的精确 Core 版本没有直接取证；`CSM_MOC_VERSION_50` 与 lo
 | 工具 | 用途 | 本环境路径/获取方式 |
 |---|---|---|
 | PowerShell | 哈希、签名、版本信息、文件枚举 | 系统自带 |
-| `objdump` | PE 头、节表、导入/导出、反汇编 | `C:\x86_64-14.2.0-release-win32-seh-ucrt-rt_v12-rev1\mingw64\bin\objdump.exe` |
+| `objdump` | PE 头、节表、导入/导出、反汇编 | `<mingw>\bin\objdump.exe` |
 | `strings` | ASCII/UTF-16 字符串与偏移 | 同目录 `strings.exe` |
-| Python | 熵计算、PE 解析、脚本化交叉核对 | `D:\anaconda\python.exe` |
+| Python | 熵计算、PE 解析、脚本化交叉核对 | `python` |
 | `pefile`（可选） | 解析 Rich header、数据目录、导入表 | `python -m pip install pefile` |
 | `capstone`（可选） | 反汇编与 xref 脚本 | `python -m pip install capstone` |
 | Godot 4.7.1 | 跑测试/加载扩展 | `$env:GODOT_BIN` |
@@ -1255,9 +1251,9 @@ Cubism SDK 的精确 Core 版本没有直接取证；`CSM_MOC_VERSION_50` 与 lo
 ### 11.3 六条核心命令
 
 ```powershell
-$dll = 'D:\01restart\langchain\lty\Agent-LuoTianyi\client-godot\addons\windows_security\bin\windows_security.dll'
-$objdump = 'C:\x86_64-14.2.0-release-win32-seh-ucrt-rt_v12-rev1\mingw64\bin\objdump.exe'
-$strings = 'C:\x86_64-14.2.0-release-win32-seh-ucrt-rt_v12-rev1\mingw64\bin\strings.exe'
+$dll = '<repo>\client-godot\addons\windows_security\bin\windows_security.dll'
+$objdump = '<mingw>\bin\objdump.exe'
+$strings = '<mingw>\bin\strings.exe'
 
 # 1. 哈希与签名
 Get-FileHash $dll -Algorithm SHA256
