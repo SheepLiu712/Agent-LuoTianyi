@@ -99,6 +99,20 @@ def _release_test_write(session, url):
         pass
 
 
+def _wait_reset_ready(http, url, call_id, timeout=10):
+    deadline = time.monotonic() + timeout
+    observed = None
+    while (remaining := deadline - time.monotonic()) > 0:
+        response = http.get(
+            url + f"/test/call_state/{call_id}", params={"reset_readiness_only": "true"}, timeout=min(2, remaining)
+        )
+        response.raise_for_status()
+        observed = response.json()["reset_readiness"]
+        if observed["ready"]:
+            return observed
+    raise AssertionError(f"call resources did not become reset-ready: {observed}")
+
+
 def _process_output(stdout_path: Path, stderr_path: Path) -> str:
     return stdout_path.read_text(encoding="utf-8") + stderr_path.read_text(encoding="utf-8")
 
@@ -524,6 +538,8 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
     assert call_history["content"].startswith("[语音通话] ")
     assert "用户与角色讨论" not in call_history["content"]
 
+    # 历史可见早于资源关闭/占用释放，先观察真实空闲，不用重复POST探测重置。
+    _wait_reset_ready(http, url, call_id)
     reset = http.post(
         url + "/user/data/reset",
         json={"username": "alice"},

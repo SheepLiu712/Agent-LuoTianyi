@@ -6,6 +6,22 @@ from src.infrastructure.config.store import ConfigStore
 from src.infrastructure.config.validation import RuntimeConfigValidator
 
 
+@pytest.mark.parametrize("configured", [None, 30.0])
+def test_call_setup_budget_view_and_leaf_update_preserve_manager_settings(configured):
+    manager = {"stage": {"termination_timeout": 90}, "offline_timeout": 60}
+    if configured is not None:
+        manager["call_setup_timeout"] = configured
+    config = {"stage_manager": manager, "call_transport": {"enabled": False}}
+
+    view = build_llm_config_view(config)
+
+    assert view.get("call_setup_timeout") == (10.0 if configured is None else 30.0)
+    updated = apply_llm_config_draft(config, {"call_setup_timeout": 45.5})
+    assert updated["stage_manager"] == {**manager, "call_setup_timeout": 45.5}
+    assert updated["call_transport"] == config["call_transport"]
+    assert config["stage_manager"] == manager
+
+
 def test_audio_configuration_save_and_reload(tmp_path):
     config = {
         "llm_service": {
@@ -70,7 +86,6 @@ def test_audio_configuration_save_and_reload(tmp_path):
     [
         {"endpoint": "https://invalid.example"},
         {"write_queue_size": 0},
-        {"session_timeout_seconds": -1},
         {"api_key": "$UNRESOLVED_KEY"},
         {"enabled": "true"},
     ],
@@ -93,6 +108,16 @@ def test_realtime_invalid_configuration_blocks_save(tmp_path, patch):
     assert not result["core_ok"]
     assert any(
         item["name"] == "call_transport.realtime_speech" and item["status"] == "error" for item in result["items"]
+    )
+
+
+@pytest.mark.parametrize("value", [0, -1, True, None, "30", float("nan"), float("inf")])
+def test_invalid_total_call_setup_budget_is_a_core_validation_error(tmp_path, value):
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.json"))
+    result = validator.validate({"stage_manager": {"call_setup_timeout": value}})
+    assert any(
+        item["name"] == "stage_manager.call_setup_timeout" and item["status"] == "error"
+        for item in result["items"]
     )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import sys
 import time
 import wave
@@ -43,9 +44,10 @@ async def run_adapter(config, pcm, args, record):
             results.append(event)
             record("receive", {"event": type(event).__name__, **asdict(event)})
 
-    await session.start(RealtimeSpeechConfig(language="zh"))
-    consumer = asyncio.create_task(consume())
+    consumer = None
     try:
+        await session.start(RealtimeSpeechConfig(language="zh"))
+        consumer = asyncio.create_task(consume())
         record("send", {"action": "initial_silence", "seconds": args.initial_silence_seconds})
         await push_pcm(session, bytes(32000 * args.initial_silence_seconds))
         assert not results, "纯静音不应产生通话事件"
@@ -60,9 +62,12 @@ async def run_adapter(config, pcm, args, record):
         assert [type(e) for e in results] == [SpeechStarted, SpeechStopped, TurnCompleted] * len(rounds)
         record("assert", {"action": "passed", "completed_turns": len(rounds), "event_count": len(results)})
     finally:
-        await session.close()
-        consumer.cancel()
-        await asyncio.gather(consumer, return_exceptions=True)
+        try:
+            await session.close()
+        finally:
+            if consumer is not None:
+                consumer.cancel()
+                await asyncio.gather(consumer, return_exceptions=True)
 
 
 async def feed(socket, pcm, silence_seconds, task_id, record):
@@ -85,15 +90,21 @@ async def feed(socket, pcm, silence_seconds, task_id, record):
 
 
 async def main(args):
+    for value in (args.connect_timeout_seconds, args.session_timeout_seconds):
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError("诊断等待上限必须是正的有限秒数")
     root = args.config_root.resolve()
     SecretStore(root / "config/secrets.local.env").load_into_environment()
     config = ConfigStore(root / "config/config.json", root_dir=root).read_resolved()
-    key = config["call_transport"]["realtime_speech"]["api_key"]
+    speech = {
+        **config["call_transport"]["realtime_speech"],
+        "connect_timeout_seconds": args.connect_timeout_seconds,
+        "session_timeout_seconds": args.session_timeout_seconds,
+    }
     with wave.open(str(args.wav), "rb") as source:
         if (source.getframerate(), source.getsampwidth(), source.getnchannels()) != (16000, 2, 1):
             raise ValueError("测试 WAV 必须是 16 kHz 单声道 PCM16")
         pcm = source.readframes(source.getnframes())
-    task_id = uuid4().hex
     timeline = []
     began = time.perf_counter()
 
@@ -104,39 +115,47 @@ async def main(args):
         print(json.dumps(entry, ensure_ascii=False), flush=True)
 
     if args.adapter:
-        await run_adapter(config["call_transport"]["realtime_speech"], pcm, args, record)
-        return
+        await run_adapter(speech, pcm, args, record)
+    else:
+        await run_direct(speech, pcm, args, record, timeline)
 
+
+async def _start_direct(socket, task_id, record):
+    await socket.send(
+        json.dumps(
+            {
+                "header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"},
+                "payload": {
+                    "task_group": "audio",
+                    "task": "asr",
+                    "function": "recognition",
+                    "model": "fun-asr-realtime",
+                    "input": {},
+                    "parameters": {
+                        "format": "pcm",
+                        "sample_rate": 16000,
+                        "max_sentence_silence": 800,
+                        "heartbeat": True,
+                    },
+                },
+            }
+        )
+    )
+    event = json.loads(await socket.recv())
+    record("receive", event)
+    if event["header"]["event"] != "task-started":
+        raise RuntimeError("Fun-ASR 任务启动失败，查看诊断结果")
+
+
+async def run_direct(config, pcm, args, record, timeline):
+    task_id = uuid4().hex
     async with connect(
         "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
-        additional_headers={"Authorization": f"Bearer {key}"},
-        open_timeout=10,
+        additional_headers={"Authorization": f"Bearer {config['api_key']}"},
+        open_timeout=args.connect_timeout_seconds,
         close_timeout=5,
     ) as socket:
-        await socket.send(
-            json.dumps(
-                {
-                    "header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"},
-                    "payload": {
-                        "task_group": "audio",
-                        "task": "asr",
-                        "function": "recognition",
-                        "model": "fun-asr-realtime",
-                        "input": {},
-                        "parameters": {
-                            "format": "pcm",
-                            "sample_rate": 16000,
-                            "max_sentence_silence": 800,
-                            "heartbeat": True,
-                        },
-                    },
-                }
-            )
-        )
-        event = json.loads(await asyncio.wait_for(socket.recv(), 10))
-        record("receive", event)
-        if event["header"]["event"] != "task-started":
-            raise RuntimeError("Fun-ASR 任务启动失败，查看诊断结果")
+        await asyncio.wait_for(_start_direct(socket, task_id, record), args.session_timeout_seconds)
 
         feeder = asyncio.create_task(feed(socket, pcm, args.silence_seconds, task_id, record))
         try:
@@ -158,7 +177,14 @@ async def main(args):
         raise AssertionError(f"预期三轮最终识别结果，实际 {len(finals)}")
 
 
-if __name__ == "__main__":
+def _positive_seconds(value):
+    seconds = float(value)
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError("诊断等待上限必须是正的有限秒数")
+    return seconds
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config-root", type=Path, required=True)
     parser.add_argument("--wav", type=Path, required=True, help="仅使用公开合成语音；结果会记录识别文本")
@@ -167,4 +193,10 @@ if __name__ == "__main__":
     parser.add_argument("--adapter", action="store_true", help="通过系统实际使用的供应商工厂验证领域事件")
     parser.add_argument("--initial-silence-seconds", type=int, default=6)
     parser.add_argument("--silence-only", action="store_true", help="适配器测试只发送初始静音并关闭")
-    asyncio.run(main(parser.parse_args()))
+    parser.add_argument("--connect-timeout-seconds", type=_positive_seconds, default=10.0)
+    parser.add_argument("--session-timeout-seconds", type=_positive_seconds, default=10.0)
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    asyncio.run(main(parse_args()))

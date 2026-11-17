@@ -54,6 +54,27 @@ from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactor
 from src.stage.call.call_stage import CallStage
 
 
+async def _open_owned_session(socket):
+    """直接调用 Factory 的测试显式接管失败句柄，成功句柄由各用例 finally 关闭。"""
+    owned = []
+    deadline = asyncio.get_running_loop().time() + 10.0
+
+    def remaining():
+        seconds = deadline - asyncio.get_running_loop().time()
+        if seconds <= 0:
+            raise asyncio.TimeoutError
+        return seconds
+
+    try:
+        return await factory(socket).open(
+            uuid4(), "背景", remaining_setup_time=remaining, on_session_created=owned.append
+        )
+    except BaseException:
+        for session in owned:
+            await session.close()
+        raise
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("found", [False, True], ids=["empty", "known_fact"])
 async def test_memory_action_returns_typed_value_without_presentation_outputs(call_setup, found):
@@ -100,7 +121,7 @@ async def test_memory_action_returns_typed_value_without_presentation_outputs(ca
 @pytest.mark.asyncio
 async def test_sessions_are_isolated_and_stream_before_generation_finishes():
     sockets = [FakeAliyunWebSocket(), FakeAliyunWebSocket()]
-    sessions = [await factory(s).open(uuid4(), "背景") for s in sockets]
+    sessions = [await _open_owned_session(s) for s in sockets]
     try:
         first, second = sessions
         config = sockets[0].sent[0]["session"]
@@ -131,7 +152,7 @@ async def test_sessions_are_isolated_and_stream_before_generation_finishes():
 @pytest.mark.parametrize("result_before_done", [False, True])
 async def test_memory_results_continue_once_after_tool_response_done(result_before_done):
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     stream = session.events()
     try:
         await send_reply(socket, text="", item_id=None, done=False)
@@ -166,7 +187,7 @@ async def test_memory_results_continue_once_after_tool_response_done(result_befo
 @pytest.mark.asyncio
 async def test_late_tool_result_after_interrupt_does_not_continue():
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     try:
         await send_reply(socket, text="", item_id=None)
         await socket.server_event(
@@ -392,7 +413,7 @@ async def test_lookup_failure_is_reported_and_releases_wait_without_ending_call(
 @pytest.mark.asyncio
 async def test_pending_tool_continuation_inherits_interruption_before_response_id_arrives():
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     try:
         await send_reply(socket, text="", done=False)
         await socket.server_event(
@@ -467,7 +488,7 @@ async def test_silence_uses_one_control_request_after_playback_and_waits_during_
 @pytest.mark.asyncio
 async def test_streamed_tone_tags_are_not_spoken_and_survive_delta_boundaries():
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     try:
         await socket.server_event({"type": "response.created", "response": {"id": "tones"}})
         for delta in ("[温", "柔]别着急。", "我在听。\n[欣", "喜]太好了", "！[中性]再见"):
@@ -496,7 +517,7 @@ async def test_endpoint_estimate_ignores_silence_and_audio_after_reported_end(mo
     events = []
     monkeypatch.setattr(omni, "call_latency", lambda name, *args, **fields: events.append(name))
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     try:
         for ms, value in enumerate([0, 1000, 0, 1000], 1):
             pcm = value.to_bytes(2, "little", signed=True) * 160
@@ -522,7 +543,7 @@ async def test_anonymous_empty_done_keeps_next_spoken_turn_usable(status):
     from src.domain.call.omni import SpeechStopped
 
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     try:
         await socket.server_event({"type": "input_audio_buffer.speech_stopped", "item_id": "no-reply"})
         await socket.server_event({"type": "response.done", "response": {"id": "", "status": status, "output": []}})
@@ -542,7 +563,7 @@ async def test_anonymous_empty_done_keeps_next_spoken_turn_usable(status):
 @pytest.mark.asyncio
 async def test_anonymous_failed_done_retains_provider_error():
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     try:
         await socket.server_event({
             "type": "response.done", "event_id": "event-error",
