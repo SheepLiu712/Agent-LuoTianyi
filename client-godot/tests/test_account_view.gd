@@ -30,6 +30,21 @@ func has_text(view: Node, text: String) -> bool:
 			return true
 	return false
 
+func error_dialog() -> Node:
+	for child in root.find_children("*", "", true, false):
+		if child.is_in_group("error_dialog"):
+			return child
+	return null
+
+func dismiss_error_dialog() -> void:
+	var dialog := error_dialog()
+	if dialog == null:
+		return
+	var confirm := dialog.get_node_or_null("%ErrorConfirm") as Button
+	if confirm != null:
+		confirm.pressed.emit()
+	await process_frame
+
 func focused_name(view: Control) -> String:
 	var focused := view.get_viewport().gui_get_focus_owner()
 	return "" if focused == null else String(focused.name)
@@ -79,6 +94,7 @@ func run() -> void:
 		check(has_text(view.get_window(), "用户名或密码错误"), "authentication rejection visible in error dialog")
 		check(not has_text(view, "用户名或密码错误"), "authentication rejection not duplicated in form")
 		check(password.text == "synthetic-password", "failed login preserves draft")
+		await dismiss_error_dialog()
 		view.select_mode("register")
 		username.text = "test"
 		password.text = "synthetic-password"
@@ -86,7 +102,11 @@ func run() -> void:
 		input(view, "邀请码").text = "invite-test"
 		press(view, "注册")
 		check(has_text(view.get_window(), "两次输入的密码不一致"), "password confirmation checked locally")
+		var mismatch_dialog := error_dialog()
+		check(mismatch_dialog != null and mismatch_dialog.get_current_text().contains("两次输入的密码不一致"),
+			"password mismatch is the current queued error")
 		check(not has_text(view, "两次输入的密码不一致"), "password mismatch not duplicated in form")
+		await dismiss_error_dialog()
 		input(view, "确认密码").text = "synthetic-password"
 		press(view, "注册")
 		await create_timer(0.4).timeout
