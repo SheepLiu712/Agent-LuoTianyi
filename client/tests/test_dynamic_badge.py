@@ -236,10 +236,20 @@ def test_failed_and_malformed_results_preserve_badge_then_allow_new_refresh(unre
 
 def test_successful_mark_read_invalidates_old_unread_result(unread_window, monkeypatch):
     _window, chat, network, transport = unread_window([{"unread_count": 12}, {"unread_count": 0}])
-    monkeypatch.setattr(network, "get_dynamics", lambda **kwargs: {"ok": True, "items": []})
-    monkeypatch.setattr(network, "mark_dynamics_read", lambda: {"ok": True})
+    from src.network.dynamics import DynamicRequest
+
+    monkeypatch.setattr(DynamicRequest, "fetch", lambda self, session: {"ok": True, "items": []})
+    marked_read = []
+    invalidate = chat.invalidate_dynamic_badge
+
+    def on_read():
+        invalidate()
+        marked_read.append(True)
+
+    monkeypatch.setattr(chat, "invalidate_dynamic_badge", on_read)
     QTest.mouseClick(chat.dynamic_btn, ui_module.Qt.MouseButton.LeftButton)
     assert chat.dynamic_dialog is not None
+    wait_for(lambda: marked_read == [True])
     transport.gates[0].set()
     wait_for(lambda: len(transport.calls) == 2)
     assert chat.dynamic_btn.text() != "12"

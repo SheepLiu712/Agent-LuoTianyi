@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 from .binder import AgentBinder
 from ..safety import credential
 from ..utils.logger import get_logger
-from ..utils.http_client import HttpClientFactory
+from .window_operation import WindowOperation
 
 
 class LoginDialog(QDialog):
@@ -36,6 +36,14 @@ class LoginDialog(QDialog):
         layout.addWidget(self.tabs)
 
         self.setLayout(layout)
+        self._account_operation = WindowOperation(self)
+        self._account_operation.completed.connect(self._account_completed)
+        self._account_operation.settled.connect(self._account_settled)
+        self._account_child = None
+        self._account_button = None
+        self._account_button_text = None
+        self._account_closed = False
+
         self.tabs.currentChanged.connect(self.update_default_button)
         self.update_default_button(self.tabs.currentIndex())
 
@@ -47,6 +55,78 @@ class LoginDialog(QDialog):
             self.saved_token = token
             if saved_url:
                 self.custom_base_url = saved_url
+
+    def _start_account(self, action, button, child=None, **values):
+        if self._account_closed or self._account_operation.busy:
+            return
+        try:
+            request = self.binder.prepare_account_request(action, **values)
+        except Exception as exc:
+            QMessageBox.critical(child or self, "请求失败", str(exc))
+            return
+        self._account_child = child
+        self._account_button = button
+        self._account_button_text = button.text()
+        self.tabs.setEnabled(False)
+        button.setText("处理中…")
+        button.setEnabled(False)
+        cancelled = self._account_operation.start(request)
+        if child is not None:
+            child.finished.connect(lambda _result, token=cancelled: token.set())
+            child.destroyed.connect(lambda _obj=None, token=cancelled: token.set())
+            for field in child.findChildren(QLineEdit):
+                field.setEnabled(False)
+
+    def _account_settled(self):
+        if self._account_closed:
+            return
+        self.tabs.setEnabled(True)
+        try:
+            if self._account_child is None or self._account_child.isVisible():
+                self._account_button.setEnabled(True)
+                self._account_button.setText(self._account_button_text)
+                if self._account_child is not None:
+                    for field in self._account_child.findChildren(QLineEdit):
+                        field.setEnabled(True)
+        except RuntimeError:
+            pass  # 子窗口可能已实际删除；只恢复仍存活的父窗口。
+
+    def _account_completed(self, request, result):
+        child = self._account_child
+        if self._account_closed:
+            return
+        try:
+            if child is not None and not child.isVisible():
+                return
+        except RuntimeError:
+            return
+        if request.context != self.binder.account_context():
+            return
+        try:
+            success, message = self.binder.apply_account_result(request, result)
+        except Exception as exc:
+            success, message = False, str(exc)
+        if not success:
+            QMessageBox.critical(child or self, "请求失败", message)
+        elif request.action == "login":
+            self.accept()
+        elif request.action == "register":
+            QMessageBox.information(self, "成功", "注册成功，请登录")
+            self.tabs.setCurrentIndex(0)
+        elif request.action == "reset":
+            QMessageBox.information(child, "成功", "账号重置成功，请使用新账号登录")
+            self.l_username.setText(request.username)
+            self.tabs.setCurrentIndex(0)
+            child.accept()
+        elif request.action == "server":
+            self.custom_base_url = request.base_url
+            QMessageBox.information(child, "成功", "服务器地址验证成功，地址已保存")
+            child.accept()
+
+    def done(self, result):
+        self._account_closed = True
+        self._account_operation.close()
+        super().done(result)
 
     def update_default_button(self, index):
         # Qt 的默认按钮属于整个对话框，切页时只保留当前页的主动作。
@@ -181,6 +261,8 @@ class LoginDialog(QDialog):
         self.register_tab.setLayout(layout)
 
     def do_login(self):
+        if self._account_operation.busy:
+            return
         username = self.l_username.text()
         password = self.l_password.text()
         do_auto_login = self.l_auto_login.isChecked()
@@ -189,13 +271,11 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, "错误", "请输入用户名和密码")
             return
             
-        success, msg = self.binder.on_login(username, password, do_auto_login=do_auto_login)
-        if success:
-            self.accept()
-        else:
-            QMessageBox.critical(self, "登录失败", msg)
+        self._start_account("login", self.l_btn, username=username, password=password, remember=do_auto_login)
 
     def do_register(self):
+        if self._account_operation.busy:
+            return
         username = self.r_username.text()
         password = self.r_password.text()
         confirm_password = self.r_confirm_password.text()
@@ -209,15 +289,12 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, "错误", "两次输入的密码不一致")
             return
             
-        success, msg = self.binder.on_register(username, password, invite)
-        if success:
-            QMessageBox.information(self, "成功", "注册成功，请登录")
-            self.tabs.setCurrentIndex(0)
-        else:
-            QMessageBox.critical(self, "注册失败", msg)
+        self._start_account("register", self.r_btn, username=username, password=password, invite=invite)
 
     def open_reset_account_dialog(self):
         """打开重置账号对话框"""
+        if self._account_operation.busy:
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle("重置账号")
         dialog.setFixedSize(380, 280)
@@ -258,6 +335,8 @@ class LoginDialog(QDialog):
         layout.addWidget(btn)
 
         def do_reset():
+            if self._account_operation.busy:
+                return
             invite = invite_input.text().strip()
             new_username = username_input.text().strip()
             new_password = password_input.text().strip()
@@ -270,20 +349,15 @@ class LoginDialog(QDialog):
                 QMessageBox.warning(dialog, "错误", "两次输入的密码不一致")
                 return
 
-            success, msg = self.binder.on_reset_account(invite, new_username, new_password)
-            if success:
-                QMessageBox.information(dialog, "成功", "账号重置成功，请使用新账号登录")
-                self.l_username.setText(new_username)
-                self.tabs.setCurrentIndex(0)
-                dialog.accept()
-            else:
-                QMessageBox.critical(dialog, "重置失败", msg)
+            self._start_account("reset", btn, child=dialog, username=new_username, password=new_password, invite=invite)
 
         btn.clicked.connect(do_reset)
         dialog.exec()
 
     def open_server_settings_dialog(self):
         """打开服务器地址设置对话框"""
+        if self._account_operation.busy:
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle("服务器地址设置")
         dialog.setFixedSize(400, 200)
@@ -308,6 +382,8 @@ class LoginDialog(QDialog):
         layout.addWidget(btn)
 
         def do_verify():
+            if self._account_operation.busy:
+                return
             url = url_input.text().strip().rstrip("/")
             if not url:
                 QMessageBox.warning(dialog, "错误", "请输入服务器地址")
@@ -317,21 +393,7 @@ class LoginDialog(QDialog):
             if not url.startswith("http://") and not url.startswith("https://"):
                 url = "https://" + url
 
-            # 尝试获取 public key 来验证服务器
-            try:
-                session = HttpClientFactory.get_session(verify_ssl=True)
-                resp = session.get(f"{url}/auth/public_key", timeout=10)
-                if resp.status_code == 200:
-                    self.custom_base_url = url
-                    credential.save_server_url(url, verify_ssl=True)
-                    # 同步更新 NetworkClient（AuthApi + WsTransport）
-                    self.binder.on_set_base_url(url, verify_ssl=True)
-                    QMessageBox.information(dialog, "成功", "服务器地址验证成功，地址已保存")
-                    dialog.accept()
-                else:
-                    QMessageBox.critical(dialog, "验证失败", f"服务器返回状态码: {resp.status_code}")
-            except Exception as e:
-                QMessageBox.critical(dialog, "验证失败", f"无法连接到服务器: {e}")
+            self._start_account("server", btn, child=dialog, server_url=url)
 
         btn.clicked.connect(do_verify)
         dialog.exec()

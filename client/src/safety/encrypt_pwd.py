@@ -7,9 +7,12 @@ from ..utils.http_client import HttpClientFactory
 logger = get_logger("password")
 
 
-def get_public_key(base_url="http://127.0.0.1:8000", verify_ssl: bool = True) -> serialization.PublicFormat | None:
+def get_public_key(
+    base_url="http://127.0.0.1:8000", verify_ssl: bool = True, session=None
+) -> serialization.PublicFormat | None:
     try:
-        session = HttpClientFactory.get_session(verify_ssl=verify_ssl)
+        if session is None:
+            session = HttpClientFactory.get_session(verify_ssl=verify_ssl)
         resp = session.get(
             f"{base_url}/auth/public_key", verify=verify_ssl, timeout=15, headers={"Cache-Control": "no-cache"}
         )
@@ -22,8 +25,10 @@ def get_public_key(base_url="http://127.0.0.1:8000", verify_ssl: bool = True) ->
     return None
 
 
-def encrypt_password(password: str, base_url="http://127.0.0.1:8000", verify_ssl: bool = True) -> str | None:
-    key = get_public_key(base_url=base_url, verify_ssl=verify_ssl)
+def encrypt_password(
+    password: str, base_url="http://127.0.0.1:8000", verify_ssl: bool = True, session=None
+) -> str | None:
+    key = get_public_key(base_url=base_url, verify_ssl=verify_ssl, session=session)
     if not key:
         return None
     try:

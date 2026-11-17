@@ -4,6 +4,8 @@ from dataclasses import dataclass, field, fields
 from typing import Callable, List, Tuple
 
 from . import AuthApi, WsTransport
+from .auth import AccountRequest
+from .dynamics import DynamicRequest
 from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
@@ -79,8 +81,8 @@ class NetworkClient:
 
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
-        self._identity = object()
-        self._identity_revision = 0
+        self._account_identity = object()
+        self._account_revision = 0
 
         self.user_id: str | None = None
         self.message_token: str | None = None
@@ -99,7 +101,7 @@ class NetworkClient:
         """更新服务器地址，同步更新 AuthApi、WsTransport 和 HTTP 会话。"""
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
-        self._identity_revision += 1
+        self._account_revision += 1
         self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
@@ -114,7 +116,7 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
-            self._identity_revision += 1
+            self._account_revision += 1
 
             if request_token:
                 credential.save_credentials(self.user_id, self.login_token, True)
@@ -135,13 +137,48 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
-            self._identity_revision += 1
+            self._account_revision += 1
             credential.save_credentials(self.user_id, self.login_token, True)
             self.ws_transport.start()
             return True
         except Exception as exc:
             self.logger.error(f"Auto login error: {exc}")
             return False
+
+    def account_context(self) -> tuple:
+        return (self._account_identity, self._account_revision, self.base_url, self.user_id, self.message_token)
+
+    def prepare_account_request(
+        self,
+        action: str,
+        username: str = "",
+        password: str = "",
+        invite: str = "",
+        remember: bool = False,
+        server_url: str | None = None,
+    ) -> AccountRequest:
+        return AccountRequest(
+            self.account_context(), action, server_url or self.base_url, username, password, invite, remember
+        )
+
+    def apply_account_result(self, request: AccountRequest, result: tuple) -> tuple[bool, str]:
+        """由有效 UI ticket 调用；这里不执行认证 HTTP 或等待 WS 就绪。"""
+        if request.context != self.account_context():
+            return False, "账号或服务器已变更，请重试"
+        success, message, data = result
+        if not success:
+            return False, message
+        if request.action == "login":
+            self.user_id = data.get("user_id")
+            self.login_token = data.get("login_token")
+            self.message_token = data.get("message_token")
+            self._account_revision += 1
+            credential.save_credentials(self.user_id, self.login_token if request.remember else None, request.remember)
+            self.ws_transport.start()
+        elif request.action == "server":
+            self.set_base_url(request.base_url, verify_ssl=True)
+            credential.save_server_url(request.base_url, verify_ssl=True)
+        return True, message
 
     def register(self, username: str, password: str, invite_code: str) -> Tuple[bool, str]:
         try:
@@ -335,139 +372,29 @@ class NetworkClient:
             self.logger.error(f"History Error: {exc}")
             return [], -1
 
-    def get_dynamics(self, limit: int = 50, cursor: str | None = None) -> dict:
-        if not self.user_id:
-            return {"ok": False, "message": "Not logged in", "items": [], "has_more": False, "next_cursor": None}
+    def prepare_dynamic_request(self, action: str, **values) -> DynamicRequest:
+        return DynamicRequest(self.account_context(), action, self.base_url, self.user_id, self.message_token, **values)
 
-        try:
-            params = {
-                "username": self.user_id,
-                "limit": limit,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            headers = {}
-            if self.message_token:
-                headers["Authorization"] = f"Bearer {self.message_token}"
-            resp = self.session.get(
-                f"{self.base_url}/dynamics",
-                params=params,
-                headers=headers,
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                self.logger.warning(f"获取动态失败: {detail}")
-                return {"ok": False, "message": detail, "items": [], "has_more": False, "next_cursor": None}
-            data = resp.json()
-            data["ok"] = True
-            return data
-        except Exception as exc:
-            self.logger.error(f"获取动态失败: {exc}")
-            return {"ok": False, "message": str(exc), "items": [], "has_more": False, "next_cursor": None}
+    def get_dynamics(self, limit: int = 50, cursor: str | None = None) -> dict:
+        return self.prepare_dynamic_request("list", limit=limit, cursor=cursor).fetch(self.session)
 
     def create_dynamic(self, content: str) -> dict:
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "message": "Not logged in"}
-
-        try:
-            resp = self.session.post(
-                f"{self.base_url}/dynamics",
-                json={
-                    "username": self.user_id,
-                    "token": self.message_token,
-                    "content": content,
-                },
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                return {"ok": False, "message": detail}
-            data = resp.json()
-            return {"ok": True, "item": data.get("item")}
-        except Exception as exc:
-            self.logger.error(f"发布动态失败: {exc}")
-            return {"ok": False, "message": str(exc)}
+        return self.prepare_dynamic_request("post", content=content).fetch(self.session)
 
     def get_dynamic_comments(self, dynamic_id: str, limit: int = 100, cursor: str | None = None) -> dict:
-        if not self.user_id:
-            return {"ok": False, "message": "Not logged in", "items": [], "has_more": False, "next_cursor": None}
-
-        try:
-            params = {
-                "username": self.user_id,
-                "limit": limit,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            headers = {}
-            if self.message_token:
-                headers["Authorization"] = f"Bearer {self.message_token}"
-            resp = self.session.get(
-                f"{self.base_url}/dynamics/{dynamic_id}/comments",
-                params=params,
-                headers=headers,
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                self.logger.warning(f"获取动态评论失败: {detail}")
-                return {"ok": False, "message": detail, "items": [], "has_more": False, "next_cursor": None}
-            data = resp.json()
-            data["ok"] = True
-            return data
-        except Exception as exc:
-            self.logger.error(f"获取动态评论失败: {exc}")
-            return {"ok": False, "message": str(exc), "items": [], "has_more": False, "next_cursor": None}
+        return self.prepare_dynamic_request("comments", dynamic_id=dynamic_id, limit=limit, cursor=cursor).fetch(
+            self.session
+        )
 
     def create_dynamic_comment(self, dynamic_id: str, content: str, parent_comment_id: str | None = None) -> dict:
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "message": "Not logged in"}
-
-        try:
-            resp = self.session.post(
-                f"{self.base_url}/dynamics/{dynamic_id}/comments",
-                json={
-                    "username": self.user_id,
-                    "token": self.message_token,
-                    "content": content,
-                    "parent_comment_id": parent_comment_id,
-                },
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                return {"ok": False, "message": detail}
-            data = resp.json()
-            return {"ok": True, "item": data.get("item")}
-        except Exception as exc:
-            self.logger.error(f"发表评论失败: {exc}")
-            return {"ok": False, "message": str(exc)}
+        return self.prepare_dynamic_request(
+            "comment", dynamic_id=dynamic_id, content=content, parent_comment_id=parent_comment_id
+        ).fetch(self.session)
 
     def dynamic_unread_request(self) -> DynamicUnreadRequest:
         return DynamicUnreadRequest(
-            self._identity,
-            self._identity_revision,
+            self._account_identity,
+            self._account_revision,
             self.base_url,
             self.user_id,
             self.message_token,
@@ -478,30 +405,7 @@ class NetworkClient:
         return self.dynamic_unread_request().fetch(self.session)
 
     def mark_dynamics_read(self) -> dict:
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "message": "Not logged in"}
-
-        try:
-            resp = self.session.post(
-                f"{self.base_url}/dynamics/read",
-                json={
-                    "username": self.user_id,
-                    "token": self.message_token,
-                },
-                verify=self.verify_ssl,
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                return {"ok": False, "message": detail}
-            return resp.json()
-        except Exception as exc:
-            self.logger.error(f"标记动态已读失败: {exc}")
-            return {"ok": False, "message": str(exc)}
+        return self.prepare_dynamic_request("read").fetch(self.session)
 
     def network_set_message_listener(
         self,

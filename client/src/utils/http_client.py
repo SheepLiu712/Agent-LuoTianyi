@@ -39,9 +39,8 @@ class HttpClientFactory:
 
     @classmethod
     def create_session(cls, verify_ssl: bool = True) -> requests.Session:
-        """创建调用方独占的会话，保持与缓存会话相同的强制 TLS 策略。"""
+        """新建调用方独占会话，保持缓存入口的强制 TLS 策略。"""
         session = requests.Session()
-        adapter = TLS12HttpAdapter(verify_ssl=True)
-        session.mount("https://", adapter)
+        session.mount("https://", TLS12HttpAdapter(verify_ssl=True))
         session.mount("http://", HTTPAdapter())
         return session
