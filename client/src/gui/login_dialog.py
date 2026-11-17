@@ -36,6 +36,8 @@ class LoginDialog(QDialog):
         layout.addWidget(self.tabs)
 
         self.setLayout(layout)
+        self.tabs.currentChanged.connect(self.update_default_button)
+        self.update_default_button(self.tabs.currentIndex())
 
         cred = credential.load_credentials()
         if cred:
@@ -45,6 +47,11 @@ class LoginDialog(QDialog):
             self.saved_token = token
             if saved_url:
                 self.custom_base_url = saved_url
+
+    def update_default_button(self, index):
+        # Qt 的默认按钮属于整个对话框，切页时只保留当前页的主动作。
+        self.l_btn.setDefault(index == 0)
+        self.r_btn.setDefault(index == 1)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
@@ -89,6 +96,7 @@ class LoginDialog(QDialog):
         self.l_auto_login.setStyleSheet("font-size: 16px; padding: 5px;")
 
         self.l_btn = QPushButton("登录")
+        self.l_btn.setAutoDefault(False)
         self.l_btn.clicked.connect(self.do_login)
         self.l_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 5px;"
@@ -97,6 +105,7 @@ class LoginDialog(QDialog):
         )
 
         self.reset_btn = QPushButton("重置账号")
+        self.reset_btn.setAutoDefault(False)
         self.reset_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
             " border: none; text-align: left; }"
@@ -105,6 +114,7 @@ class LoginDialog(QDialog):
         self.reset_btn.clicked.connect(self.open_reset_account_dialog)
 
         self.server_btn = QPushButton("服务器地址")
+        self.server_btn.setAutoDefault(False)
         self.server_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
             " border: none; text-align: left; }"
@@ -150,6 +160,7 @@ class LoginDialog(QDialog):
         self.r_invite.setStyleSheet(style)
 
         self.r_btn = QPushButton("注册")
+        self.r_btn.setAutoDefault(False)
         self.r_btn.clicked.connect(self.do_register)
         self.r_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 5px;"
