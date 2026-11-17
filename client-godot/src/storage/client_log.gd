@@ -25,6 +25,7 @@ var _meta: Dictionary
 var _initialized := false
 var _closed := false
 var _archive_bytes := -1
+var _archive_failed := false
 var _archive_handle: FileAccess
 var _archive_path := ""
 var _seq := 0
@@ -35,6 +36,8 @@ var _dropped_debug := 0
 var _dropped_pending := 0
 var _schema_warnings := 0
 var _write_failures := 0
+var _unwritten_bytes := 0
+var _write_error_reported := false
 var _limit_reported := false
 var _dropped_limit := 0
 var _pending_drop_requested := false
@@ -112,6 +115,8 @@ func _commit_built(entry: Dictionary, _category: String) -> Error:
 	if error != OK and not written.limit_rejected:
 		# 普通磁盘失败保留内存视图；容量超限的条目直接丢弃。
 		_entries.append(entry)
+		var serialized := JSON.stringify(entry).to_utf8_buffer()
+		_unwritten_bytes += serialized.size() + 1
 		_on_write_error(error)
 	if not written.limit_rejected:
 		entry_added.emit(entry.duplicate(true))
@@ -121,7 +126,10 @@ func _commit_entry(entry: Dictionary) -> Dictionary:
 	var serialized := JSON.stringify(entry).to_utf8_buffer()
 	var is_over_limit := _entries.size() >= _max_entries
 	if not is_over_limit:
-		is_over_limit = _archive_size() + serialized.size() + 1 > _max_bytes
+		var written_bytes := _archive_size()
+		if written_bytes < 0:
+			written_bytes = _max_bytes
+		is_over_limit = written_bytes + _unwritten_bytes + serialized.size() + 1 > _max_bytes
 	if is_over_limit:
 		_dropped_limit += 1
 		if not _limit_reported:
@@ -130,7 +138,9 @@ func _commit_entry(entry: Dictionary) -> Dictionary:
 			_write_limit_diagnostic()
 			_sync_drop_metadata()
 			_save_metadata()
-			write_failed.emit(ERR_OUT_OF_MEMORY)
+			if not _write_error_reported:
+				_write_error_reported = true
+				write_failed.emit(ERR_OUT_OF_MEMORY)
 		return {"error":ERR_OUT_OF_MEMORY, "limit_rejected":true}
 	var error := _ensure_directory()
 	if error != OK:
@@ -155,8 +165,11 @@ func _write_limit_diagnostic() -> void:
 func _on_write_error(error: int) -> void:
 	_meta.complete = false
 	_write_failures += 1
-	_save_metadata()
-	write_failed.emit(error)
+	# 同一个运行内的写失败只提示、只同步一次元数据，避免坏目录下每条日志都弹窗/写盘。
+	if not _write_error_reported:
+		_write_error_reported = true
+		_save_metadata()
+		write_failed.emit(error)
 
 ## 工作线程只入队，主线程 drain 后统一写盘。
 func record_threadsafe(category: String, event: String, fields: Dictionary = {}) -> void:
@@ -252,8 +265,7 @@ func finish() -> void:
 	_sync_drop_metadata()
 	if _save_metadata() != OK:
 		_meta.complete = false
-		_write_failures += 1
-		write_failed.emit(ERR_CANT_CREATE)
+		_on_write_error(ERR_CANT_CREATE)
 
 func list_runs() -> Array[Dictionary]:
 	var runs := _all_runs()
@@ -402,8 +414,7 @@ func _prune() -> void:
 		if error == OK:
 			excess -= 1
 		else:
-			_write_failures += 1
-			write_failed.emit(error)
+			_on_write_error(error)
 
 func _path(id: String, suffix: String) -> String:
 	return _directory.path_join(id + suffix)
@@ -413,15 +424,19 @@ func _jsonl_size(path: String) -> int:
 		return 0
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
-		return 0
+		return -1
 	var size := file.get_length()
 	file.close()
 	return size
 
 ## 写入前只探测一次已有 JSONL 大小；后续由 _append_entry_file 增量维护。
 func _archive_size() -> int:
+	if _archive_failed:
+		return -1
 	if _archive_bytes < 0:
 		_archive_bytes = _jsonl_size(_path(_id, ".jsonl"))
+		if _archive_bytes < 0:
+			_archive_failed = true
 	return _archive_bytes
 
 func _read_archive(id: String) -> Dictionary:
@@ -553,6 +568,7 @@ func _append_entry_file(path: String, serialized: PackedByteArray) -> Error:
 	if file == null:
 		error = FileAccess.get_open_error()
 		_archive_bytes = -1
+		_archive_failed = true
 	else:
 		file.seek_end()
 		file.store_buffer(serialized)
@@ -561,8 +577,10 @@ func _append_entry_file(path: String, serialized: PackedByteArray) -> Error:
 		error = file.get_error()
 		if error == OK:
 			_archive_bytes += serialized.size() + 1
+			_archive_failed = false
 		else:
 			_archive_bytes = -1
+			_archive_failed = true
 			_close_archive()
 	return error
 

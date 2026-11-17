@@ -104,6 +104,30 @@ func skip() -> void:
 	_release_boundary_once()
 
 
+## 存储损坏时的显式恢复：重建库后重新拉首屏，不假装旧数据仍在。
+func reset_storage() -> void:
+	if _persistence == null:
+		return
+	var generation := _generation
+	_state.storage = "resetting"
+	_notify()
+	var result: Dictionary = await _persistence.reset_scope()
+	if generation != _generation:
+		return
+	if not result.ok:
+		_state.storage = "unavailable"
+		_state.code = str(result.get("code", "CACHE_RESET_FAILED"))
+		_notify()
+		return
+	_open = false
+	_state.storage = "ready"
+	_state.code = ""
+	var opened := await _open_storage(generation)
+	if generation != _generation or not opened:
+		return
+	await _restart_initial(generation)
+
+
 func load_older() -> void:
 	if _state.initial != "ready" or _state.older == "loading":
 		return
@@ -194,7 +218,9 @@ func _restore_local(generation: int) -> void:
 		return
 	_oldest_id = str(messages[0].id)
 	restore_page.emit(_typed(messages))
-	_release_boundary_once()
+	# 本地尾部非空不等于服务端基线已知：只有持久化过基线时才允许先发送。
+	if _state.has_baseline:
+		_release_boundary_once()
 
 
 func _fetch_initial(generation: int) -> void:

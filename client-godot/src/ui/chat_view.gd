@@ -9,6 +9,7 @@ signal composer_height_changed(height: float)
 const Attachment = preload("res://src/media/image_attachment.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const StatusBanner = preload("res://src/ui/status_banner.gd")
+const DecisionDialog = preload("res://scenes/ui/components/decision_dialog.tscn")
 const MIN_COMPOSER_HEIGHT := 48.0
 const MAX_COMPOSER_HEIGHT := 320.0
 const AUTO_MAX_HEIGHT := 128.0
@@ -20,6 +21,7 @@ var _attachment: Dictionary = {}
 @onready var _history_status: Label = %HistoryStatus
 @onready var _history_retry: Button = %HistoryRetry
 @onready var _history_skip: Button = %HistorySkip
+@onready var _history_reset: Button = %HistoryReset
 @onready var _scroll = %Scroll
 @onready var _latest: Button = %Latest
 @onready var _unread: Button = %Unread
@@ -93,6 +95,7 @@ func _initialize() -> void:
 	_initialized = true
 	_history_retry.pressed.connect(_session.retry_history)
 	_history_skip.pressed.connect(_session.skip_history)
+	_history_reset.pressed.connect(_confirm_reset_history)
 	_scroll.audio_action.connect(_audio_action)
 	_scroll.image_action.connect(_image_action)
 	_scroll.delivery_action.connect(_delivery_action)
@@ -368,30 +371,61 @@ func _update_density() -> void:
 func _update_history_status(state: Dictionary) -> void:
 	var history: Dictionary = state.get("history",{"phase":"idle","count":0})
 	_scroll.set_older_state(str(history.get("older","idle")))
-	_history_retry.visible = history.phase in ["first_failed","failed"]
-	_history_skip.visible = history.phase == "first_failed"
-	_history_status.text = {"first_loading":"正在同步最近历史；发送的消息将暂时排队。", "first_failed":"", "loading":"后台同步历史 · 已加载 %s 条" % history.count, "failed":"", "skipped":"已跳过本次历史同步。"}.get(history.phase, "")
+	var storage_broken: bool = str(history.get("storage", "")) == "unavailable" or str(history.get("code", "")) in ["CACHE_CONFIG_FAILED", "CACHE_RESET_FAILED", "STORAGE_UNAVAILABLE"]
+	var resetting: bool = str(history.get("storage", "")) == "resetting"
+	_apply_history_buttons(history, storage_broken, resetting)
+	_history_status.text = _history_status_text(history, storage_broken, resetting)
+	_announce_history_phase(history)
+	_apply_reading()
+	_sync_history_banner(str(history.phase))
+
+
+func _apply_history_buttons(history: Dictionary, storage_broken: bool, resetting: bool) -> void:
+	_history_retry.visible = history.phase in ["first_failed","failed"] and not storage_broken and not resetting
+	_history_skip.visible = history.phase == "first_failed" and not storage_broken and not resetting
+	_history_reset.visible = storage_broken and not resetting
+
+
+func _history_status_text(history: Dictionary, storage_broken: bool, resetting: bool) -> String:
+	if resetting:
+		return "正在重建本地历史…"
+	if storage_broken:
+		return "本地历史不可用（%s）。可重建本地库；旧库会保留为 recovery 文件。" % str(history.get("code", "STORAGE_UNAVAILABLE"))
+	return {"first_loading":"正在同步最近历史；发送的消息将暂时排队。", "first_failed":"", "loading":"后台同步历史 · 已加载 %s 条" % history.count, "failed":"", "skipped":"已跳过本次历史同步。"}.get(history.phase, "")
+
+
+func _announce_history_phase(history: Dictionary) -> void:
 	if history.phase != _last_history_phase:
 		_last_history_phase = str(history.phase)
 		if history.phase == "first_failed":
 			ErrorDialog.present(self, "首批历史加载失败，可重试或跳过。")
 		elif history.phase == "failed":
 			ErrorDialog.present(self, "较早历史加载失败，已加载内容保留。")
-	if history.get("incomplete",false):
-		if not _history_incomplete_announced:
-			_history_incomplete_announced = true
-			ErrorDialog.present(self, "部分历史可能缺失。")
-	_apply_reading()
-	_sync_history_banner(str(history.phase))
+	if history.get("incomplete",false) and not _history_incomplete_announced:
+		_history_incomplete_announced = true
+		ErrorDialog.present(self, "部分历史可能缺失。")
 
 
 func _sync_history_banner(phase: String) -> void:
-	var shown := not _history_status.text.is_empty() or _history_retry.visible or _history_skip.visible
+	var shown := not _history_status.text.is_empty() or _history_retry.visible or _history_skip.visible or _history_reset.visible
 	%HistoryRow.visible = shown
 	%HistoryBanner.visible = shown
 	if shown:
 		var kind := "info" if phase in ["first_loading", "loading"] else "muted"
 		StatusBanner.apply_surface_status(%HistoryBanner, _history_status, kind, _ui_style)
+
+
+func _confirm_reset_history() -> void:
+	var dialog = DecisionDialog.instantiate()
+	dialog.title = "重建本地历史"
+	dialog.dialog_text = "将备份当前本地库并重新同步服务端历史。未发送消息不会自动重发，可在 recovery 备份中恢复。"
+	dialog.ok_button_text = "重建"
+	dialog.destructive_action = true
+	dialog.confirmed.connect(func(): _session.reset_history_storage())
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
 
 func _announce_chat_code(code: String) -> void:
 	if code == "":

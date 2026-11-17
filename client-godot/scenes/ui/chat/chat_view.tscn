@@ -128,6 +128,13 @@ layout_mode = 2
 theme_type_variation = &"SettingsButton"
 text = "跳过本次"
 
+[node name="HistoryReset" type="Button" parent="Margin/Column/MessagesMargin/Messages/HistoryBanner/HistoryRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "重建库"
+
 [node name="Scroll" parent="Margin/Column/MessagesMargin/Messages" instance=ExtResource("7_messages")]
 unique_name_in_owner = true
 layout_mode = 2

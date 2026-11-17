@@ -62,6 +62,17 @@ func close_scope() -> Dictionary:
 	return result
 
 
+func reset_scope() -> Dictionary:
+	if _worker == null or not _worker.is_running():
+		return _failure("STORAGE_UNAVAILABLE")
+	if _scope.is_empty():
+		return _failure("INVALID_INPUT")
+	var result: Dictionary = await _worker.submit("reset_scope", {"scope": _scope}).wait()
+	if result.ok:
+		_metadata = result.data.duplicate(true)
+	return result
+
+
 func _clear_state() -> void:
 	_root = ""
 	_scope = ""

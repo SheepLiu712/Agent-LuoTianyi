@@ -151,8 +151,18 @@ const READ_REVISION := "SELECT revision FROM sync_state WHERE id=1"
 const READ_NEXT_END := "SELECT next_end FROM sync_state WHERE id=1"
 
 ## 最新窗口：服务端槽位倒序取一页，本地尾部单独按 local_seq 正序全取。
-const READ_LATEST_SERVER := "SELECT * FROM messages ORDER BY server_index DESC LIMIT ?"
-const READ_ALL_LOCAL := "SELECT * FROM local_messages ORDER BY local_seq ASC"
+const READ_LATEST_SERVER := """
+SELECT * FROM messages
+WHERE server_index <= COALESCE((SELECT baseline_index FROM sync_state WHERE id=1), 2147483647)
+ORDER BY server_index DESC LIMIT ?
+"""
+## 本地尾部有界读取：最近 500 条加上所有未完成/失败行，避免长期失败记录拖慢每次上翻。
+const READ_ALL_LOCAL := """
+SELECT * FROM local_messages
+WHERE local_seq IN (SELECT local_seq FROM local_messages ORDER BY local_seq DESC LIMIT 500)
+   OR state IN ('pending','waiting_history','sending','failed')
+ORDER BY local_seq ASC
+"""
 
 const READ_SERVER_BY_ID := "SELECT * FROM messages WHERE id=?"
 const READ_LOCAL_BY_ID := "SELECT * FROM local_messages WHERE id=?"
@@ -194,13 +204,14 @@ const DELETE_LOCAL := "DELETE FROM local_messages WHERE id=?"
 const UPDATE_PROGRESS := """
 UPDATE sync_state SET next_end=?, baseline_index=?, revision=revision+1 WHERE id=1
 """
+const DELETE_SERVER_AFTER := "DELETE FROM messages WHERE server_index > ?"
 const BUMP_REVISION := "UPDATE sync_state SET revision=revision+1 WHERE id=1"
 
 ## 本地用户消息对账候选：只有已经交给传输层的记录才允许被历史页认领，
 ## 还没发出去的 pending / waiting_history 不能因为正文相同而消失。
 const READ_LOCAL_USER_CANDIDATES := """
 SELECT * FROM local_messages
-WHERE role='user' AND state IN ('sending','sent')
+WHERE role='user' AND state='sent'
 ORDER BY sent_ts_ms ASC, local_seq ASC
 """
 

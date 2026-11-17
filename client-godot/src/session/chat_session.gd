@@ -609,6 +609,12 @@ func skip_history() -> void:
 	if _history != null:
 		_history.skip()
 
+
+func reset_history_storage() -> void:
+	if _history != null:
+		_history.reset_storage()
+
+
 func _release_history_sends() -> void:
 	_waiting_history = false
 	var queued := _pending_history.duplicate()

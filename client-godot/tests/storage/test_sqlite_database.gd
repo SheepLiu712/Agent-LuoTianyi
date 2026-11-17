@@ -18,13 +18,17 @@ func run() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_root))
 	_case_install()
 	_case_save_and_page()
+	_case_initial_page_purges_stale_slots()
 	_case_slot_self_heal()
 	_case_local_tail()
 	_case_restart_recovery()
 	_case_confirmation()
+	_case_confirmation_keeps_sending()
 	_case_delete_local()
 	_case_query_plan()
 	_case_stale_scope()
+	_case_config_rebuild()
+	_case_explicit_reset()
 	_case_reset_legacy()
 	_case_reset_orphans()
 	_case_repair_metadata()
@@ -115,6 +119,33 @@ func _case_save_and_page() -> void:
 		"context": {"direction": "catchup"},
 	})
 	check(again.ok and int(again.data.baseline_index) == 59, "catch-up pages do not move the baseline")
+	database.close()
+
+
+func _case_initial_page_purges_stale_slots() -> void:
+	var scope := _scope("b1")
+	var database := _open(scope)
+	var full: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 0, "history": _server_rows("p", 0, 100)},
+		"context": {"direction": "initial"},
+	})
+	check(full.ok and int(full.data.baseline_index) == 99, "full initial page records its baseline")
+	var shortened: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 0, "history": _server_rows("p", 0, 30)},
+		"context": {"direction": "initial"},
+	})
+	check(shortened.ok and int(shortened.data.baseline_index) == 29, "shortened initial page moves the baseline down")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM messages")["count"]) == 30,
+		"stale slots above the new baseline are removed")
+	var latest: Dictionary = _execute(database, "read_latest", scope, {"limit": 30})
+	check(_ids(latest.data.messages) == _server_ids("p", 0, 30), "latest window excludes stale slots")
+	var emptied: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 0, "history": []},
+		"context": {"direction": "initial"},
+	})
+	check(emptied.ok and int(emptied.data.baseline_index) == -1, "empty initial page resets the baseline")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM messages")["count"]) == 0,
+		"empty initial page clears cached server slots")
 	database.close()
 
 
@@ -254,6 +285,28 @@ func _case_confirmation() -> void:
 	database.close()
 
 
+func _case_confirmation_keeps_sending() -> void:
+	var scope := _scope("e1")
+	var database := _open(scope)
+	var server_display: float = float(Time.get_unix_time_from_datetime_string("2026-09-19T10:00:00"))
+	var local_ts: float = server_display - float(Time.get_time_zone_from_system().bias) * 60.0
+	_execute(database, "save_local", scope, {"message": _local("sending-hello", "hello", "sending", local_ts)})
+	_execute(database, "save_local", scope, {"message": _local("failed-note", "not sent", "failed", local_ts)})
+	var page: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 0, "history": [
+			{"uuid": "srv-hello", "source": "user", "type": "text", "content": "hello", "timestamp": "2026-09-19 10:00:00"},
+			{"uuid": "srv-note", "source": "user", "type": "text", "content": "not sent", "timestamp": "2026-09-19 10:00:01"},
+		]},
+		"context": {"direction": "initial"},
+	})
+	check(page.ok, "confirmation page with in-flight rows saves")
+	check(not page.data.removed.has("sending-hello"), "sending row is not claimed by content match")
+	check(not page.data.removed.has("failed-note"), "failed row is not claimed by content match")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM local_messages")["count"]) == 2,
+		"in-flight and failed local rows remain visible")
+	database.close()
+
+
 func _case_delete_local() -> void:
 	var scope := _scope("1")
 	var database := _open(scope)
@@ -308,6 +361,45 @@ func _case_stale_scope() -> void:
 	check(database.metadata().ok, "stale close leaves the connection open")
 	var closed: Dictionary = _execute(database, "close_scope", scope)
 	check(closed.ok, "own scope can close the connection")
+
+
+func _case_config_rebuild() -> void:
+	var scope := _scope("6")
+	var directory := _root.path_join(scope)
+	DirAccess.make_dir_recursive_absolute(directory)
+	var path := directory.path_join("history.db")
+	var raw: Object = ClassDB.instantiate("SQLite")
+	raw.path = path
+	raw.open_db()
+	raw.query("PRAGMA auto_vacuum=0")
+	raw.query("PRAGMA user_version=100")
+	raw.query("PRAGMA application_id=1280591961")
+	raw.close_db()
+	var database = Database.new()
+	var opened: Dictionary = database.open(_root, scope)
+	check(opened.ok, "config mismatch rebuilds the cache")
+	check(_recovery_files(directory).size() == 1, "config rebuild keeps a recovery copy")
+	database.close()
+
+
+func _case_explicit_reset() -> void:
+	var scope := _scope("6a")
+	var database := _open(scope)
+	var path: String = str(database._path)
+	var directory := path.get_base_dir()
+	var lock := FileAccess.open(path, FileAccess.READ)
+	var blocked: Dictionary = _execute(database, "reset_scope", scope)
+	check(not blocked.ok and blocked.code == "CACHE_RESET_FAILED", "occupied database cannot be reset")
+	lock.close()
+	check(database.open(_root, scope).ok, "database reopens after releasing the lock")
+	var reset: Dictionary = _execute(database, "reset_scope", scope)
+	check(reset.ok, "explicit reset rebuilds the cache")
+	check(_recovery_files(directory).size() == 1, "explicit reset keeps a recovery copy")
+	database.close()
+
+
+func _recovery_files(directory: String) -> Array:
+	return Array(DirAccess.get_files_at(directory)).filter(func(name): return str(name).contains(".recovery-"))
 
 
 func _case_reset_legacy() -> void:

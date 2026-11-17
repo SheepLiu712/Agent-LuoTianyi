@@ -92,6 +92,7 @@ func run() -> void:
 	await _case_gap_forces_network()
 	await _case_write_failure_stops_cursor()
 	await _case_initial_failure_releases_boundary()
+	await _case_warm_cache_failure_releases_boundary()
 	print("History paging: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -271,6 +272,22 @@ func _case_initial_failure_releases_boundary() -> void:
 	check(not released[0], "initial failure keeps sends waiting")
 	sync.skip()
 	check(released[0], "skip releases the send boundary")
+	_teardown(sync, opened)
+
+
+## 有持久化基线的暖缓存允许离线发送；没有基线的本地尾部仍需等待。
+func _case_warm_cache_failure_releases_boundary() -> void:
+	var scope := _scope("f1")
+	await _seed(scope, 100)
+	var opened: Dictionary = await _open(scope)
+	var source := FakeSource.new()
+	source.fail = true
+	var sync: Node = _sync(source, opened.persistence)
+	var released := [false]
+	sync.boundary_ready.connect(func(): released[0] = true)
+	sync.start(_session(scope))
+	check(await _until(func(): return sync.get_state().initial == "failed"), "warm cache initial failure settles")
+	check(released[0], "warm cache with a persisted baseline releases sends")
 	_teardown(sync, opened)
 
 

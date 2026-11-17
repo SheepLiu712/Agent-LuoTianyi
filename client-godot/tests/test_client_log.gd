@@ -65,6 +65,19 @@ func _initialize() -> void:
 	var bad = Log.new(zip_path + "/impossible")
 	check(bad.record_as("system", "state_snapshot", {}) != OK, "write failure surfaced")
 	check(bad.read_entries().size() == 1, "failed disk write retained for current viewer")
+	var bad_failures := [0]
+	bad.write_failed.connect(func(_error): bad_failures[0] += 1)
+	for index in range(10):
+		bad.record_as("system", "state_snapshot", {"detail":"broken-dir detail ".repeat(12), "count":index})
+	check(bad_failures[0] <= 1, "write failure notification is throttled to once per run")
+	var capped = Log.new(zip_path + "/impossible-capped", 1024, null, 1000)
+	var capped_failures := [0]
+	capped.write_failed.connect(func(_error): capped_failures[0] += 1)
+	for index in range(20):
+		capped.record_as("system", "state_snapshot", {"detail":"bounded detail ".repeat(20), "count":index})
+	check(capped.read_entries().size() < 20, "unwritable archive still enforces byte cap")
+	check(capped.get_stats().dropped_limit >= 1, "byte cap is reported as a limit drop")
+	check(capped_failures[0] <= 1, "capped write failure is notified once")
 	_check_capacity_and_recovery()
 	for file in DirAccess.get_files_at(directory):
 		DirAccess.remove_absolute(directory.path_join(file))

@@ -98,8 +98,7 @@ func _initialize() -> void:
 		if visible and _selected == _logger.get_run_id() and _matches(entry):
 			_append(entry))
 	_logger.write_failed.connect(func(_error):
-		_set_status("", "muted")
-		ErrorDialog.present(self, "归档可能不完整，当前窗口仍可查看本次记录。"))
+		_set_status("归档可能不完整，当前窗口仍可查看本次记录。", "muted"))
 func open() -> void:
 	_logger.drain()
 	var options: Array = []

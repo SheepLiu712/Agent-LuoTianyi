@@ -192,11 +192,17 @@ func _update_progress(start: int, count: int, context: Dictionary) -> Dictionary
 		return current
 	var row: Dictionary = _access.first_row(current)
 	var baseline := int(row.get("baseline_index", -1))
-	if str(context.get("direction", "")) == "initial" and count > 0:
-		baseline = start + count - 1
+	var initial := str(context.get("direction", "")) == "initial"
+	if initial:
+		baseline = (start + count - 1) if count > 0 else -1
 	var updated: Dictionary = _access.execute(Schema.UPDATE_PROGRESS, [start, baseline])
 	if not updated.ok:
 		return updated
+	# 初始页代表服务端当前最新窗口；更高的旧槽位已经失效，必须一起清理。
+	if initial:
+		var purged: Dictionary = _access.execute(Schema.DELETE_SERVER_AFTER, [baseline])
+		if not purged.ok:
+			return purged
 	var revision: Dictionary = _access.query(Schema.READ_REVISION)
 	if not revision.ok:
 		return revision

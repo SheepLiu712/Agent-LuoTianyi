@@ -44,6 +44,12 @@ func close_scope() -> Dictionary:
 	return await _scope_session.close_scope()
 
 
+func reset_scope() -> Dictionary:
+	if _scope_session == null:
+		return _failure("STORAGE_UNAVAILABLE")
+	return await _scope_session.reset_scope()
+
+
 func read_latest(limit: int = DEFAULT_LIMIT) -> Dictionary:
 	return await _read("read_latest", {"scope": scope(), "limit": limit})
 

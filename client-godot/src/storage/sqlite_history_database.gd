@@ -27,6 +27,7 @@ var _writer: RefCounted
 var _dynamics: RefCounted
 var _scope := ""
 var _path := ""
+var _rebuild_attempted := false
 var _handlers: Dictionary = {}
 
 
@@ -36,6 +37,7 @@ func _init() -> void:
 
 func open(root_path: String, scope: String) -> Dictionary:
 	close()
+	_rebuild_attempted = false
 	var preflight := _preflight(root_path, scope)
 	if not preflight.ok:
 		return preflight
@@ -98,6 +100,7 @@ func _configure_handlers() -> void:
 		"read_sync_state": _read_sync_command,
 		"flush": _flush_command,
 		"close_scope": _close_command,
+		"reset_scope": _reset_command,
 		"dynamics_load": _dynamics_load_command,
 		"dynamics_save_posts": _dynamics_save_posts_command,
 		"dynamics_save_comments": _dynamics_save_comments_command,
@@ -181,6 +184,32 @@ func _close_command(payload: Dictionary) -> Dictionary:
 		return guard
 	close()
 	return _success()
+
+
+func _reset_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
+	return reset()
+
+
+## 显式重建：旧库改名为 recovery 文件，再创建空库；失败不会伪装成可用。
+func reset() -> Dictionary:
+	var path := _path
+	var scope := _scope
+	close()
+	if FileAccess.file_exists(path):
+		var backup := path + ".recovery-%d" % Time.get_ticks_usec()
+		if DirAccess.rename_absolute(path, backup) != OK:
+			return _failure("CACHE_RESET_FAILED")
+	var sidecars := _delete_files(path, ["-wal", "-shm"])
+	if not sidecars.ok:
+		return sidecars
+	var opened := _open_connection(path, scope)
+	if not opened.ok:
+		return opened
+	_rebuild_attempted = false
+	return _prepare()
 
 
 func _dynamics_load_command(payload: Dictionary) -> Dictionary:
@@ -321,6 +350,11 @@ func _attach(db: Object, path: String, scope: String) -> void:
 func _prepare() -> Dictionary:
 	var configured := _configure()
 	if not configured.ok:
+		if str(configured.get("code", "")) == "CACHE_CONFIG_FAILED" and not _rebuild_attempted:
+			_rebuild_attempted = true
+			var rebuilt := _rebuild_cache()
+			if rebuilt.ok:
+				return rebuilt
 		return _abort(configured)
 	var schema := _ensure_schema()
 	if not schema.ok:
@@ -403,9 +437,13 @@ func _rebuild_cache() -> Dictionary:
 	close()
 	if not FileAccess.file_exists(path):
 		return _failure("CACHE_RESET_FAILED")
-	var deleted := _delete_cache_files(path)
-	if not deleted.ok:
-		return deleted
+	# 配置损坏也先保留旧库，便于事后恢复待发消息。
+	var backup := path + ".recovery-%d" % Time.get_ticks_usec()
+	if DirAccess.rename_absolute(path, backup) != OK:
+		return _failure("CACHE_RESET_FAILED")
+	var sidecars := _delete_files(path, ["-wal", "-shm"])
+	if not sidecars.ok:
+		return sidecars
 	var reopened := _open_connection(path, scope)
 	if not reopened.ok:
 		return reopened
