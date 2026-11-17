@@ -7,14 +7,14 @@
       "sha256": "0fad411ffff2dfe448a6b3b7d70e21e90a213ff5801c435d672419df6a2f3c16"
     },
     {
-      "path": "res/admin_ui/admin_static/assets/index-smbr_9OT.js",
-      "size": 245260,
-      "sha256": "13625ee3a225a22dbc7de46b52173a81c9abc0a8b29679110c8f2260e04daf72"
+      "path": "res/admin_ui/admin_static/assets/index-D_JwhSXV.js",
+      "size": 245867,
+      "sha256": "17cdfcd66ce267e1278c0dac90556ddf80a24933455942ec5d80ed93a90117a3"
     },
     {
       "path": "res/admin_ui/admin_static/index.html",
-      "size": 423,
-      "sha256": "7fa2c373bb070829688a71049d4d937d686a6024f90e0fc7deec2effa1f7ed7e"
+      "size": 435,
+      "sha256": "853c4c0f51a9501eebe50ad0d961a98c18fb634dc33b6d74cd400a538f7f12b2"
     },
     {
       "path": "res/agent/persona/llm_tones_mapping.json",

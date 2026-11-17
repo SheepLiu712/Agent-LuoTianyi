@@ -15,6 +15,7 @@ def build_llm_config_view(config: dict[str, Any]) -> dict[str, Any]:
             "speaking_enabled": _get_by_path(config, "agent_runtime.skills.speaking.enabled") is not False,
             "vector_store_enabled": _get_by_path(config, "agent_runtime.vector_store.enabled") is not False,
         },
+        "call_setup_timeout": config.get("stage_manager", {}).get("call_setup_timeout", 10.0),
         "client_model_types": llm_service.get("client_model_types", []),
         "module_bindings": collect_module_bindings(config),
     }
@@ -59,6 +60,7 @@ def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> d
     for key in ("available_llms", "available_vlms", "available_audio_models"):
         if key in payload:
             llm_service[key] = _normalize_interfaces(payload[key])
+    _apply_call_setup_budget(next_config, payload)
     if "call_transport" in payload:
         if not isinstance(payload["call_transport"], dict):
             raise ValueError("call_transport 必须是对象")
@@ -119,6 +121,11 @@ def _apply_component_startup(config: dict[str, Any], payload: dict[str, Any]) ->
                 raise ComponentStartupDraftError(f"{path} 无法写入：{name} 必须是对象")
             target = child
         target["enabled"] = value
+
+
+def _apply_call_setup_budget(config: dict[str, Any], payload: dict[str, Any]) -> None:
+    if "call_setup_timeout" in payload:
+        config.setdefault("stage_manager", {})["call_setup_timeout"] = payload["call_setup_timeout"]
 
 
 def _normalize_client_model_types(value: Any) -> list[dict[str, Any]]:

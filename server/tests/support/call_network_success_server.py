@@ -67,9 +67,16 @@ class _LoopbackOmniSession(FakeRealtimeSpeechSession):
 
 
 class _LoopbackOmniFactory(FakeRealtimeSpeechSessionFactory):
-    async def open(self, call_id, instructions):
+    async def open(self, call_id, instructions, *, remaining_setup_time, on_session_created):
+        remaining_setup_time()
         session = _LoopbackOmniSession()
+        try:
+            on_session_created(session)
+        except BaseException:
+            await session.close()
+            raise
         self.sessions[call_id] = session
+        remaining_setup_time()
         await session.start(RealtimeSpeechConfig(instructions=instructions))
         return session
 

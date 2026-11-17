@@ -131,6 +131,7 @@ type LlmConfigInfo = {
   available_vlms: Record<string, LlmInterfaceConfig>;
   available_audio_models: Record<string, LlmInterfaceConfig>;
   call_transport: { enabled?: boolean; realtime_speech?: Record<string, unknown>; [key: string]: unknown };
+  call_setup_timeout: number | string;
   client_model_types: ClientModelType[];
   module_bindings: ModuleBinding[];
   component_startup: ComponentStartup;
@@ -155,7 +156,7 @@ const modelPanels = [
   {
     title: '实时音频模型配置',
     Editor: RealtimeSpeechDraftEditor,
-    select: ({ call_transport }: LlmConfigInfo) => ({ call_transport }),
+    select: ({ call_transport, call_setup_timeout }: LlmConfigInfo) => ({ call_transport, call_setup_timeout }),
   },
   {
     title: '模型 module（调用模块）绑定',
@@ -1562,6 +1563,15 @@ function ConfigPage() {
     const candidate = { ...savedConfig, ...patch,
       component_startup: { ...savedConfig.component_startup, ...patch.component_startup } };
     const errors = validateClientModelTypes(candidate.client_model_types, candidate.module_bindings);
+    if ('call_setup_timeout' in patch) {
+      const raw = patch.call_setup_timeout;
+      const timeout = Number(raw);
+      if (raw === undefined || String(raw).trim() === '' || !Number.isFinite(timeout) || timeout <= 0) {
+        errors.push('通话建立总时限必须是正的有限秒数');
+      } else {
+        patch = { ...patch, call_setup_timeout: timeout };
+      }
+    }
     if (errors.length) {
       setLlmApplyStatus({ panel, tone: 'error', message: `配置未写入：${errors[0]}` });
       return;
@@ -1750,8 +1760,6 @@ function RealtimeSpeechDraftEditor({ draft, onChange }: {
     onChange({ ...currentDraft, call_transport: { ...transport, realtime_speech: { ...speech, [field]: value } } });
   }
   const limits = [
-    ['connect_timeout_seconds', '连接超时（秒）', 10],
-    ['session_timeout_seconds', '会话初始化超时（秒）', 10],
     ['close_timeout_seconds', '关闭超时（秒）', 5],
     ['cleanup_timeout_seconds', '清理超时（秒）', 2],
     ['write_queue_size', '发送队列容量', 32],
@@ -1780,6 +1788,12 @@ function RealtimeSpeechDraftEditor({ draft, onChange }: {
           updateSpeech('enabled', event.target.checked)} />启用实时音频模型</label>
       </div>
       <p>通话使用上方实时音频接口，需要同时启用两个开关。当前实时音频由服务端执行。</p>
+      <label>通话建立总时限（秒）
+        <input type="number" min={0.001} step="any" value={String(currentDraft.call_setup_timeout ?? 10)}
+          onChange={(event) => onChange({ ...currentDraft, call_setup_timeout: event.target.value })} />
+      </label>
+      <p>连接、模型就绪、源聊天切换及响铃共用这一总时限；明确连接或鉴权失败会立即结束。
+        旧连接和会话初始化超时配置不再限制生产拨号，修改后沿用现有重启流程。</p>
       <div className="interface-card realtime-fields">
         {limits.map(([key, label, defaultValue]) => <label key={key}>{label}
           <input type="number" min={key.endsWith('_seconds') ? 0.001 : 1}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -82,6 +83,7 @@ class RuntimeConfigValidator:
         items.extend(self._validate_secrets(config))
         items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
+        items.extend(self._validate_call_setup_timeout(config))
         items.extend(self._validate_realtime_speech(config))
         items.extend(self._validate_client_model_types(config))
         items.extend(self._validate_core_modules(config))
@@ -364,6 +366,18 @@ class RuntimeConfigValidator:
         walk(config, "")
         return bindings
 
+    @staticmethod
+    def _validate_call_setup_timeout(config: dict[str, Any]) -> list[ValidationItem]:
+        manager = config.get("stage_manager", {})
+        if not isinstance(manager, dict):
+            return [ValidationItem("core", "stage_manager", "error", "stage_manager 必须是对象")]
+        value = manager.get("call_setup_timeout", 10.0)
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            return [
+                ValidationItem("core", "stage_manager.call_setup_timeout", "error", "通话建立总时限必须是正的有限秒数")
+            ]
+        return []
+
     def _validate_realtime_speech(self, config: dict[str, Any]) -> list[ValidationItem]:
         transport = config.get("call_transport", {})
         try:
@@ -373,7 +387,7 @@ class RuntimeConfigValidator:
             if not isinstance(speech, dict) or type(speech.get("enabled", False)) is not bool:
                 raise RealtimeSpeechConfigError("realtime_speech.enabled 必须是布尔值")
             if speech.get("enabled", False):
-                provider = AliyunRealtimeSpeechConfig.from_mapping(speech)
+                provider = AliyunRealtimeSpeechConfig.from_mapping(speech, use_legacy_setup_timeouts=False)
                 _ = provider.websocket_url
         except RealtimeSpeechConfigError as error:
             return [ValidationItem("core", "call_transport.realtime_speech", "error", str(error))]

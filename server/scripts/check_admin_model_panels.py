@@ -19,6 +19,7 @@ def main():
     }
     static = Path(__file__).resolve().parents[1] / "res/admin_ui/admin_static"
     requests = []
+    applied = []
     runtime = {"state": "stopped", "running": False}
     restarted = False
 
@@ -29,8 +30,10 @@ def main():
             route.fulfill(path=static / (path or "index.html"))
             return
         if path == "api/llm/config/apply":
-            requests.append(route.request.post_data_json)
-            config = apply_llm_config_draft(config, route.request.post_data_json)
+            payload = route.request.post_data_json
+            requests.append(payload)
+            applied.append(payload)
+            config = apply_llm_config_draft(config, payload)
             result = {"ok": True, "config": build_llm_config_view(config), "restarted": restarted, "runtime": runtime}
         elif path == "api/llm/config":
             result = build_llm_config_view(config)
@@ -69,6 +72,10 @@ def main():
         vectors = components.get_by_role("checkbox", name="启用长期记忆向量库")
         expect(speaking).to_be_checked()
         expect(vectors).to_be_checked()
+        budget = audio.get_by_label("通话建立总时限（秒）", exact=True)
+        expect(budget).to_have_value("10")
+        expect(audio.get_by_label("连接超时（秒）", exact=True)).to_have_count(0)
+        expect(audio.get_by_label("会话初始化超时（秒）", exact=True)).to_have_count(0)
 
         # 四处同时编辑；客户端草稿尚未填全，也应能提交实时音频面板。
         model.fill("next-model")
@@ -86,9 +93,18 @@ def main():
         assert '"limit"' in params.input_value()
         # 另一面板保存不能带入或清除本面板尚未提交的向量草稿。
         vectors.uncheck()
+        applied_before_budget = len(applied)
+        budget.fill("")
+        audio.get_by_role("button", name="修改", exact=True).click()
+        expect(audio.get_by_text("通话建立总时限必须是正的有限秒数", exact=False)).to_be_visible()
+        assert len(applied) == applied_before_budget, "空预算不能被序列化为null提交"
+        budget.fill("30.5")
         audio.get_by_role("button", name="修改", exact=True).click()
         expect(audio.get_by_text("配置已写入", exact=False)).to_be_visible()
         assert config["call_transport"]["realtime_speech"]["model"] == "next-audio"
+        assert config["stage_manager"]["call_setup_timeout"] == 30.5
+        assert set(applied[-1]) == {"call_transport", "call_setup_timeout"}
+        expect(budget).to_have_value("30.5")
         assert config["llm_service"]["available_llms"]["main"]["model"] == "original"
         assert config["llm_service"]["client_model_types"][0]["name"] == "原名"
         assert config["skill"]["llm"]["params"] == {}
@@ -147,6 +163,10 @@ def main():
         expect(model).to_have_value("next-model")
         expect(client).to_have_value("新名称")
         expect(speech).to_have_value("next-audio")
+        expect(budget).to_have_value("30.5")
+        budget.fill("0")
+        audio.get_by_role("button", name="放弃草稿").click()
+        expect(budget).to_have_value("30.5")
         assert '"limit"' in params.input_value()
         expect(speaking).to_be_checked()
         expect(vectors).to_be_checked()

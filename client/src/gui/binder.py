@@ -39,6 +39,9 @@ class AgentBinder(QObject):
         send_image_selecting_callback: Callable[[], None] | None = None,
         send_image_selecting_cancel_callback: Callable[[], None] | None = None,
         is_server_audio_active_callback: Callable[[], bool] | None = None,
+        prepare_account_callback: Callable | None = None,
+        apply_account_callback: Callable | None = None,
+        account_context_callback: Callable | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -61,6 +64,9 @@ class AgentBinder(QObject):
         self.send_image_selecting_callback = send_image_selecting_callback
         self.send_image_selecting_cancel_callback = send_image_selecting_cancel_callback
         self.is_server_audio_active_callback = is_server_audio_active_callback
+        self.prepare_account_callback = prepare_account_callback
+        self.apply_account_callback = apply_account_callback
+        self.account_context_callback = account_context_callback
 
         self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
         # 将跨线程的更新请求通过 Qt 信号转发到主线程执行
@@ -123,6 +129,21 @@ class AgentBinder(QObject):
             return self.auto_login_callback(username, token)
         self.logger.error("Auto login callback not set")
         return False
+
+    def prepare_account_request(self, action: str, **values):
+        if self.prepare_account_callback is None:
+            raise RuntimeError("Account request preparation is not configured")
+        return self.prepare_account_callback(action, **values)
+
+    def apply_account_result(self, request, result):
+        if self.apply_account_callback is None:
+            raise RuntimeError("Account result application is not configured")
+        return self.apply_account_callback(request, result)
+
+    def account_context(self):
+        if self.account_context_callback is None:
+            raise RuntimeError("Account context is not configured")
+        return self.account_context_callback()
 
     def on_login(self, username: str, password: str, do_auto_login: bool = False) -> Tuple[bool, str]:
         if self.login_callback:

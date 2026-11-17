@@ -1,6 +1,6 @@
 """一次通话的持续模型会话；不包含供应商协议或持久化行为。"""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 from uuid import UUID
@@ -111,4 +111,13 @@ class OmniSession(Protocol):
 
 
 class OmniSessionFactory(Protocol):
-    async def open(self, call_id: UUID, instructions: str) -> OmniSession: ...
+    async def open(
+        self,
+        call_id: UUID,
+        instructions: str,
+        *,
+        remaining_setup_time: Callable[[], float],
+        on_session_created: Callable[[OmniSession], None],
+    ) -> OmniSession:
+        """首个 await 前同步交付句柄；交付成功后仅调用方负责关闭。"""
+        ...

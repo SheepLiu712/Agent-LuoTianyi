@@ -5,14 +5,16 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import struct
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from uuid import UUID, uuid4
 
 from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 
 from src.domain.call.omni import (
     AudioFrame,
@@ -36,6 +38,7 @@ from .config import AliyunRealtimeSpeechConfig, RealtimeSpeechUnavailable
 @dataclass
 class _Reply:
     item_id: str | None
+    input_epoch: int
     buffer: str = ""
     tone: str = "中性"
     tag: str | None = None
@@ -54,7 +57,11 @@ class QwenOmniSessionFactory:
     def from_mapping(cls, value, *, connector=connect):
         if not isinstance(value, dict) or type(value.get("enabled", False)) is not bool:
             raise ValueError("realtime_speech must be an object with boolean enabled")
-        config = AliyunRealtimeSpeechConfig.from_mapping(value) if value.get("enabled", False) else None
+        config = (
+            AliyunRealtimeSpeechConfig.from_mapping(value, use_legacy_setup_timeouts=False)
+            if value.get("enabled", False)
+            else None
+        )
         if config is not None and (not config.model.startswith("qwen") or "realtime" not in config.model):
             raise ValueError("通话必须使用 Qwen Realtime 模型")
         return cls(config, connector=connector)
@@ -63,15 +70,25 @@ class QwenOmniSessionFactory:
     def is_configured(self):
         return self._config is not None
 
-    async def open(self, call_id: UUID, instructions: str) -> QwenOmniSession:
+    async def open(
+        self,
+        call_id: UUID,
+        instructions: str,
+        *,
+        remaining_setup_time: Callable[[], float],
+        on_session_created: Callable[[QwenOmniSession], None],
+    ) -> QwenOmniSession:
         if self._config is None:
             raise RealtimeSpeechUnavailable("实时模型未配置")
+        remaining_setup_time()
         session = QwenOmniSession(self._config, call_id, connector=self._connector)
         try:
-            await session.start(instructions)
+            on_session_created(session)
         except BaseException:
             await session.close()
             raise
+        # 登记成功后调用方是唯一 owner；失败也必须先传播而非等待清理。
+        await session.start(instructions, remaining_setup_time=remaining_setup_time)
         return session
 
 
@@ -83,6 +100,7 @@ class QwenOmniSession:
         self._close_task = None
         self._closed = False
         self._error = None
+        self._setup_provider_code = None
         self._ready = asyncio.Event()
         self._events = asyncio.Queue(config.event_queue_size)
         self._available = asyncio.Event()
@@ -98,18 +116,55 @@ class QwenOmniSession:
         self._active_windows = deque(maxlen=8000)
         self._speech_floor = 0
 
-    async def start(self, instructions):
-        self._socket = await asyncio.wait_for(
-            self._connector(
+    async def start(self, instructions, *, remaining_setup_time):
+        phase = "connect"
+        try:
+            remaining = remaining_setup_time()
+            self._socket = await self._connector(
                 self._config.websocket_url,
                 additional_headers={"Authorization": f"Bearer {self._config.api_key}"},
-                open_timeout=self._config.connect_timeout_seconds,
+                open_timeout=remaining,
                 close_timeout=self._config.close_timeout_seconds,
                 max_size=4 * 1024 * 1024,
-            ),
-            self._config.connect_timeout_seconds,
+            )
+            phase = "session_ready"
+            remaining = remaining_setup_time()
+            self._reader = asyncio.create_task(self._read(), name=f"omni-read-{self._call_id}")
+            await asyncio.wait_for(self._initialize(instructions), remaining)
+        except BaseException as error:
+            self._log_setup_failure(phase, error, remaining_setup_time)
+            raise
+
+    def _log_setup_failure(self, phase, error, remaining_setup_time):
+        try:
+            remaining = remaining_setup_time()
+        except asyncio.TimeoutError:
+            remaining = 0.0
+        except asyncio.CancelledError:
+            remaining = None
+        outcome = (
+            "cancelled"
+            if isinstance(error, asyncio.CancelledError)
+            else "timeout" if isinstance(error, asyncio.TimeoutError) else "failed"
         )
-        self._reader = asyncio.create_task(self._read(), name=f"omni-read-{self._call_id}")
+        status = None
+        if isinstance(error, InvalidStatus):
+            response = vars(error).get("response")
+            candidate = vars(response).get("status_code") if hasattr(response, "__dict__") else None
+            if type(candidate) is int and 100 <= candidate <= 599:
+                status = candidate
+        get_logger(__name__).warning(
+            "Realtime setup failed call=%s phase=%s type=%s remaining=%s outcome=%s provider_code=%s http_status=%s",
+            self._call_id,
+            phase,
+            type(error).__name__,
+            remaining,
+            outcome,
+            self._setup_provider_code,
+            status,
+        )
+
+    async def _initialize(self, instructions):
         await self._send(
             "session.update",
             session={
@@ -136,7 +191,7 @@ class QwenOmniSession:
                 "tool_choice": "auto",
             },
         )
-        await asyncio.wait_for(self._ready.wait(), self._config.session_timeout_seconds)
+        await self._ready.wait()
         self._check_open()
 
     def _check_open(self):
@@ -247,6 +302,9 @@ class QwenOmniSession:
         kind = event["type"]
         if kind == "error":
             code = event.get("error", {}).get("code", "unknown")
+            self._setup_provider_code = (
+                code if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,96}", code) else None
+            )
             raise RuntimeError(f"Qwen protocol error: {code}")
         if kind == "session.updated":
             self._ready.set()
@@ -272,7 +330,7 @@ class QwenOmniSession:
             self._next_origins.popleft() if self._next_origins else (self._last_item, None, self._input_epoch)
         )
         stale = epoch != self._input_epoch or (parent is not None and self._replies[parent].cancelled)
-        self._replies[response_id] = _Reply(origin)
+        self._replies[response_id] = _Reply(origin, epoch)
         if stale:
             await self.interrupt(response_id)
         else:
@@ -341,12 +399,28 @@ class QwenOmniSession:
         if response_id:
             if response_id not in self._replies:
                 raise RuntimeError(f"Qwen finished an unknown response: {diagnostic}")
-            return self._replies[response_id]
+            return response_id
+
+        if status == "cancelled" and not response.get("output") and not error:
+            response_id = self._anonymous_cancel_target()
+            if response_id is not None:
+                get_logger(__name__).info(
+                    "Qwen anonymous cancellation resolved call=%s response_id=%s input_epoch=%s %s",
+                    self._call_id,
+                    response_id,
+                    self._input_epoch,
+                    diagnostic,
+                )
+                return response_id
 
         # 未创建回复就结束：只能结算唯一待创建来源，绝不能猜测正在播放的回复 ID。
         active = any(reply.generating for reply in self._replies.values())
         if active or response.get("output") or len(self._next_origins) > 1:
-            raise RuntimeError(f"Cannot correlate anonymous Qwen response: {diagnostic}")
+            raise RuntimeError(
+                f"Cannot correlate anonymous Qwen response: {diagnostic} "
+                f"active_response_ids={[key for key, reply in self._replies.items() if reply.generating]!r} "
+                f"pending_origins={len(self._next_origins)} input_epoch={self._input_epoch}"
+            )
         origin = self._next_origins.popleft() if self._next_origins else None
         get_logger(__name__).warning(
             "Qwen ended without creating a reply call=%s item_id=%s %s",
@@ -356,11 +430,24 @@ class QwenOmniSession:
         )
         return None
 
+    def _anonymous_cancel_target(self):
+        active = [(key, reply) for key, reply in self._replies.items() if reply.generating]
+        # speech_started 在读取协程中先推进轮次；不能等待 CallStage 异步发送取消后才识别旧回复。
+        interrupted = [key for key, reply in active if reply.cancelled or reply.input_epoch < self._input_epoch]
+        if interrupted:
+            return interrupted[0] if len(interrupted) == 1 else None
+        # 尚有待创建来源时，匿名事件也可能属于该来源，不能误取消当前生成。
+        if len(active) == 1 and not self._next_origins:
+            return active[0][0]
+        return None
+
     async def _done(self, response, event_id):
-        reply = self._terminal_reply(response, event_id)
-        if reply is None or not reply.generating:
+        response_id = self._terminal_reply(response, event_id)
+        if response_id is None:
             return
-        response_id = response["id"]
+        reply = self._replies[response_id]
+        if not reply.generating:
+            return
         status = response["status"]
         reply.generating = False
         if status == "cancelled":

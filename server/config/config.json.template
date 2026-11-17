@@ -15,6 +15,7 @@
         }
     },
     "stage_manager": {
+        "call_setup_timeout": 10.0,
         "stage": {
             "termination_timeout": 90
         }
