@@ -1,0 +1,2451 @@
+{
+  "check": true,
+  "check_passed": true,
+  "dependencies": {
+    "beautifulsoup4": "4.15.0",
+    "mwparserfromhell": "0.7.2",
+    "zhconv": "1.4.3"
+  },
+  "groups": [
+    {
+      "median_file_bytes_ratio": 30.47504207138056,
+      "median_paired_speedup": 6.882509170551973,
+      "new_faster": true,
+      "rounds": 9,
+      "rows": [
+        {
+          "file_bytes_ratio": 31.052481163938687,
+          "html_bytes": 119521,
+          "html_sha256": "10237a0827dd1f999bcad1c2212a6ee84ad6871ee42ee0c942e0a95c4f64c1be",
+          "new_median_s": 0.008140099933370948,
+          "old_median_s": 0.05249790009111166,
+          "paired_speedup": 6.449294298696825,
+          "samples": [
+            {
+              "new_s": 0.008140099933370948,
+              "old_s": 0.05396930011920631,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.007375699933618307,
+              "old_s": 0.05249790009111166,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.008956699864938855,
+              "old_s": 0.05036589992232621,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.007411800092086196,
+              "old_s": 0.05032739997841418,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.009131999919191003,
+              "old_s": 0.1279611000791192,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.010575500084087253,
+              "old_s": 0.05246140016242862,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.009001299971714616,
+              "old_s": 0.05175919993780553,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.007317200070247054,
+              "old_s": 0.06762439990416169,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.008059700019657612,
+              "old_s": 0.05473360000178218,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "3d31f20ed929c6719240fa60dff472b4bbd0ea14ba7f2f996a9b2d12310eb64f",
+          "title": "Foxy",
+          "wikitext_bytes": 3849
+        },
+        {
+          "file_bytes_ratio": 14.848975898659209,
+          "html_bytes": 180519,
+          "html_sha256": "6dca4e80cefcc40929a1214877852ebf73a21a30966efcafcfc16913e77ca8da",
+          "new_median_s": 0.015489199897274375,
+          "old_median_s": 0.09271920006722212,
+          "paired_speedup": 5.986054843513116,
+          "samples": [
+            {
+              "new_s": 0.01551689999178052,
+              "old_s": 0.1688872000668198,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.01657749991863966,
+              "old_s": 0.09905759990215302,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.01475089997984469,
+              "old_s": 0.09100720006972551,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.015489199897274375,
+              "old_s": 0.09100899985060096,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.01588719990104437,
+              "old_s": 0.09505690005607903,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.10212220018729568,
+              "old_s": 0.09598660003393888,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.014646499883383512,
+              "old_s": 0.09193860017694533,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.015278100036084652,
+              "old_s": 0.09271920006722212,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.014391000149771571,
+              "old_s": 0.09238699986599386,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "4d6bb884d87f2c41a7ad37cb6fd5d2c46d2ee06b94caf2137d8847ff4222da28",
+          "title": "Sharing The World",
+          "wikitext_bytes": 12157
+        },
+        {
+          "file_bytes_ratio": 29.897602978822434,
+          "html_bytes": 128470,
+          "html_sha256": "ef76612ab7621e22cdad401a861898bc490cfb5a2885e780e103157fa92a0593",
+          "new_median_s": 0.008402000181376934,
+          "old_median_s": 0.052725500194355845,
+          "paired_speedup": 6.275350994543195,
+          "samples": [
+            {
+              "new_s": 0.009833100019022822,
+              "old_s": 0.05136030004359782,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.007333799963817,
+              "old_s": 0.051805099938064814,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.008567699929699302,
+              "old_s": 0.13601670018397272,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.007432800019159913,
+              "old_s": 0.053749300073832273,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.008569600060582161,
+              "old_s": 0.05227590003050864,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.00829549995251,
+              "old_s": 0.05384860001504421,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.008156700059771538,
+              "old_s": 0.05692859995178878,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.010266700061038136,
+              "old_s": 0.052725500194355845,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.008402000181376934,
+              "old_s": 0.052674900041893125,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "dacf10e16aa8f83779cf009c4aa3917fe51d5b5fad5831e60bcd2a3907043f04",
+          "title": "唱给雅音宫羽",
+          "wikitext_bytes": 4297
+        },
+        {
+          "file_bytes_ratio": 26.95916660330013,
+          "html_bytes": 354540,
+          "html_sha256": "a88ed18b61394d1b34656e7ce5a39cb7fa94348d9bd3b1981370b2362c094bb7",
+          "new_median_s": 0.01335390005260706,
+          "old_median_s": 0.16921159997582436,
+          "paired_speedup": 12.67132443025807,
+          "samples": [
+            {
+              "new_s": 0.013967500068247318,
+              "old_s": 0.16746110003441572,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.014054100029170513,
+              "old_s": 0.16818040004000068,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.01311169983819127,
+              "old_s": 0.2758979999925941,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.013577299891039729,
+              "old_s": 0.16546620009467006,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.011926099890843034,
+              "old_s": 0.16537569998763502,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.01444569998420775,
+              "old_s": 0.26030660001561046,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.01208700006827712,
+              "old_s": 0.16921159997582436,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.01335390005260706,
+              "old_s": 0.17198640014976263,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.01212390000000596,
+              "old_s": 0.2578885001130402,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "913898417ff0788c09cd60a816882199ff0dfe0e60f4a7e5c0c89f17c1f757be",
+          "title": "山塘恋雨",
+          "wikitext_bytes": 13151
+        },
+        {
+          "file_bytes_ratio": 7.803735680830653,
+          "html_bytes": 276580,
+          "html_sha256": "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d",
+          "new_median_s": 0.1548963999375701,
+          "old_median_s": 0.15983969997614622,
+          "paired_speedup": 1.0319135889573192,
+          "samples": [
+            {
+              "new_s": 0.07705560000613332,
+              "old_s": 0.16173360007815063,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.15865299990400672,
+              "old_s": 0.1601809998974204,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.07365319994278252,
+              "old_s": 0.15975370001979172,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.1548963999375701,
+              "old_s": 0.15815769997425377,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.07848500018008053,
+              "old_s": 0.1607100002001971,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.20003189984709024,
+              "old_s": 0.1594267999753356,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.1552067999728024,
+              "old_s": 0.15856319991871715,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.07487340015359223,
+              "old_s": 0.15983969997614622,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.15790640003979206,
+              "old_s": 0.16424859990365803,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+          "title": "普通DISCO",
+          "wikitext_bytes": 35442
+        },
+        {
+          "file_bytes_ratio": 59.28349282296651,
+          "html_bytes": 198244,
+          "html_sha256": "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35",
+          "new_median_s": 0.0067431998904794455,
+          "old_median_s": 0.09448740002699196,
+          "paired_speedup": 14.012249608734919,
+          "samples": [
+            {
+              "new_s": 0.0067431998904794455,
+              "old_s": 0.09448740002699196,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.006845799973234534,
+              "old_s": 0.09344210010021925,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.007653600070625544,
+              "old_s": 0.09169970010407269,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.006428000051528215,
+              "old_s": 0.17812830000184476,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.006351500051096082,
+              "old_s": 0.09429899998940527,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.00776690011844039,
+              "old_s": 0.09651349997147918,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.006395000033080578,
+              "old_s": 0.09644669992849231,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.007130600046366453,
+              "old_s": 0.09322059992700815,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.00613359990529716,
+              "old_s": 0.1822115001268685,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+          "title": "礼物pre-Sent",
+          "wikitext_bytes": 3344
+        },
+        {
+          "file_bytes_ratio": 38.53556034482759,
+          "html_bytes": 107283,
+          "html_sha256": "baa90147b4fe77e7406ba85b2c2d9620d9775f25d04a25940541b164ebdcf758",
+          "new_median_s": 0.005641000112518668,
+          "old_median_s": 0.041268000146374106,
+          "paired_speedup": 7.315724042407123,
+          "samples": [
+            {
+              "new_s": 0.005068300059065223,
+              "old_s": 0.041492999996989965,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.005641000112518668,
+              "old_s": 0.041268000146374106,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.005313599947839975,
+              "old_s": 0.04317779978737235,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.004884700058028102,
+              "old_s": 0.04121820000000298,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.008060699794441462,
+              "old_s": 0.04164569987915456,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.004965599859133363,
+              "old_s": 0.04120530001819134,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.0060859001241624355,
+              "old_s": 0.04072370007634163,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.005807500099763274,
+              "old_s": 0.04089189996011555,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.005852800095453858,
+              "old_s": 0.042604600079357624,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "c3ec95cc00be4ec6a272cf72e20fa2ead6a8153728c31faaeeceaea87956cfdc",
+          "title": "社畜烧酒",
+          "wikitext_bytes": 2784
+        },
+        {
+          "file_bytes_ratio": 49.93386545039909,
+          "html_bytes": 131376,
+          "html_sha256": "40f7a7a0294f1aae811d9f3d14122ae295f5b72f795b732f74e0743e63f4ebd5",
+          "new_median_s": 0.004937299992889166,
+          "old_median_s": 0.05664670001715422,
+          "paired_speedup": 11.473214124873582,
+          "samples": [
+            {
+              "new_s": 0.004990299930796027,
+              "old_s": 0.15194619982503355,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.005020899930968881,
+              "old_s": 0.05802699993364513,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.0048362999223172665,
+              "old_s": 0.05705179995857179,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.004894499899819493,
+              "old_s": 0.05620629992336035,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.006175999995321035,
+              "old_s": 0.05610379995778203,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.004937299992889166,
+              "old_s": 0.05614090012386441,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.004689600085839629,
+              "old_s": 0.05664670001715422,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.004916999954730272,
+              "old_s": 0.05713650002144277,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.0051398000214248896,
+              "old_s": 0.05653090006671846,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "e84e0e8f4fc4133f58637be9462c43bec29e7edef5637c55465cd93b32e1ed8e",
+          "title": "青麟雪",
+          "wikitext_bytes": 2631
+        }
+      ],
+      "sample_set": [
+        {
+          "html_sha256": "10237a0827dd1f999bcad1c2212a6ee84ad6871ee42ee0c942e0a95c4f64c1be",
+          "source_sha256": "3d31f20ed929c6719240fa60dff472b4bbd0ea14ba7f2f996a9b2d12310eb64f",
+          "title": "Foxy"
+        },
+        {
+          "html_sha256": "6dca4e80cefcc40929a1214877852ebf73a21a30966efcafcfc16913e77ca8da",
+          "source_sha256": "4d6bb884d87f2c41a7ad37cb6fd5d2c46d2ee06b94caf2137d8847ff4222da28",
+          "title": "Sharing The World"
+        },
+        {
+          "html_sha256": "ef76612ab7621e22cdad401a861898bc490cfb5a2885e780e103157fa92a0593",
+          "source_sha256": "dacf10e16aa8f83779cf009c4aa3917fe51d5b5fad5831e60bcd2a3907043f04",
+          "title": "唱给雅音宫羽"
+        },
+        {
+          "html_sha256": "a88ed18b61394d1b34656e7ce5a39cb7fa94348d9bd3b1981370b2362c094bb7",
+          "source_sha256": "913898417ff0788c09cd60a816882199ff0dfe0e60f4a7e5c0c89f17c1f757be",
+          "title": "山塘恋雨"
+        },
+        {
+          "html_sha256": "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d",
+          "source_sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+          "title": "普通DISCO"
+        },
+        {
+          "html_sha256": "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35",
+          "source_sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+          "title": "礼物pre-Sent"
+        },
+        {
+          "html_sha256": "baa90147b4fe77e7406ba85b2c2d9620d9775f25d04a25940541b164ebdcf758",
+          "source_sha256": "c3ec95cc00be4ec6a272cf72e20fa2ead6a8153728c31faaeeceaea87956cfdc",
+          "title": "社畜烧酒"
+        },
+        {
+          "html_sha256": "40f7a7a0294f1aae811d9f3d14122ae295f5b72f795b732f74e0743e63f4ebd5",
+          "source_sha256": "e84e0e8f4fc4133f58637be9462c43bec29e7edef5637c55465cd93b32e1ed8e",
+          "title": "青麟雪"
+        }
+      ],
+      "sample_set_sha256": "cb69884dd2691a6233aca1de5c26f308f63f609798ecd40102ca2a39cad4578b",
+      "scope": "offline parse + complete field extraction, no network/LLM/IO/import/init",
+      "size_scope": "local UTF-8 file bytes, not network payload",
+      "sum_medians_group_ratio": 3.3060006980668284,
+      "sum_new_medians_s": 0.2176030999980867,
+      "sum_old_medians_s": 0.7193960004951805,
+      "warmups": 2
+    },
+    {
+      "median_file_bytes_ratio": 30.47504207138056,
+      "median_paired_speedup": 7.175300988517986,
+      "new_faster": true,
+      "rounds": 9,
+      "rows": [
+        {
+          "file_bytes_ratio": 31.052481163938687,
+          "html_bytes": 119521,
+          "html_sha256": "10237a0827dd1f999bcad1c2212a6ee84ad6871ee42ee0c942e0a95c4f64c1be",
+          "new_median_s": 0.008212999906390905,
+          "old_median_s": 0.05245189997367561,
+          "paired_speedup": 6.386448383234538,
+          "samples": [
+            {
+              "new_s": 0.00966139999218285,
+              "old_s": 0.0510281000752002,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.008207000093534589,
+              "old_s": 0.05273170000873506,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.007519199978560209,
+              "old_s": 0.05271870014257729,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.008212999906390905,
+              "old_s": 0.05228980001993477,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.00916090002283454,
+              "old_s": 0.05319839995354414,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.008934800047427416,
+              "old_s": 0.052736900048330426,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.0098710001911968,
+              "old_s": 0.0513775001745671,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.007879199925810099,
+              "old_s": 0.05051290011033416,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.007757300045341253,
+              "old_s": 0.05245189997367561,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "3d31f20ed929c6719240fa60dff472b4bbd0ea14ba7f2f996a9b2d12310eb64f",
+          "title": "Foxy",
+          "wikitext_bytes": 3849
+        },
+        {
+          "file_bytes_ratio": 14.848975898659209,
+          "html_bytes": 180519,
+          "html_sha256": "6dca4e80cefcc40929a1214877852ebf73a21a30966efcafcfc16913e77ca8da",
+          "new_median_s": 0.017010899959132075,
+          "old_median_s": 0.09306310000829399,
+          "paired_speedup": 5.470792270360411,
+          "samples": [
+            {
+              "new_s": 0.017010899959132075,
+              "old_s": 0.09178039990365505,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.03872890002094209,
+              "old_s": 0.09306310000829399,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.01748020015656948,
+              "old_s": 0.0920752000529319,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.017023100052028894,
+              "old_s": 0.1836924001108855,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.017137099988758564,
+              "old_s": 0.09501299983821809,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.014987499918788671,
+              "old_s": 0.09500760002993047,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.01616099989041686,
+              "old_s": 0.0928982999175787,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.016019399976357818,
+              "old_s": 0.09019679995253682,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.014012399828061461,
+              "old_s": 0.1866421999875456,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "4d6bb884d87f2c41a7ad37cb6fd5d2c46d2ee06b94caf2137d8847ff4222da28",
+          "title": "Sharing The World",
+          "wikitext_bytes": 12157
+        },
+        {
+          "file_bytes_ratio": 29.897602978822434,
+          "html_bytes": 128470,
+          "html_sha256": "ef76612ab7621e22cdad401a861898bc490cfb5a2885e780e103157fa92a0593",
+          "new_median_s": 0.00847609993070364,
+          "old_median_s": 0.05362000013701618,
+          "paired_speedup": 6.326022649023315,
+          "samples": [
+            {
+              "new_s": 0.0073951000813394785,
+              "old_s": 0.05475099990144372,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.009665299905464053,
+              "old_s": 0.05116840009577572,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.00847609993070364,
+              "old_s": 0.05344240018166602,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.007312599802389741,
+              "old_s": 0.05362000013701618,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.009005399886518717,
+              "old_s": 0.052179899998009205,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.007626599865034223,
+              "old_s": 0.05889860005117953,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.009200999978929758,
+              "old_s": 0.05676049995236099,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.008592300117015839,
+              "old_s": 0.14389119995757937,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.007995499996468425,
+              "old_s": 0.05287280003540218,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "dacf10e16aa8f83779cf009c4aa3917fe51d5b5fad5831e60bcd2a3907043f04",
+          "title": "唱给雅音宫羽",
+          "wikitext_bytes": 4297
+        },
+        {
+          "file_bytes_ratio": 26.95916660330013,
+          "html_bytes": 354540,
+          "html_sha256": "a88ed18b61394d1b34656e7ce5a39cb7fa94348d9bd3b1981370b2362c094bb7",
+          "new_median_s": 0.013330599991604686,
+          "old_median_s": 0.1738394999410957,
+          "paired_speedup": 13.040635834139195,
+          "samples": [
+            {
+              "new_s": 0.01271370006725192,
+              "old_s": 0.26115560019388795,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.015524700051173568,
+              "old_s": 0.20165150007233024,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.012701800093054771,
+              "old_s": 0.1738394999410957,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.011856799945235252,
+              "old_s": 0.3154931999742985,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.014310600003227592,
+              "old_s": 0.16674550017341971,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.013330599991604686,
+              "old_s": 0.16869629989378154,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.01348430011421442,
+              "old_s": 0.17198600014671683,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.014752999879419804,
+              "old_s": 0.2664109000470489,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.012711199931800365,
+              "old_s": 0.17021839995868504,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "913898417ff0788c09cd60a816882199ff0dfe0e60f4a7e5c0c89f17c1f757be",
+          "title": "山塘恋雨",
+          "wikitext_bytes": 13151
+        },
+        {
+          "file_bytes_ratio": 7.803735680830653,
+          "html_bytes": 276580,
+          "html_sha256": "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d",
+          "new_median_s": 0.07402990013360977,
+          "old_median_s": 0.18372059985995293,
+          "paired_speedup": 2.4817080602347494,
+          "samples": [
+            {
+              "new_s": 0.15960310003720224,
+              "old_s": 0.16580710001289845,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.07315630000084639,
+              "old_s": 0.16075229994021356,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.07690250012092292,
+              "old_s": 0.23676160001195967,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.07493080012500286,
+              "old_s": 0.18372059985995293,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.0727798999287188,
+              "old_s": 0.2581233000382781,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.07510649994947016,
+              "old_s": 0.16003490006551147,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.07379729999229312,
+              "old_s": 0.25297789997421205,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.07383999996818602,
+              "old_s": 0.2834468998480588,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.07402990013360977,
+              "old_s": 0.1604079999960959,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+          "title": "普通DISCO",
+          "wikitext_bytes": 35442
+        },
+        {
+          "file_bytes_ratio": 59.28349282296651,
+          "html_bytes": 198244,
+          "html_sha256": "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35",
+          "new_median_s": 0.006342499982565641,
+          "old_median_s": 0.09599629999138415,
+          "paired_speedup": 15.135404060742642,
+          "samples": [
+            {
+              "new_s": 0.006299699889495969,
+              "old_s": 0.18238550005480647,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.006411700043827295,
+              "old_s": 0.12986240000464022,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.005783800035715103,
+              "old_s": 0.0959018999710679,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.007328700041398406,
+              "old_s": 0.09794769994914532,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.005828800145536661,
+              "old_s": 0.09537900006398559,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.007291800109669566,
+              "old_s": 0.09435910009779036,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.005847099935635924,
+              "old_s": 0.18621430010534823,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.00642010010778904,
+              "old_s": 0.09599629999138415,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.006342499982565641,
+              "old_s": 0.09437960013747215,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+          "title": "礼物pre-Sent",
+          "wikitext_bytes": 3344
+        },
+        {
+          "file_bytes_ratio": 38.53556034482759,
+          "html_bytes": 107283,
+          "html_sha256": "baa90147b4fe77e7406ba85b2c2d9620d9775f25d04a25940541b164ebdcf758",
+          "new_median_s": 0.005487299989908934,
+          "old_median_s": 0.04370169993489981,
+          "paired_speedup": 7.964153593801434,
+          "samples": [
+            {
+              "new_s": 0.005215100012719631,
+              "old_s": 0.04231469985097647,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.005487299989908934,
+              "old_s": 0.04182139993645251,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.0059292002115398645,
+              "old_s": 0.04022750002332032,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.005064100027084351,
+              "old_s": 0.04040049994364381,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.005270299967378378,
+              "old_s": 0.04370169993489981,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.0059038999024778605,
+              "old_s": 0.16240300005301833,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.007034800015389919,
+              "old_s": 0.058771700132638216,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.006181299919262528,
+              "old_s": 0.04626360000111163,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.00537850009277463,
+              "old_s": 0.050332200014963746,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "c3ec95cc00be4ec6a272cf72e20fa2ead6a8153728c31faaeeceaea87956cfdc",
+          "title": "社畜烧酒",
+          "wikitext_bytes": 2784
+        },
+        {
+          "file_bytes_ratio": 49.93386545039909,
+          "html_bytes": 131376,
+          "html_sha256": "40f7a7a0294f1aae811d9f3d14122ae295f5b72f795b732f74e0743e63f4ebd5",
+          "new_median_s": 0.005668899975717068,
+          "old_median_s": 0.06180489994585514,
+          "paired_speedup": 10.90245024794909,
+          "samples": [
+            {
+              "new_s": 0.005179000087082386,
+              "old_s": 0.06089319987222552,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.006448599975556135,
+              "old_s": 0.06160809984430671,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.005350999999791384,
+              "old_s": 0.05810369993560016,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.005427500000223517,
+              "old_s": 0.0592849999666214,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.005668899975717068,
+              "old_s": 0.18399490020237863,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.00799309997819364,
+              "old_s": 0.06363300001248717,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.006220299983397126,
+              "old_s": 0.0636058000382036,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.00519569986499846,
+              "old_s": 0.06180489994585514,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.006023100111633539,
+              "old_s": 0.06319929985329509,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "e84e0e8f4fc4133f58637be9462c43bec29e7edef5637c55465cd93b32e1ed8e",
+          "title": "青麟雪",
+          "wikitext_bytes": 2631
+        }
+      ],
+      "sample_set": [
+        {
+          "html_sha256": "10237a0827dd1f999bcad1c2212a6ee84ad6871ee42ee0c942e0a95c4f64c1be",
+          "source_sha256": "3d31f20ed929c6719240fa60dff472b4bbd0ea14ba7f2f996a9b2d12310eb64f",
+          "title": "Foxy"
+        },
+        {
+          "html_sha256": "6dca4e80cefcc40929a1214877852ebf73a21a30966efcafcfc16913e77ca8da",
+          "source_sha256": "4d6bb884d87f2c41a7ad37cb6fd5d2c46d2ee06b94caf2137d8847ff4222da28",
+          "title": "Sharing The World"
+        },
+        {
+          "html_sha256": "ef76612ab7621e22cdad401a861898bc490cfb5a2885e780e103157fa92a0593",
+          "source_sha256": "dacf10e16aa8f83779cf009c4aa3917fe51d5b5fad5831e60bcd2a3907043f04",
+          "title": "唱给雅音宫羽"
+        },
+        {
+          "html_sha256": "a88ed18b61394d1b34656e7ce5a39cb7fa94348d9bd3b1981370b2362c094bb7",
+          "source_sha256": "913898417ff0788c09cd60a816882199ff0dfe0e60f4a7e5c0c89f17c1f757be",
+          "title": "山塘恋雨"
+        },
+        {
+          "html_sha256": "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d",
+          "source_sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+          "title": "普通DISCO"
+        },
+        {
+          "html_sha256": "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35",
+          "source_sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+          "title": "礼物pre-Sent"
+        },
+        {
+          "html_sha256": "baa90147b4fe77e7406ba85b2c2d9620d9775f25d04a25940541b164ebdcf758",
+          "source_sha256": "c3ec95cc00be4ec6a272cf72e20fa2ead6a8153728c31faaeeceaea87956cfdc",
+          "title": "社畜烧酒"
+        },
+        {
+          "html_sha256": "40f7a7a0294f1aae811d9f3d14122ae295f5b72f795b732f74e0743e63f4ebd5",
+          "source_sha256": "e84e0e8f4fc4133f58637be9462c43bec29e7edef5637c55465cd93b32e1ed8e",
+          "title": "青麟雪"
+        }
+      ],
+      "sample_set_sha256": "cb69884dd2691a6233aca1de5c26f308f63f609798ecd40102ca2a39cad4578b",
+      "scope": "offline parse + complete field extraction, no network/LLM/IO/import/init",
+      "size_scope": "local UTF-8 file bytes, not network payload",
+      "sum_medians_group_ratio": 5.472014853618852,
+      "sum_new_medians_s": 0.13855919986963272,
+      "sum_old_medians_s": 0.7581979997921735,
+      "warmups": 2
+    },
+    {
+      "median_file_bytes_ratio": 30.47504207138056,
+      "median_paired_speedup": 7.186391562240051,
+      "new_faster": true,
+      "rounds": 9,
+      "rows": [
+        {
+          "file_bytes_ratio": 31.052481163938687,
+          "html_bytes": 119521,
+          "html_sha256": "10237a0827dd1f999bcad1c2212a6ee84ad6871ee42ee0c942e0a95c4f64c1be",
+          "new_median_s": 0.008518900023773313,
+          "old_median_s": 0.05210809991694987,
+          "paired_speedup": 6.1167638746239685,
+          "samples": [
+            {
+              "new_s": 0.012043700087815523,
+              "old_s": 0.06296140002086759,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.013520099921151996,
+              "old_s": 0.09549620002508163,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.0075270000379532576,
+              "old_s": 0.059267699951305985,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.008532000007107854,
+              "old_s": 0.14938620012253523,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.008018800057470798,
+              "old_s": 0.05069159995764494,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.009497999912127852,
+              "old_s": 0.05043440009467304,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.008137600030750036,
+              "old_s": 0.05158889992162585,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.007941300049424171,
+              "old_s": 0.05210809991694987,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.008518900023773313,
+              "old_s": 0.051824500085785985,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "3d31f20ed929c6719240fa60dff472b4bbd0ea14ba7f2f996a9b2d12310eb64f",
+          "title": "Foxy",
+          "wikitext_bytes": 3849
+        },
+        {
+          "file_bytes_ratio": 14.848975898659209,
+          "html_bytes": 180519,
+          "html_sha256": "6dca4e80cefcc40929a1214877852ebf73a21a30966efcafcfc16913e77ca8da",
+          "new_median_s": 0.01551400008611381,
+          "old_median_s": 0.09406360005959868,
+          "paired_speedup": 6.0631429378289505,
+          "samples": [
+            {
+              "new_s": 0.014244699850678444,
+              "old_s": 0.2001644999254495,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.016217299969866872,
+              "old_s": 0.09441829985007644,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.01490319985896349,
+              "old_s": 0.09394679986871779,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.01441750000230968,
+              "old_s": 0.0929986999835819,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.01551400008611381,
+              "old_s": 0.09157419996336102,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.014853299828246236,
+              "old_s": 0.20168149983510375,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.0165438000112772,
+              "old_s": 0.09270100016146898,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.016827099956572056,
+              "old_s": 0.09406360005959868,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.015814300160855055,
+              "old_s": 0.10021340008825064,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "4d6bb884d87f2c41a7ad37cb6fd5d2c46d2ee06b94caf2137d8847ff4222da28",
+          "title": "Sharing The World",
+          "wikitext_bytes": 12157
+        },
+        {
+          "file_bytes_ratio": 29.897602978822434,
+          "html_bytes": 128470,
+          "html_sha256": "ef76612ab7621e22cdad401a861898bc490cfb5a2885e780e103157fa92a0593",
+          "new_median_s": 0.008002299815416336,
+          "old_median_s": 0.05304539995267987,
+          "paired_speedup": 6.628769375834749,
+          "samples": [
+            {
+              "new_s": 0.008784999838098884,
+              "old_s": 0.05515430006198585,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.0070890998467803,
+              "old_s": 0.1438003999646753,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.007364399963989854,
+              "old_s": 0.05511009995825589,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.010125499917194247,
+              "old_s": 0.051740799797698855,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.007903600111603737,
+              "old_s": 0.05488339997828007,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.00794040015898645,
+              "old_s": 0.05299989995546639,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.008374999975785613,
+              "old_s": 0.052456900011748075,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.008085999870672822,
+              "old_s": 0.05178339988924563,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.008002299815416336,
+              "old_s": 0.05304539995267987,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "dacf10e16aa8f83779cf009c4aa3917fe51d5b5fad5831e60bcd2a3907043f04",
+          "title": "唱给雅音宫羽",
+          "wikitext_bytes": 4297
+        },
+        {
+          "file_bytes_ratio": 26.95916660330013,
+          "html_bytes": 354540,
+          "html_sha256": "a88ed18b61394d1b34656e7ce5a39cb7fa94348d9bd3b1981370b2362c094bb7",
+          "new_median_s": 0.013420999981462955,
+          "old_median_s": 0.1694873000960797,
+          "paired_speedup": 12.628515038385743,
+          "samples": [
+            {
+              "new_s": 0.012436599936336279,
+              "old_s": 0.16711319983005524,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.11249889992177486,
+              "old_s": 0.16661600000225008,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.012346499832347035,
+              "old_s": 0.17322719981893897,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.01415059994906187,
+              "old_s": 0.1694873000960797,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.01182470005005598,
+              "old_s": 0.17228049994446337,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.014112700009718537,
+              "old_s": 0.2631413999479264,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.013259800150990486,
+              "old_s": 0.1675637001171708,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.013420999981462955,
+              "old_s": 0.16715320013463497,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.013762200018391013,
+              "old_s": 0.2611310000065714,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "913898417ff0788c09cd60a816882199ff0dfe0e60f4a7e5c0c89f17c1f757be",
+          "title": "山塘恋雨",
+          "wikitext_bytes": 13151
+        },
+        {
+          "file_bytes_ratio": 7.803735680830653,
+          "html_bytes": 276580,
+          "html_sha256": "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d",
+          "new_median_s": 0.15305680013261735,
+          "old_median_s": 0.16261269990354776,
+          "paired_speedup": 1.0624336831989865,
+          "samples": [
+            {
+              "new_s": 0.07332329987548292,
+              "old_s": 0.1596955000422895,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.15855680010281503,
+              "old_s": 0.16061660018749535,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.07579200016334653,
+              "old_s": 0.1679371001664549,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.1530945000704378,
+              "old_s": 0.16020150016993284,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.15668399981223047,
+              "old_s": 0.19251960003748536,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.07643649983219802,
+              "old_s": 0.1591352999676019,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.15571069996804,
+              "old_s": 0.16740320017561316,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.07409150013700128,
+              "old_s": 0.16261269990354776,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.15305680013261735,
+              "old_s": 0.1645078998990357,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+          "title": "普通DISCO",
+          "wikitext_bytes": 35442
+        },
+        {
+          "file_bytes_ratio": 59.28349282296651,
+          "html_bytes": 198244,
+          "html_sha256": "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35",
+          "new_median_s": 0.0070264998357743025,
+          "old_median_s": 0.10175150004215539,
+          "paired_speedup": 14.481107581345674,
+          "samples": [
+            {
+              "new_s": 0.006338299950584769,
+              "old_s": 0.0983580001629889,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.006239899899810553,
+              "old_s": 0.09377060015685856,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.007621599826961756,
+              "old_s": 0.24122970015741885,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.01066770008765161,
+              "old_s": 0.10731130000203848,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.006023399997502565,
+              "old_s": 0.09898349991999567,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.007825599983334541,
+              "old_s": 0.10175150004215539,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.00734869996085763,
+              "old_s": 0.10237460001371801,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.0070264998357743025,
+              "old_s": 0.09596790000796318,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.006913000019267201,
+              "old_s": 0.2037679001223296,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+          "title": "礼物pre-Sent",
+          "wikitext_bytes": 3344
+        },
+        {
+          "file_bytes_ratio": 38.53556034482759,
+          "html_bytes": 107283,
+          "html_sha256": "baa90147b4fe77e7406ba85b2c2d9620d9775f25d04a25940541b164ebdcf758",
+          "new_median_s": 0.005399900022894144,
+          "old_median_s": 0.04181690001860261,
+          "paired_speedup": 7.7440137486453535,
+          "samples": [
+            {
+              "new_s": 0.005261000012978911,
+              "old_s": 0.04070580005645752,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.007503200089558959,
+              "old_s": 0.04256070009432733,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.005399900022894144,
+              "old_s": 0.04114949982613325,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.005810699891299009,
+              "old_s": 0.04181690001860261,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.0069989999756217,
+              "old_s": 0.04186400002799928,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.004930200055241585,
+              "old_s": 0.04403050011023879,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.005013599991798401,
+              "old_s": 0.041227699955925345,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.005558499833568931,
+              "old_s": 0.04318260005675256,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.005075300112366676,
+              "old_s": 0.04091460001654923,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "c3ec95cc00be4ec6a272cf72e20fa2ead6a8153728c31faaeeceaea87956cfdc",
+          "title": "社畜烧酒",
+          "wikitext_bytes": 2784
+        },
+        {
+          "file_bytes_ratio": 49.93386545039909,
+          "html_bytes": 131376,
+          "html_sha256": "40f7a7a0294f1aae811d9f3d14122ae295f5b72f795b732f74e0743e63f4ebd5",
+          "new_median_s": 0.005021600052714348,
+          "old_median_s": 0.057204100070521235,
+          "paired_speedup": 11.39160814680979,
+          "samples": [
+            {
+              "new_s": 0.005094300024211407,
+              "old_s": 0.06034870003350079,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 0
+            },
+            {
+              "new_s": 0.004924300126731396,
+              "old_s": 0.05888289981521666,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 1
+            },
+            {
+              "new_s": 0.005308299791067839,
+              "old_s": 0.057152000023052096,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 2
+            },
+            {
+              "new_s": 0.005021600052714348,
+              "old_s": 0.056894600158557296,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 3
+            },
+            {
+              "new_s": 0.004908900009468198,
+              "old_s": 0.05859989998862147,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 4
+            },
+            {
+              "new_s": 0.0065454000141471624,
+              "old_s": 0.057204100070521235,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 5
+            },
+            {
+              "new_s": 0.004791600164026022,
+              "old_s": 0.05714530008845031,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 6
+            },
+            {
+              "new_s": 0.005140400025993586,
+              "old_s": 0.05574430013075471,
+              "order": [
+                "old",
+                "new"
+              ],
+              "round": 7
+            },
+            {
+              "new_s": 0.004771400010213256,
+              "old_s": 0.15376950008794665,
+              "order": [
+                "new",
+                "old"
+              ],
+              "round": 8
+            }
+          ],
+          "source_sha256": "e84e0e8f4fc4133f58637be9462c43bec29e7edef5637c55465cd93b32e1ed8e",
+          "title": "青麟雪",
+          "wikitext_bytes": 2631
+        }
+      ],
+      "sample_set": [
+        {
+          "html_sha256": "10237a0827dd1f999bcad1c2212a6ee84ad6871ee42ee0c942e0a95c4f64c1be",
+          "source_sha256": "3d31f20ed929c6719240fa60dff472b4bbd0ea14ba7f2f996a9b2d12310eb64f",
+          "title": "Foxy"
+        },
+        {
+          "html_sha256": "6dca4e80cefcc40929a1214877852ebf73a21a30966efcafcfc16913e77ca8da",
+          "source_sha256": "4d6bb884d87f2c41a7ad37cb6fd5d2c46d2ee06b94caf2137d8847ff4222da28",
+          "title": "Sharing The World"
+        },
+        {
+          "html_sha256": "ef76612ab7621e22cdad401a861898bc490cfb5a2885e780e103157fa92a0593",
+          "source_sha256": "dacf10e16aa8f83779cf009c4aa3917fe51d5b5fad5831e60bcd2a3907043f04",
+          "title": "唱给雅音宫羽"
+        },
+        {
+          "html_sha256": "a88ed18b61394d1b34656e7ce5a39cb7fa94348d9bd3b1981370b2362c094bb7",
+          "source_sha256": "913898417ff0788c09cd60a816882199ff0dfe0e60f4a7e5c0c89f17c1f757be",
+          "title": "山塘恋雨"
+        },
+        {
+          "html_sha256": "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d",
+          "source_sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+          "title": "普通DISCO"
+        },
+        {
+          "html_sha256": "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35",
+          "source_sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+          "title": "礼物pre-Sent"
+        },
+        {
+          "html_sha256": "baa90147b4fe77e7406ba85b2c2d9620d9775f25d04a25940541b164ebdcf758",
+          "source_sha256": "c3ec95cc00be4ec6a272cf72e20fa2ead6a8153728c31faaeeceaea87956cfdc",
+          "title": "社畜烧酒"
+        },
+        {
+          "html_sha256": "40f7a7a0294f1aae811d9f3d14122ae295f5b72f795b732f74e0743e63f4ebd5",
+          "source_sha256": "e84e0e8f4fc4133f58637be9462c43bec29e7edef5637c55465cd93b32e1ed8e",
+          "title": "青麟雪"
+        }
+      ],
+      "sample_set_sha256": "cb69884dd2691a6233aca1de5c26f308f63f609798ecd40102ca2a39cad4578b",
+      "scope": "offline parse + complete field extraction, no network/LLM/IO/import/init",
+      "size_scope": "local UTF-8 file bytes, not network payload",
+      "sum_medians_group_ratio": 3.389915772880438,
+      "sum_new_medians_s": 0.21596099995076656,
+      "sum_old_medians_s": 0.7320896000601351,
+      "warmups": 2
+    }
+  ],
+  "implementation_sha256": {
+    "benchmark_script": "3917838876c6332a92fedbdad363fc12256a994287eab342d5dce8e59d63f0dc",
+    "config_rules": "650efb926102d25de9b0c031f77748dec2c0e4b5c726b42227f5c282318a75b0",
+    "freeze_loader": "4b24e558115bd5260495d41110f755342a8a2a05f068c8cb9ddf6efaa3568a4f",
+    "legacy_adapter": "8b6d09f06aba557a8043f70792a46b9330a40de1cd3bf2f4c3e9d5c0b6b2ec53",
+    "manifest": "8d5279a28ae1efc9c4a1fe76b1c89953a58339569537d0a91ac609878347b412",
+    "new_parser": "32ce22475bc1cd5c266ea6817ec758f38a1898bc5d7e7546528dfdad506eb724",
+    "packaged_rules": "650efb926102d25de9b0c031f77748dec2c0e4b5c726b42227f5c282318a75b0",
+    "template_rules": "f862d4ceb956d369c1c7261f7bddfc66c933847ef3f3ab5e75e0b78bd0a48117",
+    "text_conversion": "d7fc8e238ad209eecda429994f06a283b756d282695278f24f8fc195c81e0c96"
+  },
+  "platform": "Windows-10-10.0.19045-SP0",
+  "python": "3.10.20 | packaged by Anaconda, Inc. | (main, Jun 11 2026, 15:13:20) [MSC v.1942 64 bit (AMD64)]"
+}

@@ -46,6 +46,14 @@
 			{
 				"Name": "sad",
 				"File": "expressions/sad.exp3.json"
+			},
+			{
+				"Name": "sing",
+				"File": "expressions/sing.exp3.json"
+			},
+			{
+				"Name": "yanndere",
+				"File": "expressions/yanndere.exp3.json"
 			}
 		],
 		"Motions": {
@@ -106,5 +114,10 @@
             "Name": "头",
             "Id": "ArtMesh35"
         }
-    ]
+    ],
+	"Groups": [{
+		"Target": "Parameter",
+		"Name": "EyeBlink",
+		"Ids": ["ParamEyeLOpen", "ParamEyeROpen"]
+	}]
 }

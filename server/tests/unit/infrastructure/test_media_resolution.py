@@ -15,6 +15,7 @@ from src.infrastructure.media import (
     UnconfiguredMediaResolver,
 )
 
+
 def png_bytes():
     image = BytesIO()
     Image.new("RGB", (1, 1)).save(image, format="PNG")
@@ -46,14 +47,15 @@ def test_media_resolver_factory_exposes_unconfigured_adapter():
     resolver.ensure_dependencies()
 
 
-def test_filesystem_resolver_reads_permanent_media(tmp_path):
+@pytest.mark.parametrize("stored_mime", ["image/png", "image/jpeg", "image/jpg"])
+def test_filesystem_resolver_reads_permanent_media(tmp_path, stored_mime):
     media_id = str(uuid4())
     media_dir = tmp_path / media_id
     media_dir.mkdir()
     image = png_bytes()
     (media_dir / "content.bin").write_bytes(image)
     (media_dir / "metadata.json").write_text(
-        json.dumps({"mime_type": "image/png", "owner_user_id": "owner"}), encoding="utf-8"
+        json.dumps({"mime_type": stored_mime, "owner_user_id": "owner"}), encoding="utf-8"
     )
 
     resolved = FilesystemMediaResolver({"root": str(tmp_path)}).resolve(

@@ -1,0 +1,82 @@
+{{VOCALOID中文殿堂曲题头}}
+
+{{VOCALOID_Songbox
+|image = 社畜烧酒.jpg
+|图片信息 = 曲绘 by RacheLZ祺
+|颜色 = linear-gradient(to right,#050c43,#4b4f74,#050c43);color:#f4f4f4;border-color:#FFF
+|颜色2 = linear-gradient(to right,#050c43,#4b4f74 40%,#d7d7df 40%,#d7d7df 60%,#4b4f74 60%,#050c43);border-color:#FFF
+|演唱 = [[洛天依]]
+|歌曲名称 = 社畜烧酒
+|UP主 = [[Yu H.]]
+|bb_id = BV1o741117kM
+|投稿时间 = 2020年3月25日
+|再生 = {{bilibiliCount|id=BV1o741117kM}}
+}}
+
+== 简介 ==
+《'''社畜烧酒'''》是[[Yu H.]]于2020年3月25日投稿至[[bilibili]]的[[VOCALOID]]中文原创歌曲，由[[洛天依]]演唱。[[VOCALOID中文殿堂曲|殿堂曲]]，截至现在已有{{bilibiliCount|id=BV1o741117kM}}次观看，{{bilibiliCount|id=BV1o741117kM|type=4}}人收藏。
+
+本曲為二人独立音乐团体[[ChiliChill]]的第二首作品。
+
+另有[[夏铜子]]演唱的命名为《社畜少女》的人声本家，为ChiliChill首张专辑《每到夜里我就很饿》的收录曲。
+
+== 歌曲 ==
+{{BilibiliVideo|id=BV1o741117kM}}
+
+==二次创作==
+;三无Marblue的翻唱
+{{BilibiliVideo|id=av625196747}}
+
+== 歌词 ==
+{{VOCALOID Songbox Introduction
+|LDC = YES
+|lbgcolor = #050c43
+|ltcolor = #f4f4f4
+|group1 = 作编曲<br/>作词<br/>调教<br/>混音<br/>PV
+|list1 = [[ChiliChill]]<br/>（Yu H.、<br/>CuSummer）
+|group2 = 曲绘
+|list2 = RacheLZ祺
+|group3 = 演唱
+|list3 = [[洛天依]]
+}}
+<poem>
+{{交叉颜色N|c1=#050c43;text-shadow:0 0 2px #e1e6f2|c2=#f81a9f|
+追早高峰的地铁　被挤下错过一列
+哎　一会儿走快一些不想迟到被扣钱
+回家已经十二点　还有一份报告没写
+泡上一杯咖啡今晚继续熬夜
+
+难道你和我一样　人生何|畜|不相逢
+
+每天每天加班加点早|畜|晚归
+为了明天后天|畜|类拔萃
+只能说okay　不能说很累
+没时间恋爱没有机会|畜|双入对
+那些学弟学妹后|畜|可畏　没有时间|畜畜|可怜
+再努力一些　希望有一天赚大钱
+
+小肚子越来越肥　没工夫健身锻炼
+喜欢的都太贵明天还要还花呗
+害怕年末的体检　越发稀疏的发际线
+别想了快工作明天早起开会
+
+难道你和我一样　人生何|畜|不相逢
+
+每天每天加班加点早|畜|晚归
+为了明天后天|畜|类拔萃
+只能说okay　不能说很累
+没时间恋爱没有机会|畜|双入对
+那些学弟学妹后|畜|可畏　没有时间|畜畜|可怜
+再坚持几年　总会有一天赚大钱
+
+其实其实也没什么伟大理想
+过的普普通通但也不差
+撸猫喝奶茶　追星看动画
+赚的足够浪费　这样算不算理想
+看似平凡看似易如反掌　对平凡的我也不简单
+希望有一天　一定有一天会实现}}
+</poem>
+
+
+{{ChiliChill|collapsed}}
+{{洛天依/2020|collapsed}}

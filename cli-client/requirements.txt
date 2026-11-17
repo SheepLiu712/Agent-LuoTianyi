@@ -2,3 +2,4 @@ cryptography
 requests
 prompt_toolkit>=3,<4
 websockets
+Pillow

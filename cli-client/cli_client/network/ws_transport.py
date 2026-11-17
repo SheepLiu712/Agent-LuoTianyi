@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import ssl
 import threading
@@ -7,17 +8,17 @@ from typing import Callable
 
 import websockets
 
+from ..utils.logger import get_logger
+from ..utils.tls import create_default_ssl_context
 from .event_types import (
+    AgentMessage,
+    WSEventType,
+    WSMessage,
     build_event,
     normalize_agent_message,
     normalize_error_message,
     parse_server_message,
-    WSEventType,
-    WSMessage,
-    AgentMessage,
 )
-from ..utils.logger import get_logger
-from ..utils.tls import create_default_ssl_context
 
 WS_CLIENT_CAPABILITIES = ("negative_ack_v1",)
 
@@ -25,7 +26,7 @@ WS_CLIENT_CAPABILITIES = ("negative_ack_v1",)
 def normalize_server_ack(payload: dict) -> dict:
     """Normalize positive and negative ACK payloads, including legacy ACKs."""
     if payload.get("ok") is not False:
-        return {"ok": True, "error": None}
+        return {"ok": True, "error": None, **payload}
 
     code = payload.get("code") if isinstance(payload.get("code"), str) else "REJECTED"
     retryable = payload.get("retryable") is True
@@ -65,7 +66,8 @@ class WsTransport:
         self._agent_state_listener: Callable[[bool], None] | None = None  # agent状态变化的监听器
         self._client_mode = {"types": []}  # 服务端当前客户端委托类型列表（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
-        self._llm_request_listener: Callable[[dict], object] | None = None
+        self._llm_request_listener: Callable[..., object] | None = None
+        self._llm_tasks: dict[str, asyncio.Task] = {}
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -123,7 +125,7 @@ class WsTransport:
         agent_message_listener: Callable[[AgentMessage], None] | None,
         agent_state_listener: Callable[[bool], None] | None,
         system_message_listener: Callable[[str], None] | None = None,
-        llm_request_listener: Callable[[dict], object] | None = None,
+        llm_request_listener: Callable[..., object] | None = None,
     ) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
@@ -171,6 +173,72 @@ class WsTransport:
             payload=payload,
             ack_timeout=ack_timeout,
             client_msg_id=client_msg_id,
+        )
+
+    def submit_user_voice(
+        self,
+        phase: str,
+        upload_id: str,
+        *,
+        audio_chunk: bytes | None = None,
+        chunk_index: int | None = None,
+        byte_length: int | None = None,
+        total_chunks: int | None = None,
+        ack_timeout: float = 10.0,
+    ) -> dict:
+        """Submit one phase of the internal user voice upload protocol."""
+        if phase not in {"begin", "chunk", "finalize", "abort"}:
+            raise ValueError(f"unsupported voice upload phase: {phase}")
+        payload = {"phase": phase, "upload_id": upload_id}
+        if phase == "begin":
+            if type(byte_length) is not int or byte_length <= 0 or byte_length > 1024 * 1024:
+                raise ValueError("voice byte_length must be between 1 byte and 1 MiB")
+            if type(total_chunks) is not int or not 1 <= total_chunks <= 32:
+                raise ValueError("voice total_chunks must be between 1 and 32")
+            payload.update(
+                {
+                    "mime_type": "audio/mp4",
+                    "container": "m4a",
+                    "codec": "aac_lc",
+                    "byte_length": byte_length,
+                    "total_chunks": total_chunks,
+                }
+            )
+        elif phase == "chunk":
+            if audio_chunk is None or chunk_index is None:
+                raise ValueError("voice chunk requires audio_chunk and chunk_index")
+            if not audio_chunk or len(audio_chunk) > 48 * 1024:
+                raise ValueError("voice chunks must be between 1 byte and 48 KiB")
+            if type(chunk_index) is not int or not 0 <= chunk_index < 32:
+                raise ValueError("voice chunk_index must be between 0 and 31")
+            payload.update(
+                {
+                    "chunk_index": chunk_index,
+                    "audio_base64": base64.b64encode(audio_chunk).decode("ascii"),
+                }
+            )
+        suffix = f":chunk:{chunk_index}" if phase == "chunk" else f":{phase}"
+        return self._submit_user_event(
+            WSEventType.USER_VOICE,
+            payload=payload,
+            ack_timeout=ack_timeout,
+            client_msg_id=f"{upload_id}{suffix}",
+        )
+
+    def submit_voice_recording_started(self, recording_id: str, ack_timeout: float = 5.0) -> dict:
+        return self._submit_user_event(
+            WSEventType.USER_VOICE_RECORDING_STARTED,
+            payload={"recording_id": recording_id},
+            ack_timeout=ack_timeout,
+            client_msg_id=f"{recording_id}:recording_started",
+        )
+
+    def submit_voice_recording_cancelled(self, recording_id: str, ack_timeout: float = 5.0) -> dict:
+        return self._submit_user_event(
+            WSEventType.USER_VOICE_RECORDING_CANCELLED,
+            payload={"recording_id": recording_id},
+            ack_timeout=ack_timeout,
+            client_msg_id=f"{recording_id}:recording_cancelled",
         )
 
     def submit_typing_event(
@@ -358,6 +426,11 @@ class WsTransport:
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 30)  # 指数退避，最大30秒
             finally:
+                tasks = tuple(self._llm_tasks.values())
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                self._llm_tasks.clear()
                 self._ws = None
                 self._connected_event.clear()
                 self._ready_event.clear()
@@ -439,6 +512,7 @@ class WsTransport:
                     drop=ack.get("drop"),
                     code=ack.get("code"),
                     retryable=ack.get("retryable"),
+                    payload=msg.payload,
                 )
                 continue
 
@@ -451,7 +525,17 @@ class WsTransport:
                 continue
 
             if event_type == WSEventType.LLM_REQUEST:
-                asyncio.create_task(self._handle_llm_request(ws, msg.payload))
+                request_id = msg.payload.get("request_id")
+                if request_id in self._llm_tasks:
+                    raise ValueError("重复的模型委托请求")
+                task = asyncio.create_task(self._handle_llm_request(ws, msg.payload))
+                self._llm_tasks[request_id] = task
+                continue
+
+            if event_type == WSEventType.LLM_CANCEL:
+                task = self._llm_tasks.get(msg.payload.get("request_id"))
+                if task is not None:
+                    task.cancel()
                 continue
 
             if event_type == WSEventType.AGENT_STATE_CHANGED:
@@ -480,11 +564,26 @@ class WsTransport:
     async def _handle_llm_request(self, ws, payload: dict) -> None:
         if self._llm_request_listener is None:
             return
+        sequence = 0
+
+        async def on_delta(text):
+            nonlocal sequence
+            event = build_event(WSEventType.LLM_RESPONSE, payload={
+                "request_id": payload.get("request_id"), "sequence": sequence, "delta": text,
+            })
+            await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
+            sequence += 1
+
         try:
-            result = self._llm_request_listener(payload)
+            result = (
+                self._llm_request_listener(payload, on_delta=on_delta)
+                if payload.get("stream") is True else self._llm_request_listener(payload)
+            )
             if asyncio.iscoroutine(result):
                 result = await result
             if result:
+                if payload.get("stream") is True:
+                    result = {**result, "sequence": sequence, "done": True}
                 event = build_event(WSEventType.LLM_RESPONSE, payload=result)
                 await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
         except Exception as exc:
@@ -500,6 +599,9 @@ class WsTransport:
                 await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
             except Exception as response_exc:
                 self.logger.error(f"Failed to send client LLM error response: {response_exc}")
+
+        finally:
+            self._llm_tasks.pop(payload.get("request_id"), None)
 
     async def _heartbeat_loop(self, ws) -> None:
         ping_id = 0
@@ -520,6 +622,7 @@ class WsTransport:
         drop: bool | None = None,
         code: str | None = None,
         retryable: bool | None = None,
+        payload: dict | None = None,
     ) -> bool:
         with self._lock:
             waiter = self._ack_waiter
@@ -543,6 +646,8 @@ class WsTransport:
                 waiter["result"]["code"] = code
             if retryable is not None:
                 waiter["result"]["retryable"] = retryable
+            if ok and payload:
+                waiter["result"].update(payload)
             waiter["event"].set()
             self.logger.debug(f"ACK waiter completed for request_id {expected}")
             return True

@@ -1,0 +1,492 @@
+{
+  "counts_semantics": "Correlated boolean check slots, not independent defects or accuracy; exact and representative lyric checks overlap. Lyrics page counts are separate; normalization only converts to zh-cn and removes whitespace.",
+  "effect_complete": false,
+  "extended_counts": {
+    "new": {
+      "check_slots": 104,
+      "lyrics_exact_pages": 13,
+      "lyrics_nonexact_pages": 3,
+      "lyrics_pages": 16,
+      "matched_slots": 93,
+      "unmatched_slots": 11
+    },
+    "old": {
+      "check_slots": 104,
+      "lyrics_exact_pages": 3,
+      "lyrics_nonexact_pages": 13,
+      "lyrics_pages": 16,
+      "matched_slots": 77,
+      "unmatched_slots": 27
+    }
+  },
+  "known_gap_policy": "Matching reviewed outcomes is regression stability, not effect acceptance.",
+  "old_24_song_claim": "unverified: this is cache21 + random10, not the historical daily first24",
+  "rows": {
+    "Estrus Cycle": {
+      "new": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "野良犬P": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "野良犬P": true
+        },
+        "type": true
+      }
+    },
+    "Foxy": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "2018年1月5日": true,
+          "九尾妖狐阿狸": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2018年1月5日": true,
+          "九尾妖狐阿狸": true
+        },
+        "type": true
+      }
+    },
+    "I LOVE YOU(Adaa)": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2020年1月27日": true,
+          "第六作": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "2020年1月27日": true,
+          "第六作": true
+        },
+        "type": true
+      }
+    },
+    "Sharing The World": {
+      "new": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "BIGHEAD": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "BIGHEAD": true
+        },
+        "type": true
+      }
+    },
+    "唱给雅音宫羽": {
+      "new": {
+        "infobox": {
+          "作曲": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "3449日": true,
+          "压线": false,
+          "雅音宫羽组曲第一作": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "作曲": true,
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "3449日": true,
+          "压线": true,
+          "雅音宫羽组曲第一作": true
+        },
+        "type": true
+      }
+    },
+    "山塘恋雨": {
+      "new": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2022年7月20日": false,
+          "5.1": false,
+          "5.2.1": false,
+          "5.2.2": false,
+          "洛梦江南系列-姑苏篇": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "2022年7月20日": true,
+          "5.1": true,
+          "5.2.1": true,
+          "5.2.2": true,
+          "洛梦江南系列-姑苏篇": true
+        },
+        "type": true
+      }
+    },
+    "普通DISCO": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2015年3月21日": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": false,
+          "演唱": false
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "2015年3月21日": true
+        },
+        "type": true
+      }
+    },
+    "横竖撇点折": {
+      "new": {
+        "infobox": {
+          "作词": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "由米白演唱": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "作词": false
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "由米白演唱": true
+        },
+        "type": true
+      }
+    },
+    "疑神疑鬼": {
+      "new": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "跳蝻P": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "跳蝻P": true
+        },
+        "type": true
+      }
+    },
+    "礼物pre-Sent": {
+      "new": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2023年4月14日": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2023年4月14日": true
+        },
+        "type": true
+      }
+    },
+    "社畜烧酒": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "ChiliChill": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "ChiliChill": true
+        },
+        "type": true
+      }
+    },
+    "神孽": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "作词": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2025年2月12日": true,
+          "心华十周年": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": true,
+          "作词": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2025年2月12日": true,
+          "心华十周年": true
+        },
+        "type": true
+      }
+    },
+    "达拉崩吧": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2017年3月25日": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": true,
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "2017年3月25日": true
+        },
+        "type": true
+      }
+    },
+    "长平传": {
+      "new": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "帝女花": true,
+          "铁冠图": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "帝女花": true,
+          "铁冠图": true
+        },
+        "type": true
+      }
+    },
+    "青麟雪": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "作词": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2016年4月21日": true,
+          "伦桑": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": true,
+          "作词": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2016年4月21日": true,
+          "伦桑": true
+        },
+        "type": true
+      }
+    },
+    "飞跃乌托邦": {
+      "new": {
+        "infobox": {
+          "UP主": true,
+          "作词": true,
+          "演唱": true
+        },
+        "lyrics_exact": true,
+        "lyrics_representative_order": true,
+        "summary_facts": {
+          "2016年9月30日": true,
+          "去掉和声": true
+        },
+        "type": true
+      },
+      "old": {
+        "infobox": {
+          "UP主": true,
+          "作词": false,
+          "演唱": true
+        },
+        "lyrics_exact": false,
+        "lyrics_representative_order": false,
+        "summary_facts": {
+          "2016年9月30日": true,
+          "去掉和声": true
+        },
+        "type": true
+      }
+    }
+  },
+  "scope": "selected first-candidate content checks against a reviewed oracle; not whole-song/global accuracy",
+  "selected_counts": {
+    "new": {
+      "check_slots": 78,
+      "lyrics_exact_pages": 9,
+      "lyrics_nonexact_pages": 3,
+      "lyrics_pages": 12,
+      "matched_slots": 67,
+      "unmatched_slots": 11
+    },
+    "old": {
+      "check_slots": 78,
+      "lyrics_exact_pages": 2,
+      "lyrics_nonexact_pages": 10,
+      "lyrics_pages": 12,
+      "matched_slots": 58,
+      "unmatched_slots": 20
+    }
+  },
+  "selected_titles": [
+    "Foxy",
+    "Sharing The World",
+    "社畜烧酒",
+    "唱给雅音宫羽",
+    "山塘恋雨",
+    "普通DISCO",
+    "礼物pre-Sent",
+    "青麟雪",
+    "I LOVE YOU(Adaa)",
+    "长平传",
+    "达拉崩吧",
+    "Estrus Cycle"
+  ],
+  "unreviewed_change": false
+}

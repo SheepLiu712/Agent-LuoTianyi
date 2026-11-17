@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from src.domain.stage import DueEvent
 
@@ -23,7 +24,7 @@ class EventStoreDueEventProvider:
         values = []
         for event, trigger_key in self._event_store.get_events_due_for_trigger(
             character=character_id,
-            today=now.date(),
+            today=now.astimezone(ZoneInfo("Asia/Shanghai")).date(),
         ):
             event_id = event.get("id")
             if not isinstance(event_id, str) or not event_id.strip():
@@ -32,11 +33,13 @@ class EventStoreDueEventProvider:
             if not isinstance(due_at, datetime):
                 due_at = now
             elif due_at.tzinfo is None:
-                due_at = due_at.replace(tzinfo=timezone.utc)
+                due_at = due_at.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
             target_user_id = event.get("target_user_id")
             values.append(
                 DueEvent(
                     event_id=event_id,
+                    title=event["title"],
+                    description=event.get("description") or "",
                     trigger_key=str(trigger_key),
                     reason=str(event.get("event_type") or "event"),
                     due_at=due_at,

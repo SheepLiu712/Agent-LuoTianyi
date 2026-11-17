@@ -1,0 +1,24 @@
+# Replace @INSTANCE_ROOT@ and @SERVICE_USER@; enable this unit before using apply.
+[Unit]
+Description=AgentLuo managed instance
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@INSTANCE_ROOT@/current
+ExecStart=/bin/bash "@INSTANCE_ROOT@/current/scripts/deploy/startup/start_linux.sh"
+EnvironmentFile=@INSTANCE_ROOT@/deployments/instance.env
+UMask=0077
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=120
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

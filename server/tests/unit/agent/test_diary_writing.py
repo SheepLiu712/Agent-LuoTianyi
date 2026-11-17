@@ -10,7 +10,7 @@ from src.agent.handlers.action.write_diary import WriteDiaryHandler
 from src.agent.handlers.stimulus.diary_due import DiaryPlanningDueHandler
 from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.diary_writing import DiaryWritingSkill
+from support.dynamic_skill import make_diary
 
 
 class DiaryOperations:
@@ -104,8 +104,8 @@ def _request(fact: d.DiaryPlanningDue) -> d.HandleStimulusRequest:
     )
 
 
-def _skill(diary: DiaryOperations, dynamics: Dynamics) -> DiaryWritingSkill:
-    return DiaryWritingSkill(
+def _skill(diary: DiaryOperations, dynamics: Dynamics):
+    return make_diary(
         diary,
         dynamics,
         {

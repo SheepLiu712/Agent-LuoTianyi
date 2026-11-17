@@ -4,7 +4,7 @@ from src.utils.helpers import load_config
 
 
 DEFAULT_CITYWALK_CONFIG: Dict[str, Any] = {
-    "daily_run_probability": 0.1,
+    "daily_run_probability": 0.5,
     "amap": {
         "api_key": "$AMAP_KEY",
         "base_url": "https://restapi.amap.com/v3",
@@ -38,7 +38,7 @@ DEFAULT_CITYWALK_CONFIG: Dict[str, Any] = {
     },
     "decision": {
         "enabled": True,
-        "persona_path": "res/agent/persona/luotianyi_persona.json",
+        "persona_path": "res/agent/persona/persona.json",
         "max_poi_candidates": 5,
         "constrained_rounds": 2,
         "use_llm_environment_feedback": False,

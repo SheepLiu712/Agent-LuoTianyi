@@ -1,15 +1,15 @@
 """LLM Service 单元测试"""
-import sys
+
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock
+
 import pytest
-# 添加项目根目录
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
 
 from src.infrastructure.models.service import LLMService
 from src.utils.helpers import load_config
+
+server_root = str(Path(__file__).resolve().parents[3])
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -21,25 +21,28 @@ def server_cwd():
     finally:
         os.chdir(old_cwd)
 
+
 @pytest.fixture(scope="function")
 def llm_service():
     config = load_config("config/config.json")
     service = LLMService(config["llm_service"])
     return service
 
+
 @pytest.fixture(scope="function")
 def sample_template():
     template = {
-    "name": "sample_template",
-    "description": "用于测试的模板",
-    "template": [
-        "这是一个测试模板。",
-        "你需要扮演名为 {{ character_name }} 的角色。",
-        "请根据以下输入生成简洁的响应：",
-        "{{ input_text }}"
-    ]
-}
+        "name": "sample_template",
+        "description": "用于测试的模板",
+        "template": [
+            "这是一个测试模板。",
+            "你需要扮演名为 {{ character_name }} 的角色。",
+            "请根据以下输入生成简洁的响应：",
+            "{{ input_text }}",
+        ],
+    }
     return template
+
 
 class TestLLMService:
     def test_llm_service_registration(self, llm_service: LLMService):
@@ -84,9 +87,7 @@ class TestLLMService:
         types = llm_service.get_client_model_types()
         assert len(types) == len([x for x in raw if isinstance(x, dict) and str(x.get("id") or "").strip()])
         raw_by_type = {
-            str(x.get("id") or "").strip(): x
-            for x in raw
-            if isinstance(x, dict) and str(x.get("id") or "").strip()
+            str(x.get("id") or "").strip(): x for x in raw if isinstance(x, dict) and str(x.get("id") or "").strip()
         }
         for type_item in types:
             raw_type = raw_by_type[type_item["id"]]
@@ -108,7 +109,9 @@ class TestLLMService:
         assert sample_template["name"] not in templates_after_removal, "模板移除后仍存在"
 
         # 添加模板（从字符串）
-        llm_service.prompt_manager.add_template_from_str(sample_template["name"], "\n".join(sample_template["template"]))
+        llm_service.prompt_manager.add_template_from_str(
+            sample_template["name"], "\n".join(sample_template["template"])
+        )
         templates_after_add_str = llm_service.prompt_manager.list_templates()
         assert sample_template["name"] in templates_after_add_str, "从字符串添加模板失败"
         removed = llm_service.prompt_manager.remove_template(sample_template["name"])
@@ -118,6 +121,7 @@ class TestLLMService:
         temp_file_path = tmp_path / "temp_template.json"
         with open(temp_file_path, "w", encoding="utf-8") as f:
             import json
+
             json.dump(sample_template, f, ensure_ascii=False, indent=4)
 
         llm_service.prompt_manager.add_template_from_file(str(temp_file_path))
@@ -130,7 +134,7 @@ class TestLLMService:
         removed_nonexistent = llm_service.prompt_manager.remove_template("nonexistent_template")
         assert not removed_nonexistent, "移除不存在的模板应该返回False"
 
-    async def test_register_llm_module(self, llm_service: LLMService, sample_template):
+    async def test_register_llm_module(self, llm_service: LLMService, sample_template, monkeypatch):
         # 测试注册一个LLM模块
         llm_service.prompt_manager.add_template_from_json(sample_template)
         module_config = {
@@ -138,31 +142,40 @@ class TestLLMService:
                 "name": list(llm_service.llm_interfaces.keys())[0],  # 使用第一个可用的LLM接口
                 "enable_thinking": False,
             },
-            "prompt_name": sample_template["name"]  # 使用第一个可用的模板
+            "prompt_name": sample_template["name"],  # 使用第一个可用的模板
         }
         module_name = "test_llm_module"
         module = llm_service.register_llm_module(module_name, module_config)
         assert module.name == module_name, "注册的LLM模块名称不匹配"
-        assert module.enable_thinking == False, "注册的LLM模块 enable_thinking 属性不匹配"
+        assert module.enable_thinking is False, "注册的LLM模块 enable_thinking 属性不匹配"
 
         vars = module.get_variables()
         assert "character_name" in vars, "模块变量中缺少 'character_name'"
         assert "input_text" in vars, "模块变量中缺少 'input_text'"
 
+        # 单元测试验证模板渲染和响应记录，不依赖真实密钥、外网或付费模型。
+        generate = AsyncMock(
+            return_value={
+                "content": "我是洛天依。",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "response_time_s": 0.01,
+            }
+        )
+        monkeypatch.setattr(module.llm_client, "generate_response", generate)
         resp = await module.generate_response(character_name="洛天依", input_text="你好，你是谁？")
-        assert resp is not None, "生成的响应不应为None"
+        assert resp == "我是洛天依。"
+        generate.assert_awaited_once()
+        prompt = generate.call_args.args[0]
+        assert "你需要扮演名为 洛天依 的角色。" in prompt
+        assert "你好，你是谁？" in prompt
         recent_resp = module.recent_response
         assert recent_resp is not None, "最近一次的响应结果不应为None"
         token_usage = recent_resp.get("usage", {})
-        assert "prompt_tokens" in token_usage and token_usage["prompt_tokens"] > 0, "最近一次响应的使用情况中缺少 'prompt_tokens'"
-        assert "completion_tokens" in token_usage and token_usage["completion_tokens"] > 0, "最近一次响应的使用情况中缺少 'completion_tokens'"
-        assert "total_tokens" in token_usage and token_usage["total_tokens"] > 0, "最近一次响应的使用情况中缺少 'total_tokens'"
+        assert token_usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         response_time_s = recent_resp.get("response_time_s", None)
         assert response_time_s is not None, "最近一次响应的使用情况中缺少 'response_time_s'"
 
-    def test_register_llm_module_carries_client_model_type(
-        self, llm_service: LLMService, sample_template
-    ):
+    def test_register_llm_module_carries_client_model_type(self, llm_service: LLMService, sample_template):
         """注册模块时应透传 client_model_type 与客户端执行器。"""
         llm_service.prompt_manager.add_template_from_json(sample_template)
         module_config = {

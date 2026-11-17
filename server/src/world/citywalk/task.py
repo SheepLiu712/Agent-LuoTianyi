@@ -11,6 +11,7 @@ import src.domain.agent as d
 from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from src.utils.asyncio_helpers import run_sync_owned
 from src.utils.logger import get_logger
+from src.world.citywalk.config import DEFAULT_CITYWALK_CONFIG
 from src.world.citywalk.errors import CitywalkError
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
@@ -133,11 +134,13 @@ class CitywalkTask(WorldTask):
             return WorldTaskResult.skipped_result(self.task_name, "citywalk did not produce a diary")
 
         overview = self._normalize_overview(output_path)
+        report = self._load_citywalk_report(output_path) if Path(output_path).suffix.lower() == ".json" else {}
+        destination = report.get("overview", {}).get("selected_destination") or "城市漫步"
         if self.event_store is not None:
             await self.event_store.add_event(
                 {
                     "character": self.character_id,
-                    "title": f"{self.character_name}出门散步",
+                    "title": destination,
                     "description": overview,
                     "event_type": UnifiedEventType.TRAVEL.value,
                     "start_datetime": datetime.now(),
@@ -201,22 +204,31 @@ class CitywalkTask(WorldTask):
 
     @staticmethod
     def build_observation_summary(report: dict[str, Any]) -> str:
-        """优先使用报告自身的叙述，否则用目的地/经过地点/时长拼出简短摘要。"""
-        narrative = str(report.get("diary_text") or "").strip()
-        if narrative:
-            return narrative
-        overview = report.get("overview") if isinstance(report.get("overview"), dict) else {}
-        places = [str(item) for item in (report.get("places") or []) if str(item).strip()]
-        parts: list[str] = []
-        destination = str(overview.get("selected_destination") or "").strip()
-        if destination:
-            parts.append(f"目的地：{destination}")
-        if places:
-            parts.append(f"经过：{'、'.join(places)}")
-        duration = overview.get("total_duration_minutes")
-        if duration:
-            parts.append(f"时长：{duration}分钟")
-        return "；".join(parts) or "完成了一次城市散步"
+        """保留目的地、日记和逐站活动，供事件提醒与动态表达共用。"""
+        overview = report.get("overview") or {}
+        parts = []
+        for key, label in (
+            ("city", "城市"),
+            ("selected_destination", "目的地"),
+            ("destination_reason", "出行原因"),
+            ("total_duration_minutes", "时长（分钟）"),
+        ):
+            if overview.get(key):
+                parts.append(f"{label}：{overview[key]}")
+        if report.get("places"):
+            parts.append(f"经过：{'、'.join(report['places'])}")
+        if report.get("diary_text"):
+            parts.append(str(report["diary_text"]).strip())
+        for card in report.get("event_cards", []):
+            place = card.get("poi", {}).get("name", "")
+            activities = "；".join(
+                str(card[key]).strip()
+                for key in ("moving_activity", "poi_activity", "environment_feedback")
+                if card.get(key)
+            )
+            if activities:
+                parts.append(f"{card.get('time', '')} {place}：{activities}".strip())
+        return "\n".join(parts) or "完成了一次城市散步"
 
     def _build_citywalk_service(self) -> Any | None:
         if self.server_runtime is None:
@@ -272,20 +284,25 @@ class CitywalkTask(WorldTask):
 
     @staticmethod
     def _normalize_overview(output_path: Path) -> str:
-        text = str(output_path)
-        if text.endswith(".md"):
-            return f"今天写了一篇散步日记：{text}"
+        path = Path(output_path)
+        if path.suffix.lower() == ".json":
+            return CitywalkTask.build_observation_summary(CitywalkTask._load_citywalk_report(path))
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            raise ValueError(f"城市漫步报告为空：{path}")
         return text
 
     @staticmethod
     def _load_citywalk_report(output_path: Any) -> dict[str, Any]:
         path = Path(str(output_path))
-        if not path.is_file():
-            return {}
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
+            report = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(report, dict):
+                raise ValueError("城市漫步报告必须为 JSON 对象")
+            return report
+        except (OSError, ValueError):
+            get_logger(__name__).exception("无法读取城市漫步报告：%s", path)
+            raise
 
     @staticmethod
     def _write_dynamic_content_to_report(output_path: Any, content: str, dynamic_id: Any = None) -> None:
@@ -305,11 +322,12 @@ class CitywalkTask(WorldTask):
             get_logger(__name__).warning(f"Failed to write citywalk dynamic content back to report: {exc}")
 
     def _sample_daily_run(self) -> tuple[bool, float, float]:
-        raw_probability = self.config.get("daily_run_probability", 0.1)
+        default_probability = DEFAULT_CITYWALK_CONFIG["daily_run_probability"]
+        raw_probability = self.config.get("daily_run_probability", default_probability)
         try:
             probability = float(raw_probability)
         except (TypeError, ValueError):
-            probability = 0.1
+            probability = default_probability
         probability = max(0.0, min(1.0, probability))
         sample = random.random()
         return sample < probability, probability, sample

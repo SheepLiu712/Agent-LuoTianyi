@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-
 TIMESTAMP_LINE_RE = re.compile(r"^\[(\d{1,2}:\d{1,2}(?:\.\d{1,6})?)\](.*)$")
 SPEAKER_LINE_RE = re.compile(r"^([^:：]+)\s*[：:]\s*(.+)$")
 HEADER_KEYWORDS = ("ti", "ar", "al", "by", "offset")
@@ -29,9 +28,7 @@ def read_text_auto(path: Path) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="根据原始 lrc 与 boundary_inst.txt 生成 <歌名>.clear.lrc。"
-    )
+    parser = argparse.ArgumentParser(description="根据原始 lrc 与 boundary_inst.txt 生成 <歌名>.clear.lrc。")
     parser.add_argument(
         "--song_dir",
         required=True,
@@ -122,12 +119,12 @@ def render_clear_lrc(lyrics: List[LyricLine], boundaries: List[float]) -> List[s
         current_time = lyrics[idx].time_seconds
         next_time = lyrics[idx + 1].time_seconds
         time_diff = next_time - current_time
-        
+
         if time_diff > 10:
             # 在下一行之前插入 "===" 标记（除非该位置已有 "---" 标记）
             if idx + 1 not in insert_positions:
                 insert_positions[idx + 1] = "==="
-    
+
     # 处理 boundary 标记（优先级低）
     for boundary in boundaries:
         idx = find_first_ge_index(lyrics, boundary)
@@ -136,8 +133,6 @@ def render_clear_lrc(lyrics: List[LyricLine], boundaries: List[float]) -> List[s
         pos = max(0, idx)
         if pos not in insert_positions:
             insert_positions[pos] = "---"
-    
-
 
     rendered: List[str] = []
     for idx, item in enumerate(lyrics):
@@ -166,6 +161,8 @@ def generate_clear_lrc(song_dir: Path) -> Path:
     ensure_exists(boundary_path, "伴奏边界文件")
 
     lyrics = parse_lrc_keep_timestamps(lrc_path)
+    if not any(line.text for line in lyrics):
+        raise ValueError(f"没有带有效时间戳的歌词，无法生成唱段: {lrc_path}")
     boundaries = parse_boundary_file(boundary_path)
 
     result_lines = render_clear_lrc(lyrics, boundaries)

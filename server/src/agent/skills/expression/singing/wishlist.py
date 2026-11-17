@@ -76,7 +76,7 @@ class WishlistManager:
 
     def add(self, safe_name: str) -> bool:
         """Record or increment a wished song. Return whether it was created."""
-        safe_name = safe_name.strip().strip("《》")
+        safe_name = safe_name.replace("/", "").replace("\\", "").strip().strip("《》")
         unified_name = get_unified_song_name(safe_name)
         if not safe_name:
             return False

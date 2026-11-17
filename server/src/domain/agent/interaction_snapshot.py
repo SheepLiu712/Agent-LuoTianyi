@@ -31,6 +31,7 @@ class InteractionKind(str, Enum):
     CHAT = "chat"
     TOY = "toy"
     WORLD = "world"
+    CALL = "call"
 
 
 class ConnectionState(str, Enum):
@@ -56,6 +57,10 @@ _COORDINATION_KINDS = frozenset(
         StimulusKind.USER_TYPING,
         StimulusKind.IMAGE_SELECTION_OPENED,
         StimulusKind.IMAGE_SELECTION_CLOSED,
+        StimulusKind.VOICE_RECORDING_STARTED,
+        StimulusKind.VOICE_RECORDING_CANCELLED,
+        StimulusKind.VOICE_RECORDING_COMMITTED,
+        StimulusKind.VOICE_UPLOAD_FAILED,
         StimulusKind.INTERACTION_DEADLINE,
         StimulusKind.INTERACTION_ENDING,
     }
@@ -154,4 +159,3 @@ class WorldInteractionSnapshot(_InteractionFacts):
 
 
 InteractionSnapshot = ChatInteractionSnapshot | ToyInteractionSnapshot | WorldInteractionSnapshot
-"""聊天、玩偶与世界三种具体快照的联合类型。"""

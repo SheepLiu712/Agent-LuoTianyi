@@ -4,16 +4,18 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from support.chat_connection import StubChatConnection
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.relationship import NewRelationshipProposeHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
-from src.stage import StageManager
+from src.agent.skills.cognitive._reply_resources import ReplyResources
+from src.infrastructure.media import create_media_resolver
 from src.web.http import UserInterface
 from src.web.http.types import PreferenceOverwriteRequest
 
@@ -41,14 +43,14 @@ class ConversationService:
         return {"conversations": [], "summary": "", "context_count": 0}
 
 
-class Connection:
-    user_uuid = "user-1"
+class Socket:
+    async def send_json(self, event) -> None:
+        pass
 
+
+class Connection(StubChatConnection):
     def __init__(self) -> None:
-        self.is_closed = False
-
-    def mark_disconnected(self) -> None:
-        self.is_closed = True
+        super().__init__(Socket(), "user-1", "user")
 
 
 def make_runtime():
@@ -65,7 +67,7 @@ def make_runtime():
             ),
         )
 
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=get_agent,
         adapter=WebSocketAdapter(),
         get_context_factory=lambda character_id: ContextFactory(character_id=character_id, database=conversation),
@@ -85,10 +87,10 @@ def make_runtime():
 @pytest.mark.asyncio
 async def test_overwrite_updates_online_and_retained_stage_before_returning() -> None:
     runtime = make_runtime()
-    user_interface = UserInterface(runtime.database_manager)
+    user_interface = UserInterface(runtime.database_manager, create_media_resolver())
     first_connection = Connection()
-    stage = await runtime.stage_manager.connect(first_connection, "luotianyi")
-    other_stage = await runtime.stage_manager.connect(Connection(), "miku")
+    stage = await runtime.stage_manager._test_chat_adapter._open(first_connection, "luotianyi")
+    other_stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "miku")
     try:
         assert stage.context.user.read().preferences.relationship == "旧关系"
 
@@ -103,11 +105,9 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
         assert stage.context.user.read().preferences.relationship == "星际图书馆搭档"
         assert other_stage.context.user.read().preferences.relationship == "星际图书馆搭档"
         assert stage.context.user.read().preferences.speaking_style == "活泼"
-        assert "用户希望你是他的：星际图书馆搭档" in CharacterReplyGenerator._build_preference_context(
-            stage.context.user.read()
-        )
+        assert "用户希望你是他的：星际图书馆搭档" in ReplyResources._build_preference_context(stage.context.user.read())
 
-        await runtime.stage_manager.disconnect(first_connection)
+        await runtime.stage_manager._test_chat_adapter._close_connection(first_connection)
         await user_interface.overwrite_preference(
             PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": "朋友"}),
             runtime,
@@ -117,7 +117,7 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
         await stage.propose_relationship("过时的提议")
         assert stage.context.user.read().preferences.relationship == "朋友"
 
-        restored = await runtime.stage_manager.connect(Connection(), "luotianyi")
+        restored = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
         assert restored is stage
         assert restored.context.user.read().preferences.relationship == "朋友"
     finally:
@@ -127,13 +127,13 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
 @pytest.mark.asyncio
 async def test_overwrite_without_stage_is_loaded_by_next_interaction() -> None:
     runtime = make_runtime()
-    user_interface = UserInterface(runtime.database_manager)
+    user_interface = UserInterface(runtime.database_manager, create_media_resolver())
     try:
         await user_interface.overwrite_preference(
             PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": "朋友"}),
             runtime,
         )
-        stage = await runtime.stage_manager.connect(Connection(), "luotianyi")
+        stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
         assert stage.context.user.read().preferences.relationship == "朋友"
     finally:
         await runtime.stage_manager.close()
@@ -142,7 +142,7 @@ async def test_overwrite_without_stage_is_loaded_by_next_interaction() -> None:
 @pytest.mark.asyncio
 async def test_refresh_preferences_reads_database_without_writing_stale_snapshot(monkeypatch) -> None:
     runtime = make_runtime()
-    stage = await runtime.stage_manager.connect(Connection(), "luotianyi")
+    stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
     conversation = runtime.database_manager.conversation_service
     conversation.preferences = {"relationship": "伙伴", "speaking_style": "轻松", "future_field": "保留"}
     monkeypatch.setattr(conversation, "save_user_preferences", lambda *args: pytest.fail("refresh wrote preferences"))
@@ -159,12 +159,12 @@ async def test_refresh_preferences_reads_database_without_writing_stale_snapshot
 @pytest.mark.asyncio
 async def test_failed_preference_save_does_not_dispatch_proposal(monkeypatch) -> None:
     runtime = make_runtime()
-    stage = await runtime.stage_manager.connect(Connection(), "luotianyi")
+    stage = await runtime.stage_manager._test_chat_adapter._open(Connection(), "luotianyi")
     conversation = runtime.database_manager.conversation_service
     monkeypatch.setattr(conversation, "save_user_preferences", lambda *args: False)
     try:
         with pytest.raises(HTTPException) as error:
-            await UserInterface(runtime.database_manager).overwrite_preference(
+            await UserInterface(runtime.database_manager, create_media_resolver()).overwrite_preference(
                 PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": "新关系"}),
                 runtime,
             )
@@ -179,7 +179,7 @@ async def test_invalid_relationship_is_rejected_before_persistence() -> None:
     runtime = make_runtime()
     try:
         with pytest.raises(HTTPException) as error:
-            await UserInterface(runtime.database_manager).overwrite_preference(
+            await UserInterface(runtime.database_manager, create_media_resolver()).overwrite_preference(
                 PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": None}),
                 runtime,
             )

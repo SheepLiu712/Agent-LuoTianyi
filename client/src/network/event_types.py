@@ -19,6 +19,7 @@ class WSEventType(str, Enum):
 
     LLM_REQUEST = "llm_request"
     LLM_RESPONSE = "llm_response"
+    LLM_CANCEL = "llm_cancel"
 
     USER_MESSAGE = "user_message"
     USER_IMAGE = "user_image"

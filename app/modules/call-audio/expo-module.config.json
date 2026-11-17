@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["com.sheepliu712.callaudio.CallAudioModule"]
+  }
+}

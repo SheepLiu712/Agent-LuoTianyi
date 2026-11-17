@@ -1,12 +1,13 @@
 """真实聊天链路的结算与取消验收（Issue #69）。"""
+
 import asyncio
 
 import pytest
+from support.reply_capabilities import scripted_reply_skills
 from support.stage_support import cleanup, setup, stimulus
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
@@ -14,32 +15,20 @@ from src.agent.handlers.stimulus.chat import (
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import ComposedReply, ComposedResponse, ReplyDraft
+from src.agent.skills.cognitive import ReplyDraft
 
 
 async def until(predicate):
     async def wait():
         while not predicate():
             await asyncio.sleep(0)
+
     await asyncio.wait_for(wait(), 2)
 
 
 class _Understanding:
-    def extract_terms(self, text):
+    def recognize(self, text):
         return ()
-
-
-class _NoReflection:
-    async def consolidate_memories(self, invocation, **kwargs):
-        return {}
-
-    async def update_profile(self, invocation, **kwargs):
-        return None
-
-
-class _NoCompaction:
-    async def compact(self, conversation_context):
-        return None
 
 
 class _Composer:
@@ -47,17 +36,9 @@ class _Composer:
         self.drafts = drafts
         self.calls = 0
 
-    async def compose(self, invocation, **kwargs):
+    async def generate_drafts(self, invocation, **kwargs):
         self.calls += 1
         return self.drafts
-
-    async def compose_staged(self, invocation, **kwargs):
-        self.calls += 1
-
-        async def formal():
-            return ComposedReply(drafts=self.drafts)
-
-        return ComposedResponse(provisional=None, pending=formal)
 
 
 class _Execute:
@@ -69,17 +50,27 @@ class _Execute:
         self.actions.append(action.action_id)
         if self.gate is not None:
             await self.gate.wait()
-        return d.ActionResult(action_id=action.action_id, status=d.ActionExecutionStatus.COMPLETED,
-                              error_code=None, irreversible_effect_committed=False, effect_ref=None)
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=d.ActionExecutionStatus.COMPLETED,
+            error_code=None,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        )
 
 
 def build_agent(composer, execute):
-    reflection = ReflectionActionHandler("luotianyi", _NoReflection(), _NoCompaction())
-    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
-        (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(composer, _Understanding())),
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())]),
-        action_router=ActionRouter([(d.ActionKind.SAY, execute), (d.ActionKind.REFLECTION, reflection)]))
+    return Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            [
+                (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
+                (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(scripted_reply_skills(composer))),
+                (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            ]
+        ),
+        action_router=ActionRouter([(d.ActionKind.SAY, execute), (d.ActionKind.COGNITIVE_MAINTENANCE, _Execute())]),
+    )
 
 
 def drafts():

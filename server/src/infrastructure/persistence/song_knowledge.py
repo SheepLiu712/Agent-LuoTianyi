@@ -5,6 +5,9 @@ from typing import Dict
 from sqlalchemy import Column, String, Text, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
+from src.utils.database_schema import guard_version, stamp
+from src.utils.server_paths import resolve_server_path
+
 Base = declarative_base()
 
 
@@ -31,6 +34,8 @@ def init_song_db(config: Dict):
     db_folder: str = config.get("db_folder", None)
     db_file: str = config.get("db_file", None)
 
+    schema_version = guard_version(Path(db_folder) / db_file, "songs")
+
     # Ensure directory exists
     Path(db_folder).mkdir(parents=True, exist_ok=True)
 
@@ -38,21 +43,15 @@ def init_song_db(config: Dict):
 
     engine = create_engine(database_url, connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
+    if schema_version == 0:
+        Base.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            stamp(connection.connection.driver_connection, "songs")
 
 
 def get_song_db():
     """Generator for database session"""
-    global SessionLocal
-    if SessionLocal is None:
-        # Fallback default path if not initialized explicitly
-        init_song_db(
-            {
-                "db_folder": str(Path(__file__).resolve().parents[3] / "res" / "knowledge"),
-                "db_file": "knowledge_db.db",
-            }
-        )
-    db = SessionLocal()
+    db = get_song_session()
     try:
         yield db
     finally:
@@ -66,7 +65,7 @@ def get_song_session() -> Session:
         # Fallback default path if not initialized explicitly
         init_song_db(
             {
-                "db_folder": str(Path(__file__).resolve().parents[3] / "res" / "knowledge"),
+                "db_folder": str(resolve_server_path("data/knowledge")),
                 "db_file": "knowledge_db.db",
             }
         )

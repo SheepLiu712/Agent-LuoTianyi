@@ -1,5 +1,17 @@
 # Android 本地签名构建
 
+## 安装依赖
+
+使用 `package.json` 声明的 npm 10.9.9，项目 `.npmrc` 固定使用 npm 官方源。在干净检出或构建环境的 `app` 目录执行：
+
+```powershell
+npm exec --yes --package=npm@10.9.9 -- npm ci
+```
+
+`npm ci` 必须通过后再构建；不要用 `npm install` 绕过锁文件不一致。需要修改依赖时使用同一 npm 版本更新并提交 `package.json` 和 `package-lock.json`，随后在干净目录复跑 `npm ci`。仅修复锁文件元数据时，可先执行 `npm exec --yes --package=npm@10.9.9 -- npm install --package-lock-only`，避免无关依赖升级。
+
+## 构建
+
 在 `app` 目录执行：
 
 ```powershell

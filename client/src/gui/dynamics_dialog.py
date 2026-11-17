@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QSize, Qt, Signal
+from shiboken6 import isValid
+
+from PySide6.QtCore import QSize, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -19,6 +21,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from .window_operation import WindowOperation
 
 TIANYI_ICON_PATH = "res/gui/tianyi_icon.png"
 USER_ICON_PATH = "res/gui/user_icon.png"
@@ -87,8 +91,7 @@ class AvatarLabel(QLabel):
                 self.setStyleSheet("border-radius: 17px;")
                 return
         self.setText(_author_label(author_type))
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QLabel {
                 background: #EEF3F7;
                 color: #667481;
@@ -96,8 +99,7 @@ class AvatarLabel(QLabel):
                 font-size: 11px;
                 font-weight: 700;
             }
-            """
-        )
+            """)
 
 
 class CommentInput(QTextEdit):
@@ -183,9 +185,7 @@ class DynamicPostWidget(QWidget):
             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
         )
 
-        author_name = QLabel(
-            str(dynamic.get("author_name") or _author_label(str(dynamic.get("author_type", ""))))
-        )
+        author_name = QLabel(str(dynamic.get("author_name") or _author_label(str(dynamic.get("author_type", "")))))
         author_name.setStyleSheet("font-weight: 900; font-size: 16px; color: #243447;")
         author_name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         author_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -225,9 +225,7 @@ class DynamicCommentWidget(QWidget):
             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
         )
 
-        author_name = QLabel(
-            str(comment.get("author_name") or _author_label(str(comment.get("author_type", ""))))
-        )
+        author_name = QLabel(str(comment.get("author_name") or _author_label(str(comment.get("author_type", "")))))
         author_name.setStyleSheet("font-weight: 900; font-size: 16px; color: #243447;")
         author_name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         author_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -255,14 +253,14 @@ class DynamicEditorDialog(QDialog):
     def __init__(self, publish_callback, parent=None):
         super().__init__(parent)
         self.publish_callback = publish_callback
+        self.pending = False
         self.setWindowTitle("发一条动态")
         self.resize(560, 420)
         self.setModal(True)
         self._build_ui()
 
     def _build_ui(self):
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QDialog {
                 background: #F6F7F9;
             }
@@ -296,8 +294,7 @@ class DynamicEditorDialog(QDialog):
             QPushButton:focus {
                 outline: none;
             }
-            """
-        )
+            """)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 16)
         root.setSpacing(14)
@@ -323,21 +320,25 @@ class DynamicEditorDialog(QDialog):
         root.addWidget(hint)
 
     def _publish(self):
+        if self.pending:
+            return
         content = self.input.toPlainText().strip()
         if not content:
             QMessageBox.information(self, "提示", "先写一点内容再发布。")
             return
-        self.publish_button.setEnabled(False)
-        self.exit_button.setEnabled(False)
-        try:
-            ok, message = self.publish_callback(content)
-        finally:
-            self.publish_button.setEnabled(True)
-            self.exit_button.setEnabled(True)
-        if not ok:
+        if self.publish_callback(content, self):
+            self.pending = True
+            self.publish_button.setEnabled(False)
+            self.input.setEnabled(False)
+
+    def finish_publish(self, success, message):
+        self.pending = False
+        self.publish_button.setEnabled(True)
+        self.input.setEnabled(True)
+        if success:
+            self.accept()
+        else:
             QMessageBox.warning(self, "发布失败", message or "未知错误")
-            return
-        self.accept()
 
     def reject(self):
         box = QMessageBox(self)
@@ -370,12 +371,34 @@ class DynamicsDialog(QDialog):
         self.setModal(False)
 
         self._build_ui()
-        if self.load_dynamics():
-            self.mark_read()
+        self._list_operation = WindowOperation(self)
+        self._comments_operation = WindowOperation(self)
+        self._write_operation = WindowOperation(self)
+        self._list_operation.completed.connect(self._list_completed)
+        self._list_operation.settled.connect(self._list_settled)
+        self._comments_operation.completed.connect(self._comments_completed)
+        self._comments_operation.settled.connect(self._comments_settled)
+        self._write_operation.completed.connect(self._write_completed)
+        self._write_operation.settled.connect(self._write_settled)
+        self._feed_generation = 0
+        self._selection_generation = 0
+        self._visible_generation = 0
+        self._list_ticket = None
+        self._comments_ticket = None
+        self._write_ticket = None
+        self._list_latest = False
+        self._comments_latest = None
+        self._read_dirty = False
+        self._hidden = False
+        self._loaded = False
+        self._editor = None
+        self._comment_drafts = {}
+        self.feed_status.setText("正在加载动态…")
+        self.feed_status.show()
+        QTimer.singleShot(0, self.load_dynamics)
 
     def _build_ui(self):
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QDialog {
                 background: #F6F7F9;
             }
@@ -436,8 +459,7 @@ class DynamicsDialog(QDialog):
             QPushButton:focus {
                 outline: none;
             }
-            """
-        )
+            """)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -528,6 +550,24 @@ class DynamicsDialog(QDialog):
     def showEvent(self, event):
         super().showEvent(event)
         self._update_detail_item_sizes()
+        if self._hidden:
+            self._hidden = False
+            self._list_latest = True
+            QTimer.singleShot(0, self.load_dynamics)
+
+    def hideEvent(self, event):
+        self._hidden = True
+        self._visible_generation += 1
+        self._feed_generation += 1
+        self._selection_generation += 1
+        self._list_latest = False
+        self._comments_latest = None
+        self._read_dirty = False
+        self._list_operation.invalidate()
+        self._comments_operation.invalidate()
+        self._write_operation.invalidate()
+        # 隐藏仍保留 timer 回收实际终态，不能让重开绕过写在途。
+        super().hideEvent(event)
 
     def _on_dynamic_list_scroll(self, value: int):
         if self._loading_dynamics or self._loading_more_dynamics:
@@ -584,66 +624,101 @@ class DynamicsDialog(QDialog):
         self.comments_text.setItemWidget(item, DynamicPostWidget(dynamic))
         self._update_detail_item_sizes()
 
-    def load_dynamics(self):
-        self._loading_dynamics = True
-        try:
-            payload = self.network_client.get_dynamics(limit=DYNAMIC_PAGE_SIZE)
-            if not payload.get("ok", False):
-                self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
-                self.feed_status.show()
-                return False
+    def _valid_result(self, request, visible_generation):
+        return (
+            not self._hidden
+            and self.isVisible()
+            and visible_generation == self._visible_generation
+            and request.context == self.network_client.account_context()
+        )
 
-            self.feed_status.hide()
-            items = payload.get("items", [])
+    def load_dynamics(self):
+        if self._hidden:
+            return
+        if self._list_operation.busy:
+            return
+        self._feed_generation += 1
+        self._selection_generation += 1
+        self._comments_operation.invalidate()
+        self._comments_latest = None
+        self._start_list(None)
+
+    def _start_list(self, cursor):
+        request = self.network_client.prepare_dynamic_request("list", limit=DYNAMIC_PAGE_SIZE, cursor=cursor)
+        self._list_ticket = (
+            self._visible_generation,
+            self._feed_generation,
+            cursor,
+            self.dynamic_list.verticalScrollBar().value(),
+            self.current_dynamic.get("id") if self.current_dynamic else None,
+        )
+        self._loading_dynamics = cursor is None
+        self._loading_more_dynamics = cursor is not None
+        self.refresh_button.setEnabled(False)
+        self.feed_status.setText("正在加载动态…")
+        self.feed_status.show()
+        self._list_operation.start(request)
+
+    def load_more_dynamics(self):
+        if self._hidden or self._list_operation.busy or not self.has_more or not self.next_cursor:
+            return
+        self._start_list(self.next_cursor)
+
+    def _list_completed(self, request, result):
+        visible, generation, cursor, scroll, selected = self._list_ticket
+        if not self._valid_result(request, visible) or generation != self._feed_generation:
+            return
+        ok, message, payload = result
+        if not ok:
+            self.feed_status.setText(f"动态加载失败：{message}。点击“刷新”重试。")
+            return
+        self.feed_status.hide()
+        # 请求等待期间用户仍可切换选择或滚动，成功回写只保留完成时状态。
+        selected = self.current_dynamic.get("id") if self.current_dynamic else None
+        scroll = self.dynamic_list.verticalScrollBar().value()
+        items = payload.get("items", [])
+        if cursor is None:
             self.dynamic_list.clear()
             self.dynamic_end_item = None
             self.current_dynamic = None
             self.comments_text.clear()
-            self.comment_status.setText("请选择一条动态")
-            self.comment_button.setEnabled(False)
-            self.next_cursor = payload.get("next_cursor")
-            self.has_more = bool(payload.get("has_more"))
-
-            for dynamic in items:
+        existing = {
+            self.dynamic_list.item(i).data(Qt.ItemDataRole.UserRole).get("id")
+            for i in range(self.dynamic_list.count())
+            if isinstance(self.dynamic_list.item(i).data(Qt.ItemDataRole.UserRole), dict)
+        }
+        for dynamic in items:
+            if dynamic.get("id") not in existing:
                 self._add_dynamic_item(dynamic)
+                existing.add(dynamic.get("id"))
+        self.next_cursor = payload.get("next_cursor")
+        self.has_more = bool(payload.get("has_more"))
+        self._update_dynamic_end_state()
+        row = next(
+            (
+                i
+                for i in range(self.dynamic_list.count())
+                if isinstance(self.dynamic_list.item(i).data(Qt.ItemDataRole.UserRole), dict)
+                and self.dynamic_list.item(i).data(Qt.ItemDataRole.UserRole).get("id") == selected
+            ),
+            0,
+        )
+        if items:
+            self.dynamic_list.setCurrentRow(row)
+        if cursor is not None:
+            self.dynamic_list.verticalScrollBar().setValue(scroll)
+        self._loaded = True
+        if cursor is None:
+            self._read_dirty = True
+            QTimer.singleShot(0, self.mark_read)
 
-            self._update_dynamic_end_state()
-            if items:
-                self.dynamic_list.setCurrentRow(0)
-            return True
-        finally:
-            self._loading_dynamics = False
-
-    def load_more_dynamics(self):
-        if self._loading_dynamics or self._loading_more_dynamics or not self.has_more or not self.next_cursor:
-            return
-
-        self._loading_more_dynamics = True
-        scrollbar = self.dynamic_list.verticalScrollBar()
-        scroll_value = scrollbar.value()
-        current_item = self.dynamic_list.currentItem()
-        current_row = self.dynamic_list.row(current_item) if current_item is not None else -1
-        try:
-            payload = self.network_client.get_dynamics(limit=DYNAMIC_PAGE_SIZE, cursor=self.next_cursor)
-            if not payload.get("ok", False):
-                self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
-                self.feed_status.show()
-                return
-
-            self.feed_status.hide()
-            items = payload.get("items", [])
-            self.next_cursor = payload.get("next_cursor")
-            self.has_more = bool(payload.get("has_more"))
-
-            for dynamic in items:
-                self._add_dynamic_item(dynamic)
-            self._update_dynamic_end_state()
-
-            if current_row >= 0 and current_row < self.dynamic_list.count():
-                self.dynamic_list.setCurrentRow(current_row)
-            scrollbar.setValue(scroll_value)
-        finally:
-            self._loading_more_dynamics = False
+    def _list_settled(self):
+        self._loading_dynamics = False
+        self._loading_more_dynamics = False
+        self.refresh_button.setEnabled(True)
+        if self._list_latest and not self._hidden:
+            self._list_latest = False
+            self.load_dynamics()
 
     def _add_dynamic_item(self, dynamic: dict):
         item = QListWidgetItem()
@@ -653,11 +728,18 @@ class DynamicsDialog(QDialog):
         self.dynamic_list.setItemWidget(item, DynamicListItemWidget(dynamic))
 
     def mark_read(self):
-        result = self.network_client.mark_dynamics_read()
-        if result.get("ok") and self.on_read_callback:
-            self.on_read_callback()
+        if self._hidden or not self._loaded:
+            return
+        if self._write_operation.busy:
+            self._read_dirty = True
+            return
+        self._read_dirty = False
+        self._start_write("read")
 
     def on_dynamic_selected(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None):
+        if self.current_dynamic:
+            self._comment_drafts[self.current_dynamic.get("id")] = self.comment_input.toPlainText()
+        self._selection_generation += 1
         if current is None:
             self.current_dynamic = None
             self.comments_text.clear()
@@ -667,6 +749,7 @@ class DynamicsDialog(QDialog):
 
         dynamic = current.data(Qt.ItemDataRole.UserRole) or {}
         self.current_dynamic = dynamic
+        self.comment_input.setPlainText(self._comment_drafts.get(dynamic.get("id"), ""))
         self.render_dynamic_detail(dynamic)
         self.load_comments(dynamic)
 
@@ -674,7 +757,7 @@ class DynamicsDialog(QDialog):
         self.comments_text.clear()
         self._add_post_item(dynamic)
         allow_comment = bool(dynamic.get("allow_comment", False))
-        self.comment_button.setEnabled(allow_comment)
+        self.comment_button.setEnabled(allow_comment and not self._write_operation.busy)
         self.comment_status.setText("可评论" if allow_comment else "当前动态不支持评论")
 
     def _clear_comment_items(self):
@@ -683,21 +766,52 @@ class DynamicsDialog(QDialog):
 
     def load_comments(self, dynamic: dict):
         dynamic_id = dynamic.get("id")
-        if not dynamic_id:
+        if not dynamic_id or self._hidden:
             return
-        payload = self.network_client.get_dynamic_comments(dynamic_id, limit=200)
-        if not payload.get("ok", False):
-            self._clear_comment_items()
-            self._add_detail_message(f"评论加载失败：{payload.get('message', '未知错误')}\n再次点击这条动态，或点击“刷新”后重试。")
+        if self._comments_operation.busy:
+            self._comments_latest = dynamic_id
+            self._comments_operation.invalidate()
+            return
+        request = self.network_client.prepare_dynamic_request("comments", dynamic_id=dynamic_id, limit=200)
+        self._comments_ticket = (
+            self._visible_generation,
+            self._feed_generation,
+            self._selection_generation,
+            dynamic_id,
+        )
+        self._clear_comment_items()
+        self._add_detail_message("正在加载评论…")
+        self._comments_operation.start(request)
+
+    def _comments_completed(self, request, result):
+        visible, feed, selection, dynamic_id = self._comments_ticket
+        if (
+            not self._valid_result(request, visible)
+            or feed != self._feed_generation
+            or selection != self._selection_generation
+            or not self.current_dynamic
+            or dynamic_id != self.current_dynamic.get("id")
+        ):
+            return
+        ok, message, payload = result
+        self._clear_comment_items()
+        if not ok:
+            self._add_detail_message(f"评论加载失败：{message}\n再次点击这条动态，或点击“刷新”后重试。")
             return
         rows = payload.get("items", [])
-        self._clear_comment_items()
-        if not rows:
-            self._add_detail_message("还没有评论。")
-            return
         for comment in rows:
             self._add_comment_item(comment)
-        self._add_detail_message("没有更多评论了。")
+        self._add_detail_message("没有更多评论了。" if rows else "还没有评论。")
+
+    def _comments_settled(self):
+        target, self._comments_latest = self._comments_latest, None
+        if (
+            target is not None
+            and not self._hidden
+            and self.current_dynamic
+            and self.current_dynamic.get("id") == target
+        ):
+            self.load_comments(self.current_dynamic)
 
     def _add_comment_item(self, comment: dict):
         item = QListWidgetItem()
@@ -709,14 +823,75 @@ class DynamicsDialog(QDialog):
         editor = DynamicEditorDialog(self.publish_dynamic, self)
         editor.exec()
 
-    def publish_dynamic(self, content: str) -> tuple[bool, str]:
-        result = self.network_client.create_dynamic(content)
-        if not result.get("ok"):
-            return False, result.get("message", "未知错误")
-        self.load_dynamics()
-        return True, ""
+    def publish_dynamic(self, content: str, editor=None) -> bool:
+        if self._hidden or self._write_operation.busy:
+            return False
+        self._editor = editor
+        self._start_write("post", content=content)
+        return True
+
+    def _start_write(self, action, **values):
+        request = self.network_client.prepare_dynamic_request(action, **values)
+        self._write_ticket = (
+            self._visible_generation,
+            self._selection_generation,
+            values.get("dynamic_id"),
+            values.get("content"),
+        )
+        self.comment_button.setEnabled(False)
+        self.add_dynamic_button.setEnabled(False)
+        self._write_operation.start(request)
+
+    def _write_completed(self, request, result):
+        visible, selection, target, content = self._write_ticket
+        if not self._valid_result(request, visible):
+            return
+        ok, message, payload = result
+        if request.action == "read":
+            if ok and self.on_read_callback:
+                self.on_read_callback()
+            return
+        if request.action == "post":
+            if self._editor is not None and isValid(self._editor) and self._editor.isVisible():
+                self._editor.finish_publish(ok, message)
+            if ok:
+                self._feed_generation += 1
+                self._list_operation.invalidate()
+                self._list_latest = True
+            return
+        if not ok:
+            QMessageBox.warning(self, "评论失败", message or "未知错误")
+            return
+        if self.current_dynamic and self.current_dynamic.get("id") == target:
+            self._selection_generation += 1
+            self._comments_operation.invalidate()
+            if selection + 1 == self._selection_generation and self.comment_input.toPlainText().strip() == content:
+                self.comment_input.clear()
+                self._comment_drafts.pop(target, None)
+            self._comments_latest = target
+        elif self._comment_drafts.get(target, "").strip() == content:
+            self._comment_drafts.pop(target, None)
+
+    def _write_settled(self):
+        if self._editor is not None and isValid(self._editor):
+            self._editor.pending = False
+            self._editor.publish_button.setEnabled(True)
+            self._editor.input.setEnabled(True)
+        self.add_dynamic_button.setEnabled(True)
+        self.comment_button.setEnabled(bool(self.current_dynamic and self.current_dynamic.get("allow_comment")))
+        if self._hidden:
+            return
+        if self._list_latest and not self._list_operation.busy:
+            self._list_latest = False
+            self.load_dynamics()
+        if self._comments_latest is not None and not self._comments_operation.busy:
+            self._comments_settled()
+        if self._read_dirty:
+            QTimer.singleShot(0, self.mark_read)
 
     def publish_comment(self):
+        if self._hidden or self._write_operation.busy:
+            return
         if not self.current_dynamic:
             QMessageBox.information(self, "提示", "请先选择一条动态。")
             return
@@ -727,9 +902,4 @@ class DynamicsDialog(QDialog):
         if not content:
             QMessageBox.information(self, "提示", "先写一点评论再发送。")
             return
-        result = self.network_client.create_dynamic_comment(self.current_dynamic.get("id"), content)
-        if not result.get("ok"):
-            QMessageBox.warning(self, "评论失败", result.get("message", "未知错误"))
-            return
-        self.comment_input.clear()
-        self.load_comments(self.current_dynamic)
+        self._start_write("comment", dynamic_id=self.current_dynamic.get("id"), content=content)

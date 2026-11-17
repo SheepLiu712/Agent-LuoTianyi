@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import copy
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.skills import SkillsConfig
+from src.infrastructure.models.realtime_speech.config import AliyunRealtimeSpeechConfig, RealtimeSpeechConfigError
 from src.infrastructure.persistence.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
     MIN_MESSAGE_TOKEN_TTL_SECONDS,
 )
+from src.utils.server_paths import ServerPaths
 
 
 @dataclass
@@ -40,14 +44,13 @@ class RuntimeConfigValidator:
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
         "database.memory_store": "database.memory_store.llm_module",
-        "conversation.summary": "chat_session_manager.conversation_service.llm_module",
-        "agent.topic_extractor": "agent_runtime.agent.topic_extractor.llm_module",
-        "agent.main_chat": "agent_runtime.agent.main_chat.llm_module",
-        "agent.memory_writer": "agent_runtime.agent.memory.memory_writer.llm_module",
-        "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
-        "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
+        "conversation.summary": "agent_runtime.skills.cognitive_maintenance.conversation_compaction.llm_module",
+        "agent.topic_extractor": "agent_runtime.skills.topic_extraction.llm_module",
+        "agent.main_chat": "agent_runtime.skills.reply.llm_module",
+        "agent.memory_writer": "agent_runtime.skills.memory_write.llm_module",
+        "agent.user_profile": "agent_runtime.skills.cognitive_maintenance.user_profile.llm_module",
         "skill.singing.song_emotion_tagger": "agent_runtime.skills.singing.song_emotion_tagger",
-        "skill.diary": "agent_runtime.skills.diary.diary_llm.llm_module",
+        "skill.diary": "agent_runtime.skills.dynamic.diary_composer.llm_module",
     }
 
     CORE_VLM_MODULE_PATHS = {
@@ -73,9 +76,17 @@ class RuntimeConfigValidator:
 
     def validate(self, config: dict[str, Any]) -> dict[str, Any]:
         items: list[ValidationItem] = []
+        if "agent_runtime" in config:
+            try:
+                SkillsConfig.reject_legacy_summary(config)
+                SkillsConfig.from_runtime(config["agent_runtime"])
+            except (ValueError, TypeError) as error:
+                items.append(ValidationItem("core", "agent_runtime.skills", "error", str(error)))
         items.extend(self._validate_secrets())
         items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
+        items.extend(self._validate_call_setup_timeout(config))
+        items.extend(self._validate_realtime_speech(config))
         items.extend(self._validate_client_model_types(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
@@ -129,7 +140,7 @@ class RuntimeConfigValidator:
                     "core",
                     name,
                     "warning",
-                    ("未配置 message_token_ttl_seconds，使用安全默认值 " f"{DEFAULT_MESSAGE_TOKEN_TTL_SECONDS} 秒"),
+                    (f"未配置 message_token_ttl_seconds，使用安全默认值 {DEFAULT_MESSAGE_TOKEN_TTL_SECONDS} 秒"),
                     severity="warning",
                 )
             ]
@@ -161,8 +172,21 @@ class RuntimeConfigValidator:
     def _validate_llm_interfaces(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
         llm_service = config.get("llm_service", {})
-        for kind, key in (("llm", "available_llms"), ("vlm", "available_vlms")):
+        for kind, key in (
+            ("llm", "available_llms"),
+            ("vlm", "available_vlms"),
+            ("audio", "available_audio_models"),
+        ):
             interfaces = llm_service.get(key, {})
+            if kind == "audio" and not interfaces:
+                interfaces = {
+                    "qwen3.8-omni-flash": {
+                        "api_type": "openai",
+                        "model": "qwen3.8-omni-flash",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "api_key": os.environ.get("QWEN_API_KEY", ""),
+                    }
+                }
             if not interfaces:
                 result.append(
                     ValidationItem("core", f"{kind}.interfaces", "error", f"未配置任何 {kind.upper()} interface")
@@ -239,8 +263,8 @@ class RuntimeConfigValidator:
             if not name:
                 result.append(ValidationItem("core", label, "error", "显示名称不能为空"))
                 continue
-            if model_kind not in {"llm", "vlm"}:
-                result.append(ValidationItem("core", label, "error", "模型类型必须是 llm 或 vlm"))
+            if model_kind not in {"llm", "vlm", "audio"}:
+                result.append(ValidationItem("core", label, "error", "模型类型必须是 llm、vlm 或 audio"))
                 continue
             type_requirements[type_id] = {
                 "model_kind": model_kind,
@@ -312,7 +336,7 @@ class RuntimeConfigValidator:
 
         def walk(value: Any, path: str) -> None:
             if isinstance(value, dict):
-                for kind in ("llm", "vlm"):
+                for kind in ("llm", "vlm", "audio"):
                     cfg = value.get(kind)
                     if isinstance(cfg, dict):
                         model_type = str(cfg.get("client_model_type") or "").strip()
@@ -337,6 +361,33 @@ class RuntimeConfigValidator:
         walk(config, "")
         return bindings
 
+    @staticmethod
+    def _validate_call_setup_timeout(config: dict[str, Any]) -> list[ValidationItem]:
+        manager = config.get("stage_manager", {})
+        if not isinstance(manager, dict):
+            return [ValidationItem("core", "stage_manager", "error", "stage_manager 必须是对象")]
+        value = manager.get("call_setup_timeout", 10.0)
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            return [
+                ValidationItem("core", "stage_manager.call_setup_timeout", "error", "通话建立总时限必须是正的有限秒数")
+            ]
+        return []
+
+    def _validate_realtime_speech(self, config: dict[str, Any]) -> list[ValidationItem]:
+        transport = config.get("call_transport", {})
+        try:
+            if not isinstance(transport, dict) or type(transport.get("enabled", False)) is not bool:
+                raise RealtimeSpeechConfigError("call_transport.enabled 必须是布尔值")
+            speech = transport.get("realtime_speech", {})
+            if not isinstance(speech, dict) or type(speech.get("enabled", False)) is not bool:
+                raise RealtimeSpeechConfigError("realtime_speech.enabled 必须是布尔值")
+            if speech.get("enabled", False):
+                provider = AliyunRealtimeSpeechConfig.from_mapping(speech, use_legacy_setup_timeouts=False)
+                _ = provider.websocket_url
+        except RealtimeSpeechConfigError as error:
+            return [ValidationItem("core", "call_transport.realtime_speech", "error", str(error))]
+        return []
+
     def _validate_core_modules(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
         llms = set((config.get("llm_service", {}).get("available_llms") or {}).keys())
@@ -349,6 +400,11 @@ class RuntimeConfigValidator:
             module = self._get(config, path) or {}
             vlm_name = ((module.get("vlm") or {}).get("name") or "").strip()
             result.append(self._module_item("vlm", name, vlm_name, vlms))
+        audio_names = set((config.get("llm_service", {}).get("available_audio_models") or {}).keys())
+        audio_module = self._get(config, "agent_runtime.skills.audio_understanding.audio_model_module")
+        if isinstance(audio_module, dict):
+            audio_name = str((audio_module.get("audio") or {}).get("name") or "").strip()
+            result.append(self._module_item("audio", "audio_understanding", audio_name, audio_names))
         return result
 
     def _validate_core_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
@@ -381,14 +437,14 @@ class RuntimeConfigValidator:
         return result
 
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
-        linker_cfg = self._get(config, "agent_runtime.agent.preprocessing.song_entity_linker") or {}
-        songname_file = linker_cfg.get("songname_file") or "res/knowledge/song_name_keywords.txt"
+        linker_cfg = self._get(config, "agent_runtime.skills.jargon_recognition.song_entity_linker") or {}
+        songname_file = linker_cfg.get("songname_file") or "data/knowledge/song_name_keywords.txt"
         lyric_file = (
-            linker_cfg.get("lyric_file") or linker_cfg.get("lyrics_file") or "res/knowledge/song_lyric_keywords.txt"
+            linker_cfg.get("lyric_file") or linker_cfg.get("lyrics_file") or "data/knowledge/song_lyric_keywords.txt"
         )
 
-        song_db_cfg = self._get(config, "agent_runtime.agent.song_knowledge.song_database") or {}
-        db_folder = song_db_cfg.get("db_folder") or "res/knowledge"
+        song_db_cfg = self._get(config, "agent_runtime.skills.knowledge.song_database") or {}
+        db_folder = song_db_cfg.get("db_folder") or "data/knowledge"
         db_file = song_db_cfg.get("db_file") or "knowledge_db.db"
         raw_db_file = Path(str(db_file))
         db_path = raw_db_file if raw_db_file.is_absolute() else Path(str(db_folder)) / raw_db_file
@@ -489,7 +545,7 @@ class RuntimeConfigValidator:
         path = Path(str(raw))
         if path.is_absolute():
             return path
-        return self.root_dir / path
+        return ServerPaths.from_environment(self.root_dir).resolve(path)
 
     @staticmethod
     def _get(data: dict[str, Any], path: str) -> Any:

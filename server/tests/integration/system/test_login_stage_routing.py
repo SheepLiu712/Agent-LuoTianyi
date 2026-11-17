@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi import BackgroundTasks
 
-from src.web.http.types import AutoLoginRequest, LoginRequest
+from src.infrastructure.media import create_media_resolver
 from src.web.http import UserInterface
+from src.web.http.types import AutoLoginRequest, LoginRequest
 
 
 class StageManager:
@@ -67,7 +68,7 @@ async def test_first_login_records_stage_fact_without_legacy_dispatch(
 ) -> None:
     # Given: authentication reports that the account has never logged in.
     server_runtime, stage_manager = runtime(None)
-    user_interface = UserInterface(server_runtime.database_manager)
+    user_interface = UserInterface(server_runtime.database_manager, create_media_resolver())
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
     request = (
         LoginRequest(username="alice", password="secret")
@@ -90,7 +91,7 @@ async def test_return_login_does_not_enter_first_daily_login_dispatch(
 ) -> None:
     # Given: authentication reports a previous successful login.
     server_runtime, stage_manager = runtime(60.0)
-    user_interface = UserInterface(server_runtime.database_manager)
+    user_interface = UserInterface(server_runtime.database_manager, create_media_resolver())
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
     request = (
         LoginRequest(username="alice", password="secret")
@@ -113,7 +114,7 @@ async def test_first_ordinary_login_today_routes_to_stage_claim_path(
 ) -> None:
     # Given: the previous login was yesterday, so this is today's first ordinary login.
     server_runtime, stage_manager = runtime(24 * 60 * 60)
-    user_interface = UserInterface(server_runtime.database_manager)
+    user_interface = UserInterface(server_runtime.database_manager, create_media_resolver())
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
     request = (
         LoginRequest(username="alice", password="secret")

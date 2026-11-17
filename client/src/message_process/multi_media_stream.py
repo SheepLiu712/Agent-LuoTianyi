@@ -349,9 +349,9 @@ class MultiMediaStream:
             # 再发结束指令，并等待响应，确保之前的音频数据已经播放完成
             self.audio_queue_in.put({"cmd": "wait_finish"})
             try:
-                _ = self.audio_queue_out.get(timeout=120)  # 等待播放完成的信号
+                _ = self.audio_queue_out.get(timeout=90)  # 与 app 一致：结束回执最多等待 90 秒
             except Exception:
-                self.logger.warning("Timeout waiting for audio to finish, forcing stop.")
+                self.logger.warning("Audio finish acknowledgement unavailable; treating playback as finished.")
 
         if self._stop_mouth_event:
             self._stop_mouth_event.set()

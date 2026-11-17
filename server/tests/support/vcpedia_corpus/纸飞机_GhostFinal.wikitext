@@ -1,0 +1,103 @@
+{{标题格式化}}
+{{about|[[GhostFinal]]创作，由[[洛天依]]演唱的[[VOCALOID]]中文原创歌曲|消歧义页=纸飞机}}
+{{VOCALOID中文殿堂曲题头}}
+
+{{VOCALOID_Songbox
+|image = 纸飞机.jpg
+|图片信息 = 曲繪 by chenny0_0
+|颜色1 = linear-gradient(90deg,transparent 45%,#b8defe 45%,#6cb9fd 55%,transparent 55%),linear-gradient(70deg,#a6e4ef,#6dafeb);color:#FFF
+|颜色2 = linear-gradient(130deg,#defaff,#a6e4ef);color:#50a2f1;border-color:#FFF
+|颜色3 = linear-gradient(130deg,#defaff,#8aeffd);color:#50a2f1;border-color:#FFF
+|演唱 = [[洛天依]]
+|歌曲名称 = 纸飞机
+|UP主 = [[GhostFinal]]
+|链接 = [https://www.bilibili.com/video/av419216 原版]、[https://www.bilibili.com/video/BV1WZ4y187Tn 重制版]
+|其他资料 = 2012年12月19日投稿原版，再生数为{{bilibiliCount|id=av419216}}<br />2022年5月16日投稿重制版，再生数为{{bilibiliCount|id=BV1WZ4y187Tn}}
+}}
+
+==简介==
+《'''纸飞机'''》是[[咏吟轩]]出品、[[Ghostfinal]]于2012年12月19日投稿至[[bilibili]]的[[VOCALOID]]中文原创歌曲，由[[洛天依]]演唱。2022年5月16日Ghostfinal投稿了本曲的'''重制版本'''。截至现在'''原版'''已達成[[VOCALOID中文殿堂曲|殿堂曲]]，有{{bilibiliCount|id=av419216}}次观看，{{bilibiliCount|id=av419216|type=4}}人收藏；'''重制版'''則有{{BilibiliCount|id=BV1WZ4y187Tn}}次观看，{{BilibiliCount|id=BV1WZ4y187Tn|type=4}}次收藏。
+
+本曲旋律清新活潑，描寫即將從學校生活中畢業的兩人，藉由紙飛機傳達情誼的故事。
+
+本曲於[[洛天依新曲排行榜22]]中获得SUPER HIT!!!成就。
+
+本曲投稿十周年之际，Ghostfinal投稿了本曲的'''重制版'''。重制版使用了洛天依[[ACE Studio|ACE AI]]聲庫，在編曲與調教方面都進行了改動。
+
+==歌曲==
+;原版
+{{BilibiliVideo|id=419216}}
+;重置版
+{{BilibiliVideo|id=BV1WZ4y187Tn}}
+
+==歌词==
+{{VOCALOID Songbox Introduction
+|LDC = YES
+|lbgcolor = #6dafeb
+|ltcolor = #FFFFFF;background:linear-gradient(70deg,#a6e4ef,#6dafeb)
+|group1 = 作编曲
+|list1 = [[Ghostfinal]]
+|group2 = 作词
+|list2 = [[杏花包子]]
+|group3 = 吉他
+|list3 = 叁陆玖
+|group4 = 调教
+|list4 = [[跳蝻P]]
+|group5 = 曲繪
+|list5 = chenny0_0
+|group6 = PV
+|list6 = [[冰镇甜豆浆]]
+|group7 = 演唱
+|list7 = [[洛天依]]
+}}
+<poem style="background:linear-gradient(60deg,#defaff,#a6e4ef,#a4eff9);font-size:15px;text-align:center;width:32em;">
+{{color|#4193e2|
+在蔚蓝天空中画着弧线的纸飞机
+总觉得有些熟悉　奇怪的飞行轨迹
+那曾经纯真无邪笑着闹着的青春期
+晴朗天气翠绿的草地　发着呆的我和你
+
+上课时总想用笔戳戳你的后背　你却学会了用纸板防备
+放学后落在两个人脸庞上的余晖　听海浪的声音将你我包围
+
+也许有时会拌嘴　有时谁也不理谁
+但到最后还是会　傻傻地笑着解开误会
+可是总会有一天　我们不能再把手牵
+湿润的眼哭着的脸　舍不得离别
+
+在蔚蓝天空中画着弧线的纸飞机
+承载着青涩记忆　证明曾经在一起
+那恋恋不舍相拥着不放手的毕业礼
+同样的tee　扎歪的发髻　抽泣着的我和你
+
+我们总是在一起趁老师无防备　偷偷去操场看帅气前辈
+但是谁也没有勇气送出去的cookie　被塞满了的嘴高热量伤悲
+
+也许有时会拌嘴　有时谁也不理谁
+但到最后还是会　傻傻地笑着解开误会
+可是总会有一天　我们不能再把手牵
+湿润的眼　哭着的脸　舍不得离别
+
+在蔚蓝天空中画着弧线的纸飞机
+总觉得有些熟悉　奇怪的飞行轨迹
+在脚边有我们名字缩写的那纸飞机
+晴朗天气　翠绿的草地　发着呆的我和你
+
+在蔚蓝天空中画着弧线的纸飞机
+总觉得有些熟悉　怀念的飞行轨迹
+樱花树下我们许下的约定变得清晰
+我会珍惜曾经　不忘记　永远在心中的你}}
+
+
+</poem>
+{{GhostFinal|collapsed}}
+{{杏花包子|collapsed}}
+{{跳蝻P|collapsed}}
+{{洛天依/2012|collapsed}}
+{{洛天依/2022|collapsed}}
+
+[[Category:使用ACE Studio的歌曲]]
+[[Category:2012年投稿的音乐作品]]
+[[Category:12月19日投稿的音乐作品]]
+[[Category:2022年投稿的音乐作品]]
+[[Category:5月16日投稿的音乐作品]]

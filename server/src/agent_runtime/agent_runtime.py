@@ -5,15 +5,28 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
+from src.agent.handlers.action.call import AnswerCallHandler, EndCallHandler
+from src.agent.handlers.action.call_memory import LookupCallMemoryHandler
+from src.agent.handlers.action.call_settlement import FinalizeCallHandler
+from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
-from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.action.write_diary import WriteDiaryHandler
+from src.agent.handlers.reply_skills import ReplySkills
+from src.agent.handlers.stimulus.call import (
+    CallAnswerRequestedHandler,
+    CallEndingHandler,
+    CallMemoryLookupRequestedHandler,
+    CallReplyConfirmedHandler,
+    CallReplySegmentReadyHandler,
+    CallTimeLimitWarningHandler,
+    CallTurnCompletedHandler,
+)
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReplyHandler,
@@ -35,14 +48,15 @@ from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
     WorldActivityHandler,
 )
+from src.agent.processing.omni_background import CallSessionPrompt
+from src.agent.processing.reply_dispatch import ReplyDelivery
 from src.agent.skills import SharedSkills
-from src.agent.skills.adapters.memory import AgentMemory
-from src.agent.skills.cognitive import CharacterReplyGenerator
-from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+from src.agent.skills.resources import SkillResources
 from src.agent_runtime.character_registry import CharacterRegistry
 from src.domain.agent import ActionKind, StimulusKind
+from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver
+from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.persistence.database.vector_store import (
     clear_vector_store,
     get_vector_store,
@@ -67,7 +81,25 @@ class AgentRuntime:
     @property
     def singing_backend(self) -> SingingBackend:
         """Expose the shared singing port only to the application composition root."""
-        return self.skills.singing.backend
+        return self.skills.song_learning_tasks.world_resources
+
+    @property
+    def call_tts_character_ids(self) -> tuple[str, ...]:
+        """Return characters whose Agent-owned realtime call speech is ready."""
+        return tuple(
+            character_id
+            for character_id in self.character_ids
+            if self.skills.speaking.supports_call_audio(character_id)
+        )
+
+    @property
+    def call_summary_character_ids(self) -> tuple[str, ...]:
+        """Return characters whose Agent-owned call summary capability is ready."""
+        return tuple(
+            character_id
+            for character_id in self.character_ids
+            if self.skills.call_summary.supports_character(character_id)
+        )
 
     def __init__(
         self,
@@ -76,6 +108,7 @@ class AgentRuntime:
         database_manager: DatabaseManager,
         *,
         media_resolver: MediaResolver,
+        omni_factory=None,
     ) -> None:
         """初始化启用角色及注册表，为门面注入数据库会话工厂；初始化失败回滚资源。"""
         self.logger = get_logger(__name__)
@@ -87,53 +120,31 @@ class AgentRuntime:
         self._shutdown_complete = False
         self._shutdown_task: asyncio.Task | None = None
         self.shutdown_timeout_seconds = DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS
-        self.vector_store = self._initialize_vector_store(self.config["agent"])
+        self.vector_store = self._initialize_vector_store(self.config.get("vector_store", {}))
         try:
             first_login_names = self._first_login_prepared_names(self.config.get("proactive", {}))
             self.character_registry = CharacterRegistry(config.get("character_registry", {}))
-            prepared_speech = PreparedSpeechCatalog(self.config.get("prepared_speech", {}).get("characters", {}))
-            self.character_memories: dict[str, AgentMemory] = {}
-            self.reply_generators: dict[str, CharacterReplyGenerator] = {}
-            self._build_character_resources(
-                agent_config=self.config["agent"],
-                llm_service=llm_service,
-                database_manager=database_manager,
-            )
-            narratives = {
-                character_id: CharacterNarrative(
-                    name=generator.character_name,
-                    persona=generator.character_persona,
-                    speaking_style=generator.speaking_style,
-                )
-                for character_id, generator in self.reply_generators.items()
-            }
-            touch_configs = {
-                character_id: self.character_registry.get(character_id).reflex.get("touch", {}).get("fast_reply", {})
-                for character_id in self.character_memories
-            }
+            skills_config = SkillsConfig.from_runtime(config)
+            characters = {key: value for key, value in self.character_registry.characters.items() if value.enabled}
+            self.reply_delivery = ReplyDelivery()
             self.skills = SharedSkills(
-                self.config.get("skills", {}),
-                llm_service,
-                memories=self.character_memories,
-                reply_generators=self.reply_generators,
-                narratives=narratives,
-                touch_configs=touch_configs,
-                prepared_speech=prepared_speech,
-                preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
-                explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
-                reply_composition_config=self.config.get("reply_composition", {}),
-                reflection_config=self.config.get("reflection", {}),
-                song_knowledge_config=self.config.get("agent", {}).get("song_knowledge", {}),
-                database_manager=database_manager,
-                media_resolver=media_resolver,
+                skills_config,
+                resources=SkillResources(
+                    llm_service=llm_service,
+                    database=database_manager,
+                    vector_store=self.vector_store,
+                    media_resolver=media_resolver,
+                    characters=characters,
+                ),
             )
 
             self.default_character_id = self.character_registry.default_character_id
-            self.character_ids = tuple(self.character_memories)
+            self.character_ids = tuple(characters)
             self.context_factories = {
                 character_id: ContextFactory(character_id=character_id, database=database_manager.conversation_service)
                 for character_id in self.character_ids
             }
+            self.omni_factory = omni_factory or QwenOmniSessionFactory(None)
             self._agents = self._build_agents(first_login_names)
             set_agent_runtime(self)
         except BaseException:
@@ -146,7 +157,7 @@ class AgentRuntime:
     def _build_agents(self, first_login_names: tuple[str, ...]) -> dict[str, Agent]:
         """完整构造所有角色门面后一次性发布，避免暴露半装配状态。"""
         world_activity = WorldActivityHandler(
-            branches={CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.skills.dynamic_publishing)}
+            branches={CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.skills.dynamic)}
         )
         agents: dict[str, Agent] = {}
         for character_id in self.character_ids:
@@ -160,8 +171,14 @@ class AgentRuntime:
         world_activity: WorldActivityHandler,
     ) -> Agent:
         """为一个角色装配私有路由；共享处理器只在其行为无角色状态时复用。"""
+        prompt_file = self.config.get("omni_prompt_file")
+        if self.omni_factory.is_configured and not prompt_file:
+            raise ValueError("实时通话必须配置 agent_runtime.omni_prompt_file")
         return Agent(
             character_id=character_id,
+            omni_factory=self.omni_factory,
+            narrative=self.skills.reply.narratives()[character_id],
+            omni_prompt=CallSessionPrompt(prompt_file) if prompt_file is not None else None,
             stimulus_router=self._build_stimulus_router(
                 character_id,
                 first_login_names,
@@ -178,10 +195,24 @@ class AgentRuntime:
     ) -> StimulusRouter:
         """登记一个角色可处理的刺激，并复用无状态的输入预处理器。"""
         preprocessing = ChatPreprocessingHandler(
-            self.skills.text_preprocessing,
+            self.skills.jargon_recognition,
             self.skills.image_understanding,
+            self.skills.audio_understanding,
+        )
+        reply_skills = ReplySkills(
+            topic_extraction=self.skills.topic_extraction,
+            retrieval=self.skills.memory_retrieval,
+            singing=self.skills.singing,
+            reply=self.skills.reply,
         )
         registrations = [
+            (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
+            (StimulusKind.CALL_REPLY_SEGMENT_READY, CallReplySegmentReadyHandler(self.skills.reply)),
+            (StimulusKind.CALL_MEMORY_LOOKUP_REQUESTED, CallMemoryLookupRequestedHandler()),
+            (StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+            (StimulusKind.CALL_TIME_LIMIT_WARNING, CallTimeLimitWarningHandler()),
+            (StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
+            (StimulusKind.CALL_ENDING, CallEndingHandler()),
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),
             (
@@ -189,15 +220,17 @@ class AgentRuntime:
                 FirstLoginHandler(
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
+                    skills=reply_skills,
+                    reply=self.reply_delivery,
                 ),
             ),
             (
                 StimulusKind.INTERACTION_DEADLINE,
                 ChatReplyHandler(
-                    self.skills.response_composition,
-                    self.skills.text_preprocessing,
+                    reply_skills,
                     self.skills.explicit_memory_intent,
-                    self.skills.intentional_memory,
+                    self.skills.memory_write,
+                    reply=self.reply_delivery,
                 ),
             ),
             (
@@ -209,21 +242,21 @@ class AgentRuntime:
                 StimulusKind.DYNAMIC_OBSERVED,
                 DynamicObservedHandler(
                     character_id,
-                    self.skills.dynamic_reply,
-                    self.skills.dynamic_topic_memory,
+                    self.skills.dynamic,
+                    self.skills.memory_write,
                 ),
             ),
             (
                 StimulusKind.DIARY_PLANNING_DUE,
-                DiaryPlanningDueHandler(self.skills.diary_writing),
+                DiaryPlanningDueHandler(self.skills.diary),
             ),
             (
                 StimulusKind.SONG_LEARNED,
                 SongLearnedHandler(
                     character_id,
-                    self.skills.learned_song_experience,
-                    self.skills.dynamic_publishing,
-                    self.skills.song_learning,
+                    self.skills.memory_write,
+                    self.skills.dynamic,
+                    self.skills.memory_retrieval,
                 ),
             ),
         ]
@@ -260,25 +293,28 @@ class AgentRuntime:
                     ActionKind.SAY,
                     SayHandler(character_id, self.skills.speaking, self.skills.prepared_speech),
                 ),
+                (ActionKind.LOOKUP_CALL_MEMORY, LookupCallMemoryHandler(self.skills.memory_retrieval)),
                 (ActionKind.SING, SingHandler(character_id, self.skills.singing)),
                 (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
-                (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(character_id, self.skills.dynamic_publishing)),
+                (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(character_id, self.skills.dynamic)),
                 (
                     ActionKind.REQUEST_SONG_LEARNING,
-                    RequestSongLearningHandler(character_id, self.skills.song_learning),
+                    RequestSongLearningHandler(character_id, self.skills.song_learning_tasks),
                 ),
                 (
                     ActionKind.REPLY_DYNAMIC,
-                    ReplyDynamicHandler(character_id, self.skills.dynamic_reply),
+                    ReplyDynamicHandler(character_id, self.skills.dynamic),
                 ),
-                (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary_writing)),
+                (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary)),
                 (
-                    ActionKind.REFLECTION,
-                    ReflectionActionHandler(
-                        character_id,
-                        self.skills.reflection,
-                        self.skills.conversation_compaction,
-                    ),
+                    ActionKind.COGNITIVE_MAINTENANCE,
+                    CognitiveMaintenanceActionHandler(character_id, self.skills.cognitive_maintenance),
+                ),
+                (ActionKind.ANSWER_CALL, AnswerCallHandler()),
+                (ActionKind.END_CALL, EndCallHandler()),
+                (
+                    ActionKind.FINALIZE_CALL,
+                    FinalizeCallHandler(character_id, self.skills.cognitive_maintenance, self.skills.call_summary),
                 ),
             )
         )
@@ -391,6 +427,7 @@ class AgentRuntime:
         llm_service: LLMService,
         database_manager: DatabaseManager,
         media_resolver: MediaResolver,
+        omni_factory=None,
     ) -> None:
         """记录运行时外部依赖，并检查角色私有技能。"""
         self.llm_service = llm_service
@@ -406,8 +443,6 @@ class AgentRuntime:
             "media_resolver": self.media_resolver,
             "vector_store": self.vector_store,
             "character_registry": self.character_registry,
-            "character_memories": self.character_memories,
-            "reply_generators": self.reply_generators,
             "skills": self.skills,
             "default_character_id": self.default_character_id,
         }
@@ -416,8 +451,7 @@ class AgentRuntime:
             raise RuntimeError(f"AgentRuntime dependencies are missing: {', '.join(missing)}")
         if not self.character_ids:
             raise RuntimeError("AgentRuntime dependency is missing: character_ids")
-        for memory in self.character_memories.values():
-            memory.ensure_dependencies()
+        self.skills.ensure_dependencies()
 
     def get_agent(self, character_id: str | None = None) -> Agent:
         """返回角色的缓存门面；仅 None 选择默认角色。
@@ -432,33 +466,6 @@ class AgentRuntime:
         if not character_id.strip():
             raise KeyError(character_id)
         return self._agents[character_id]
-
-    def _build_character_resources(
-        self,
-        *,
-        agent_config: dict[str, Any],
-        llm_service: LLMService,
-        database_manager: DatabaseManager,
-    ) -> None:
-        """为共享 Skill 建立按角色索引的记忆和模型适配器。"""
-        for profile in self.character_registry.characters.values():
-            if not profile.enabled:
-                continue
-            llm_modules = self._register_character_llm_modules(llm_service, profile.character_id, agent_config)
-            memory = AgentMemory(
-                agent_config["memory"],
-                llm_modules,
-                database_manager=database_manager,
-                vector_store=self.vector_store,
-                owner_character_id=profile.character_id,
-            )
-            self.character_memories[profile.character_id] = memory
-            generator = CharacterReplyGenerator(
-                agent_config["main_chat"],
-                llm_modules["main_chat"],
-                profile,
-            )
-            self.reply_generators[profile.character_id] = generator
 
     @staticmethod
     def _first_login_prepared_names(config: dict[str, Any]) -> tuple[str, ...]:
@@ -482,33 +489,11 @@ class AgentRuntime:
         return tuple(names)
 
     @staticmethod
-    def _initialize_vector_store(agent_config: dict[str, Any]) -> Any:
-        """根据 Agent 配置初始化并返回共享向量存储。"""
-        vector_cfg = agent_config.get("memory", {}).get("vector_store", {})
-        if vector_cfg:
-            init_vector_store(vector_cfg)
+    def _initialize_vector_store(vector_config: dict[str, Any]) -> Any:
+        """根据连接配置初始化共享向量存储。"""
+        if vector_config:
+            init_vector_store(vector_config)
         return get_vector_store()
-
-    @staticmethod
-    def _register_character_llm_modules(
-        llm_service: LLMService, character_id: str, agent_config: dict[str, Any]
-    ) -> dict[str, Any]:
-        """为指定角色注册回复生成、记忆写入和画像更新 LLM 模块。"""
-        modules: dict[str, Any] = {
-            "memory_writer": llm_service.register_llm_module(
-                f"{character_id}_memory_writer",
-                agent_config["memory"]["memory_writer"]["llm_module"],
-            ),
-            "user_profile_updater": llm_service.register_llm_module(
-                f"{character_id}_user_profile_updater",
-                agent_config["memory"]["user_profile"]["llm_module"],
-            ),
-            "main_chat": llm_service.register_llm_module(
-                f"{character_id}_main_chat",
-                agent_config["main_chat"]["llm_module"],
-            ),
-        }
-        return modules
 
 
 _agent_runtime: AgentRuntime | None = None

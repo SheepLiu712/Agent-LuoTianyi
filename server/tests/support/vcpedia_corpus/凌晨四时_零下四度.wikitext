@@ -1,0 +1,118 @@
+{{ACE中文殿堂曲题头}}
+
+{{VOCALOID_Songbox
+|image    = 凌晨四时 零下四度.jpg
+|图片信息 = 曲绘 by SHIROCO、urekaしお
+|颜色1    = linear-gradient(90deg,#9DC7DD 0%,transparent 30%),linear-gradient(to right,#9FCADB 0%,#99CADE 15%,#1B4156 15%,#174C6E 40%,#174C6E 75%,#194966 100%);color:#1AA5EA;text-shadow:0 0 5px #4498cc;border-style:none
+|颜色2    = linear-gradient(90deg,#92c7de 0%,transparent 30%),linear-gradient(to right,#9FCADB 0%,#99CADE 15%,#1B4156 15%,#174C6E 40%,#174C6E 75%,#194966 100%);color:#F6FBFF;text-shadow:0 0 5px #FFF;border-style:none
+|颜色3    = linear-gradient(90deg,#257EA6 0%,transparent 30%),linear-gradient(to right,#9FCADB 0%,#99CADE 15%,#1B4156 15%,#174C6E 40%,#174C6E 75%,#194966 100%);color:#62dafb;text-shadow:0 0 5px #7abed7;border-style:none
+|演唱     = [[洛天依]]
+|歌曲名称 = 凌晨四时 零下四度
+|UP主     = [[停电前夜]]
+|bb_id    = BV1tF4m1M7ns
+|wyy_id   = 2131742312
+|投稿时间 = 2024年2月13日
+|再生     = {{bilibiliCount|id=BV1tF4m1M7ns}}
+|其他资料 = ，收录于专辑《Indie Hospital》
+}}
+
+== 简介 ==
+《'''凌晨四时 零下四度'''》是[[停电前夜]]于2024年2月13日投稿至[[bilibili]]的[[ACE Studio|ACE]]中文原创歌曲，由[[洛天依]]主唱、[[言和]]與[[停电前夜]]和聲，為专辑《[[Indie Hospital]]》收錄曲。[[ACE殿堂曲|殿堂曲]]，截至现在已有{{bilibiliCount|id=BV1tF4m1M7ns}}次观看，{{bilibiliCount|id=BV1tF4m1M7ns|type=4}}人收藏。
+
+== 作者的话 ==
+{{Cquote|<poem>在似乎没有尽头的失眠里，听着窗外电车噪音逐渐消失，又随着朝阳再次响起。不知你是否也会产生被这早晨的光线就此杀死的想法呢？
+这首歌的灵感最初是产生于精神病院的某个午夜，当时我正被保护性约束在病床上。护士似乎忘记了拉上窗帘，因此月亮幽幽的无色光线，就那样倾斜着照射进来，映出空中模糊着舞动的灰尘。那光如同猫的眼睛一样直勾勾凝视着我，仅仅是存在于那里，就散发出一种不祥的气氛。即使已经服用了100mg喹硫平作为助眠药，可在接连不断幻听的围绕之下，我依旧无论如何也无法入眠。这种极度疲倦之下却仍然清醒的状态持续了不知多久，就在我想着大不了咬破舌头一死了之的时候，一个吉他旋律突然在很近的地方响起。
+在去死之前，至少还要好好写一首Midwest Emo啊！我这样想着。
+于是，凌晨四时 零下四度。给我好好听着！这可是拼上性命的最后Twinkle Riff！</poem>|视频简介}}
+
+== 歌曲 ==
+{{BilibiliVideo|id=BV1tF4m1M7ns}}
+
+== 歌词 ==
+{{VOCALOID_Songbox_Introduction
+|LDC = YES
+|lbgcolor = ;background:linear-gradient(110deg,#1B4156,#174C6E,#194966)
+|ltcolor = #F6FBFF;text-shadow:0 0 5px #FFF
+|rbdcolor = #194966
+|group1 = 作編曲<br/>作词<br/>調教
+|list1 = [[停电前夜]]
+|group2 = 混音
+|list2 = 啪pia君
+|group3 = 曲绘
+|list3 = SHIROCO<br/>Eurekaしお
+|group4 = PV
+|list4 = 花开yesterday
+|group5 = 特别感谢
+|list5 = 要你命2118<br>精神病泡面
+|group6 = 演唱
+|list6 = [[洛天依]]
+|group7 = 和声
+|list7 = [[言和]]<br>[[停电前夜]]
+}}
+<poem>{{color|#18345f;text-shadow:0 0 1px #1a74b6|
+雨失落在窗外　昏黑夜中伤害
+被默许的安排　对白锈处裂开
+而这梦来了又去　仅疼痛还在延续
+目之所及处皆是　是被填满的情绪
+
+一直　角落里记忆霉湿　谎称着自己没事
+一直　逃避过去　凌晨四时的一角　零下四度的心跳
+
+朝阳　游荡　心脏　暗伤
+杀了徘徊的我吧　杀了沉默的我吧
+杀了无解的夜吧　杀了无尽的夜吧
+
+朝阳　怎样　已不幻想　却还漫长
+长夜将尽的一秒　戛然而止的一秒
+和被无视的心跳　和你无力的心跳
+
+梦中只见　旋律自生自灭
+空白纸页　只能　寄向失眠昨夜
+触感溶解　在撕裂中描写
+漫长的夜　才是　无法完成章节
+
+心的空洞　若与噪音相容
+恍惚之中　线香燃尽幻痛
+生造感动　只能自己相拥
+可是如果　我只是说如果
+
+一直　一直　找不到一刻合适　拾起忘却的日子
+一直　看向过去　那是城市的一角　那是空洞的心跳
+
+朝阳　游荡　心脏　暗伤
+杀了徘徊的我吧　杀了沉默的我吧
+杀了无解的夜吧　杀了无尽的夜吧
+朝阳　怎样　已不幻想　却还漫长
+长夜将尽的一秒　戛然而止的一秒
+和被无视的心跳　和你无力的心跳
+
+记忆　秘密　无力　苏醒
+奇迹　代替　词语　逃离
+
+但世纪前聒噪的琴弦已然不重要
+你在滂沱派对中奔跑　被生命力牵着线舞蹈
+育音堂前　自顾自掺入咸味啜饮上周的特调
+世界还欠我一次拥抱　怎样靠近也都得不到
+
+所以一直　一直　在鼓点中喝醉了　在解离<ref>可能指[[停电前夜]]所患的解离障碍。</ref>中忘记了
+一直　看向过去　那是时间的空泡　那是错乱的心跳
+
+朝阳　回避三级解离
+心脏　岔开四段记忆
+杀了徘徊的我吧　演出五场马戏
+杀了无解的夜吧　抽取虚无主义
+
+朝阳　回到三级解离
+已不幻想　断绝四段记忆
+长夜将尽的一秒　循环五场马戏
+和被无视的心跳　我的世界解体}}
+</poem>
+
+
+{{停电前夜|collapsed}}
+{{洛天依/2024|collapsed|nocate=1}}
+== 注释 ==
+<references/>
+
+[[Category:使用ACE Studio的歌曲]]
+[[Category:洛天依歌曲]]

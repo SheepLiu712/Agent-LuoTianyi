@@ -1,0 +1,894 @@
+{
+  "description": "Checked-in examples for regression, prompt experiments and offline comparison. Selection notes are documentation, not a runtime prerequisite.",
+  "selected_titles": [
+    "Foxy",
+    "Sharing The World",
+    "社畜烧酒",
+    "唱给雅音宫羽",
+    "山塘恋雨",
+    "普通DISCO",
+    "礼物pre-Sent",
+    "青麟雪",
+    "I LOVE YOU(Adaa)",
+    "长平传",
+    "达拉崩吧",
+    "Estrus Cycle"
+  ],
+  "benchmark_titles": [
+    "Foxy",
+    "Sharing The World",
+    "唱给雅音宫羽",
+    "山塘恋雨",
+    "普通DISCO",
+    "礼物pre-Sent",
+    "社畜烧酒",
+    "青麟雪"
+  ],
+  "rights": {
+    "modifications": "Raw responses losslessly gzip-compressed; UTF-8/newline normalization for extracted sidecars. Oracle selections reviewed separately.",
+    "project_license": "Third-party material is not covered by project MIT.",
+    "scope": "User-supplied pre-existing local evidence only; no new lyric crawl. Original copyright notices retained.",
+    "site_editorial_text": "Applicable site license version only: CC BY-NC-SA 4.0 after 2026-09-16; earlier historical material may remain under CC BY-NC-SA 3.0 CN. No blanket relicensing.",
+    "source": "https://vcpedia.cn/VCPedia:浏览前必读",
+    "terms_oldid": 585010,
+    "third_party_lyrics": "Excluded from site-wide CC authorization; rights remain with original rightsholders. No claim of acquired lyric license."
+  },
+  "selection_note": {
+    "activity_source": "https://vcpedia.cn/Special:活跃用户",
+    "activity_snapshot_at": "2026-10-01T16:09:46.054364+00:00",
+    "activity_evidence": "evidence/active-users.html",
+    "policy": "Official 30-day activity and structural examples informed manual selection. Tests do not revalidate that selection process."
+  },
+  "pages": [
+    {
+      "title": "Estrus Cycle",
+      "pageid": 9118,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/Estrus%20Cycle",
+      "file": "Estrus_Cycle.wikitext",
+      "sha256": "b366bb4f50602164313730a5fb1ff42867756b0e021735a1b9ca71e76405c29d",
+      "purpose": [
+        "masked-original-not-translation"
+      ],
+      "capture": {
+        "path": "captures/9118.response.json.gz",
+        "sha256": "22bfd9cb5e35e85b204f9eaf9f21144f9b7755e409ff3c00b9856664b4f63b9b",
+        "origin": "browser-fixed-20260911-113745-20e80d/2.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 509443,
+        "user": "维克劳德",
+        "timestamp": "2026-01-30T11:17:14Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "accc8f00fafdf52cc2210c5ac47d8f681bfcfbd1",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "Foxy",
+      "pageid": 2549,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/Foxy",
+      "file": "Foxy.wikitext",
+      "sha256": "3d31f20ed929c6719240fa60dff472b4bbd0ea14ba7f2f996a9b2d12310eb64f",
+      "purpose": [
+        "columns-list-lyrics-unhandled",
+        "old-better-lyrics"
+      ],
+      "capture": {
+        "path": "captures/2549.response.json.gz",
+        "sha256": "fe72e07cde2819d31b7bef8c46cefb8cce0cf4ae26ee1c5238642547811983d2",
+        "origin": "precommit-review-random-20260912/2549.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 503322,
+        "user": "Fiction Blue",
+        "timestamp": "2025-12-28T10:37:50Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "f73eba88164beae021c0cca987459e061b07b20d",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "I LOVE YOU(Adaa)",
+      "pageid": 56174,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/I%20LOVE%20YOU%28Adaa%29",
+      "file": "I_LOVE_YOU_Adaa.wikitext",
+      "sha256": "5410ba3a8c015c8ab0464dff599bda732f0785cda7fa0025bdff922ac2e2118b",
+      "purpose": [
+        "visible-morse-not-hover-alternative",
+        "partial-gap"
+      ],
+      "capture": {
+        "path": "captures/56174.response.json.gz",
+        "sha256": "8dbeed5358e608dff1b7b397e8469838922c6895b5b314adf71079de748a879d",
+        "origin": "six-real/05.raw.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 537809,
+        "user": "Meng-LX",
+        "timestamp": "2026-05-07T10:22:15Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "6737160bc5fa4ca6d84fc8d5d1390f39fb5852a1",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "Sharing The World",
+      "pageid": 12260,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/Sharing%20The%20World",
+      "file": "Sharing_The_World.wikitext",
+      "sha256": "4d6bb884d87f2c41a7ad37cb6fd5d2c46d2ee06b94caf2137d8847ff4222da28",
+      "purpose": [
+        "hover-original-first",
+        "wrong-candidate-regression"
+      ],
+      "capture": {
+        "path": "captures/12260.response.json.gz",
+        "sha256": "de9b6ef740f73bfeea054d6ec92d8d364d20c69ec5e9cb15e583d539ab85f695",
+        "origin": "precommit-review-random-20260912/12260.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 538946,
+        "user": "维克劳德",
+        "timestamp": "2026-05-13T14:27:35Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "51967ff131745d43dd19218465d8aaebb4159d87",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "亚种",
+      "pageid": 54490,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E4%BA%9A%E7%A7%8D",
+      "file": "亚种.wikitext",
+      "sha256": "f3004c5e5c4dfe8c4cc2c0d7b41a1424a7288019d2024367392a3c9b1193dd21",
+      "purpose": [
+        "terminology-not-person"
+      ],
+      "capture": {
+        "path": "captures/54490.response.json.gz",
+        "sha256": "36574c18abc1d50ef646ca080a441cf759dca2633f31b6d0899471280dec4019",
+        "origin": "precommit-review-random-20260912/54490.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 564660,
+        "user": "维克劳德",
+        "timestamp": "2026-07-25T06:13:11Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "2cb1dcbba967b99ef7e793685d83bf63fcdf33ad",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "凌晨四时 零下四度",
+      "pageid": 37729,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E5%87%8C%E6%99%A8%E5%9B%9B%E6%97%B6%20%E9%9B%B6%E4%B8%8B%E5%9B%9B%E5%BA%A6",
+      "file": "凌晨四时_零下四度.wikitext",
+      "sha256": "d9acca0f8b9e6b195761686c4c98ab0d4fc49849c646cb234249c4c9961863a7",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/37729.response.json.gz",
+        "sha256": "73824e20751cb926a9a05349b8f4796e4e116ad4cc45c29674eae5ffb4272e08",
+        "origin": "random-five-20260911-234450-515b33/2.capture.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 495770,
+        "user": "CreeperCHEN2",
+        "timestamp": "2025-11-02T13:13:00Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "e5701c50c9fc2633f81486c2053297cbf019b43d",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "刀马旦(虚拟歌手)",
+      "pageid": 4762,
+      "revid": 508786,
+      "source_url": "https://vcpedia.cn/%E5%88%80%E9%A9%AC%E6%97%A6%28%E8%99%9A%E6%8B%9F%E6%AD%8C%E6%89%8B%29",
+      "file": "刀马旦_虚拟歌手.wikitext",
+      "sha256": "18d227f7d3d2eb759ec2a68e258f3ac03f6784d7a584ccadf038c5bd61edd876",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/4762.response.json.gz",
+        "sha256": "fcd0370f48d483bee024028d6bec9b1d4e2fe8ad59b6ba9075a8119184e325f9",
+        "origin": "browser-fixed-20260911-021300/2.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 508786,
+        "user": "学生bot",
+        "timestamp": "2026-01-24T12:10:03Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "d522ff211f0210193e46048003816fc750d4fbf5",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "周刊Synthesizer V排行榜72",
+      "pageid": 16218,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E5%91%A8%E5%88%8ASynthesizer%20V%E6%8E%92%E8%A1%8C%E6%A6%9C72",
+      "file": "周刊Synthesizer_V排行榜72.wikitext",
+      "sha256": "e166a89ebad89bdf71cbdd85e0621de3330010a922e3dffc98b121a306f5a6f7",
+      "purpose": [
+        "ranking-not-song"
+      ],
+      "capture": {
+        "path": "captures/16218.response.json.gz",
+        "sha256": "2ca29f3c11e47a5dd997712a49273165f196c089cb7727492dd4f3a27169486a",
+        "origin": "precommit-review-random-20260912/16218.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 574946,
+        "user": "维克劳德",
+        "timestamp": "2026-08-19T07:42:07Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "828cdde56c55cdba578ea8dddbb7baaac32f3b62",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "周刊VOCALOID中文排行榜449",
+      "pageid": null,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E5%91%A8%E5%88%8AVOCALOID%E4%B8%AD%E6%96%87%E6%8E%92%E8%A1%8C%E6%A6%9C449",
+      "file": "周刊VOCALOID中文排行榜449.wikitext",
+      "sha256": "dc4df7a7e8d573ecba267b65076b4b1a87d10ed9e14407abfad9d578a95fb8b4",
+      "purpose": [
+        "ranking-not-song"
+      ],
+      "revision_evidence": {
+        "user": null,
+        "source_sha1_matches": false
+      },
+      "note": "Existing source-only example, not used for paired performance comparison."
+    },
+    {
+      "title": "唱给雅音宫羽",
+      "pageid": 2236,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E5%94%B1%E7%BB%99%E9%9B%85%E9%9F%B3%E5%AE%AB%E7%BE%BD",
+      "file": "唱给雅音宫羽.wikitext",
+      "sha256": "dacf10e16aa8f83779cf009c4aa3917fe51d5b5fad5831e60bcd2a3907043f04",
+      "purpose": [
+        "plain-plus-spans",
+        "summary-font-fact"
+      ],
+      "capture": {
+        "path": "captures/2236.response.json.gz",
+        "sha256": "be894ac354de7f68a39887e8ab018425785a3b6405cebcd0e95c846cd9186dbb",
+        "origin": "six-real/01.raw.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 581077,
+        "user": "Meng-LX",
+        "timestamp": "2026-09-02T12:34:44Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "3b6cd9c54bdb6cbc41d67ce00ccf5a6e04406a12",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "山塘恋雨",
+      "pageid": 3553,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E5%B1%B1%E5%A1%98%E6%81%8B%E9%9B%A8",
+      "file": "山塘恋雨.wikitext",
+      "sha256": "913898417ff0788c09cd60a816882199ff0dfe0e60f4a7e5c0c89f17c1f757be",
+      "purpose": [
+        "multi-version-first-candidate",
+        "summary-counter-facts"
+      ],
+      "capture": {
+        "path": "captures/3553.response.json.gz",
+        "sha256": "55317063f93d7dfb83d78df0c6a1daa49240924a0ccea7f0153e0bc42a0e1a8a",
+        "origin": "six-real/04.raw.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 523001,
+        "user": "氢化脱氰氰酸",
+        "timestamp": "2026-03-05T14:51:13Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "897c9c7a2cc166cbaa40520a15a7233cfac807d4",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "当我想哭的时候厕所里总是有黄金",
+      "pageid": 58298,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E5%BD%93%E6%88%91%E6%83%B3%E5%93%AD%E7%9A%84%E6%97%B6%E5%80%99%E5%8E%95%E6%89%80%E9%87%8C%E6%80%BB%E6%98%AF%E6%9C%89%E9%BB%84%E9%87%91",
+      "file": "当我想哭的时候厕所里总是有黄金.wikitext",
+      "sha256": "0ae5129748bd93e8236314543cca00d33e5a152401965ca5108ed1989ff2f84a",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/58298.response.json.gz",
+        "sha256": "f0a35b20477ed1b8da2d0f6f2f3c811ea2030fd939736cd6af6cee0486ad854a",
+        "origin": "random-five-20260911-234450-515b33/1.capture.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 528575,
+        "user": "不可逆",
+        "timestamp": "2026-03-15T04:00:54Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "ae364c0fa67d669c1aceefad1a67e33a7d134749",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "我生于死去之日。",
+      "pageid": 54990,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E6%88%91%E7%94%9F%E4%BA%8E%E6%AD%BB%E5%8E%BB%E4%B9%8B%E6%97%A5%E3%80%82",
+      "file": "我生于死去之日.wikitext",
+      "sha256": "bc67d972c6bdf7b57c42c10125cf67884b98b922d7abf9e7e5cfa7bdd8a907eb",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/54990.response.json.gz",
+        "sha256": "2705d7fe79bbb7aea67c8e6a855b628ca1839776645a50560343b037f557d420",
+        "origin": "precommit-review-random-20260912/54990.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 557618,
+        "user": "Meng-LX",
+        "timestamp": "2026-07-16T12:29:58Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "1ecf7266478936eceede9d1f1f104609eac977a6",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "我还活着",
+      "pageid": 59795,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E6%88%91%E8%BF%98%E6%B4%BB%E7%9D%80",
+      "file": "我还活着.wikitext",
+      "sha256": "520ff25c60b9db2f5c30de404f53a7100d7ecd6e08bcb86070f2229dc17ee35a",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/59795.response.json.gz",
+        "sha256": "93d0c5f5bffe3328c045686ac7b1579fda77dee78bf901fca43e2c4165661082",
+        "origin": "normalization-three-20260912-0052-a31f/3.capture.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 538827,
+        "user": "CreeperCHEN2",
+        "timestamp": "2026-05-12T19:05:49Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "92fa9b071c0ddddbf8278c497ecb61fdbed033f4",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "普罗米修斯",
+      "pageid": 49873,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E6%99%AE%E7%BD%97%E7%B1%B3%E4%BF%AE%E6%96%AF",
+      "file": "普罗米修斯.wikitext",
+      "sha256": "a8b237040c3a30aeadf188dead39c0fcfb4e6edb6c806f88f27e28c497894d82",
+      "purpose": [
+        "disambiguation-not-song"
+      ],
+      "capture": {
+        "path": "captures/49873.response.json.gz",
+        "sha256": "3028dbeaf00827e15c8fa6f381a3ae0faabf6b85c256141ad3845564abc37903",
+        "origin": "precommit-review-random-20260912/49873.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 535925,
+        "user": "CreeperCHEN2",
+        "timestamp": "2026-04-23T20:27:29Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "620c75a6edc588dce51c6697e6565d8d5e1d986e",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "普通DISCO",
+      "pageid": 3363,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E6%99%AE%E9%80%9ADISCO",
+      "file": "普通DISCO.wikitext",
+      "sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+      "purpose": [
+        "custom-infobox",
+        "many-versions-first"
+      ],
+      "capture": {
+        "path": "captures/3363.response.json.gz",
+        "sha256": "7b38bfb0099f3cd5383ae51c30ccf891880380369fe4f70a14504c0487b3ae26",
+        "origin": "restart-20260910/普通DISCO.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 579153,
+        "user": "0wzyt1",
+        "timestamp": "2026-08-30T09:42:44Z",
+        "query_file": "evidence/revisions-3363.json",
+        "source_sha1": "d71a9c38eae55a2e926429c4a3e17b337d2f1247",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "横竖撇点折",
+      "pageid": 49362,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E6%A8%AA%E7%AB%96%E6%92%87%E7%82%B9%E6%8A%98",
+      "file": "横竖撇点折.wikitext",
+      "sha256": "db935a1cf58e1efd079d945b1109cda114e592c7ea37b424fc4bb2a7602c478d",
+      "purpose": [
+        "human-sung-song",
+        "non-vocaloid-songbox"
+      ],
+      "capture": {
+        "path": "captures/49362.response.json.gz",
+        "sha256": "44791158ceb9039bcce9c9d6ca095730382bfe62aa2f1edd2737a34cb11c9d77",
+        "origin": "six-real/03.raw.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 576425,
+        "user": "语星308",
+        "timestamp": "2026-08-25T12:50:54Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "79dfc9826e1213e86ca1be788cbad85e0aa36a59",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "此刻说再见",
+      "pageid": 2313,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E6%AD%A4%E5%88%BB%E8%AF%B4%E5%86%8D%E8%A7%81",
+      "file": "此刻说再见.wikitext",
+      "sha256": "d6eb9564717cb6c6f6f08eda501542a5b2b98ffe2ad363ea834b3b21c27cf0b3",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/2313.response.json.gz",
+        "sha256": "0f023c8ddf8d0da2e371aa494ece92f7a686d0b56ddc1c11841d662601aabb19",
+        "origin": "browser-fixed-20260911-113745-20e80d/1.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 486944,
+        "user": "JackBlock",
+        "timestamp": "2025-10-11T05:52:06Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "14c61a75530eef4640467b99f0ef9277ac56804c",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "疑神疑鬼",
+      "pageid": 5135,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E7%96%91%E7%A5%9E%E7%96%91%E9%AC%BC",
+      "file": "疑神疑鬼.wikitext",
+      "sha256": "01fdf73629968927ed77fd0e81b61142ff5d21a31b4d739a3d2df1138f879ac6",
+      "purpose": [
+        "parenthetical-harmonies",
+        "first-summary-only"
+      ],
+      "capture": {
+        "path": "captures/5135.response.json.gz",
+        "sha256": "750698ac3db43242cdeafded517a04e7d91fe008754e80e1043de8ef48ce7c8a",
+        "origin": "random-five-20260911-234450-515b33/3.capture.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 547973,
+        "user": "维克劳德",
+        "timestamp": "2026-06-18T03:48:00Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "ebabb1596ff9de6efbc488d5a6fcaa802dd54a94",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "礼物pre-Sent",
+      "pageid": 5220,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E7%A4%BC%E7%89%A9pre-Sent",
+      "file": "礼物pre-Sent.wikitext",
+      "sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+      "purpose": [
+        "parenthetical-harmonies"
+      ],
+      "capture": {
+        "path": "captures/5220.response.json.gz",
+        "sha256": "5166de1240d08a7d56cda109bb34a0d0b987a6a7c566ca804700674df8aac0fa",
+        "origin": "random-blind-20260909/special.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 505754,
+        "user": "Fiction Blue",
+        "timestamp": "2026-01-04T14:58:40Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "c1551e68b58d9ef6bbc26d4d8e51f98d791ad3fc",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "社畜烧酒",
+      "pageid": 3569,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E7%A4%BE%E7%95%9C%E7%83%A7%E9%85%92",
+      "file": "社畜烧酒.wikitext",
+      "sha256": "c3ec95cc00be4ec6a272cf72e20fa2ead6a8153728c31faaeeceaea87956cfdc",
+      "purpose": [
+        "cross-colour-n-unhandled",
+        "old-duplicate-new-empty"
+      ],
+      "capture": {
+        "path": "captures/3569.response.json.gz",
+        "sha256": "74fd26619b41f94809eea6f8c8847392246449bcc2d0030a2678c31c8fef66fd",
+        "origin": "precommit-review-random-20260912/3569.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 507918,
+        "user": "学生bot",
+        "timestamp": "2026-01-20T12:04:52Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "2b88d12bb318e92f9fa7b8c2f4e8b05d626673b0",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "神孽",
+      "pageid": 51878,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E7%A5%9E%E5%AD%BD",
+      "file": "神孽.wikitext",
+      "sha256": "efdb8f87919b2bf55adc7b82c565f2e6cb57e7415888d790a243d18165ab56e9",
+      "purpose": [
+        "ruby-surface-content-tie"
+      ],
+      "capture": {
+        "path": "captures/51878.response.json.gz",
+        "sha256": "07eaa75509ad7a5bc82299547e9d52d12eb6657199081b46cdfc7f105018505e",
+        "origin": "precommit-review-random-20260912/51878.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 506265,
+        "user": "这只阿皮有点皮",
+        "timestamp": "2026-01-08T10:49:23Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "fb370d3b84d9e0399d011c348d316f37ca9656da",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "秦宣四方",
+      "pageid": 68015,
+      "revid": 582936,
+      "source_url": "https://vcpedia.cn/%E7%A7%A6%E5%AE%A3%E5%9B%9B%E6%96%B9",
+      "file": "秦宣四方.wikitext",
+      "sha256": "c6440f200012e236cdc9307b05f425a88e13654397384361d90818377690208d",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/68015.response.json.gz",
+        "sha256": "ef458dec3c60e75270b146a746d13945187998248f83f3fcfa5096aac0fa83b0",
+        "origin": "browser-fixed-20260911-021300/1.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 582936,
+        "user": "不可逆",
+        "timestamp": "2026-09-09T03:50:55Z",
+        "query_file": "evidence/revisions-68015.json",
+        "source_sha1": "0b164fa862ac6fcb795d15ec0a250c65c2a6a26b",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "纸飞机(GhostFinal)",
+      "pageid": 4580,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E7%BA%B8%E9%A3%9E%E6%9C%BA%28GhostFinal%29",
+      "file": "纸飞机_GhostFinal.wikitext",
+      "sha256": "e7a4a00432ed5448479de1cb8a61830a87b18aeef2a3588a2dd718353fb69c4a",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/4580.response.json.gz",
+        "sha256": "c2b2aa2dde43629e66f3b4b21f567932c4c085fbf2f9b4d6db17b289adc860dc",
+        "origin": "browser-fixed-20260911-021300/3.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 507042,
+        "user": "维克劳德",
+        "timestamp": "2026-01-12T23:34:40Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "7e9da6b5187d92325c667364dd7d4c63ead31790",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "致闪耀的你",
+      "pageid": 53455,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E8%87%B4%E9%97%AA%E8%80%80%E7%9A%84%E4%BD%A0",
+      "file": "致闪耀的你.wikitext",
+      "sha256": "64297c20bdfaacd09d8613288f61d749a9fb9de6931e605bac4409eec3f89d03",
+      "purpose": [
+        "first-lyric-candidate",
+        "source-specific-staff-summary"
+      ],
+      "capture": {
+        "path": "captures/53455.response.json.gz",
+        "sha256": "89f9bcd332276d8bc017b58692b1e73d64fc3b909cc5aed741f6fdb45ee69185",
+        "origin": "precommit-review-random-20260912/53455.api.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 492205,
+        "user": "JackBlock",
+        "timestamp": "2025-10-11T08:39:24Z",
+        "query_file": "evidence/revisions-53455.json",
+        "source_sha1": "2f558c4669d6555a2cdec9f7ad6c2cd9fe3aaf72",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "达拉崩吧",
+      "pageid": 2350,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E8%BE%BE%E6%8B%89%E5%B4%A9%E5%90%A7",
+      "file": "达拉崩吧.wikitext",
+      "sha256": "7ec57538768bc0f44de0cf041e884db7b1136b95ca2b19e89bff8c5374e95e80",
+      "purpose": [
+        "blank-ruby-audible-fallback",
+        "bracket-placeholders"
+      ],
+      "capture": {
+        "path": "captures/2350.response.json.gz",
+        "sha256": "c8d21ad5e77903749703ac166ec6a3e1f5410a126d5af45184731864060b38fc",
+        "origin": "restart-20260910/达拉崩吧.source.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 575959,
+        "user": "JinyiDog",
+        "timestamp": "2026-08-22T20:32:01Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "f4aacd7289c7f98cb127bcac51a0bbb7db2ad5d5",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "长平传",
+      "pageid": 6077,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E9%95%BF%E5%B9%B3%E4%BC%A0",
+      "file": "长平传.wikitext",
+      "sha256": "ec5453dd7baed137733f2300d699bfc9fbe88074975213ff1a8280de45ab040e",
+      "purpose": [
+        "dramatic-spoken-lines",
+        "protected-lc"
+      ],
+      "capture": {
+        "path": "captures/6077.response.json.gz",
+        "sha256": "41312aaea5cdc55ae810b49b41866c22ee0a7078e461d764847376eb7d4d7c7f",
+        "origin": "six-real/06.raw.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 571334,
+        "user": "学生bot",
+        "timestamp": "2026-08-10T09:26:27Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "e38e2e8feb8f2e24df5315b82869fb0f25357849",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "青麟雪",
+      "pageid": 3426,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E9%9D%92%E9%BA%9F%E9%9B%AA",
+      "file": "青麟雪.wikitext",
+      "sha256": "e84e0e8f4fc4133f58637be9462c43bec29e7edef5637c55465cd93b32e1ed8e",
+      "purpose": [
+        "lyrics-content-tie",
+        "split-staff-roles"
+      ],
+      "capture": {
+        "path": "captures/3426.response.json.gz",
+        "sha256": "9bc562c71896a07156d58d2a3adffe108dbfdcf1bfe1248c8c627a7329ef232c",
+        "origin": "six-real/02.raw.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 532473,
+        "user": "维克劳德",
+        "timestamp": "2026-04-03T05:19:28Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "3bd82313541f9c46992c53262f1b2b0c43b23908",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    },
+    {
+      "title": "飞跃乌托邦",
+      "pageid": 9228,
+      "revid": null,
+      "source_url": "https://vcpedia.cn/%E9%A3%9E%E8%B7%83%E4%B9%8C%E6%89%98%E9%82%A6",
+      "file": "飞跃乌托邦.wikitext",
+      "sha256": "dccfc8e7c36986113646d43c30b32a42ce8b6957c964ed99ea117804ea731529",
+      "purpose": [
+        "staff-table",
+        "old-empty-lyrics"
+      ],
+      "capture": {
+        "path": "captures/9228.response.json.gz",
+        "sha256": "7ff7624e496c88a343954656602f9006cae46b3fd524621c00d18786899377b6",
+        "origin": "normalization-three-20260912-0052-a31f/1.capture.json",
+        "retrieved_at": null,
+        "time_note": "Original artifact has no trustworthy capture timestamp; directory label is not a timestamp."
+      },
+      "pair_kind": "HTML and wikitext from the same saved MediaWiki parse response; HTML is a rendered fragment, not the whole web page.",
+      "revision_evidence": {
+        "revid": 516145,
+        "user": "维克劳德",
+        "timestamp": "2026-03-01T23:48:20Z",
+        "query_file": "evidence/latest-revisions-v2.json",
+        "source_sha1": "9e8b3b4f35f5dd3355098f8a35196971188568b1",
+        "source_sha1_matches": true,
+        "basis": "API revision SHA1 exactly matches frozen UTF-8 wikitext; last editor, not structure author",
+        "queried_at": "2026-10-01T16:15:35.911532+00:00"
+      }
+    }
+  ]
+}

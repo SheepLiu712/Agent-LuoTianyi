@@ -1,0 +1,79 @@
+{{VOCALOID_Songbox
+|image    = 青麟雪.jpg
+|图片信息 = 曲绘 by AllySion
+|颜色     = linear-gradient(to right,#FFFFFF,#FFFFFF,#cfeaf4,#FFFFFF,#faeaed,#FFFFFF,#FFFFFF);border-color:#FFF
+|演唱     = [[洛天依]]
+|歌曲名称 = 青麟雪
+|UP主      = [[litterzy]]
+|bb_id    = av4424756
+|投稿时间 = 2016年4月21日
+|再生     = {{bilibiliCount|id=4424756}}
+}}
+
+== 简介 ==
+《'''青麟雪'''》是汐音社出品，[[litterzy]]于2016年4月21日投稿至[[bilibili]]的[[VOCALOID]]中文原创歌曲，由[[洛天依]]演唱。截至现在已有{{bilibiliCount|id=4424756}}次观看，{{bilibiliCount|id=4424756|type=4}}人收藏。
+
+另有伦桑演唱的人声本家。
+
+==STAFF的话==
+{{Cquote|<poem>由网易天谕特邀创作的同人歌，特别下载了游戏去玩。江南大大做的世界观，以及游戏剧情都蛮有趣的。
+这首歌写的是青帝九尾狐一族的故事，司空千阳、望月、淙玉间的一段往事。有兴趣的大家可以去游戏里面玩玩剧情。</poem>|曲作[[litterzy]]發表於于人声版5sing灵感}}
+
+== 歌曲 ==
+;VC本家
+{{BilibiliVideo|id=4424756}}
+
+== 歌词 ==
+{{VOCALOID Songbox Introduction
+|LDC = YES
+|lbgcolor = #faeaed
+|ltcolor = #000000;background:linear-gradient(90deg,#cfeaf4,#FFFFFF,#faeaed)
+|group1 = 作编曲<br>调教
+|list1 = [[Litterzy]]
+|group2 = 作词
+|list2 = 乘物游心
+|group3 = 笛子
+|list3 = 水玥儿
+|group4 = 混音
+|list4 = Cuttlefish
+|group5 = 曲绘
+|list5 = AllySion
+|group6 = PV
+|list6 = 纯名木
+|group7 = 出品
+|list7 = 汐音社
+|group8 = 演唱
+|list8 = [[洛天依]]
+}}
+* 此处参照PV使用繁体字。
+<poem>
+{{color|#68376c|
+-{碧海潮　長空暗日月寂　雲垂之地葬了多少神祇
+貪念迷　波瀾生禍端起　誰人揭開封印}-
+
+-{刀刃下嘶聲血淚和低鳴　愛恨模糊不清
+最終的話語灼燙了心底　造化多淒厲}-
+
+-{青麟木聽過輪迴的聲音　觀世人無上悲憫
+山河蕭條間大雪又來臨　有一人白了雙鬢}-
+
+-{流浪在　紅塵中或夢境　凡世之地就此長臥不醒
+最無奈　最糾纏是命運　猶恐踏碎薄冰}-
+
+-{繁花看遍後轉眼無踪跡　誰記此情此景
+仇怨本傷心卻催人沉溺　迷失長夜裡}-
+
+-{青麟木聽過輪迴的聲音　觀世人無上悲憫
+山河蕭條間大雪又來臨　有一人白了雙鬢}-
+
+-{青麟木聽過輪迴的聲音　觀世人無上悲憫
+山河蕭條間大雪又來臨　有一人白了雙鬢}-
+
+-{願生早春枝不等寒霜消盡　枝頭相望兩相依}-}}
+</poem>
+
+
+{{Litterzy|collapsed}}
+{{汐音社|collapsed}}
+{{洛天依/2016|collapsed}}
+[[分类:天谕同人作品]]

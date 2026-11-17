@@ -1,0 +1,50 @@
+{
+  "method": "Human inspection of frozen HTML and wikitext, independently of new output; oracle_html_candidates.json is a whitespace-insensitive diagnostic locator, not accuracy scoring. Hidden ruby annotations, references and TextHover alternative text excluded in locator; blank-surface Ruby requires manual exception. Do not infer content correctness from line count or absence of needed.",
+  "sample_scope": "21 unique paired song pages: six-real 6 plus cached-check 15. Each has only one input revision here; no same-title different-revision comparison is collapsed. Most cached records have no revid: hashes identify frozen content, not inferred revision. All 21 song status independently supported by song introduction/lyrics, including human-sung 横竖撇点折. Person fallback must not be used as independent non-song oracle.",
+  "non_song_excluded": [
+    {"title":"周刊VOCALOID中文排行榜449", "basis":"Frozen API title and ranking-program infobox; one duplicate fixture reference, one distinct page."},
+    {"title":"周刊VOCALOID中文排行榜455", "basis":"Frozen API title and ranking-program infobox."},
+    {"title":"TraveLing", "basis":"Album Infobox; prose calls it VOCALOID & ACE Chinese music album; 12-track list. Not a single-song page."}
+  ],
+  "trigger_denominators": {
+    "eligible_fresh_pairs":21,
+    "new_summary_stub_calls":21,
+    "old_summary_stub_calls":21,
+    "new_extraction_stub_calls":0,
+    "old_extraction_stub_calls":0,
+    "new_extraction_reason":"All 21 fresh results are Song and the public entry never invokes the explicitly injected extraction module. Given enabled use_llm and module, the guarded needed predicate was false after collect_materials. needed is not a public result and was not obtained by calling or patching a private parser. Thus no needed payload exists to report. This does NOT certify no semantic omissions.",
+    "new_fragment_requests_stubs":0,
+    "new_fragment_requests_rules":0,
+    "unreplayable_fragments":[],
+    "new_summary_only_pages":21,
+    "new_two_call_pages":0,
+    "rules_mode_model_calls":0,
+    "cache_files_written":0,
+    "model_quality":"Not evaluated. Extraction recording stub returns JSON null; independent summary recording stub returns fixed text. No provider/model/config production access."
+  },
+  "findings": [
+    {"title":"唱给雅音宫羽", "verdict":"Mixed: new lyrics improve, old summary preserves a fact new drops", "basis":"HTML and source include introductory lyric lines 也許有人會遺忘 / 但我決不會忘記 / 你永遠是我的雅音宮羽 before main poem. New retains them; old span preference misses plain text. HTML/source also include 压线 in rank-return sentence via font; old summary preserves 压线, new omits it. Not a claim new dominates all fields."},
+    {"title":"青麟雪", "verdict":"Lyric content tie, new formatting and field structure improve", "basis":"Both lyric strings match selected rendered lyric block ignoring whitespace; new preserves stanza/newline structure. New splits 作编曲 and 调教 instead of old fused 作编曲调教; adds source-backed song/date/ID fields."},
+    {"title":"横竖撇点折", "verdict":"Clear new lyric/infobox win", "basis":"Old lyrics empty and infobox contains only empty-key copyright disclaimer. New records 米白zzz/papaw泡泡/St and actual lyric text matching rendered original block; classify as song independently, not necessarily virtual singer original."},
+    {"title":"山塘恋雨", "verdict":"Mixed: new restores lyrics, old retains more useful summary", "basis":"New lyrics match rendered original block; old empty. New summary drops entire source paragraph describing ACE/VOCALOID4/X Studio publication and project IDs 5.1,5.2.1,5.2.2 because dynamic counts occur in same sentence. Old keeps dates/IDs albeit dangling punctuation. Source-backed infobox recovers some dates but not all dropped summary facts."},
+    {"title":"I LOVE YOU(Adaa)", "verdict":"Clear new first-lyric-candidate win, limited scope", "basis":"Old lyrics empty; new matches rendered first lyric poem including two visible Morse lines ../.-../---/...-/./-.--/---/..-. Hidden TextHover decoded alternative is not lyric oracle. No claim second PV/font content is fixed or whole-page lyric versions are complete."},
+    {"title":"长平传", "verdict":"Clear new selected-original lyric coverage win with scope caveat", "basis":"New full selected poem matches rendered corresponding original block, including opening narrative and dramatic spoken lines; old span-only extraction yields much shorter subset. New retains source LC protected traditional glyphs. Ordinary-Mandarin alternate lyrics are outside selected candidate; dramatic speaker labels/narrative remain mixed with lyrics in page and output, so not clean timed singing transcript."},
+    {"title":"秦宣四方", "verdict":"Clear new lyrics win", "basis":"Old empty; new original lyrics match rendered poem, starting 无衣颂 问前程 and 蒹葭歌 溯洄相从. Source-backed roles split 笛子/箫 rather than fused HTML label."},
+    {"title":"刀马旦(虚拟歌手)", "verdict":"New lyric coverage win", "basis":"New selected poem matches HTML; old span preference loses unwrapped text/parts. New removes copyright text mistakenly stored under empty infobox key by old."},
+    {"title":"纸飞机(GhostFinal)", "verdict":"Lyric content tie; new structure/summary cleanup improves", "basis":"Both match rendered original ignoring whitespace. New preserves newlines; old leaves ;重制版则有--次观看，--次收藏 after statistics cleaning, new omits incomplete counter sentence."},
+    {"title":"此刻说再见", "verdict":"Lyric content tie; new newlines/infobox cleanup", "basis":"Both match rendered poem ignoring whitespace. New removes empty-key copyright infobox pollution. New normalizes 徵羽摩柯 to 征羽摩柯 in prose: required zh-cn conversion but not a canonical-name fidelity improvement; neither guarantees canonical named-entity glyphs."},
+    {"title":"Estrus Cycle", "verdict":"New rule candidate restored, not unmasked full-song recovery", "basis":"HTML LyricsKai two-column text and source original/translated slots independently show masked original versus unmasked alternative. Old empty. New returns masked original 47 nonempty lines, does not combine translated column. Nonempty is not evidence complete intelligible lyrics recovered. Generic poem locator cannot judge this table; manually inspected source original slot."},
+    {"title":"煌", "verdict":"Lyric content tie; new role separation/newlines", "basis":"Both match corresponding rendered lyric block ignoring whitespace; new splits 作编曲/作词 and 混音/母带. Other page poems are not indiscriminately aggregated."},
+    {"title":"飞跃乌托邦", "verdict":"Clear new lyric and staff win", "basis":"Old lyrics empty and staff only singer/uploader. New lyrics match rendered original block, source staff includes 动点P/古洛/Gold3/九方/溱绫西陌/COIN; alternative rendered version not claim of full multi-version coverage."},
+    {"title":"惜春去", "verdict":"Lyric content tie; new formatting/role separation", "basis":"Both match rendered poem ignoring whitespace; new source-backed fields, newlines and 作编曲/调教 separated."},
+    {"title":"我还活着", "verdict":"Lyric content tie; new formatting/infobox cleanup", "basis":"Both match rendered selected poem ignoring whitespace; old copyright disclaimer under empty infobox key; new song/date/IDs from source."},
+    {"title":"礼物pre-Sent", "verdict":"Clear new lyric fidelity win", "basis":"Source and HTML contain four parenthesized harmony lines including 怎敢跳脱程序 直白将爱提起 and 拼命掩藏心底 呼之欲出话语. Old destructive brackets regex removes them; new preserves, matching rendered poem."},
+    {"title":"当我想哭的时候厕所里总是有黄金", "verdict":"Lyric content tie; new structure/infobox cleanup", "basis":"Both match rendered selected poem ignoring whitespace, including WC. New removes empty-key copyright infobox value."},
+    {"title":"凌晨四时 零下四度", "verdict":"Lyric content tie; new newlines/roles", "basis":"Both match rendered selected poem ignoring whitespace. Source-backed new role split for 作编曲/作词/调教; no lyric completeness improvement inferred from 1 to 56 lines."},
+    {"title":"疑神疑鬼", "verdict":"Mixed: new harmony fidelity, old retains second-version summary", "basis":"Source and HTML include parenthetical sung harmony 怕你的美...让我想后退 etc. New retains all, old strips. Old returns second简介 about 2026-06-17 revision, new first-candidate summary does not. This latter loss is consistent with contracted first-candidate scope but remains whole-page information loss; cannot call new globally more complete."},
+    {"title":"普通DISCO", "verdict":"New selected-original lyrics/infobox win; not fewer chars implies correctness", "basis":"New lyrics match rendered ordinary-original poem; old 885-character string is longer but not equal to selected original due span collection. New 648-character result does match. Source has performer/uploader in custom table; new returns 洛天依、言和 and ilem, old only empty-key copyright. Page also has many versions; scope not whole page."},
+    {"title":"达拉崩吧", "verdict":"Clear new original-story coverage win with alternate-version caveat", "basis":"Old duplicates starting story and drops bracket placeholders, return-to-city and closing 王浩然 stanza. New preserves original coherent sequence and [那个巨龙]/[那个勇者]. Naive HTML hidden-ruby removal locator differs by 啦啦 because source {{ruby|　　|啦啦}} has blank surface: this is actual audible lyric exception, not hallucination. Other dozens of page variants not aggregated by new; no all-version completeness claim."}
+  ],
+  "quality_boundary":"No aggregate accuracy percentage. Eight pairs have equal lyric content ignoring whitespace (2,9,10,12,14,15,17,18), despite line-count increases. Other differences have independently witnessed new benefits, but summaries show reversals and scope losses; old HTML has access to fully rendered unknown template text new rules cannot always decode. Both have dynamic-count/alternate-version/lyric-versus-narrative limitations.",
+  "invalid_attempt":"run-9798666468 is retained but invalid for model-trigger measurement: blanket socket prohibition prevented Windows asyncio loop self-pipe initialization. Effective run-6489c973c4 permits loopback self-pipe while requests external HTTP, external sockets and child processes are blocked."
+}

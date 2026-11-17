@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -66,7 +67,7 @@ def _extract_env_name(value: Any) -> str | None:
 def _collect_llm_api_key_names(config: dict[str, Any]) -> set[str]:
     llm_service = config.get("llm_service", {}) or {}
     names: set[str] = set()
-    for collection_name in ("available_llms", "available_vlms"):
+    for collection_name in ("available_llms", "available_vlms", "available_audio_models"):
         collection = llm_service.get(collection_name, {}) or {}
         for item in collection.values():
             if not isinstance(item, dict):
@@ -74,6 +75,10 @@ def _collect_llm_api_key_names(config: dict[str, Any]) -> set[str]:
             env_name = _extract_env_name(item.get("api_key"))
             if env_name:
                 names.add(env_name)
+    speech = (config.get("call_transport", {}) or {}).get("realtime_speech", {}) or {}
+    env_name = _extract_env_name(speech.get("api_key"))
+    if env_name:
+        names.add(env_name)
     return names
 
 
@@ -327,6 +332,7 @@ async def apply_llm_config(payload: dict[str, Any] = Body(default_factory=dict))
         "ok": True,
         "written": True,
         "restarted": was_running,
+        "config": build_llm_config_view(next_raw_config),
         "validation": shell.runtime_supervisor.last_validation or validation,
         "runtime": runtime_status,
     }
@@ -337,6 +343,16 @@ async def dashboard(
     days: int = Query(default=1, ge=1, le=90),
 ) -> dict[str, Any]:
     return get_admin_shell().observability.get_dashboard_summary(days=days)
+
+
+@protected_router.get("/metrics/usage")
+async def usage_metrics(window: Literal["24h", "7d"] = "24h") -> dict[str, Any]:
+    return await asyncio.to_thread(get_admin_shell().observability.usage_trends, window)
+
+
+@protected_router.get("/metrics/latency")
+async def latency_metrics(window: Literal["24h", "7d", "all"] = "24h") -> dict[str, Any]:
+    return await asyncio.to_thread(get_admin_shell().observability.latency_groups, window)
 
 
 @protected_router.get("/llm/summary")
@@ -383,6 +399,14 @@ async def pipeline_spans(
         trace_id=trace_id,
         order_by_slow=slow,
     )
+
+
+@protected_router.get("/pipeline/call-replies")
+async def call_reply_latency(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=100, ge=1, le=200),
+) -> dict[str, Any]:
+    return get_admin_shell().observability.get_call_reply_latency(days=days, limit=limit)
 
 
 @protected_router.get("/traces")

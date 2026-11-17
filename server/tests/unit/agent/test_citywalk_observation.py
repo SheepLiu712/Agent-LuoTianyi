@@ -10,7 +10,7 @@ from src.agent.handlers.stimulus.citywalk import CitywalkObservationHandler
 from src.agent.handlers.stimulus.world_activity import WorldActivityHandler
 from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from support.dynamic_skill import make_dynamic
 
 BODY = "今天在武康路散步，风很舒服。"
 
@@ -91,7 +91,7 @@ def emitter(request, sink):
 
 
 def skill(dynamics):
-    return DynamicPublishingSkill(
+    return make_dynamic(
         dynamics,
         {"luotianyi": CharacterNarrative(name="洛天依", persona="", speaking_style="")},
     )

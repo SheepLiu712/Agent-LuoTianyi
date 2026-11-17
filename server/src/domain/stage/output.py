@@ -9,6 +9,7 @@ from src.domain.agent import AgentOutput
 class AgentPresentationState(str, Enum):
     """角色的客户端呈现状态。"""
 
+    LISTENING = "listening"
     THINKING = "thinking"
     WAITING = "waiting"
 

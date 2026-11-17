@@ -46,8 +46,15 @@
     });
 
     let model;
+    let autoEyeBlink;
     let app;
-    const MODEL_SCALE_MULTIPLIER = 1.2;
+    let presentationMode = 'chat';
+    let resizePresentation = () => {};
+    window.setPresentationMode = (mode) => {
+      if (mode !== 'chat' && mode !== 'call') throw new Error('invalid_presentation_mode');
+      presentationMode = mode;
+      resizePresentation();
+    };
     const FOCUS_Y_OFFSET_RATIO = 0.0;
     const MODEL_SETTINGS_URL = './models/luo/model.model3.json';
 
@@ -145,19 +152,28 @@
             onError: (err) => { console.error('Model load internal error:', err); }
         });
         
+        autoEyeBlink = model.internalModel.eyeBlink;
         app.stage.addChild(model);
         model.eventMode = 'none';
         model.interactive = false;
         model.interactiveChildren = false;
 
         // 响应式缩放与居中
+        const naturalWidth = model.width;
+        const naturalHeight = model.height;
         const resizeModel = () => {
-          const scaleX = (window.innerWidth * MODEL_SCALE_MULTIPLIER) / model.width;
-          const scaleY = (window.innerHeight * MODEL_SCALE_MULTIPLIER) / model.height;
+          const inCall = presentationMode === 'call';
+          // 模型画布左右有透明留白；通话按可见轮廓校准至屏幕宽度。
+          const scaleX = (window.innerWidth * (inCall ? 1.75 : 1.2)) / naturalWidth;
+          const scaleY = (window.innerHeight * (inCall ? 0.9 : 1.2)) / naturalHeight;
           model.scale.set(Math.min(scaleX, scaleY));
           model.x = window.innerWidth * 0.5 - (model.width / 2);
-          model.y = window.innerHeight * 0.5 - (model.height / 2) ;
+          // 当前模型的脚底位于画布高度约 93%，与两种背景构图中的地毯对齐。
+          model.y = inCall
+            ? window.innerHeight * 0.84 - model.height * 0.93
+            : window.innerHeight * 0.5 - model.height / 2;
         };
+        resizePresentation = resizeModel;
         resizeModel();
         model.expression('normal')
         window.addEventListener('resize', resizeModel);
@@ -318,6 +334,8 @@
 
     window.setExpression = (expressionId) => {
       if (model) {
+        // Pause automatic blinking for the alternate eyes used by dumb.
+        model.internalModel.eyeBlink = expressionId === 'dumb' ? undefined : autoEyeBlink;
         model.expression(expressionId);
         window.setMouthOpenY(mouthValueProjection[expressionId] || -1); // 根据预设值调整嘴部张开程度
       }
@@ -333,7 +351,10 @@
     
     // 初始化 dataArray
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = new Float32Array(analyser.fftSize);
+    window.ReactNativeWebView?.postMessage(JSON.stringify({
+      type: 'mouthAnalysisWindow', sampleRate: audioCtx.sampleRate, samples: bufferLength,
+    }));
 
     // 维护当前音频流的状态（从第一个包提取，作用于后续包）
     let streamState = {
@@ -344,13 +365,28 @@
     let nextStartTime = 0;
     let isWaitingForEnd = false;
     let isPlaying = false;
+    let chatGeneration = 0;
+    let visualOwner = null;
+    let callMouthRms = 0;
+    const resetMouth = (owner) => {
+      if (visualOwner !== owner) return;
+      visualOwner = null;
+      window.setMouthOpenY?.(-1, 1);
+    };
+    window.setCallMouthRms = (value) => {
+      visualOwner = 'call';
+      callMouthRms = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+    };
+    window.resetCallMouth = () => resetMouth('call');
     // 当前已排队的音频源，用于停止/清空队列（音频播放互斥，Bug#9）
     const activeSources = [];
     // 最后一段已排队的音频源，用于精确感知播放结束（Bug#7）
     let lastSource = null;
 
     window.feedAudioChunk = async (base64Audio, isFinal) => {
+      const generation = chatGeneration;
       if (audioCtx.state === 'suspended') await audioCtx.resume();
+      if (generation !== chatGeneration) return;
       
       if (base64Audio) {
         // 1. Base64 转 Uint8Array
@@ -399,6 +435,7 @@
 
         // 5. 排队播放
         isPlaying = true;
+        if (visualOwner !== 'call') visualOwner = generation;
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(analyser);
@@ -408,7 +445,7 @@
           if (idx >= 0) {
             activeSources.splice(idx, 1);
           }
-          if (lastSource === source) {
+          if (generation === chatGeneration && lastSource === source) {
             notifyAudioFinished();
           }
         };
@@ -428,12 +465,13 @@
       // 6. 处理结束标志
       if (isFinal) {
         isWaitingForEnd = true;
-        checkFinished();
+        checkFinished(generation);
       }
     };
 
     // 停止并清空所有已排队的音频（用于音频播放互斥）
     window.stopServerAudio = () => {
+      resetMouth(chatGeneration++);
       for (const src of activeSources.slice()) {
         try {
           src.stop();
@@ -455,11 +493,11 @@
     // 检测是否播放完毕：主信号是最后一段音频的 onended（精确、不受 rAF 节流影响，
     // 页面被节流/切后台时 rAF 会停摆，导致 audio_finished 丢失、回复中的后续句子迟迟不出现），
     // rAF 轮询作为兜底（onended 异常丢失时也能收敛）。
-    function checkFinished() {
-      if (!isWaitingForEnd) return;
+    function checkFinished(generation) {
+      if (generation !== chatGeneration || !isWaitingForEnd) return;
       // 还有音频排队未播完：继续轮询兜底
       if (lastSource && audioCtx.currentTime < nextStartTime) {
-        requestAnimationFrame(checkFinished);
+        requestAnimationFrame(() => checkFinished(generation));
         return;
       }
       // 没有待播音频，或已全部播完：立即通知
@@ -475,6 +513,7 @@
       nextStartTime = 0;
       // 保留 lastSource 的 onended（负责从 activeSources 移除），仅解除引用
       lastSource = null;
+      resetMouth(chatGeneration++);
       // 通知 RN 播放完成
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_finished' }));
@@ -483,16 +522,20 @@
     // 浏览器原生的 60FPS 渲染循环
     const renderLoop = () => {
       requestAnimationFrame(renderLoop);
-      if (isPlaying === false) return; // 只有在有音频播放时才计算嘴型
+      if (visualOwner === null && isPlaying) visualOwner = chatGeneration;
+      if (visualOwner === null) return;
 
       // 3. 实时提取幅值 (RMS / 响度)
-      analyser.getByteTimeDomainData(dataArray);
-      let sumSquares = 0.0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const norm = (dataArray[i] / 128.0) - 1.0;
-        sumSquares += norm * norm;
+      let rms = callMouthRms;
+      if (visualOwner !== 'call' && isPlaying) {
+        analyser.getFloatTimeDomainData(dataArray);
+        let sumSquares = 0.0;
+        for (let i = dataArray.length - bufferLength; i < dataArray.length; i++) {
+          const norm = dataArray[i];
+          sumSquares += norm * norm;
+        }
+        rms = Math.sqrt(sumSquares / bufferLength);
       }
-      const rms = Math.sqrt(sumSquares / dataArray.length);
       // 4. 将幅值映射并写入底层模型，加上一点平滑系数防止高频抖动
       const targetMouthY = Math.max(Math.min(1.0, rms * 25 - 1), -1); // 简单线性映射，调整系数以适配嘴部张开程度
       if (window.setMouthOpenY) {

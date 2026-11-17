@@ -4,10 +4,18 @@
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 from openai import OpenAI
+
+SERVER_ROOT = Path(__file__).resolve().parents[6]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
+from src.utils.server_paths import resolve_server_path  # noqa: E402
+
+DEFAULT_PROMPT = resolve_server_path("res/agent/prompts/song_segmentation_prompt.json")
 
 
 def read_text_auto(path: Path) -> str:
@@ -30,8 +38,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--prompt_json",
-        default="res/song_learner/re_segment_prompt.json",
-        help="Prompt 配置文件路径，默认 res/song_learner/re_segment_prompt.json",
+        default=str(DEFAULT_PROMPT),
+        help="Prompt 配置文件路径，默认发布资源中的 agent/prompts/song_segmentation_prompt.json",
     )
     parser.add_argument(
         "--model",
@@ -114,7 +122,7 @@ def call_llm(
 
 def generate_llm_lrc(
     song_dir: Path,
-    prompt_json: Path = Path("res/song_learner/re_segment_prompt.json"),
+    prompt_json: Path = DEFAULT_PROMPT,
     model: str = "qwen3.5-plus",
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
     enable_thinking: bool = True,

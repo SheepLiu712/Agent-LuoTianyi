@@ -32,3 +32,12 @@ python tests/manual_e2e/08-reply-read-audio-replay.driver.py
 ```
 
 要重复测量文本和图片触发 `thinking` 的时间，先准备图片并创建 CLI 自动登录文件，再运行 `python tests/manual_e2e/acceptance_timing.driver.py`。驱动在 `temp/cli_acceptance_timing/` 保存各场景 JSONL 证据；可用 `CLI_E2E_CREDENTIAL_FILE`、`CLI_E2E_IMAGE` 和 `CLI_E2E_CASE` 指定凭据、图片和单个场景。该驱动会向真实服务端发送多条消息，适合隔离的测试账号。
+
+语音 AC-27 使用内部 `HeadlessSession` 驱动，不增加用户可见 slash 命令。准备合法的 M4A/AAC-LC 文件及离线假音频模型服务端后运行：
+
+```powershell
+$env:CLI_E2E_VOICE = 'C:\path\to\voice.m4a'
+python tests/manual_e2e/22-voice-message.driver.py
+```
+
+驱动会校验分阶段 ACK、`listening`/`thinking`、完整回复、唯一历史语音元数据，以及 Bearer 下载内容的 SHA-256。

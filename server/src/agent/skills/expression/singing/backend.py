@@ -85,6 +85,7 @@ class SingingBackend:
         sing_attempts: Optional[List[str]] = None,
         excluded_segments: Collection[tuple[str, str]] | None = None,
         emotion_context: str = "",
+        confirmed_intent: bool = False,
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         根据用户的唱歌尝试，构建一个唱歌计划。
@@ -128,8 +129,6 @@ class SingingBackend:
             )
             if segment:
                 return correct_song_name, segment
-        if song_name:
-            manager.add_wished_song(song_name)
         return song_name, None
 
     async def tag_song_emotions(self, character_id: str, song_name: str) -> list[str]:

@@ -181,7 +181,30 @@ async def test_process_request_rejects_missing_thinking_capability(processor, co
 
 
 def test_get_llm_mode_reads_both_module_states(processor, config):
-    assert processor.get_llm_mode() == {"types": ["main_chat", "image_understanding"]}
+    assert processor.get_llm_mode() == {"types": ["main_chat", "image_understanding"], "stream": True}
+
+
+@pytest.mark.asyncio
+async def test_stream_request_keeps_client_configuration_and_forwards_deltas(processor, config, monkeypatch):
+    captured, deltas = {}, []
+
+    async def receive(text):
+        deltas.append(text)
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        await kwargs["on_delta"]("第一句话。")
+        return {"content": "第一句话。", "usage": {"total_tokens": 4}}
+
+    monkeypatch.setattr(message_processor_module, "call_llm_api_async", fake_call)
+    result = await processor.process_llm_request(
+        {"request_id": "stream-1", "type": "main_chat", "prompt": "你好", "stream": True}, on_delta=receive
+    )
+    assert captured["payload"]["stream"] is True
+    assert captured["payload"]["model"] == "text-model"
+    assert captured["api_key"] == "sk-text"
+    assert deltas == ["第一句话。"]
+    assert result["content"] == "第一句话。"
 
 
 @pytest.mark.asyncio

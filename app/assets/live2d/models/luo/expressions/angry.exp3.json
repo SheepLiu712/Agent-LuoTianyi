@@ -22,6 +22,16 @@
 			"Id": "Param58",
 			"Value": 1,
 			"Blend": "Add"
+		},
+		{
+			"Id": "ParamEyeLOpen",
+			"Value": -1,
+			"Blend": "Add"
+		},
+		{
+			"Id": "ParamEyeROpen",
+			"Value": -1,
+			"Blend": "Add"
 		}
 	]
 }

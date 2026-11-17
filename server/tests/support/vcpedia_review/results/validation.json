@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "reviewed_base": "910af449680091e339e0e6fd517d08c1f5222923",
+  "previous_head": "b0d0a8ee10ad441bd19937959ba885d26299772c",
+  "candidate_identity": "LF-normalized source SHA256 below; no self-referential final commit ID",
+  "python_files": [
+    "server/scripts/check_pr_python.py",
+    "server/scripts/vcpedia_freeze_corpus.py",
+    "server/scripts/vcpedia_perf_baseline.py",
+    "server/scripts/vcpedia_prompt_lab.py",
+    "server/src/world/get_new_songs/daily_new_song_fetcher.py",
+    "server/src/world/get_new_songs/source_extraction.py",
+    "server/src/world/get_new_songs/task.py",
+    "server/src/world/get_new_songs/template_rules.py",
+    "server/src/world/get_new_songs/text_conversion.py",
+    "server/src/world/get_new_songs/vcpedia_fetcher.py",
+    "server/src/world/get_new_songs/wiki_api.py",
+    "server/src/world/get_new_songs/wikitext_parser.py",
+    "server/tests/integration/packaging/test_pyproject_installation.py",
+    "server/tests/support/vcpedia_corpus/oracle_support.py",
+    "server/tests/support/vcpedia_legacy_html.py",
+    "server/tests/unit/world/test_check_pr_python.py",
+    "server/tests/unit/world/test_vcpedia_corpus_baseline.py",
+    "server/tests/unit/world/test_vcpedia_corpus_tools.py",
+    "server/tests/unit/world/test_vcpedia_document_contract.py",
+    "server/tests/unit/world/test_vcpedia_infobox_staff_scope.py",
+    "server/tests/unit/world/test_vcpedia_information_counts.py",
+    "server/tests/unit/world/test_vcpedia_keyword_contract.py",
+    "server/tests/unit/world/test_vcpedia_lyrics_recovery.py",
+    "server/tests/unit/world/test_vcpedia_material_counts.py",
+    "server/tests/unit/world/test_vcpedia_perf_baseline.py",
+    "server/tests/unit/world/test_vcpedia_prompt_lab.py",
+    "server/tests/unit/world/test_vcpedia_rules_packaging.py",
+    "server/tests/unit/world/test_vcpedia_supplement_switches.py",
+    "server/tests/unit/world/test_vcpedia_transport_contract.py",
+    "server/tests/unit/world/test_vcpedia_wikitext_equivalence.py",
+    "server/tests/unit/world/test_world_task_vcpedia_new_songs.py"
+  ],
+  "source_sha256_lf": {
+    "server/scripts/check_pr_python.py": "8c91c2a3b1a281f1b5c4fb6b07efd54d122db47b85b72971f8815511c204e9ed",
+    "server/scripts/vcpedia_freeze_corpus.py": "4b24e558115bd5260495d41110f755342a8a2a05f068c8cb9ddf6efaa3568a4f",
+    "server/scripts/vcpedia_perf_baseline.py": "c969cad444ff2f821b17fb1cf4cc852b13094c953b74d88f9830fdd152c2d0f2",
+    "server/scripts/vcpedia_prompt_lab.py": "2426e9190474803b7972e42460bf3207090607f0423024860165d25cb9eeda19",
+    "server/src/world/get_new_songs/daily_new_song_fetcher.py": "13794c92b377b3b1c144f6a06f110f6cfaf4a37b9cc98c89c03a97bb8529c08c",
+    "server/src/world/get_new_songs/source_extraction.py": "0c97f46402b0025e39993601a43f10b0b9627be07d5722506d90659c387adedc",
+    "server/src/world/get_new_songs/task.py": "17faff7fbd0829d9ad08e1c3ff243b3e5a85c80e4c5f874c31846107babf8b0a",
+    "server/src/world/get_new_songs/template_rules.py": "f862d4ceb956d369c1c7261f7bddfc66c933847ef3f3ab5e75e0b78bd0a48117",
+    "server/src/world/get_new_songs/text_conversion.py": "3b8a1ff42932e596b6632d05454b31c220eb26513443355f0a7823ee41e75780",
+    "server/src/world/get_new_songs/vcpedia_fetcher.py": "4ec933f6f8e9731da449e5f1f7fa35bcace5fc4b7b0946d7ca09b15a9d9391c2",
+    "server/src/world/get_new_songs/wiki_api.py": "4e4f4023bfc7a7f5715c2bfc4e2d3bcf3d8afcaabb162d322774f5c5bffe83a1",
+    "server/src/world/get_new_songs/wikitext_parser.py": "32ce22475bc1cd5c266ea6817ec758f38a1898bc5d7e7546528dfdad506eb724",
+    "server/tests/integration/packaging/test_pyproject_installation.py": "643ce8f88cdf3e6be21720e7f04bb9c57967ad8c0475e46fe1dca06ed813e164",
+    "server/tests/support/vcpedia_corpus/oracle_support.py": "a9cddbd5a4f4eb524d340a6232d086ca98830985d53566d968420e567b250970",
+    "server/tests/support/vcpedia_legacy_html.py": "8b6d09f06aba557a8043f70792a46b9330a40de1cd3bf2f4c3e9d5c0b6b2ec53",
+    "server/tests/unit/world/test_check_pr_python.py": "4d7c0ffca87cbec0e71b08a38dfdc88ee295b4906e5ba9446dfe1f0e99bf9987",
+    "server/tests/unit/world/test_vcpedia_corpus_baseline.py": "e23c6284b9d0082c87936e7f17fb01d0fdb37318bd041d9aa08beef55d777399",
+    "server/tests/unit/world/test_vcpedia_corpus_tools.py": "e2e4ba691cfe335c89455e79e57c10e80994fe76e4aae0d9102bed120991c8ff",
+    "server/tests/unit/world/test_vcpedia_document_contract.py": "36c4e09e93fb235ecd229f7c7ab5608c2bcc576b059c0f4acc9c15123f973a64",
+    "server/tests/unit/world/test_vcpedia_infobox_staff_scope.py": "41281972e034d3c231d6e6fbc20bd6ee24f7b7cb416e9d5d2b7ea4af89d8476e",
+    "server/tests/unit/world/test_vcpedia_information_counts.py": "796c0eb4146eb4e99dce6ea5f4c4d430db935b6a198a369ef1568dc4a4b90ee5",
+    "server/tests/unit/world/test_vcpedia_keyword_contract.py": "71e82fc27cc7afa4ad5180b6139874f5a37b9f30bd1a003426fad1ca01419ac9",
+    "server/tests/unit/world/test_vcpedia_lyrics_recovery.py": "c293e1fe4adb50d6cef443f98bf5e132bc0e9477d2dfb94fb9fa8b1a8598335d",
+    "server/tests/unit/world/test_vcpedia_material_counts.py": "1673b19964ea3c9000ffc7b61df7c3638029dc7eeaa370a61868b36cf12b2e29",
+    "server/tests/unit/world/test_vcpedia_perf_baseline.py": "002978ecf3a75f21445cfd2cfd184228d67f2c74ca63545d090206ba605ccf48",
+    "server/tests/unit/world/test_vcpedia_prompt_lab.py": "dd2abcd3f5fe09108fad563617900de28021cf3d6ca735395ada5a2186826fa0",
+    "server/tests/unit/world/test_vcpedia_rules_packaging.py": "df1ff0e021b460ff896c615fe4ecdda09ba406da62d41c456c46b14b48924fff",
+    "server/tests/unit/world/test_vcpedia_supplement_switches.py": "ea799301bef98b8359394ccf6d762e2200b986f5661c774c0c3ccc384332c9e8",
+    "server/tests/unit/world/test_vcpedia_transport_contract.py": "f6881fb6f4e642ff7542f723be5306366fc6b8e2c2df94d9dbcfb331d2e0d370",
+    "server/tests/unit/world/test_vcpedia_wikitext_equivalence.py": "04170babd07d221df424add283e5689025828466aa452b55bc207dce6f925069",
+    "server/tests/unit/world/test_world_task_vcpedia_new_songs.py": "e9d02a76a7b1c5da135b7205323ce57f8d2161ce3e24db1619e6501b82b0cc98"
+  },
+  "environment": {
+    "ruff": "0.14.10",
+    "pytest": "9.1.1",
+    "black": "26.5.1",
+    "setuptools": "80.10.2",
+    "build": "1.5.0",
+    "mwparserfromhell": "0.7.2",
+    "beautifulsoup4": "4.15.0",
+    "zhconv": "1.4.3"
+  },
+  "clean_export": {
+    "started_without": [
+      ".git",
+      "server/data",
+      "server/config/secrets.local.env"
+    ],
+    "lint_exit": 0,
+    "related_tests": {
+      "passed": 579,
+      "failed": 0,
+      "scope": [
+        "tests/unit/world",
+        "tests/integration/world",
+        "tests/integration/packaging"
+      ]
+    },
+    "compileall_exit": 0,
+    "freeze_exit": 0,
+    "effect_regression_exit": 0,
+    "performance_check_exit": 0,
+    "prompt_offline_exit": 0
+  },
+  "full_unit_worktree": {
+    "passed": 1324,
+    "failed": 1,
+    "exit_code": 1,
+    "failure": "tests/unit/utils/test_llm_service.py::TestLLMService::test_register_llm_module",
+    "reason": "Existing test attempts a real provider request and receives 401 invalid_api_key. Not changed or skipped."
+  },
+  "content_effect": {
+    "scope": "12 selected pages / 78 reviewed content items, not global accuracy",
+    "old_matched": 58,
+    "new_matched": 67,
+    "new_known_gaps": 11,
+    "effect_complete": false
+  },
+  "independent_reviews": {
+    "business": "visible-empty protected first-wins P2 fixed and independently rechecked; 161 targeted tests passed",
+    "tools": "escaped-secret output and strict JSON P2 fixed and independently rechecked with fake credentials",
+    "corpus_and_documents": "ledger contradictions fixed; paired hashes, full legacy equivalence, known gaps, official activity and full 18-commit document inventory checked"
+  },
+  "limits": [
+    "Original first24 daily sample and historical Shana Fanghua64->723 not reproduced; no substitution by the selected corpus.",
+    "No successful real supplement-model end-to-end call in this revision; only the unrelated full-unit test attempted a provider request and received 401.",
+    "No production database migration, no whole-site correctness or network speed guarantee."
+  ]
+}

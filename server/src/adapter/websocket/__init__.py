@@ -1,5 +1,5 @@
-"""WebSocket 业务适配入口。"""
+"""Shared WebSocket adapter network contracts; implementations live in chat and call_v1."""
 
-from .adapter import ChatEventAcceptance, WebSocketAdapter
+from .connection import AdapterConnection, AdapterConnectionError, OutboundDelivery
 
-__all__ = ["ChatEventAcceptance", "WebSocketAdapter"]
+__all__ = ["AdapterConnection", "AdapterConnectionError", "OutboundDelivery"]

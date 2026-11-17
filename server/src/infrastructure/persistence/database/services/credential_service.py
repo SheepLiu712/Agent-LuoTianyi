@@ -210,6 +210,23 @@ class CredentialService:
         payload = self._decode_message_token_claims(token)
         return str(payload["user_uuid"]) if payload else None
 
+    def authenticate_message_token(self, token: str) -> Optional[str]:
+        """Validate a Bearer message token without requiring a client-supplied username."""
+        payload = self._decode_message_token_claims(token)
+        if not payload:
+            return None
+        user_uuid = str(payload["user_uuid"])
+        db = self._new_session()
+        try:
+            user = db.query(User).filter(User.uuid == user_uuid).first()
+            if not user or not user.auth_token:
+                return None
+            expected_fp = self._session_fingerprint(user.auth_token)
+            actual_fp = str(payload["session_fp"])
+            return user_uuid if expected_fp and hmac.compare_digest(expected_fp, actual_fp) else None
+        finally:
+            db.close()
+
     def check_message_token(self, username: str, token: str) -> Tuple[bool, Optional[str]]:
         """
         检查消息 token 是否有效。

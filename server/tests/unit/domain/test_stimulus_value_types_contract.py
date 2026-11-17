@@ -66,7 +66,7 @@ def _valid_value(type_name: str):
         "MediaRef": lambda: agent_domain.MediaRef(media_id="media-1"),
         "EvidenceRef": lambda: agent_domain.EvidenceRef(evidence_id="evidence-1"),
         "SourceRef": lambda: agent_domain.SourceRef(source_id="source-1"),
-        "BodyRegion": lambda: agent_domain.BodyRegion(value="未来新增部位"),
+        "BodyRegion": lambda: agent_domain.BodyRegion(value="手"),
         "ProactiveReason": lambda: agent_domain.ProactiveReason(value="future_reason"),
         "WorldObservationKind": lambda: agent_domain.WorldObservationKind(value="future_fact"),
         "ActorRef": _actor,

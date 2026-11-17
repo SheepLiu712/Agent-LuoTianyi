@@ -1,0 +1,113 @@
+{{VOCALOID_Songbox
+|image = Foxy.png
+|图片信息 = Illustration by [[Sya]]
+|颜色 = #8DECFE
+|演唱 = [[洛天依]]、[[vjp:Megpoid|GUMI]]
+|歌曲名称 = Foxy
+|UP主 = [[潜移默化P]]
+|bb_id = av17977719
+|投稿时间 = 2018年1月5日
+|其他资料 = ，收录于专辑《Play!Play!》
+|再生 = {{BilibiliCount|id=17977719}}
+}}
+
+== 简介 ==
+《'''Foxy'''》是[[潜移默化P]]于2018年1月5日投稿至[[bilibili]]的[[VOCALOID]]中文原创歌曲，由[[洛天依]]和[[vjp:Megpoid|GUMI]]合唱，收录在[[咏吟轩]]的第四张原创VOCALOID专辑《[[Play!Play!]]》中。截至現在已有{{BilibiliCount|id=17977719}}次观看，{{BilibiliCount|id=17977719|type=4}}人收藏。
+
+本曲灵感来源于游戏《英雄联盟》，是其中女性角色九尾妖狐阿狸的同人曲。
+
+電音舞曲曲風動感帥氣，搭配天依和GUMI挑逗的唱腔，妖媚又冷豔，魅惑眾生。
+
+== 歌曲 ==
+{{BilibiliVideo|id=17977719}}
+
+== 歌词 ==
+{{VOCALOID Songbox Introduction
+|LDC = YES
+|lbgcolor = #8DECFE
+|ltcolor = #000000
+|group1 = 作編曲<br />混音
+|list1 = [[潜移默化P]]<br />[[GhostFinal]]
+|group2 = 作詞
+|list2 = 和田野
+|group3 = 調教
+|list3 = [[潜移默化P]]
+|group4 = 母带
+|list4 = [[GhostFinal]]
+|group5 = 曲繪
+|list5 = [[Sya]]
+|group6 = PV
+|list6 = 梳云
+|group7 = 演唱
+|list7 = [[洛天依]]、[[vjp:Megpoid|GUMI]]
+}}
+*{{color|#66ccff|蓝色字}}为洛天依演唱，{{color|#006600|绿色字}}为GUMI演唱。
+<poem>
+{{columns-list|2|
+{{color|#66ccff|用一个秘密　打破了无声趣的面具
+看你　着了迷再沉迷}}
+{{color|#006600|Baby look at me}}
+{{color|#66ccff|既然心有灵犀}}
+{{color|#006600|Why pretend so hate it}}
+{{color|#66ccff|别刻意压抑自己
+
+不要躲在一边　隐瞒着危险　装作多可怜
+一人一句谎言　泄露了心愿　要不要来圆}}
+
+{{color|#006600|Do you want me, you want me
+want do you want me to be}}
+{{color|#66ccff|故作矜持没有用　眼神和姿态放轻松}}
+{{color|#006600|say you want me, you want me
+say that so much want me}}
+{{color|#66ccff|装聋作哑没有用　叫不出声来分分钟
+嘿　快赶快来
+来　就趁现在}}
+{{color|#006600|seize your fate by the throat
+how do you make my mind blow}}
+{{color|#66ccff|夜色变奇怪　怪就别停下来
+躁动的长夜漫漫　who is the foxy one}}
+
+{{color|#006600|Even though that everything looks like a tragedy
+Don't panic oh my babe you still got me}}
+
+{{color|#66ccff|越是难将息　这世间的一万种风景
+不及你　你的万分之一}}
+{{color|#006600|Don't bite your lips}}
+{{color|#66ccff|那种为难表情}}
+{{color|#006600|It's so suspicious}}
+{{color|#66ccff|明明就不能自己}}
+
+{{color|#006600|Do you want me, you want me
+want do you want me to be}}
+{{color|#66ccff|故作矜持没有用　欲擒故纵早被看透}}
+{{color|#006600|Say you want me, you want me
+Say that so much you want me}}
+{{color|#66ccff|装聋作哑没有用　心跳在加快分分钟
+嘿　快赶快来
+来　就别放开}}
+{{color|#006600|Trust your feel lick my soul
+How do you gonna make me thrill}}
+{{color|#66ccff|谁是教唆犯　夜晚愈发可爱
+贪心的人被崇拜　别辜负一身宠爱}}
+
+{{color|#006600|Do you want me, you want me
+want do you want me to be}}
+{{color|#66ccff|故作矜持没有用　眼神和姿态放轻松}}
+{{color|#006600|say you want me, you want me
+say that so much want me}}
+{{color|#66ccff|装聋作哑没有用　叫不出声来分分钟
+嘿　快赶快来
+来　就趁现在}}
+{{color|#006600|seize your fate by the throat
+how do you make my mind blow}}
+{{color|#66ccff|夜色变奇怪　怪就别停下来
+躁动的长夜漫漫　who is the foxy one}}
+}}
+</poem>
+
+
+{{潜移默化P|collapsed}}
+{{GhostFinal|collapsed}}
+{{洛天依/2018|collapsed}}
+[[分类:英雄联盟同人作品]]
+[[Category:Megpoid歌曲]]

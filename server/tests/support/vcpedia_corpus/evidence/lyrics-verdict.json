@@ -1,0 +1,177 @@
+[
+  {
+    "title": "神孽",
+    "oracle": "HTML .poem[0] confirmed lyrics section; ruby surface only",
+    "oracle_nonempty_lines": 51,
+    "old_chars": 483,
+    "old_surface_equal_ignoring_whitespace": true,
+    "old_differences": [],
+    "new_chars": 491,
+    "new_surface_equal_ignoring_whitespace": true,
+    "new_differences": []
+  },
+  {
+    "title": "Sharing The World",
+    "oracle": "first original LyricsKai/hover parameter excluding #NoHover",
+    "oracle_nonempty_lines": 51,
+    "old_chars": 0,
+    "old_surface_equal_ignoring_whitespace": false,
+    "old_differences": [
+      {
+        "op": "delete",
+        "surface": "SharingourworldSharingourworldIcanseethisfutureisrightnowCausemyvoiceisalwaysgoingaroundTellmehowyoufeellikethesedaysTellmewhyyoudon'twannasayitTellmenowwhatisonyourmindI'mstillgonnalistentoyouIfthereissomethingonyourmindthatmakesyoustayIwillfreeyoursoulIwillfreeyoursoulSharingyoursoundWe'resharinganendlessloveCan'tyouseethisfutureisrightnowCausemyvoiceisalwaysgoingaroundSharingyoursoundConnectingourfeelingsEveryonehasfoundthatwe'veownedthishymnNowwehavefoundthat'sallSowejoininTellmehowyoufeltwhenyousawitTellmewhyitmadeyousohappyTellmenowwhatisonyourmindI'mstillgonnalistentoyouIfthereissomethingonyourmindyouwanttosayJustnowfreeyoursoulJustnowfreeyoursoulSharingyoursoundWe'resharinganendlessloveCan'tyouseethisfutureisrightnowCausemyvoiceisalwaysgoingaroundSharingyoursoundConnectingourfeelingsEveryonehasfoundthatwe'veownedthishymnNowwehavefoundthat'sallSowejoininYou'llgetitstepbystepWhenwekeepuptooursoundAnywaydanceinmystepsEverydayIwillbeeverywhereAnytime...SharingourworldSharingourworldIcanseethisfutureisrightnowCausemyvoiceisalwaysgoingaroundSharingourworldCan'tyouseethisfutureisrightnowCausemyvoiceisalwaysgoingaround",
+        "actual": ""
+      }
+    ],
+    "new_chars": 617,
+    "new_surface_equal_ignoring_whitespace": false,
+    "new_differences": [
+      {
+        "op": "replace",
+        "surface": "ourworldSharingourworldI",
+        "actual": "TheWorld过去から现在・未来へweallかけがえのない全ての灯とtellmenow饮み込んだwords君が言いかけたアーギュメント自我が消えないようにらららら歌えたらwe少し耳を澄ましたら同じような声が鼓动が共鸣だしだしたSharingTheSoundSharingTheEndlessLove过去から现在・未来へweallかけがえのない全ての灯とSharingyourSoundConne"
+      },
+      {
+        "op": "replace",
+        "surface": "anseethis",
+        "actual": "tingour"
+      },
+      {
+        "op": "replace",
+        "surface": "utureisrightnow",
+        "actual": "eelingsいつまでも孤独じゃないwefind何処にいてもアクセスほらweハブeverytime今浮かんだイメージいつも闻かしてyourstory仆が仆らになって未来が続くようにwe関系无い孤独が気楽で気がつけばsoloここからはnowallSharingTheSoundSharingTheEndlessLove消えかけた未来照らす火を燃やさずにかざせ胸の希望SharingyourSound"
+      },
+      {
+        "op": "replace",
+        "surface": "ausemyvoi",
+        "actual": "onne"
+      },
+      {
+        "op": "replace",
+        "surface": "eisalwaysgoingaroundTellmehowyou",
+        "actual": "tingour"
+      },
+      {
+        "op": "replace",
+        "surface": "likethesedaysTellmewhyyoudon'twannasayitTellmenowwhatisonyourmindI'mstillgonnalistentoyouIfthereissomethingonyourmindthatmakesyoustayIwillfreeyoursoulIwillfreeyoursoulSharingyoursoundWe'resharinganendlessloveCan'tyouseethisfutureisrightnowCausemyvoiceisalwaysgoingaroundSharingyoursoundConnectingourfeelingsEveryonehasfoundthatwe'veownedthishymnNowwehavefoundthat'sallSowejoininTellmehowyoufeltwhenyousawitTellmewhyitmadeyousohappyTellmenowwhatisonyourmindI'mstillgonnalistentoyouIfthereissomethingonyourmindyouwanttosayJustnowfreeyoursoulJustnowfreeyoursoulSharingyoursoundWe'resharinganendlessloveCan'tyouseethisfutureisrightnowCausemyvoiceisalwaysgoingaroundSharingyoursoundConnectingourfeelingsEveryonehasfoundthatwe'veownedthishymnNowwehavefoundthat'sallSowejoininYou'llgetit",
+        "actual": "ings辉くさ绿雨の日も枯れ无い种撒け肥立つフューチャー今は"
+      },
+      {
+        "op": "replace",
+        "surface": "WhenwekeepuptooursoundAnywaydanceinmystepsEverydayIwillbeeverywhereAnytime...SharingourworldSharingourworldIcanseethisfutureisrightnowCausemyvoiceisalwaysgoingaroundSharingourworldCan'tyouseethisfutureisrightnowCausemyvoiceisalwaysgoingaround",
+        "actual": "ただ视聴いていわばレア体験チャージしていつかきっといつかそうここで会える"
+      }
+    ]
+  },
+  {
+    "title": "海王的心",
+    "oracle": "HTML .poem[1] confirmed lyrics section; ruby surface only",
+    "oracle_nonempty_lines": 24,
+    "old_chars": 302,
+    "old_surface_equal_ignoring_whitespace": false,
+    "old_differences": [
+      {
+        "op": "delete",
+        "surface": "（在人海打捞我希望你即使我那声音差了频）",
+        "actual": ""
+      },
+      {
+        "op": "delete",
+        "surface": "（海的心说不出太无情青蓝夏流入夜鲸）",
+        "actual": ""
+      },
+      {
+        "op": "delete",
+        "surface": "（在人海放纵我渴望你即使我那双耳失了听）",
+        "actual": ""
+      },
+      {
+        "op": "delete",
+        "surface": "（海的心感不穿多有情）",
+        "actual": ""
+      },
+      {
+        "op": "delete",
+        "surface": "（赤红羽游入夜鲸）",
+        "actual": ""
+      }
+    ],
+    "new_chars": 393,
+    "new_surface_equal_ignoring_whitespace": true,
+    "new_differences": []
+  },
+  {
+    "title": "Foxy",
+    "oracle": "HTML .poem[0] confirmed lyrics section; ruby surface only",
+    "oracle_nonempty_lines": 52,
+    "old_chars": 1050,
+    "old_surface_equal_ignoring_whitespace": true,
+    "old_differences": [],
+    "new_chars": 0,
+    "new_surface_equal_ignoring_whitespace": false,
+    "new_differences": [
+      {
+        "op": "delete",
+        "surface": "用一个秘密打破了无声趣的面具看你着了迷再沉迷Babylookatme既然心有灵犀Whypretendsohateit别刻意压抑自己不要躲在一边隐瞒着危险装作多可怜一人一句谎言泄露了心愿要不要来圆Doyouwantme,youwantmewantdoyouwantmetobe故作矜持没有用眼神和姿态放轻松sayyouwantme,youwantmesaythatsomuchwantme装聋作哑没有用叫不出声来分分钟嘿快赶快来来就趁现在seizeyourfatebythethroathowdoyoumakemymindblow夜色变奇怪怪就别停下来躁动的长夜漫漫whoisthefoxyoneEventhoughthateverythinglookslikeatragedyDon'tpanicohmybabeyoustillgotme越是难将息这世间的一万种风景不及你你的万分之一Don'tbiteyourlips那种为难表情It'ssosuspicious明明就不能自己Doyouwantme,youwantmewantdoyouwantmetobe故作矜持没有用欲擒故纵早被看透Sayyouwantme,youwantmeSaythatsomuchyouwantme装聋作哑没有用心跳在加快分分钟嘿快赶快来来就别放开TrustyourfeellickmysoulHowdoyougonnamakemethrill谁是教唆犯夜晚愈发可爱贪心的人被崇拜别辜负一身宠爱Doyouwantme,youwantmewantdoyouwantmetobe故作矜持没有用眼神和姿态放轻松sayyouwantme,youwantmesaythatsomuchwantme装聋作哑没有用叫不出声来分分钟嘿快赶快来来就趁现在seizeyourfatebythethroathowdoyoumakemymindblow夜色变奇怪怪就别停下来躁动的长夜漫漫whoisthefoxyone",
+        "actual": ""
+      }
+    ]
+  },
+  {
+    "title": "社畜烧酒",
+    "oracle": "HTML .poem[0] confirmed lyrics section; ruby surface only",
+    "oracle_nonempty_lines": 28,
+    "old_chars": 855,
+    "old_surface_equal_ignoring_whitespace": false,
+    "old_differences": [
+      {
+        "op": "insert",
+        "surface": "",
+        "actual": "追早高峰的地铁被挤下错过一列哎一会儿走快一些不想迟到被扣钱回家已经十二点还有一份报告没写泡上一杯咖啡今晚继续熬夜难道你和我一样人生何畜不相逢每天每天加班加点早畜晚归为了明天后天畜类拔萃只能说okay不能说很累没时间恋爱没有机会畜双入对那些学弟学妹后畜可畏没有时间畜畜可怜再努力一些希望有一天赚大钱小肚子越来越肥没工夫健身锻炼喜欢的都太贵明天还要还花呗害怕年末的体检越发稀疏的发际线别想了快工作明天早起开会难道你和我一样人生何畜不相逢每天每天加班加点早畜晚归为了明天后天畜类拔萃只能说okay不能说很累没时间恋爱没有机会畜双入对那些学弟学妹后畜可畏没有时间畜畜可怜再坚持几年总会有一天赚大钱其实其实也没什么伟大理想过的普普通通但也不差撸猫喝奶茶追星看动画赚的足够浪费这样算不算理想看似平凡看似易如反掌对平凡的我也不简单希望有一天一定有一天会实现"
+      }
+    ],
+    "new_chars": 0,
+    "new_surface_equal_ignoring_whitespace": false,
+    "new_differences": [
+      {
+        "op": "delete",
+        "surface": "追早高峰的地铁被挤下错过一列哎一会儿走快一些不想迟到被扣钱回家已经十二点还有一份报告没写泡上一杯咖啡今晚继续熬夜难道你和我一样人生何畜不相逢每天每天加班加点早畜晚归为了明天后天畜类拔萃只能说okay不能说很累没时间恋爱没有机会畜双入对那些学弟学妹后畜可畏没有时间畜畜可怜再努力一些希望有一天赚大钱小肚子越来越肥没工夫健身锻炼喜欢的都太贵明天还要还花呗害怕年末的体检越发稀疏的发际线别想了快工作明天早起开会难道你和我一样人生何畜不相逢每天每天加班加点早畜晚归为了明天后天畜类拔萃只能说okay不能说很累没时间恋爱没有机会畜双入对那些学弟学妹后畜可畏没有时间畜畜可怜再坚持几年总会有一天赚大钱其实其实也没什么伟大理想过的普普通通但也不差撸猫喝奶茶追星看动画赚的足够浪费这样算不算理想看似平凡看似易如反掌对平凡的我也不简单希望有一天一定有一天会实现",
+        "actual": ""
+      }
+    ]
+  },
+  {
+    "title": "我生于死去之日。",
+    "oracle": "HTML .poem[1] confirmed lyrics section; ruby surface only",
+    "oracle_nonempty_lines": 29,
+    "old_chars": 0,
+    "old_surface_equal_ignoring_whitespace": false,
+    "old_differences": [
+      {
+        "op": "delete",
+        "surface": "当狭小四方木匣合上时间的袖中封存了又一个断章人们以悲戚话语镌刻同个模样直至传唱者也归纳进稀疏平常告诉我生命为何短暂|被遗憾填满桀骜作者刻意在章节中增添伤感|仍趋于平淡长河边未曾走完纵身一跃便到对岸徒留几张空白纸页被记忆侵染|另一半人们为逃避注定结局编篡千方百计|饮下永生药剂却无法越过法则亲手扳回胜利|必输游戏莫非生命是死神的伪命题不曾长存也不曾止息|不可回避是否那座倾斜天平就将价值轻易裁定我那不值一提的生命竟和圣人论孰轻|孰赢绝望者抓紧一切机遇洗脱这罪名却又踱步于一声烙印心底的悲鸣若自甘割舍长眠权利意料中的幸福是否也会如期降临可是爱人都离去承载超负荷的记忆独留下被变革排除在外的古迹人们总在劳碌中争夺片刻的安宁盛放后也寻求独享散场的寂静|循环更替死亡正在颂唱万物的真名侧耳倾听礼赞的回音|倾听生命新月升空艳阳沉溺昼夜轮转才成四季百草尽数枯萎后搏得一线生机若命运戏谑地留下了历史的毛皮我刺穿血肉只为将那书页写到底我的生命便在死去之日撰满深意",
+        "actual": ""
+      }
+    ],
+    "new_chars": 491,
+    "new_surface_equal_ignoring_whitespace": true,
+    "new_differences": []
+  },
+  {
+    "title": "致闪耀的你",
+    "oracle": "HTML .poem[0] confirmed lyrics section; ruby surface only",
+    "oracle_nonempty_lines": 30,
+    "old_chars": 0,
+    "old_surface_equal_ignoring_whitespace": false,
+    "old_differences": [
+      {
+        "op": "delete",
+        "surface": "我会告诉你更多关于你的秘密发现你心中至真至美看穿所有的词不达意言不由衷写新的诗篇为你注解借你编织的翅膀飞向无垠彼方比苍蓝天空更远更远让风替我带回海背面世界的照片如你所述般瑰丽壮烈你于霓虹缝隙窥见星空的一角就匆匆将光芒与我分享你于田野中沉思未能找到答案且将线索吟唱我看见你偶得一句时按捺不住地欢呼雀跃反复推敲将灵感誊写在黑白卷帘看见你心声初次被她唱响时流下感动的眼泪我看见你用通道和旋钮探寻听觉的最优解舞动线条与色彩描绘想象的画面看见你翘首等候视频渲染时满怀期待的笑颜缠绕两点一线间的藤蔓竭力开出的朵朵鲜花俯身尽数收集用于装点你为我勾勒的明天我会告诉你更多关于你的秘密发现你心中至真至美看穿所有的词不达意言不由衷写新的诗篇为你注解借你编织的翅膀飞向无垠彼方比苍蓝天空更远更远让风替我带回海背面世界的照片如你所述般瑰丽壮烈害怕身体忘却心灵呼吸的节奏戴上耳机眼眶不再微红质问他人、怀疑自己只是在表演“热爱”聊以为生拿出“工作”当借口虚掩真心凭借“爱好”为理由徘徊努力原来填满我内心的是这样胆小、脆弱的你啊可是我仍然相信啊相信你笔下的“她”说的话“未曾相逢心意却相通”你拥有“创作”的魔法感谢你让我看到：这样平凡的你都心怀着如此耀眼的“爱”更高更远处一定有更美的存在扇一扇星空千丈摘下洁白月亮安放在你我共同故乡映照每段旋律后的泪水与欢笑绝不让这故事被遗忘任他春夏与秋冬天南海北奔忙都将你谱写的歌传唱令所有平凡普通的、努力的、闪耀的你为自己骄傲",
+        "actual": ""
+      }
+    ],
+    "new_chars": 698,
+    "new_surface_equal_ignoring_whitespace": true,
+    "new_differences": []
+  }
+]

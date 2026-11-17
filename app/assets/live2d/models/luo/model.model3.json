@@ -50,6 +50,10 @@
 			{
 				"Name": "sing",
 				"File": "expressions/sing.exp3.json"
+			},
+			{
+				"Name": "yanndere",
+				"File": "expressions/yanndere.exp3.json"
 			}
 		],
 		"Motions": {
@@ -135,5 +139,10 @@
 			"Name": "右手",
 			"Id": "ArtMesh127"
 		}
-	]
+	],
+	"Groups": [{
+		"Target": "Parameter",
+		"Name": "EyeBlink",
+		"Ids": ["ParamEyeLOpen", "ParamEyeROpen"]
+	}]
 }

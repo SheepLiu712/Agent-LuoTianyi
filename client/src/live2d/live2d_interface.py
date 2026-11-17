@@ -78,6 +78,10 @@ class Live2dModel():
             self.model.Resize(w, h)
 
     def SetExpression(self, expression_id: str) -> None:
+        if expression_id=="dumb":
+            self.SetAutoBlinkEnable(False)
+        else :
+            self.SetAutoBlinkEnable(True)
         if self.model:
             self.model.SetExpression(expression_id)
             mouth_value = self.mouth_value_projection.get(expression_id, -1)

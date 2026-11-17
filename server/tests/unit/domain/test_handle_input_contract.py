@@ -38,7 +38,13 @@ def _stimulus(name="TextMessage", stimulus_id="message-1", **overrides):
             media_ref=domain.MediaRef(media_id="image-1"),
             client_msg_id="client-1",
         ),
-        "VoiceMessage": dict(media_ref=None, transcript="你好", client_msg_id="client-1"),
+        "VoiceMessage": dict(
+            message_uuid="92b6558b-83e7-54bb-b02a-609481b07406",
+            media_ref=None,
+            transcript="你好",
+            client_msg_id="client-1",
+            duration_ms=1234,
+        ),
         "UserTyping": dict(text_length=4),
         "ImageSelectionOpened": {},
         "ImageSelectionClosed": {},
@@ -122,7 +128,7 @@ def _readonly(obj, field, replacement):
 @pytest.mark.parametrize(
     "name, expected",
     [
-        ("InteractionKind", {"CHAT": "chat", "TOY": "toy", "WORLD": "world"}),
+        ("InteractionKind", {"CHAT": "chat", "TOY": "toy", "WORLD": "world", "CALL": "call"}),
         ("ConnectionState", {"CONNECTED": "connected", "DISCONNECTED": "disconnected"}),
         (
             "AgentOutputKind",
@@ -151,9 +157,11 @@ def test_handle_enums_have_only_specified_members_and_wire_values(name, expected
     assert {member.name: member.value for member in _public(name)} == expected
 
 
-def test_snapshot_union_contains_only_the_three_public_variants():
-    """保证公开快照联合只有 Chat、Toy、World，不引入通用或未来变体。"""
-    assert set(get_args(_public("InteractionSnapshot"))) == {_public(name) for name in SNAPSHOTS}
+def test_snapshot_union_contains_the_four_supported_interactions():
+    """公开快照包含聊天、设备、世界和通话；通话字段由专门的通话契约测试验证。"""
+    assert set(get_args(_public("InteractionSnapshot"))) == {
+        _public(name) for name in (*SNAPSHOTS, "CallInteractionSnapshot")
+    }
 
 
 def test_removed_snapshot_types_are_not_public():

@@ -20,14 +20,17 @@ dependencies = [
     "jinja2",
     "librosa>=0.9.2,<0.10",
     "lunardate",
+    "mutagen==1.48.1",
+    "mwparserfromhell",
     "networkx",
-    "numpy>=1.24,<2",
+    "numpy>=2",
     "openai",
     "pillow",
     "playwright",
     "psutil",
     "pydantic>=2.13.3,<3",
     "pydub",
+    "python-multipart",
     "python-jose",
     "PyYAML>=6",
     "requests",
@@ -35,6 +38,8 @@ dependencies = [
     "typing-extensions",
     "tzdata; platform_system == 'Windows'",
     "uvicorn[standard]>=0.30",
+    "websockets>=14",
+    "zhconv",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +47,9 @@ dependencies = [
 # choose a CPU or CUDA wheel source before resolving these extras.
 speech = [
     "gsv-tts-lite>=0.4,<0.5",
+    "scipy>=1.10,<2",
     "soundfile>=0.12",
+    "soxr",
 ]
 # Heavy, hardware-sensitive dependencies used only by the automatic song
 # learning pipeline. Keeping them out of the base install makes the server's
@@ -104,6 +111,9 @@ Repository = "https://github.com/SheepLiu712/Agent-LuoTianyi"
 [tool.setuptools]
 include-package-data = false
 py-modules = ["server_main"]
+
+[tool.setuptools.package-data]
+"src.world.get_new_songs" = ["vcpedia_templates.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]

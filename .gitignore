@@ -4,6 +4,9 @@
 .vscode
 settings.json
 
+# scratch
+.scratch/
+
 # Agent / tooling state
 .omo/
 
@@ -52,3 +55,6 @@ client-godot/addons/godot-sqlite/bin/*
 
 # 本地个人笔记（不随仓库分发）
 docs-godot/
+
+#
+dist

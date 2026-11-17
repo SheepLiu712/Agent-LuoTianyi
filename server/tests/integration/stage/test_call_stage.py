@@ -1,0 +1,1113 @@
+import asyncio
+import hashlib
+from datetime import datetime, timedelta
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from support.call_output import output_sink
+from support.realtime_speech import FakeRealtimeSpeechSessionFactory
+from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval
+from support.stage_lifecycle import finish_call, observe_release, wait_call_finished
+from support.stage_manager import start_call_stage
+
+import src.domain.agent as d
+from src.agent.context import ContextFactory
+from src.agent.facade import Agent
+from src.agent.handlers.action.router import ActionRouter
+from src.agent.handlers.stimulus.call import CallReplyConfirmedHandler, CallTurnCompletedHandler
+from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.processing.output_drafts import AudioChunkDraft, MessageEndDraft, TextFinalDraft
+from src.agent.processing.plan_emitter import ActionPlanDraft
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+from src.domain.call import (
+    CallAnswerDecision,
+    CallAudioSemantic,
+    CallEndReason,
+    CallOutcome,
+    CallReplyStatus,
+    CallSpeechDelivery,
+    CallState,
+)
+from src.domain.stage.lifecycle import StageEndReason, StageInitializationFailed, StageLifecycleState
+from src.infrastructure.models.realtime_speech import (
+    ProviderFailed,
+    SpeechStarted,
+    SpeechStopped,
+    TurnCompleted,
+    TurnInvalid,
+)
+from src.infrastructure.observability.call_metrics import CallMetricName
+from src.infrastructure.persistence.call_sessions import (
+    BEIJING_TIMEZONE,
+    CallSessionRecord,
+    SqlCallSessionRepository,
+)
+from src.infrastructure.persistence.database.sql_database import Base
+from src.stage.call.call_stage import CallIngressReceipt, CallStage, CallStageOwnership, CallStateChanged
+
+
+class _ContextDatabase:
+    def get_user_description(self, _user_id):
+        return ""
+
+    def get_user_preferences(self, _user_id):
+        return {}
+
+    def get_call_conversation_seed_state(self, _user_id, *, character_id, requested_at):
+        assert character_id == "luotianyi"
+        assert requested_at.tzinfo is None
+        return {"summary": "", "conversations": []}
+
+
+class _Clock:
+    def __init__(self):
+        self.wall = datetime(2026, 10, 11, 12, 0, tzinfo=BEIJING_TIMEZONE)
+        self.monotonic = 100.0
+
+    def now(self):
+        self.wall += timedelta(milliseconds=1)
+        return self.wall
+
+    def tick(self):
+        return self.monotonic
+
+    def advance(self, seconds):
+        self.monotonic += seconds
+
+
+class _Transport:
+    def __init__(self):
+        self.items = []
+
+    async def send_state(self, item):
+        self.items.append(item)
+
+    async def send_ended(self, snapshot):
+        self.items.append(("ended", snapshot))
+
+    async def send_failed(self, reason):
+        self.items.append(("failed", reason))
+
+    async def start_stream(self, response_id, stream_id, audio_format):
+        self.items.append(("start", response_id, stream_id, audio_format))
+
+    async def send_pcm(self, response_id, stream_id, payload, *, final):
+        self.items.append(("pcm", response_id, stream_id, payload, final))
+
+    async def stop_response(self, response_id, stream_ids):
+        self.items.append(("stop", response_id, stream_ids))
+
+
+class _FailingTransport(_Transport):
+    def __init__(self, operation):
+        super().__init__()
+        self.operation = operation
+
+    async def send_state(self, item):
+        if self.operation == "state" and item.state is CallState.ACTIVE:
+            raise RuntimeError("transport state failed")
+        await super().send_state(item)
+
+    async def send_ended(self, snapshot):
+        if self.operation == "ended":
+            raise RuntimeError("transport ended failed")
+        await super().send_ended(snapshot)
+
+
+class _BlockingTerminalTransport(_Transport):
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def send_ended(self, snapshot):
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
+class _BlockingProviderFactory:
+    async def create(self, _call_id):
+        await asyncio.Event().wait()
+
+
+class _BlockingPushProviderFactory(FakeRealtimeSpeechSessionFactory):
+    async def create(self, call_id):
+        provider = await super().create(call_id)
+        provider.push_started = asyncio.Event()
+        provider.release_push = asyncio.Event()
+        original_push = provider.push_audio
+
+        async def push_audio(frame):
+            provider.push_started.set()
+            await provider.release_push.wait()
+            await original_push(frame)
+
+        provider.push_audio = push_audio
+        return provider
+
+
+def _report(request, plans):
+    return d.HandlingReport(
+        request_id=request.request_id,
+        request_status=d.HandlingRequestStatus.COMPLETED,
+        trigger_stimulus_id=request.stimulus.stimulus_id,
+        basis_interaction_revision=request.interaction.interaction_revision,
+        considered_pending_stimulus_ids=tuple(i.stimulus_id for i in request.interaction.pending_stimuli),
+        consumed_pending_stimulus_ids=tuple(i.stimulus_id for i in request.interaction.pending_stimuli),
+        retained_pending_stimulus_ids=(),
+        emitted_plan_ids=tuple(plans.accepted_ids),
+        error_code=None,
+        retryable=False,
+    )
+
+
+class _AnswerHandler:
+    async def handle(self, request, plans):
+        return _report(request, plans)
+
+
+class _TurnHandler:
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.requests = []
+
+    async def handle(self, request, plans):
+        self.requests.append(request)
+        await self.gate.wait()
+        response_id = f"{request.stimulus.response_id}-segment-{request.stimulus.segment_index}"
+        await plans.emit(
+            ActionPlanDraft(
+                source_stimulus_ids=(request.stimulus.stimulus_id,),
+                actions=(
+                    d.Say(
+                        action_id=f"{request.request_id}-say",
+                        content="正式回答",
+                        sound_content="正式回答",
+                        prepared_audio_ref=None,
+                        tone=d.Tone(value="normal"),
+                        expression=None,
+                        delivery=d.OutputDelivery.EPHEMERAL_REACTION,
+                        call_delivery=CallSpeechDelivery(
+                            audio_route=d.CallAudioRoute.CALL,
+                            display_in_chat=False,
+                            is_ephemeral=True,
+                            response_id=response_id,
+                        ),
+                    ),
+                ),
+            )
+        )
+        return _report(request, plans)
+
+
+class _NoPlanHandler:
+    async def handle(self, request, plans):
+        return _report(request, plans)
+
+
+class _SilenceHandler:
+    def __init__(self):
+        self.requests = []
+
+    async def handle(self, request, plans):
+        self.requests.append(request)
+        return _report(request, plans)
+
+
+class _TimeLimitWarningHandler:
+    def __init__(self):
+        self.requests = []
+
+    async def handle(self, request, plans):
+        self.requests.append(request)
+        return _report(request, plans)
+
+
+class _NoOutputActionHandler:
+    async def realize(self, action, execution_context, outputs):
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=d.ActionExecutionStatus.COMPLETED,
+            error_code=None,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        )
+
+
+class _SayHandler:
+    async def realize(self, action, execution_context, outputs):
+        await outputs.emit(TextFinalDraft(delivery=action.delivery, text=action.content))
+        await outputs.emit(
+            AudioChunkDraft(
+                delivery=action.delivery,
+                data=b"\x00\x00",
+                framing=d.AudioFraming.RAW_PCM,
+                audio_format=d.CALL_PCM_FORMAT,
+                final=True,
+            )
+        )
+        await outputs.emit(
+            MessageEndDraft(delivery=action.delivery, status=d.MessageEndStatus.COMPLETED, error_code=None)
+        )
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=d.ActionExecutionStatus.COMPLETED,
+            error_code=None,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        )
+
+
+def _agent(turn_handler, *, silence_handler=None, time_limit_handler=None):
+    no_plan = _NoPlanHandler()
+    silence = silence_handler or no_plan
+    return Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            (
+                (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
+                (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
+                (d.StimulusKind.CALL_ANSWER_REQUESTED, _AnswerHandler()),
+                (d.StimulusKind.CALL_STARTED, no_plan),
+                (d.StimulusKind.CALL_REPLY_SEGMENT_READY, turn_handler),
+                (d.StimulusKind.CALL_SILENCE_ELAPSED, silence),
+                (d.StimulusKind.CALL_TIME_LIMIT_WARNING, time_limit_handler or no_plan),
+                (d.StimulusKind.CALL_ENDING, no_plan),
+            )
+        ),
+        action_router=ActionRouter(
+            (
+                (d.ActionKind.ANSWER_CALL, _NoOutputActionHandler()),
+                (d.ActionKind.SAY, _SayHandler()),
+                (d.ActionKind.COGNITIVE_MAINTENANCE, _NoOutputActionHandler()),
+            )
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_time_limit_warning_and_hard_deadline_are_stage_owned_and_monotonic(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+    assert stage.state is CallState.ACTIVE
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert len(warning_handler.requests) == 1
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_time_limit_resume_does_not_reset_warning_or_deadline(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 3.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    assert await stage.resume() is True
+
+    clock.advance(0.5)
+    stage._time_limit_changed.set()
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+    assert await stage.resume() is False
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert len(warning_handler.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_time_limit_during_unrecovered_disconnect_yields_recovery_timeout(call_setup):
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    clock.advance(0.5)
+    stage._time_limit_changed.set()
+    await asyncio.sleep(0)
+    assert stage.state is CallState.RECONNECTING
+
+    clock.advance(2.5)
+    stage._time_limit_changed.set()
+    assert await stage.resume() is False
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
+    assert snapshot.terminal.active_duration_ms == 1500
+
+
+@pytest.mark.asyncio
+async def test_resume_after_deadline_counts_reconnect_and_immediately_time_limits(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    clock.advance(0.75)
+    stage._time_limit_changed.set()
+    await asyncio.sleep(0)
+
+    assert await stage.resume() is True
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert snapshot.terminal.active_duration_ms == 2250
+    assert warning_handler.requests == []
+
+
+@pytest.mark.asyncio
+async def test_warning_waits_for_resume_and_is_sent_once_before_deadline(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 3.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.5)
+    await stage.disconnect()
+    clock.advance(0.6)
+    stage._time_limit_changed.set()
+    await asyncio.sleep(0)
+    assert warning_handler.requests == []
+
+    assert await stage.resume() is True
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+    clock.advance(0.9)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert len(warning_handler.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_early_hangup_cancels_time_limit_task_without_warning(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 10.0, "time_limit_warning_seconds": 2.0},
+        time_limit_handler=warning_handler,
+    )
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
+
+    assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
+    assert warning_handler.requests == []
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_blocked_warning_does_not_delay_hard_time_limit(call_setup):
+    warning_handler = _TimeLimitWarningHandler()
+    warning_handler.release = asyncio.Event()
+
+    async def blocked_handle(request, plans):
+        warning_handler.requests.append(request)
+        await warning_handler.release.wait()
+        return _report(request, plans)
+
+    warning_handler.handle = blocked_handle
+    stage, _, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+        time_limit_handler=warning_handler,
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    await _eventually(lambda: len(warning_handler.requests) == 1)
+
+    clock.advance(1.0)
+    stage._time_limit_changed.set()
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.TIME_LIMIT
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_wins_when_requested_at_time_limit_boundary(call_setup):
+    stage, provider, _, _ = await _create(
+        call_setup,
+        config={"time_limit_seconds": 2.0, "time_limit_warning_seconds": 1.0},
+    )
+    _, _, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.advance(2.0)
+    await provider.emit(ProviderFailed("provider_connection_closed", True))
+    await _eventually(lambda: stage.termination_requested)
+    stage._time_limit_changed.set()
+
+    snapshot = await asyncio.wait_for(wait_call_finished(stage), 1)
+
+    assert snapshot.terminal.end_reason is CallEndReason.PROVIDER_FAILED
+    assert not stage.tasks
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"time_limit_seconds": 0},
+        {"time_limit_seconds": float("inf")},
+        {"time_limit_seconds": 10, "time_limit_warning_seconds": -1},
+        {"time_limit_seconds": 10, "time_limit_warning_seconds": 10},
+    ],
+)
+def test_time_limit_configuration_requires_finite_ordered_values(call_setup, config):
+    repository, record, ownership, clock = call_setup
+
+    with pytest.raises(ValueError, match="time_limit"):
+        CallStage(
+            ownership=ownership,
+            record=record,
+            agent=_agent(_TurnHandler()),
+            context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+            call_sessions=repository,
+            speech_factory=FakeRealtimeSpeechSessionFactory(),
+            output_sink=output_sink(_Transport()),
+            monotonic=clock.tick,
+            wall_clock=clock.now,
+            config=config,
+        )
+
+
+async def _eventually(predicate, timeout=1.0):
+    async def wait():
+        while not predicate():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout)
+
+
+def _receipt(call_id, seq, payload):
+    return CallIngressReceipt(
+        call_id=str(call_id),
+        direction="client_to_server",
+        seq=seq,
+        fingerprint=hashlib.sha256(b"audio\0" + payload).digest(),
+    )
+
+
+@pytest.fixture
+def call_setup(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'call.db'}")
+    Base.metadata.create_all(engine)
+    repository = SqlCallSessionRepository(sessionmaker(bind=engine))
+    clock = _Clock()
+    call_id = uuid4()
+    record = CallSessionRecord(
+        call_id=call_id,
+        client_request_id="request-1",
+        user_id="user",
+        character_id="luotianyi",
+        state=CallState.PREPARING,
+        requested_at=clock.now(),
+        created_at=clock.now(),
+        updated_at=clock.now(),
+    )
+    repository.create_if_absent(record)
+    ownership = CallStageOwnership(
+        call_id=str(call_id),
+        user_id="user",
+        character_id="luotianyi",
+        client_request_id="request-1",
+        setup_deadline=110.0,
+        generation=1,
+    )
+    return repository, record, ownership, clock
+
+
+async def _create(
+    call_setup,
+    *,
+    decision=CallAnswerDecision.ACCEPT,
+    config=None,
+    release=None,
+    silence_handler=None,
+    time_limit_handler=None,
+):
+    repository, record, ownership, clock = call_setup
+    speech = FakeRealtimeSpeechSessionFactory()
+    transport = _Transport()
+    turn_handler = _TurnHandler()
+    context_factory = ContextFactory(character_id="luotianyi", database=_ContextDatabase())
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(
+            turn_handler,
+            silence_handler=silence_handler,
+            time_limit_handler=time_limit_handler,
+        ),
+        context_factory=context_factory,
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(transport),
+        own_termination=observe_release(release, ownership),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+        config=config,
+    )
+    await stage.apply_answer(d.AnswerCall(action_id="answer", call_id=record.call_id, decision=decision))
+    return stage, speech.sessions[record.call_id], transport, turn_handler
+
+
+@pytest.mark.asyncio
+async def test_real_stage_agent_context_and_sqlite_connect_then_cleanup(call_setup):
+    released = []
+    stage, provider, transport, _ = await _create(call_setup, release=lambda ownership: not released.append(ownership))
+    repository, record, _, _ = call_setup
+
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    assert provider.started_with is not None
+    assert "lookup_call_memory" in provider.started_with.instructions
+    assert repository.find_by_id(record.call_id).state is CallState.ACTIVE
+    assert [item.state for item in transport.items if isinstance(item, CallStateChanged)][:2] == [
+        CallState.RINGING,
+        CallState.ACTIVE,
+    ]
+
+    snapshot = await finish_call(stage, StageEndReason.USER_REQUESTED)
+
+    assert snapshot.terminal.outcome is CallOutcome.CONNECTED
+    assert stage.context is None
+    assert provider.closed is True
+    assert not stage.tasks
+    assert released
+    assert repository.find_by_id(record.call_id).state is CallState.ENDED
+
+
+@pytest.mark.asyncio
+async def test_decline_and_setup_deadline_are_terminal_without_active_duration(call_setup):
+    stage, _, _, _ = await _create(call_setup, decision=CallAnswerDecision.DECLINE)
+    snapshot = await wait_call_finished(stage)
+    repeated = await finish_call(stage, StageEndReason.USER_REQUESTED)
+    repository, record, ownership, clock = call_setup
+    persisted = repository.find_by_id(record.call_id)
+
+    assert stage.snapshot.terminal.outcome is CallOutcome.DECLINED
+    assert stage.snapshot.terminal.active_duration_ms == 0
+    assert snapshot is repeated
+    assert persisted.state is CallState.ENDED
+    assert persisted.outcome is CallOutcome.DECLINED
+    assert persisted.end_reason is CallEndReason.DECLINED
+
+    second = record.with_update(
+        call_id=uuid4(),
+        client_request_id="request-2",
+        requested_at=clock.now(),
+        created_at=clock.now(),
+        updated_at=clock.now(),
+        state=CallState.PREPARING,
+    )
+    repository.create_if_absent(second)
+    expired = CallStageOwnership(
+        str(second.call_id), "user", "luotianyi", "request-2", clock.monotonic, ownership.generation + 1
+    )
+    with pytest.raises(StageInitializationFailed):
+        await start_call_stage(
+            ownership=expired,
+            record=second,
+            agent=_agent(_TurnHandler()),
+            context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+            call_sessions=repository,
+            speech_factory=FakeRealtimeSpeechSessionFactory(),
+            output_sink=output_sink(_Transport()),
+            monotonic=clock.tick,
+            wall_clock=clock.now,
+        )
+
+
+@pytest.mark.asyncio
+async def test_pcm_receipts_are_bounded_idempotent_and_turns_require_completed_event(call_setup):
+    stage, provider, _, turn_handler = await _create(call_setup, config={"pcm_queue_capacity": 1})
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    assert stage.accept_pcm(_receipt(stage._record.call_id, 7, b"\x00\x00"), b"\x00\x00") is True
+    assert stage.accept_pcm(_receipt(stage._record.call_id, 7, b"\x00\x00"), b"\x00\x00") is True
+    assert stage.accept_pcm(_receipt(stage._record.call_id, 9, b"\x00"), b"\x00") is False
+    await _eventually(lambda: len(provider.pushed_frames) == 1)
+
+    await provider.emit(TurnInvalid("ambient_only"))
+    await asyncio.sleep(0)
+    assert not any(turn.semantic for turn in stage._turns.values())
+    await provider.emit(TurnCompleted(CallAudioSemantic(transcript="你好")))
+    await _eventually(lambda: 1 in stage._turns)
+    turn_handler.gate.set()
+    await _eventually(lambda: bool(stage._playback.pending_streams))
+    response_id, stream_id = stage._playback.pending_streams[0]
+    stage.playback_completed(response_id, stream_id)
+    await _eventually(lambda: stage._turns[1].status is CallReplyStatus.COMPLETED)
+    await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_preserves_accepted_pcm_and_completed_turn_exactly_once(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    transport = _Transport()
+    turn_handler = _TurnHandler()
+    turn_handler.gate.set()
+    captured_metrics = []
+
+    class Metrics:
+        def record(self, metric):
+            captured_metrics.append(metric)
+            return True
+
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(transport),
+        call_metrics=Metrics(),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        assert stage.accept_pcm(_receipt(record.call_id, 1, b"\x01\x00"), b"\x01\x00")
+        assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x02\x00"), b"\x02\x00")
+        await provider.push_started.wait()
+
+        await stage.disconnect()
+        provider.release_push.set()
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="断线期已完成轮次")))
+        assert await stage.resume() is True
+
+        await asyncio.wait_for(stage._pcm.join(), 1)
+        assert [frame.sequence for frame in provider.pushed_frames] == [1, 2]
+        await _eventually(lambda: len(turn_handler.requests) == 1)
+        await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
+        assert [frame.payload for frame in provider.pushed_frames] == [b"\x01\x00", b"\x02\x00"]
+        assert len(turn_handler.requests[0].interaction.pending_stimuli) == 0
+        assert list(stage._turns) == [1]
+        assert CallMetricName.FIRST_AUDIO not in [metric.name for metric in captured_metrics]
+
+        response_id, stream_id = stage._playback.pending_streams[0]
+        stage.playback_completed(response_id, stream_id)
+        await _eventually(lambda: not stage._fact_tasks)
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="恢复后新轮次")))
+        await _eventually(lambda: len(turn_handler.requests) == 2)
+        await _eventually(lambda: stage._realize_task is not None and stage._realize_task.done())
+        response_id, _ = stage._playback.pending_streams[0]
+        stage.audio_sent(response_id)
+        assert [metric.name for metric in captured_metrics].count(CallMetricName.FIRST_AUDIO) == 1
+    finally:
+        provider.release_push.set()
+        await finish_call(stage, StageEndReason.USER_REQUESTED)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_timeout_discards_paused_pcm_and_provider_events(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = _BlockingPushProviderFactory()
+    turn_handler = _TurnHandler()
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(turn_handler),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(_Transport()),
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+    provider = speech.sessions[record.call_id]
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        assert stage.accept_pcm(_receipt(record.call_id, 2, b"\x01\x00"), b"\x01\x00")
+        assert stage.accept_pcm(_receipt(record.call_id, 3, b"\x02\x00"), b"\x02\x00")
+        await provider.push_started.wait()
+        await stage.disconnect()
+        await provider.emit(TurnCompleted(CallAudioSemantic(transcript="不得兑现")))
+        clock.advance(3.0)
+
+        assert await stage.resume() is False
+        await wait_call_finished(stage)
+
+        assert stage.context is None
+        assert stage._pcm.empty()
+        assert stage._pcm_buffered_bytes == 0
+        assert turn_handler.requests == []
+        assert not stage.tasks
+    finally:
+        provider.release_push.set()
+        await finish_call(stage, StageEndReason.USER_REQUESTED)
+
+
+@pytest.mark.asyncio
+async def test_speech_started_interrupts_handle_and_terminal_snapshot_keeps_user_fact(call_setup):
+    stage, provider, _, turn_handler = await _create(call_setup)
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    await provider.emit(TurnCompleted(CallAudioSemantic(sound_description="敲桌声")))
+    await _eventually(lambda: bool(turn_handler.requests))
+
+    turn_handler.gate.set()
+    await provider.emit(SpeechStarted())
+    await _eventually(lambda: not stage._handle_tasks)
+    turn_handler.gate.set()
+    snapshot = await finish_call(stage)
+
+    assert len(snapshot.completed_turns) == 1
+    assert "敲桌声" in snapshot.completed_turns[0].user_semantic
+    assert snapshot.completed_turns[0].reply_status is CallReplyStatus.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_playback_completion_is_idempotent_and_resume_restarts_full_silence(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    stage.register_playback("response", 1)
+    stage.playback_final("response", 1)
+    first = stage.playback_completed("response", 1)
+    duplicate = stage.playback_completed("response", 1)
+    assert first.duplicate is False
+    assert duplicate.duplicate is True
+    assert duplicate.silence_started_at == first.silence_started_at
+
+    await stage.disconnect()
+    assert stage.state is CallState.RECONNECTING
+    assert await stage.resume() is True
+    assert stage.state is CallState.ACTIVE
+    assert stage._playback.silence_started_at == call_setup[3].monotonic
+    await finish_call(stage)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("elapsed", "expected"),
+    [(2.999, True), (3.0, False), (3.1, False)],
+)
+async def test_resume_uses_fixed_disconnect_deadline_even_when_timer_is_delayed(call_setup, elapsed, expected):
+    stage, provider, _, _ = await _create(call_setup)
+    repository, record, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    await stage.disconnect()
+    clock.monotonic += elapsed
+
+    assert await stage.resume() is expected
+    if expected:
+        assert stage.state is CallState.ACTIVE
+        assert provider.closed is False
+        await finish_call(stage)
+    else:
+        snapshot = await wait_call_finished(stage)
+        assert snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
+        assert repository.find_by_id(record.call_id).state is CallState.ENDED
+        assert provider.closed is True
+
+
+@pytest.mark.asyncio
+async def test_resume_keeps_context_and_does_not_emit_another_call_started(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    original_context = stage.context
+    original_revision = stage._revision
+    await stage.disconnect()
+
+    assert await stage.resume() is True
+
+    assert stage.context is original_context
+    assert stage._revision == original_revision
+    await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_user_hangup_reason_wins_recovery_deadline_race(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    await stage.disconnect()
+    stage._recovery_deadline = stage._monotonic()
+    original = stage._terminate_owned
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed():
+        entered.set()
+        await release.wait()
+        return await original()
+
+    stage._terminate_owned = delayed
+    hangup = asyncio.create_task(finish_call(stage, StageEndReason.USER_REQUESTED))
+    await asyncio.wait_for(entered.wait(), 1)
+    deadline = asyncio.create_task(stage.expire_retention(stage._recovery_deadline, stage._connection_generation))
+    await asyncio.sleep(0)
+    release.set()
+    snapshot = await hangup
+    await deadline
+    assert snapshot.terminal.end_reason is CallEndReason.USER_HANGUP
+    assert stage.snapshot is snapshot
+
+
+@pytest.mark.asyncio
+async def test_expired_resume_uses_owned_termination_without_recovery_self_wait(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    await stage.disconnect()
+    stage._recovery_deadline = stage._monotonic()
+
+    assert await asyncio.wait_for(stage.resume(), 1) is False
+    await wait_call_finished(stage)
+    assert stage.snapshot.terminal.end_reason is CallEndReason.RECOVERY_TIMEOUT
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_failed_terminal_delivery_cannot_hold_realtime_resources_or_skip_settlement(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = FakeRealtimeSpeechSessionFactory()
+    transport = _FailingTransport("ended")
+    released = []
+    settled = []
+
+    class Settlement:
+        async def emit(self, snapshot, *, result):
+            settled.append(snapshot)
+
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(_TurnHandler()),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(transport),
+        own_termination=observe_release(lambda value: not released.append(value), ownership),
+        save_history=Settlement().emit,
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+
+    await finish_call(stage)
+
+    assert stage.lifecycle_state is StageLifecycleState.TERMINATED
+    assert stage.context is None
+    assert speech.sessions[record.call_id].closed is True
+    assert released == [ownership]
+    assert settled == [stage.snapshot]
+    assert repository.find_by_id(record.call_id).state is CallState.ENDED
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_blocked_terminal_delivery_is_bounded_before_history_write(call_setup):
+    repository, record, ownership, clock = call_setup
+    speech = FakeRealtimeSpeechSessionFactory()
+    transport = _BlockingTerminalTransport()
+    released = []
+    settled = []
+
+    class Settlement:
+        async def emit(self, snapshot, *, result):
+            settled.append(snapshot)
+
+    stage = await start_call_stage(
+        ownership=ownership,
+        record=record,
+        agent=_agent(_TurnHandler()),
+        context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+        call_sessions=repository,
+        speech_factory=speech,
+        output_sink=output_sink(transport),
+        own_termination=observe_release(lambda value: not released.append(value), ownership),
+        save_history=Settlement().emit,
+        monotonic=clock.tick,
+        wall_clock=clock.now,
+        config={"terminal_delivery_timeout": 0.01},
+    )
+    await stage.apply_answer(
+        d.AnswerCall(action_id="answer", call_id=record.call_id, decision=CallAnswerDecision.ACCEPT)
+    )
+
+    snapshot = await asyncio.wait_for(finish_call(stage), 1)
+
+    assert transport.started.is_set()
+    assert transport.cancelled.is_set()
+    assert settled == [snapshot]
+    assert stage.lifecycle_state is StageLifecycleState.TERMINATED
+    assert stage.context is None
+    assert speech.sessions[record.call_id].closed is True
+    assert released == [ownership]
+    assert repository.find_by_id(record.call_id).state is CallState.ENDED
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_terminal_ledger_uses_monotonic_duration_and_first_disconnect_cutoff(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    repository, record, _, clock = call_setup
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+    clock.monotonic += 2.0
+    await stage.disconnect()
+    clock.monotonic += 10.0
+    await finish_call(stage, StageEndReason.IDLE_TIMEOUT)
+    snapshot = await wait_call_finished(stage)
+
+    persisted = repository.find_by_id(record.call_id)
+    assert snapshot.terminal.active_duration_ms == 2000
+    assert persisted.active_duration_ms == 2000
+    assert persisted.disconnected_at is not None
+    assert persisted.ended_at is not None
+
+
+@pytest.mark.asyncio
+async def test_setup_await_is_bounded_by_original_deadline(call_setup):
+    repository, record, ownership, clock = call_setup
+    ownership = CallStageOwnership(
+        ownership.call_id,
+        ownership.user_id,
+        ownership.character_id,
+        ownership.client_request_id,
+        clock.monotonic + 0.01,
+        ownership.generation,
+    )
+    with pytest.raises(StageInitializationFailed):
+        await start_call_stage(
+            ownership=ownership,
+            record=record,
+            agent=_agent(_TurnHandler()),
+            context_factory=ContextFactory(character_id="luotianyi", database=_ContextDatabase()),
+            call_sessions=repository,
+            speech_factory=_BlockingProviderFactory(),
+            output_sink=output_sink(_Transport()),
+            monotonic=clock.tick,
+            wall_clock=clock.now,
+        )
+    assert repository.find_by_id(record.call_id).state is CallState.FAILED
+
+
+@pytest.mark.asyncio
+async def test_pcm_rejects_sequence_duplicates_conflicts_and_gaps(call_setup):
+    stage, provider, _, _ = await _create(call_setup, config={"pcm_queue_capacity": 4})
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    call_id = stage._record.call_id
+    assert stage.accept_pcm(_receipt(call_id, 2, b"\x00\x00"), b"\x00\x00")
+    assert stage.accept_pcm(_receipt(call_id, 4, b"\x01\x00"), b"\x01\x00")
+    assert not stage.accept_pcm(_receipt(call_id, 2, b"\x01\x00"), b"\x01\x00")
+    await _eventually(lambda: [frame.sequence for frame in provider.pushed_frames] == [1, 2])
+    await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_pcm_does_not_require_audio_wire_sequence_to_start_at_one(call_setup):
+    stage, _, _, _ = await _create(call_setup)
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    assert stage.accept_pcm(_receipt(stage._record.call_id, 42, b"\x00\x00"), b"\x00\x00")
+    await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_pcm_receipts_roll_over_without_retaining_payload_or_refusing_long_calls(call_setup):
+    stage, provider, _, _ = await _create(call_setup, config={"pcm_queue_capacity": 8, "receipt_capacity": 4})
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    for seq in range(10, 16):
+        payload = seq.to_bytes(2, "little")
+        assert stage.accept_pcm(_receipt(stage._record.call_id, seq, payload), payload)
+        await _eventually(lambda expected=seq - 9: len(provider.pushed_frames) == expected)
+
+    assert len(stage._receipts) == 4
+    assert all(len(fingerprint) == 32 for fingerprint in stage._receipts.values())
+    assert [frame.sequence for frame in provider.pushed_frames] == list(range(1, 7))
+    await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_keeps_ownership_when_provider_close_fails(call_setup):
+    released = []
+    stage, provider, _, _ = await _create(call_setup, release=lambda ownership: not released.append(ownership))
+    await _eventually(lambda: stage.state is CallState.ACTIVE)
+
+    async def fail_close():
+        provider.closed = True
+        raise RuntimeError("close failed")
+
+    provider.close = fail_close
+    result = await stage.terminate(StageEndReason.USER_REQUESTED)
+    assert result.cleanup_error == "RuntimeError" and not result.resources_released
+    assert stage.lifecycle_state is StageLifecycleState.TERMINATING
+    assert not released
+    assert stage.context is None
+    assert not stage.tasks
+
+
+@pytest.mark.asyncio
+async def test_call_termination_timings_include_failed_settlement_and_resource_release(
+    call_setup, tmp_path, monkeypatch
+):
+    from src.infrastructure.observability import ObservabilityService, stage_timing
+
+    service = ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})
+    monkeypatch.setattr(stage_timing, "get_observability_service", lambda: service)
+    stage, provider, _, _ = await _create(call_setup)
+    try:
+        await _eventually(lambda: stage.state is CallState.ACTIVE)
+        await finish_call(stage, StageEndReason.USER_REQUESTED)
+        rows = service.get_recent_pipeline_spans(trace_id=f"stage:{stage.interaction_id}")
+        total = next(row for row in rows if row["span_name"] == "stage.termination.total")
+        stops = [row for row in rows if row["span_name"] == "stage.termination.stop_tasks"]
+        assert {row["metadata"]["phase"] for row in stops} == {"playback", "initialization", "inflight", "cleanup"}
+        # This harness has no FinalizeCall handler: failed settlement must not hide resource release.
+        assert total["status"] == "error"
+        assert total["metadata"]["resources_released"] is True
+        assert all(row["status"] == "success" for row in stops)
+        assert total["duration_ms"] >= sum(row["duration_ms"] for row in stops)
+        assert any(row["span_name"] == "stage.termination.cleanup" for row in rows)
+        assert provider.closed and stage.context is None
+    finally:
+        service.close()

@@ -1,0 +1,311 @@
+{
+  "sources": [
+    {
+      "id": 1,
+      "title": "秦宣四方",
+      "pageid": 68015,
+      "revid": 582936,
+      "raw_sha256": "c6440f200012e236cdc9307b05f425a88e13654397384361d90818377690208d",
+      "html_sha256": "a20aff72b0384819246f0001fa4fa5bc2794da04f11f29b0aad4281b8cdfc429",
+      "html_variants": {
+        "a20aff72b0384819246f0001fa4fa5bc2794da04f11f29b0aad4281b8cdfc429": [
+          "server/data/test_outputs/browser-fixed-20260911-021300/1.source.json",
+          "server/tests/world/fixtures/vcpedia_fixed_acceptance.json#0"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/browser-fixed-20260911-021300/1.source.json",
+        "server/tests/world/fixtures/vcpedia_fixed_acceptance.json#0"
+      ],
+      "source_url": "https://vcpedia.cn/%E7%A7%A6%E5%AE%A3%E5%9B%9B%E6%96%B9",
+      "paired": true
+    },
+    {
+      "id": 2,
+      "title": "刀马旦(虚拟歌手)",
+      "pageid": 4762,
+      "revid": 508786,
+      "raw_sha256": "18d227f7d3d2eb759ec2a68e258f3ac03f6784d7a584ccadf038c5bd61edd876",
+      "html_sha256": "dea5a89aead1919c4a5f7190613c10f8db803283740b5dd2667f3005aefe227b",
+      "html_variants": {
+        "dea5a89aead1919c4a5f7190613c10f8db803283740b5dd2667f3005aefe227b": [
+          "server/data/test_outputs/browser-fixed-20260911-021300/2.source.json",
+          "server/tests/world/fixtures/vcpedia_fixed_acceptance.json#1"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/browser-fixed-20260911-021300/2.source.json",
+        "server/tests/world/fixtures/vcpedia_fixed_acceptance.json#1"
+      ],
+      "source_url": "https://vcpedia.cn/%E5%88%80%E9%A9%AC%E6%97%A6%28%E8%99%9A%E6%8B%9F%E6%AD%8C%E6%89%8B%29",
+      "paired": true
+    },
+    {
+      "id": 3,
+      "title": "纸飞机(GhostFinal)",
+      "pageid": 4580,
+      "revid": null,
+      "raw_sha256": "e7a4a00432ed5448479de1cb8a61830a87b18aeef2a3588a2dd718353fb69c4a",
+      "html_sha256": "3e5637985759acf22919aa7c6aa42977cddfeb9c32ecb85429ad21bb4cc4c66f",
+      "html_variants": {
+        "3e5637985759acf22919aa7c6aa42977cddfeb9c32ecb85429ad21bb4cc4c66f": [
+          "server/data/test_outputs/browser-fixed-20260911-021300/3.source.json",
+          "server/tests/world/fixtures/vcpedia_fixed_acceptance.json#2"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/browser-fixed-20260911-021300/3.source.json",
+        "server/tests/world/fixtures/vcpedia_fixed_acceptance.json#2"
+      ],
+      "source_url": "https://vcpedia.cn/%E7%BA%B8%E9%A3%9E%E6%9C%BA%28GhostFinal%29",
+      "paired": true
+    },
+    {
+      "id": 4,
+      "title": "此刻说再见",
+      "pageid": 2313,
+      "revid": null,
+      "raw_sha256": "d6eb9564717cb6c6f6f08eda501542a5b2b98ffe2ad363ea834b3b21c27cf0b3",
+      "html_sha256": "9385db2b3024fbfbbb89fbddf4a6fbdbf7bd1755ef65c96300ceb18188b96670",
+      "html_variants": {
+        "9385db2b3024fbfbbb89fbddf4a6fbdbf7bd1755ef65c96300ceb18188b96670": [
+          "server/data/test_outputs/browser-fixed-20260911-113745-20e80d/1.source.json",
+          "server/tests/world/fixtures/vcpedia_frozen_consecutive.json#0"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/browser-fixed-20260911-113745-20e80d/1.source.json",
+        "server/tests/world/fixtures/vcpedia_frozen_consecutive.json#0"
+      ],
+      "source_url": "https://vcpedia.cn/%E6%AD%A4%E5%88%BB%E8%AF%B4%E5%86%8D%E8%A7%81",
+      "paired": true
+    },
+    {
+      "id": 5,
+      "title": "Estrus Cycle",
+      "pageid": 9118,
+      "revid": null,
+      "raw_sha256": "b366bb4f50602164313730a5fb1ff42867756b0e021735a1b9ca71e76405c29d",
+      "html_sha256": "9b1921a5bf579a8c271068c4df284193bec85d772396696b276c608953c0cece",
+      "html_variants": {
+        "9b1921a5bf579a8c271068c4df284193bec85d772396696b276c608953c0cece": [
+          "server/data/test_outputs/browser-fixed-20260911-113745-20e80d/2.source.json",
+          "server/tests/world/fixtures/vcpedia_frozen_consecutive.json#1"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/browser-fixed-20260911-113745-20e80d/2.source.json",
+        "server/tests/world/fixtures/vcpedia_frozen_consecutive.json#1"
+      ],
+      "source_url": "https://vcpedia.cn/Estrus%20Cycle",
+      "paired": true
+    },
+    {
+      "id": 6,
+      "title": "煌",
+      "pageid": 59060,
+      "revid": null,
+      "raw_sha256": "1cc54fb0f9ba0feef907721069b109015f1e9e43129d63fff51120afe2103a8e",
+      "html_sha256": "5c3e11c0c3b27e0e0f4c0aed1c9c2da3e692716934971b6cd7f58b38a3e2f9f2",
+      "html_variants": {
+        "5c3e11c0c3b27e0e0f4c0aed1c9c2da3e692716934971b6cd7f58b38a3e2f9f2": [
+          "server/data/test_outputs/live-20260909/historical-song.json",
+          "server/data/test_outputs/restart-20260910/煌.source.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/live-20260909/historical-song.json",
+        "server/data/test_outputs/restart-20260910/煌.source.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E7%85%8C",
+      "paired": true
+    },
+    {
+      "id": 7,
+      "title": "飞跃乌托邦",
+      "pageid": 9228,
+      "revid": null,
+      "raw_sha256": "dccfc8e7c36986113646d43c30b32a42ce8b6957c964ed99ea117804ea731529",
+      "html_sha256": "2db62f08f724ed0c9727ce47224d2a428e0014f5817539942e01f2fdd7998606",
+      "html_variants": {
+        "2db62f08f724ed0c9727ce47224d2a428e0014f5817539942e01f2fdd7998606": [
+          "server/data/test_outputs/normalization-three-20260912-0052-a31f/1.capture.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/normalization-three-20260912-0052-a31f/1.capture.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E9%A3%9E%E8%B7%83%E4%B9%8C%E6%89%98%E9%82%A6",
+      "paired": true
+    },
+    {
+      "id": 8,
+      "title": "惜春去",
+      "pageid": 4044,
+      "revid": null,
+      "raw_sha256": "c6cacc715430d6bd476678ae24a47bb413dfd8e131ceb8fd505267016dda2822",
+      "html_sha256": "538877a9a8c71fd5030e428b62fe0358c7a2496136e5afbf807b9b8d6ee31dcc",
+      "html_variants": {
+        "538877a9a8c71fd5030e428b62fe0358c7a2496136e5afbf807b9b8d6ee31dcc": [
+          "server/data/test_outputs/normalization-three-20260912-0052-a31f/2.capture.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/normalization-three-20260912-0052-a31f/2.capture.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E6%83%9C%E6%98%A5%E5%8E%BB",
+      "paired": true
+    },
+    {
+      "id": 9,
+      "title": "我还活着",
+      "pageid": 59795,
+      "revid": null,
+      "raw_sha256": "520ff25c60b9db2f5c30de404f53a7100d7ecd6e08bcb86070f2229dc17ee35a",
+      "html_sha256": "f8ad168c2fa4388ef9758c73866a4283e508d74b401b66244c53bceb830db680",
+      "html_variants": {
+        "f8ad168c2fa4388ef9758c73866a4283e508d74b401b66244c53bceb830db680": [
+          "server/data/test_outputs/normalization-three-20260912-0052-a31f/3.capture.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/normalization-three-20260912-0052-a31f/3.capture.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E6%88%91%E8%BF%98%E6%B4%BB%E7%9D%80",
+      "paired": true
+    },
+    {
+      "id": 10,
+      "title": "礼物pre-Sent",
+      "pageid": 5220,
+      "revid": null,
+      "raw_sha256": "156adc13b127634c83f5e4c5144eed18f0ce9a1c0bd56d366d87204f69ddc3ab",
+      "html_sha256": "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35",
+      "html_variants": {
+        "6d1c40f57115561d6218eb6e983b1851e91a62c9f3f7c56f20a56f7f5ba91f35": [
+          "server/data/test_outputs/random-blind-20260909/special.source.json",
+          "server/tests/world/fixtures/vcpedia_recorded_gift.json#0"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/random-blind-20260909/special.source.json",
+        "server/tests/world/fixtures/vcpedia_recorded_gift.json#0"
+      ],
+      "source_url": "https://vcpedia.cn/%E7%A4%BC%E7%89%A9pre-Sent",
+      "paired": true
+    },
+    {
+      "id": 11,
+      "title": "当我想哭的时候厕所里总是有黄金",
+      "pageid": 58298,
+      "revid": null,
+      "raw_sha256": "0ae5129748bd93e8236314543cca00d33e5a152401965ca5108ed1989ff2f84a",
+      "html_sha256": "e5a16d0f782fc09cfd27341a94bec729846e63f8630ae8517cac132ef646a1b0",
+      "html_variants": {
+        "e5a16d0f782fc09cfd27341a94bec729846e63f8630ae8517cac132ef646a1b0": [
+          "server/data/test_outputs/random-five-20260911-234450-515b33/1.capture.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/random-five-20260911-234450-515b33/1.capture.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E5%BD%93%E6%88%91%E6%83%B3%E5%93%AD%E7%9A%84%E6%97%B6%E5%80%99%E5%8E%95%E6%89%80%E9%87%8C%E6%80%BB%E6%98%AF%E6%9C%89%E9%BB%84%E9%87%91",
+      "paired": true
+    },
+    {
+      "id": 12,
+      "title": "凌晨四时 零下四度",
+      "pageid": 37729,
+      "revid": null,
+      "raw_sha256": "d9acca0f8b9e6b195761686c4c98ab0d4fc49849c646cb234249c4c9961863a7",
+      "html_sha256": "a7a55cfda95bede36136b3aa3a40a541bc7687e9303b73bdfd30ceaa724d7326",
+      "html_variants": {
+        "a7a55cfda95bede36136b3aa3a40a541bc7687e9303b73bdfd30ceaa724d7326": [
+          "server/data/test_outputs/random-five-20260911-234450-515b33/2.capture.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/random-five-20260911-234450-515b33/2.capture.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E5%87%8C%E6%99%A8%E5%9B%9B%E6%97%B6%20%E9%9B%B6%E4%B8%8B%E5%9B%9B%E5%BA%A6",
+      "paired": true
+    },
+    {
+      "id": 13,
+      "title": "疑神疑鬼",
+      "pageid": 5135,
+      "revid": null,
+      "raw_sha256": "01fdf73629968927ed77fd0e81b61142ff5d21a31b4d739a3d2df1138f879ac6",
+      "html_sha256": "29d74e51b3b81aa02b9d627851ec17a2de3412a35028fc99ec293ab4631d2ef5",
+      "html_variants": {
+        "29d74e51b3b81aa02b9d627851ec17a2de3412a35028fc99ec293ab4631d2ef5": [
+          "server/data/test_outputs/random-five-20260911-234450-515b33/3.capture.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/random-five-20260911-234450-515b33/3.capture.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E7%96%91%E7%A5%9E%E7%96%91%E9%AC%BC",
+      "paired": true
+    },
+    {
+      "id": 14,
+      "title": "普通DISCO",
+      "pageid": 3363,
+      "revid": null,
+      "raw_sha256": "418661ca43fe3449d574edbde629ddfb6c2d21e613f565de542949cd4d1c184f",
+      "html_sha256": "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d",
+      "html_variants": {
+        "af249f4bacc86d8e30eea2f148f89e2cd2e255a7b4453afdeed82ee41093d15d": [
+          "server/data/test_outputs/restart-20260910/普通DISCO.source.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/restart-20260910/普通DISCO.source.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E6%99%AE%E9%80%9ADISCO",
+      "paired": true
+    },
+    {
+      "id": 15,
+      "title": "达拉崩吧",
+      "pageid": 2350,
+      "revid": null,
+      "raw_sha256": "7ec57538768bc0f44de0cf041e884db7b1136b95ca2b19e89bff8c5374e95e80",
+      "html_sha256": "dac5b55d3b1ef95bacedfbaaff4c03ae83696c5e10cd78e91aa5ea93e722f7a9",
+      "html_variants": {
+        "dac5b55d3b1ef95bacedfbaaff4c03ae83696c5e10cd78e91aa5ea93e722f7a9": [
+          "server/data/test_outputs/restart-20260910/达拉崩吧.source.json"
+        ]
+      },
+      "references": [
+        "server/data/test_outputs/restart-20260910/达拉崩吧.source.json"
+      ],
+      "source_url": "https://vcpedia.cn/%E8%BE%BE%E6%8B%89%E5%B4%A9%E5%90%A7",
+      "paired": true
+    }
+  ],
+  "excluded": [
+    {
+      "reference": "server/data/test_outputs/browser-fixed-20260911-113745-20e80d/3.source.json",
+      "title": "周刊VOCALOID中文排行榜449",
+      "reason": "previously confirmed album/rank; not replayed"
+    },
+    {
+      "reference": "server/data/test_outputs/random-five-20260911-234450-515b33/4.capture.json",
+      "title": "TraveLing",
+      "reason": "previously confirmed album/rank; not replayed"
+    },
+    {
+      "reference": "server/data/test_outputs/random-five-20260911-234450-515b33/5.capture.json",
+      "title": "周刊VOCALOID中文排行榜455",
+      "reason": "previously confirmed album/rank; not replayed"
+    },
+    {
+      "reference": "server/tests/world/fixtures/vcpedia_frozen_consecutive.json#2",
+      "title": "周刊VOCALOID中文排行榜449",
+      "reason": "previously confirmed album/rank; not replayed"
+    }
+  ],
+  "policy": "Deduplicate pageid/title/raw SHA256; same raw with HTML variants listed separately; replay each independent raw, first listed response as primary. No inferred revision. Condensed recorded_lyrics fixture excluded (not full API); yishen raw sidecar checked separately."
+}
