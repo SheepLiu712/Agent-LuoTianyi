@@ -1,6 +1,7 @@
 extends SceneTree
 
 const TlsTrust = preload("res://src/network/tls_trust.gd")
+const CaBundleReader = preload("res://src/platform/godot_ca_bundle_reader.gd")
 const BUNDLE_PATH := "res://certs/ca-bundle.pem"
 const LOCK_PATH := "res://dependencies.lock.json"
 const PRESET_PATH := "res://export_presets.cfg"
@@ -41,7 +42,7 @@ func run() -> void:
 
 
 func _check_snapshot() -> void:
-	var snapshot: Dictionary = TlsTrust.snapshot()
+	var snapshot: Dictionary = TlsTrust.snapshot(CaBundleReader.new())
 	check(str(snapshot.get("trust_source", "")) == "bundle_override", "snapshot reports bundle override")
 	check(bool(snapshot.get("bundle_present", false)), "snapshot sees the bundle file")
 	check(bool(snapshot.get("bundle_loaded", false)), "snapshot loads the bundle")
@@ -53,10 +54,11 @@ func _check_snapshot() -> void:
 func _check_missing_bundle() -> void:
 	var original := str(ProjectSettings.get_setting(OVERRIDE_SETTING, ""))
 	ProjectSettings.set_setting(OVERRIDE_SETTING, "res://certs/missing.pem")
-	var snapshot: Dictionary = TlsTrust.snapshot()
+	var reader := CaBundleReader.new()
+	var snapshot: Dictionary = TlsTrust.snapshot(reader)
 	check(str(snapshot.get("trust_source", "")) == "bundle_override", "missing bundle keeps override source")
 	check(not bool(snapshot.get("bundle_present", true)), "missing bundle is reported absent")
-	var fields: Dictionary = TlsTrust.event_fields()
+	var fields: Dictionary = TlsTrust.event_fields(reader)
 	check(str(fields.get("code", "")) == "TLS_BUNDLE_MISSING", "missing bundle event code")
 	check(str(fields.get("phase", "")) == "failed", "missing bundle event fails")
 	ProjectSettings.set_setting(OVERRIDE_SETTING, original)
@@ -65,14 +67,14 @@ func _check_missing_bundle() -> void:
 func _check_system_source() -> void:
 	var original := str(ProjectSettings.get_setting(OVERRIDE_SETTING, ""))
 	ProjectSettings.set_setting(OVERRIDE_SETTING, "")
-	var snapshot: Dictionary = TlsTrust.snapshot()
+	var snapshot: Dictionary = TlsTrust.snapshot(CaBundleReader.new())
 	check(str(snapshot.get("trust_source", "")) == "system_or_builtin", "empty setting reports system source")
 	check(int(snapshot.get("bundle_cert_count", 0)) == -1, "system source leaves certificate count unknown")
 	ProjectSettings.set_setting(OVERRIDE_SETTING, original)
 
 
 func _check_event_fields() -> void:
-	var fields: Dictionary = TlsTrust.event_fields()
+	var fields: Dictionary = TlsTrust.event_fields(CaBundleReader.new())
 	check(str(fields.get("code", "")) == "OK", "loaded bundle event succeeds")
 	check(str(fields.get("phase", "")) == "complete", "loaded bundle event completes")
 	check(str(fields.get("detail", "")).contains("r46=true"), "event detail records R46")

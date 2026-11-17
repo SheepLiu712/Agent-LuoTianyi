@@ -9,6 +9,7 @@ extends Control
 @export var password_encryption: Resource = preload("res://src/platform/password_encryption.gd").new()
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 @export var runtime: Resource = preload("res://src/platform/runtime_environment.gd").new()
+@export var ca_bundle_reader: Resource = preload("res://src/platform/godot_ca_bundle_reader.gd").new()
 
 const Services = preload("res://src/composition/application_services.gd")
 const LogSchema = preload("res://src/storage/log_schema.gd")
@@ -116,7 +117,7 @@ func _init_services_and_logging() -> void:
 	_log.write_failed.connect(func(error): push_warning("Client log write failed: %s" % error))
 	_log.ensure_ready()
 	_log.record_as("business", "app_started", {"phase":"starting", "reason":"normal", "uptime_ms":0, "pid":runtime.process_id()})
-	_log.record_as("system", "system_tls_trust", TlsTrust.event_fields())
+	_log.record_as("system", "system_tls_trust", TlsTrust.event_fields(ca_bundle_reader))
 	_log_previous_incomplete()
 	_record_startup_phase("services_ready")
 

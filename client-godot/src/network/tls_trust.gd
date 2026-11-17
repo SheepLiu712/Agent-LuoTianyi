@@ -9,21 +9,22 @@ const R46_LABEL := "Sectigo Public Server Authentication Root R46"
 const MAX_BUNDLE_BYTES := 2 * 1024 * 1024
 
 
-static func snapshot() -> Dictionary:
+static func snapshot(reader: Resource) -> Dictionary:
 	var path := str(ProjectSettings.get_setting(OVERRIDE_SETTING, "")).strip_edges()
 	var result := _empty_snapshot(path)
 	if path.is_empty():
 		return result
-	result.bundle_present = FileAccess.file_exists(path)
+	var probe: Dictionary = reader.read(path) if reader != null else {}
+	result.bundle_present = bool(probe.get("present", false))
 	if not result.bundle_present:
 		return result
-	_inspect_bundle(path, result)
+	_inspect_bundle(probe, result)
 	return result
 
 
-static func event_fields() -> Dictionary:
+static func event_fields(reader: Resource) -> Dictionary:
 	var started := Time.get_ticks_usec()
-	var data := snapshot()
+	var data := snapshot(reader)
 	var code := _code_for(data)
 	return {
 		"operation":"tls_trust_snapshot",
@@ -49,15 +50,15 @@ static func _empty_snapshot(path: String) -> Dictionary:
 	}
 
 
-static func _inspect_bundle(path: String, result: Dictionary) -> void:
-	var bytes := FileAccess.get_file_as_bytes(path)
+static func _inspect_bundle(probe: Dictionary, result: Dictionary) -> void:
+	var bytes: PackedByteArray = probe.get("bytes", PackedByteArray())
 	if bytes.is_empty() or bytes.size() > MAX_BUNDLE_BYTES:
 		return
 	var text := bytes.get_string_from_utf8()
 	result.bundle_cert_count = text.count(PEM_MARKER)
 	result.bundle_has_r46 = text.contains(R46_LABEL)
 	result.bundle_sha256 = _sha256_prefix(bytes)
-	result.bundle_loaded = X509Certificate.new().load(path) == OK
+	result.bundle_loaded = bool(probe.get("loaded", false))
 
 
 static func _code_for(data: Dictionary) -> String:
