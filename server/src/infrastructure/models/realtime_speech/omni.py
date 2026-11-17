@@ -38,6 +38,7 @@ from .config import AliyunRealtimeSpeechConfig, RealtimeSpeechUnavailable
 @dataclass
 class _Reply:
     item_id: str | None
+    input_epoch: int
     buffer: str = ""
     tone: str = "中性"
     tag: str | None = None
@@ -329,7 +330,7 @@ class QwenOmniSession:
             self._next_origins.popleft() if self._next_origins else (self._last_item, None, self._input_epoch)
         )
         stale = epoch != self._input_epoch or (parent is not None and self._replies[parent].cancelled)
-        self._replies[response_id] = _Reply(origin)
+        self._replies[response_id] = _Reply(origin, epoch)
         if stale:
             await self.interrupt(response_id)
         else:
@@ -398,12 +399,28 @@ class QwenOmniSession:
         if response_id:
             if response_id not in self._replies:
                 raise RuntimeError(f"Qwen finished an unknown response: {diagnostic}")
-            return self._replies[response_id]
+            return response_id
+
+        if status == "cancelled" and not response.get("output") and not error:
+            response_id = self._anonymous_cancel_target()
+            if response_id is not None:
+                get_logger(__name__).info(
+                    "Qwen anonymous cancellation resolved call=%s response_id=%s input_epoch=%s %s",
+                    self._call_id,
+                    response_id,
+                    self._input_epoch,
+                    diagnostic,
+                )
+                return response_id
 
         # 未创建回复就结束：只能结算唯一待创建来源，绝不能猜测正在播放的回复 ID。
         active = any(reply.generating for reply in self._replies.values())
         if active or response.get("output") or len(self._next_origins) > 1:
-            raise RuntimeError(f"Cannot correlate anonymous Qwen response: {diagnostic}")
+            raise RuntimeError(
+                f"Cannot correlate anonymous Qwen response: {diagnostic} "
+                f"active_response_ids={[key for key, reply in self._replies.items() if reply.generating]!r} "
+                f"pending_origins={len(self._next_origins)} input_epoch={self._input_epoch}"
+            )
         origin = self._next_origins.popleft() if self._next_origins else None
         get_logger(__name__).warning(
             "Qwen ended without creating a reply call=%s item_id=%s %s",
@@ -413,11 +430,24 @@ class QwenOmniSession:
         )
         return None
 
+    def _anonymous_cancel_target(self):
+        active = [(key, reply) for key, reply in self._replies.items() if reply.generating]
+        # speech_started 在读取协程中先推进轮次；不能等待 CallStage 异步发送取消后才识别旧回复。
+        interrupted = [key for key, reply in active if reply.cancelled or reply.input_epoch < self._input_epoch]
+        if interrupted:
+            return interrupted[0] if len(interrupted) == 1 else None
+        # 尚有待创建来源时，匿名事件也可能属于该来源，不能误取消当前生成。
+        if len(active) == 1 and not self._next_origins:
+            return active[0][0]
+        return None
+
     async def _done(self, response, event_id):
-        reply = self._terminal_reply(response, event_id)
-        if reply is None or not reply.generating:
+        response_id = self._terminal_reply(response, event_id)
+        if response_id is None:
             return
-        response_id = response["id"]
+        reply = self._replies[response_id]
+        if not reply.generating:
+            return
         status = response["status"]
         reply.generating = False
         if status == "cancelled":
