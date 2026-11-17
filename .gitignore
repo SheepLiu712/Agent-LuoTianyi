@@ -49,3 +49,6 @@ client-godot/addons/godot-sqlite/bin/*
 # 本机性能诊断产物（1.1GB 级 ETL 与符号缓存），仅保留脚本与导出表格
 *.etl
 *.etl.NGENPDB/
+
+# 本地个人笔记（不随仓库分发）
+docs-godot/
