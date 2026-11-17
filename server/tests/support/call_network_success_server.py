@@ -14,7 +14,7 @@ import time
 import wave
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 _START_MONOTONIC = float(os.environ.get("CALL_TEST_START_MONOTONIC", time.monotonic()))
 
@@ -67,9 +67,16 @@ class _LoopbackOmniSession(FakeRealtimeSpeechSession):
 
 
 class _LoopbackOmniFactory(FakeRealtimeSpeechSessionFactory):
-    async def open(self, call_id, instructions):
+    async def open(self, call_id, instructions, *, remaining_setup_time, on_session_created):
+        remaining_setup_time()
         session = _LoopbackOmniSession()
+        try:
+            on_session_created(session)
+        except BaseException:
+            await session.close()
+            raise
         self.sessions[call_id] = session
+        remaining_setup_time()
         await session.start(RealtimeSpeechConfig(instructions=instructions))
         return session
 
@@ -210,6 +217,71 @@ def _install_external_seams() -> None:
     server_runtime_module.QwenOmniSessionFactory = _DeterministicSpeechFactory
 
 
+def _observe_terminations():
+    """保留原owned任务，只快照完成结果，不持有旧Stage或任务。"""
+    from src.stage.stage_manager import StageManager
+
+    completed = {}
+    original = StageManager._own_termination
+
+    def observe(manager, stage, operation):
+        task = original(manager, stage, operation)
+        identity = str(stage.interaction_id)
+
+        def finished(done):
+            snapshot = {"completed": True, "resources_released": False, "failed": True}
+            if not done.cancelled():
+                try:
+                    result = done.result()
+                    if result.interaction_id == identity:
+                        snapshot["resources_released"] = result.resources_released is True
+                        snapshot["failed"] = bool(result.finalization_error or result.cleanup_error)
+                except BaseException:
+                    pass
+            completed[identity] = snapshot
+
+        task.add_done_callback(finished)
+        return task
+
+    StageManager._own_termination = observe
+    return completed
+
+
+def _reset_readiness(runtime, call_id, completed):
+    """瞬时只读实际准入事实；未知身份或缺完成快照不视为安全。"""
+    manager = runtime.stage_manager
+    identity = str(UUID(call_id))
+    record = runtime.database_manager.call_sessions.find_by_id(UUID(identity))
+    result = completed.get(identity, {"completed": False, "resources_released": False, "failed": True})
+    if record is None:
+        return {"ready": False, **result}
+    fence = manager._user_reset_fence
+    busy = manager._user_has_interactions(record.user_id)
+    fence_owned = sum(not task.done() for task in fence._operations.get(record.user_id, ())) if fence is not None else 0
+    resetting = fence.is_resetting(record.user_id) if fence is not None else True
+    lease_owned = manager._lease_registry.current(record.user_id, record.character_id) is not None
+    return {
+        **result,
+        "manager_closed": manager.is_closed(),
+        "user_interactions_busy": busy,
+        "fence_configured": fence is not None,
+        "fence_owned": fence_owned,
+        "resetting": resetting,
+        "lease_owned": lease_owned,
+        "ready": bool(
+            result["completed"]
+            and result["resources_released"]
+            and not result["failed"]
+            and not manager.is_closed()
+            and not busy
+            and fence is not None
+            and not fence_owned
+            and not resetting
+            and not lease_owned
+        ),
+    }
+
+
 def main() -> None:  # noqa: C901 - production-loopback support exposes bounded evidence routes
     root = Path(sys.argv[1]).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -217,6 +289,7 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
     os.environ["AMAP_KEY"] = "offline-amap-key"
     os.environ["QWEN_API_KEY"] = "offline-qwen-key"
     _install_external_seams()
+    completed_terminations = _observe_terminations()
     config_path = _runtime_config(root)
     _startup_phase("config-built")
 
@@ -245,12 +318,28 @@ def main() -> None:  # noqa: C901 - production-loopback support exposes bounded 
         }
 
     @server_main.app.get("/test/call_state/{call_id}")
-    async def call_state(call_id: str):
-        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
-        stage = runtime.stage_manager._call_stages.get(call_id)
+    async def call_state(call_id: str, reset_readiness_only: bool = False):
+        try:
+            runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+            call_id = str(UUID(call_id))
+            readiness = _reset_readiness(runtime, call_id, completed_terminations)
+            stage = runtime.stage_manager._call_stages.get(call_id)
+        except Exception:
+            return {
+                "missing": True,
+                "reset_readiness": {
+                    "ready": False,
+                    "completed": False,
+                    "resources_released": False,
+                    "failed": True,
+                },
+            }
+        if reset_readiness_only:
+            return {"reset_readiness": readiness}
         if stage is None:
-            return {"missing": True}
+            return {"missing": True, "reset_readiness": readiness}
         return {
+            "reset_readiness": readiness,
             "state": stage.state.value,
             "pending": list(stage._inputs.pending),
             "ready": sorted(stage._inputs.ready),

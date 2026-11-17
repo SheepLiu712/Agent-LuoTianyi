@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 from typing import Iterable, List
 
-import msaf as msaf
+from scipy import signal
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,6 +36,12 @@ def format_boundaries(boundaries: Iterable[float]) -> List[str]:
 
 
 def run_msaf_boundaries(audio_file: Path) -> List[str]:
+    # librosa 0.9.x 的节拍裁剪仍调用旧入口；兼容范围限于学歌子进程。
+    if not hasattr(signal, "hann"):
+        signal.hann = signal.windows.hann
+
+    import msaf
+
     boundaries, _labels = msaf.process(str(audio_file))
     return format_boundaries(boundaries)
 

@@ -15,14 +15,18 @@ class CallTestSessionFactory:
     def __init__(self, speech):
         self.speech = speech
 
-    async def open(self, call_id, instructions):
+    async def open(self, call_id, instructions, *, remaining_setup_time, on_session_created):
+        remaining_setup_time()
         session = await self.speech.create(call_id)
+        owned = CallTestSession(session)
         try:
-            await session.start(RealtimeSpeechConfig(instructions=instructions))
+            on_session_created(owned)
         except BaseException:
-            await session.close()
+            await owned.close()
             raise
-        return CallTestSession(session)
+        remaining_setup_time()
+        await session.start(RealtimeSpeechConfig(instructions=instructions))
+        return owned
 
 
 class CallTestSession:
@@ -88,8 +92,13 @@ def bind_test_omni(agent, factory):
         agent._omni_prompt = CallSessionPrompt("res/agent/prompts/realtime_call_prompt.json")
     elif getattr(agent, "_test_omni_bound", False) or not hasattr(agent, "open_omni_session"):
 
-        async def open_session(context, call_id):
-            return await CallTestSessionFactory(factory).open(call_id, "测试通话背景")
+        async def open_session(context, call_id, *, remaining_setup_time, on_session_created):
+            return await CallTestSessionFactory(factory).open(
+                call_id,
+                "测试通话背景",
+                remaining_setup_time=remaining_setup_time,
+                on_session_created=on_session_created,
+            )
 
         agent.open_omni_session = open_session
         agent._test_omni_bound = True

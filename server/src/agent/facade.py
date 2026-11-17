@@ -1,6 +1,7 @@
 """角色门面：校验、内部路由、单次交付结算及在途调用所有权。"""
 
 import asyncio
+from collections.abc import Callable
 from traceback import walk_tb
 from uuid import UUID
 
@@ -62,7 +63,14 @@ class Agent:
         self._inflight: set[asyncio.Future] = set()
         self._interruptibility = _InteractionInterruptibility()
 
-    async def open_omni_session(self, context: InteractionContext, call_id: UUID) -> OmniSession:
+    async def open_omni_session(
+        self,
+        context: InteractionContext,
+        call_id: UUID,
+        *,
+        remaining_setup_time: Callable[[], float],
+        on_session_created: Callable[[OmniSession], None],
+    ) -> OmniSession:
         """读取一次背景并创建本次通话句柄；共享门面不保存连接。"""
         identity = context.identity
         if (
@@ -74,7 +82,12 @@ class Agent:
             raise ValueError("invalid omni interaction identity")
         if self._omni_factory is None or self._narrative is None or self._omni_prompt is None:
             raise RuntimeError("omni session factory is unavailable")
-        return await self._omni_factory.open(call_id, self._omni_prompt.render(context, self._narrative))
+        return await self._omni_factory.open(
+            call_id,
+            self._omni_prompt.render(context, self._narrative),
+            remaining_setup_time=remaining_setup_time,
+            on_session_created=on_session_created,
+        )
 
     async def handle_stimulus(
         self,

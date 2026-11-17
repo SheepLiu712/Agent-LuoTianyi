@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
 from sqlalchemy import create_engine
@@ -33,6 +34,7 @@ from src.agent.processing.output_drafts import TextFinalDraft, AudioChunkDraft, 
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.memory_retrieval import MemorySearchResult
 from src.domain.call import CallState
+from src.domain.stage.lifecycle import StageEndReason
 from src.infrastructure.models.realtime_speech.config import AliyunRealtimeSpeechConfig
 from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.persistence.call_sessions import BEIJING_TIMEZONE, CallSessionRecord, SqlCallSessionRepository
@@ -133,6 +135,18 @@ async def _eventually(predicate, timeout=1.0):
             await asyncio.sleep(0)
 
     await asyncio.wait_for(wait(), timeout)
+
+
+async def wait_opening_ready(stage, socket):
+    """ACTIVE是本地状态；接听执行结束且真实开场请求发出才可注入用户输入。"""
+    answer = stage._realize_task
+    if answer is None:
+        raise AssertionError("ACTIVE call has no answer realization task")
+    await asyncio.shield(answer)
+    if stage.state is not CallState.ACTIVE or stage.termination_requested:
+        raise AssertionError("call ended before opening became ready")
+    if not any(event["type"] == "response.create" for event in socket.sent):
+        raise AssertionError("answer completed without sending its opening response request")
 
 
 def _receipt(call_id, seq, payload):
@@ -274,14 +288,23 @@ async def create_stage(setup, *, retrieval=None, config=None, accept=True):
         config=config,
     )
     stage._test_summary = summary
-    await stage.start()
-    await _eventually(lambda: stage.state is CallState.ACTIVE if accept else stage.snapshot is not None)
-    if accept:
-        await _eventually(lambda: any(e["type"] == "response.create" for e in socket.sent))
-        # Acknowledge the once-only opening response before injecting user turns.
-        await send_reply(socket, response_id="opening", text="你好。", item_id=None)
-        await _eventually(lambda: any(item[0] == "pcm" for item in transport.items if isinstance(item, tuple)))
-        start = next(item for item in transport.items if isinstance(item, tuple) and item[0] == "start")
-        stage.playback_completed(start[1], start[2])
-        await stage._drain_facts()
-    return stage, socket, transport, retrieval
+    try:
+        await stage.start()
+        await _eventually(lambda: stage.state is CallState.ACTIVE if accept else stage.snapshot is not None)
+        if accept:
+            await wait_opening_ready(stage, socket)
+            # Acknowledge the once-only opening response before injecting user turns.
+            await send_reply(socket, response_id="opening", text="你好。", item_id=None)
+            await _eventually(lambda: any(item[0] == "pcm" for item in transport.items if isinstance(item, tuple)))
+            start = next(item for item in transport.items if isinstance(item, tuple) and item[0] == "start")
+            stage.playback_completed(start[1], start[2])
+            await stage._drain_facts()
+        return stage, socket, transport, retrieval
+    except BaseException:
+        try:
+            cleanup = await stage.terminate(StageEndReason.SHUTDOWN)
+            if cleanup.cleanup_error or not cleanup.resources_released:
+                logging.getLogger(__name__).error("call setup cleanup remains unsafe result=%s", cleanup)
+        except BaseException:
+            logging.getLogger(__name__).exception("call setup cleanup failed while preserving original error")
+        raise

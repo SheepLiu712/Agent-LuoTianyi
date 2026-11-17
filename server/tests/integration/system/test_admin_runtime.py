@@ -492,6 +492,58 @@ def test_access_log_filter_redacts_fallback_message():
     assert "REDACTED" in record.getMessage()
 
 
+@pytest.mark.parametrize("legacy", [-1, True, None, "bad", float("nan")])
+def test_legacy_qwen_setup_limits_do_not_block_production_validation(tmp_path, monkeypatch, legacy):
+    monkeypatch.setenv("JWT_SECRET", "offline-jwt")
+    monkeypatch.setenv("AMAP_KEY", "offline-amap")
+    config = minimal_config(tmp_path)
+    config["call_transport"] = {
+        "enabled": True,
+        "realtime_speech": {
+            "enabled": True,
+            "api_key": "offline",
+            "model": "qwen3.5-omni-realtime",
+            "endpoint": "wss://provider.invalid/realtime",
+            "connect_timeout_seconds": legacy,
+            "session_timeout_seconds": legacy,
+        },
+    }
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    assert validator.validate(config)["core_ok"] is True
+
+
+@pytest.mark.parametrize("value", [0, -1, True, None, "30", float("nan"), float("inf")])
+def test_invalid_call_setup_apply_does_not_write_or_restart(tmp_path, monkeypatch, value):
+    from src.web.admin import admin_interface
+
+    monkeypatch.setenv("JWT_SECRET", "offline-jwt")
+    monkeypatch.setenv("AMAP_KEY", "offline-amap")
+    config = minimal_config(tmp_path)
+    store = ConfigStore(tmp_path / "config.json", root_dir=tmp_path)
+    store.write_raw(config, backup=False)
+    before = store.path.read_bytes()
+    secrets = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secrets)
+    observability = ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})
+    supervisor = RuntimeSupervisor(
+        config_store=store, secret_store=secrets, validator=validator, observability=observability
+    )
+    shell = SimpleNamespace(
+        config_store=store, secret_store=secrets, validator=validator, runtime_supervisor=supervisor
+    )
+    monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
+    try:
+        result = asyncio.run(admin_interface.apply_llm_config({"call_setup_timeout": value}))
+        assert result["ok"] is False
+        assert result["written"] is False and result["restarted"] is False
+        assert store.path.read_bytes() == before
+        assert not (tmp_path / "backups").exists()
+        assert supervisor.status()["state"] == "stopped"
+        assert supervisor.status()["last_started_at"] is None
+    finally:
+        observability.close()
+
+
 def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
     config = minimal_config(tmp_path)
     view = build_llm_config_view(config)
