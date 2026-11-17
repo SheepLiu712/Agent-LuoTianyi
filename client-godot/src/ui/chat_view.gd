@@ -95,6 +95,7 @@ func _initialize() -> void:
 	_history_skip.pressed.connect(_session.skip_history)
 	_scroll.audio_action.connect(_audio_action)
 	_scroll.image_action.connect(_image_action)
+	_scroll.delivery_action.connect(_delivery_action)
 	_scroll.visible_messages.connect(_visible_audio)
 	_scroll.at_latest_changed.connect(_on_at_latest_changed)
 	_scroll.interacted.connect(_on_scroll_interacted)
@@ -348,6 +349,13 @@ func _image_action(id: String, action: String) -> void:
 			if texture == null: _session.request_message_image(id,true)
 			return texture)
 
+
+func _delivery_action(id: String, action: String) -> void:
+	if action == "retry":
+		_session.retry_message(id)
+	elif action == "delete":
+		_session.delete_message(id)
+
 func _exit_tree() -> void:
 	files.cancel()
 
@@ -412,12 +420,10 @@ func _announce_message_failures(messages: Array[Dictionary]) -> void:
 		var status := str(message.get("status", ""))
 		if status == "failed":
 			_announced_messages[id] = true
-			ErrorDialog.present(self, "发送失败")
-		elif status == "uncertain":
-			# 从本地库恢复的旧结果不再每次启动弹阻塞框；
-			# 实时送达不确定仍由本会话的 delivery_changed 触发提示。
+			# 从本地库恢复的失败记录由气泡自身提示，不再每次启动弹阻塞框。
 			if bool(message.get("restored", false)):
-				_announced_messages[id] = true
 				continue
-			_announced_messages[id] = true
-			ErrorDialog.present(self, "消息未确认送达，请刷新核实或重发。")
+			if str(message.get("code", "")) == "DELIVERY_UNCERTAIN":
+				ErrorDialog.present(self, "消息未确认送达，请刷新核实。")
+			else:
+				ErrorDialog.present(self, "发送失败")

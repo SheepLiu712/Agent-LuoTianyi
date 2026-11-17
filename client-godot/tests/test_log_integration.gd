@@ -31,10 +31,12 @@ func _initialize() -> void:
 	var logger := FakeLogger.new()
 	_check_transport(logger)
 	_check_http(logger)
+	_check_tls_probe(logger)
 	_check_detail_mapping(logger)
 	_check_history_api()
 	_check_avatar_logging(logger)
 	_check_engine_throttle(logger)
+	_check_engine_tls_cause(logger)
 	var directory := _check_credentials(logger)
 	_check_credential_failure(logger)
 	_cleanup(directory)
@@ -67,6 +69,29 @@ func _check_http(logger: FakeLogger) -> void:
 	check(not http.is_empty() and http.fields.outcome == "failure", "http failure access")
 	check(http.fields.status == 500 and http.fields.route == "/history", "http access fields")
 	check(http.fields.detail == "server exploded", "http error detail carried")
+	Events.http(logger, {"ok":false, "code":"NETWORK_ERROR", "detail":"RESULT_TLS_HANDSHAKE_ERROR"}, 0, 0,
+		Time.get_ticks_usec() - 1200, "req_abcdef123456", "/auth/public_key", "POST",
+		"https://www-api.u3493359.nyat.app:11664")
+	var tls_http: Array = logger.entries.filter(func(entry): return entry.event == "network_http")
+	var tls_entry: Dictionary = tls_http[-1]
+	check(tls_entry.fields.data.tls_stage == "handshake", "tls http failure marks handshake stage")
+	check(tls_entry.fields.data.tls_result == "RESULT_TLS_HANDSHAKE_ERROR", "tls http failure keeps result")
+
+
+func _check_tls_probe(logger: FakeLogger) -> void:
+	Events.probe(logger, {
+		"ok":false,
+		"baseline":{"ok":true, "stage":"HTTP", "code":"OK", "detail":"", "duration_ms":181,
+			"origin":"https://www.baidu.com"},
+		"target":{"ok":false, "stage":"TLS", "code":"NETWORK_ERROR",
+			"detail":"RESULT_TLS_HANDSHAKE_ERROR", "duration_ms":533,
+			"origin":"https://www-api.u3493359.nyat.app:11664"},
+		"verdict":"target_only_fail", "duration_ms":714,
+	})
+	var probe := _find(logger, "network_probe")
+	check(not probe.is_empty() and probe.fields.data.target_stage == "TLS", "probe keeps target tls stage")
+	check(probe.fields.data.target_detail == "RESULT_TLS_HANDSHAKE_ERROR", "probe keeps target tls detail")
+	check(probe.fields.data.baseline_detail == "", "probe keeps empty baseline detail")
 
 func _check_detail_mapping(logger: FakeLogger) -> void:
 	var json_body := '{"detail":"server exploded"}'.to_utf8_buffer()
@@ -137,6 +162,16 @@ func _check_engine_throttle(logger: FakeLogger) -> void:
 	sink.flush(now + 2000)
 	var repeated: Array = logger.entries.filter(func(entry): return entry.event == "engine_error_repeated")
 	check(repeated.size() == 1 and repeated[0].fields.count == 2, "engine suppression summary flushes once")
+
+
+func _check_engine_tls_cause(logger: FakeLogger) -> void:
+	var sink = EngineSink.new(logger)
+	sink._save("_do_handshake", "res://modules/mbedtls/stream_peer_mbedtls.cpp", 89, "ERROR",
+		"TLS handshake error: -9984", 0, [])
+	var entry: Dictionary = logger.entries[-1]
+	check(entry.event == "engine_error" and entry.fields.data.tls_cause == "certificate_verify_failed",
+		"engine tls error records certificate cause")
+	check(entry.fields.data.tls_stage == "handshake", "engine tls error records handshake stage")
 
 func _check_credentials(logger: FakeLogger) -> String:
 	var directory := "user://log-credential-%s" % Time.get_ticks_usec()

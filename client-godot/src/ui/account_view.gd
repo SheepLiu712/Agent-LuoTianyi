@@ -2,8 +2,10 @@ extends PanelContainer
 signal log_requested
 signal feedback_requested
 const Session = preload("res://src/session/account_session.gd")
+const ServerAddress = preload("res://src/domain/server_address.gd")
 const HistoryRow = preload("res://scenes/ui/components/login_account_row.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const LoginStyle = preload("res://src/ui/login_style.gd")
 const ModalStack = preload("res://src/ui/modal_stack.gd")
 const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
 const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
@@ -16,6 +18,7 @@ var _initialized := false
 var _mode := "login"
 var _busy := false
 var _checking_server := false
+var _probing := false
 var _syncing := false
 var _manual_password := false
 var _removing := ""
@@ -24,25 +27,43 @@ var _history_trigger: RefCounted
 var _ime_suppressed := false
 var _ime_sync_queued := false
 var _ime_control: RefCounted
+var _ui_style: RefCounted
 @onready var _form: VBoxContainer = %Form
 @onready var _remember: CheckBox = %Remember
 @onready var _automatic: CheckBox = %AutoLogin
 @onready var _submit: Button = %Submit
 @onready var _status: Label = %Status
 
-func setup(session: Node) -> void:
+func setup(session: Node, ui_style: RefCounted = null) -> void:
 	_session = session
-	if is_node_ready(): _initialize()
+	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_login_style):
+		_ui_style.style_changed.disconnect(_apply_login_style)
+	_ui_style = ui_style
+	if _ui_style != null:
+		_ui_style.style_changed.connect(_apply_login_style)
+	if is_node_ready():
+		_apply_login_style()
+		_initialize()
 
 func _ready() -> void:
+	_apply_login_style()
 	_menu_trigger = preload("res://src/ui/popup_trigger.gd").new(%MenuButton,%MenuPopup)
 	_history_trigger = preload("res://src/ui/popup_trigger.gd").new(%HistoryButton,%HistoryPopup)
 	%MenuButton.pressed.connect(_open_menu)
 	%MenuPopup.visibility_changed.connect(func(): %MenuButton.set_pressed_no_signal(%MenuPopup.visible))
 	%Logs.pressed.connect(func(): %MenuPopup.hide(); log_requested.emit())
 	%Feedback.pressed.connect(func(): %MenuPopup.hide(); feedback_requested.emit())
-	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton]: button.disabled = true
+	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe]: button.disabled = true
+	%RemoveAccountDialog.visibility_changed.connect(func(): _apply_login_style.call_deferred())
 	if _session != null: _initialize()
+
+func _apply_login_style() -> void:
+	var crystal: bool = _ui_style != null and _ui_style.has_method("is_crystal") and _ui_style.is_crystal()
+	LoginStyle.apply_account_view(self, crystal)
+
+func _present_login_error(message: String) -> void:
+	var crystal: bool = _ui_style != null and _ui_style.has_method("is_crystal") and _ui_style.is_crystal()
+	ErrorDialog.present(self, message, "提示", true, crystal)
 
 func _initialize() -> void:
 	if _initialized: return
@@ -57,7 +78,6 @@ func _initialize() -> void:
 		_fields[name].focus_exited.connect(_queue_ime_sync)
 	_fields.username.text_changed.connect(_username_changed)
 	_submit.pressed.connect(_send)
-	%Cancel.pressed.connect(_session.cancel)
 	%SetServer.pressed.connect(_open_server)
 	%RegisterLink.pressed.connect(func(): select_mode("register"))
 	%ResetLink.pressed.connect(func(): select_mode("reset"))
@@ -67,6 +87,7 @@ func _initialize() -> void:
 	_remember.toggled.connect(func(_pressed): _options_changed(false))
 	_automatic.toggled.connect(func(_pressed): _options_changed(true))
 	%ServerSave.pressed.connect(_save_server)
+	%ServerProbe.pressed.connect(_probe_server)
 	%Server.text_submitted.connect(func(_text): _save_server())
 	%ServerDefault.pressed.connect(func(): %Server.text = Session.DEFAULT_SERVER)
 	%ServerCancel.pressed.connect(_cancel_server)
@@ -76,7 +97,7 @@ func _initialize() -> void:
 	resized.connect(_layout_form)
 	_layout_form()
 	_session.changed.connect(_update_state)
-	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton]: button.disabled = false
+	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe]: button.disabled = false
 	_sync_selected()
 	if _session.get_login_defaults().storage_error:
 		push_warning("Login storage was not ready")
@@ -98,29 +119,44 @@ func _apply_mode() -> void:
 	var login := _mode == "login"
 	var signed_in: bool = not _session.get_session().is_empty()
 	var saved: bool = login and not _manual_password and _remembered().get("remember", false)
+	_apply_mode_visibility(login, saved, signed_in)
+	_apply_mode_copy()
+	_apply_submit_text()
+	_sync_status_area()
+	_update_focus_chain()
+	_queue_ime_sync()
+
+func _apply_mode_visibility(login: bool, saved: bool, signed_in: bool) -> void:
 	%AvatarBlock.visible = login
 	%AvatarGap.visible = login
 	%BackToLogin.visible = not login
 	%ModeTitle.visible = not login
-	%ModeTitle.text = "注册账号" if _mode == "register" else "忘记密码"
 	%ModeHelp.visible = _mode == "reset"
-	%Username.placeholder_text = "新用户名" if _mode == "reset" else "用户名"
-	%Password.placeholder_text = "新密码" if _mode == "reset" else "密码"
-	%Confirm.placeholder_text = "确认新密码" if _mode == "reset" else "确认密码"
 	%Confirm.visible = not login
 	%Invite.visible = not login
-	%Invite.placeholder_text = "已使用的邀请码" if _mode == "reset" else "邀请码"
 	%Password.visible = not saved
 	%SavedLogin.visible = saved
 	%HistoryButton.visible = login
 	%Options.visible = login
-	%Footer.visible = login and not signed_in
-	%Footer.get_parent().visible = login and not signed_in
+	var footer_visible := login and not signed_in
+	%Footer.visible = footer_visible
+	%Footer.get_parent().visible = footer_visible
 	_form.visible = not signed_in
-	_submit.text = {"login":"登录","register":"注册","reset":"重置账号"}[_mode]
-	_sync_status_area()
-	_update_focus_chain()
-	_queue_ime_sync()
+
+func _apply_mode_copy() -> void:
+	%ModeTitle.text = "注册账号" if _mode == "register" else "忘记密码"
+	%Username.placeholder_text = "新用户名" if _mode == "reset" else "用户名"
+	%Password.placeholder_text = "新密码" if _mode == "reset" else "密码"
+	%Confirm.placeholder_text = "确认新密码" if _mode == "reset" else "确认密码"
+	%Invite.placeholder_text = "已使用的邀请码" if _mode == "reset" else "邀请码"
+
+func _apply_submit_text() -> void:
+	var submit_texts := {
+		"login": "登录中" if _busy else "登录",
+		"register": "注册中" if _busy else "注册",
+		"reset": "重置中" if _busy else "重置账号",
+	}
+	_submit.text = submit_texts.get(_mode, "登录")
 
 ## Tab 由登录表单优先接管：发布版里依赖 focus_next 时仍可能被窗口的
 ## 空间导航带到右侧历史账号按钮，这里直接计算并抓取目标焦点。
@@ -257,20 +293,27 @@ func _send() -> void:
 	_present_response(operation, response)
 	_apply_mode()
 func _update_state(state: Dictionary) -> void:
-	_busy = state.phase == "busy"
-	for name in ["username","password","confirm","invite","server"]: _fields[name].editable = not _busy
-	for button in [_submit,_remember,_automatic,%BackToLogin,%RegisterLink,%ResetLink,%HistoryButton,%UsePassword,%SetServer,%ServerSave,%ServerDefault]: button.disabled = _busy
-	%Cancel.visible = _busy and not %ServerDialog.visible
+	_apply_busy_state(state)
 	if state.code in ["SERVER_CHANGED","ACCOUNT_SELECTED","ACCOUNT_REMOVED","LOGGED_OUT"]: _sync_selected()
 	if state.phase == "signed_in": _clear_secrets()
 	if not _checking_server or state.code == "SERVER_CHANGED":
-		if _is_error_code(state.code):
-			_show_error(state.code)
-		else:
-			_set_status(_error_text(state.code))
-		if state.storage_error:
-			push_warning("Account storage failed during %s" % state.phase)
+		_report_state(state)
 	_apply_mode()
+
+func _apply_busy_state(state: Dictionary) -> void:
+	_busy = state.phase == "busy"
+	for name in ["username","password","confirm","invite","server"]: _fields[name].editable = not _busy
+	for button in [_submit,_remember,_automatic,%BackToLogin,%RegisterLink,%ResetLink,%HistoryButton,%UsePassword,%SetServer,%ServerSave,%ServerDefault,%ServerProbe]: button.disabled = _busy or _probing
+
+func _report_state(state: Dictionary) -> void:
+	if _is_error_code(state.code):
+		_show_error(state.code, 0, str(state.get("detail", "")))
+	elif state.code == "PENDING":
+		_set_status("")
+	else:
+		_set_status(_error_text(state.code, 0, str(state.get("detail", ""))))
+	if state.storage_error:
+		push_warning("Account storage failed during %s" % state.phase)
 
 func _open_menu() -> void:
 	if not _menu_trigger.should_open(): return
@@ -322,30 +365,68 @@ func _open_server() -> void:
 	if _busy: return
 	%Server.text = _session.get_login_defaults().server
 	%ServerStatus.text = "验证连接成功后才使用新地址。"
+	%ProbeResult.text = ""
+	%ProbeResult.visible = false
+	_apply_probe_state()
 	%ServerDialog.exclusive = false
-	ModalWindowLayout.present(%ServerDialog, %ServerDialog/Panel, null, 220, Vector2i(416, 260))
+	ModalWindowLayout.present(%ServerDialog, %ServerDialog/Panel, null, 260, Vector2i(416, 300))
 	ModalStack.activate(%ServerDialog)
 	%Server.grab_focus()
 
 func _save_server() -> void:
-	if _busy: return
+	if _busy or _probing: return
 	%ServerStatus.text = "正在验证服务器…"
 	_checking_server = true
 	var response: Dictionary = await _session.set_server(%Server.text)
 	_checking_server = false
 	if not %ServerDialog.visible: return
 	if response.ok: %ServerDialog.hide()
-	else: %ServerStatus.text = "无法连接服务器，请检查网络或服务器地址。"
+	else:
+		var message := _error_text(response.code, response.get("status", 0), str(response.get("detail", "")))
+		%ServerStatus.text = message
+		if _should_auto_probe(response):
+			await _probe_server(message)
+
+## 只有链路层失败才补测；账号/参数错误不需要再打一次公网基线。
+static func _should_auto_probe(response: Dictionary) -> bool:
+	return int(response.get("status", 0)) == 0 and str(response.get("code", "")) in [
+		"NETWORK_ERROR", "TIMEOUT", "PUBLIC_KEY_ERROR"]
+
+func _probe_server(status_text: String = "验证连接成功后才使用新地址。") -> void:
+	if _probing or _busy or _checking_server: return
+	var address := ServerAddress.normalize(%Server.text)
+	if address.is_empty():
+		%ProbeResult.text = "公网基线：未测试\n目标服务器：地址无效"
+		%ProbeResult.visible = true
+		return
+	_probing = true
+	_apply_probe_state()
+	%ServerStatus.text = "正在测试网络连通性…"
+	var result: Dictionary = await _session.probe_connectivity(address)
+	_probing = false
+	_apply_probe_state()
+	if not %ServerDialog.visible or bool(result.get("cancelled", false)): return
+	%ServerStatus.text = _probe_status_text(result, status_text)
+	var baseline: Dictionary = result.get("baseline", {})
+	var target: Dictionary = result.get("target", {})
+	%ProbeResult.text = "公网基线：%s\n目标服务器：%s" % [_probe_text(baseline), _probe_text(target)]
+	%ProbeResult.visible = true
+
+func _apply_probe_state() -> void:
+	for button in [%ServerProbe, %ServerSave, %ServerDefault]:
+		button.disabled = _busy or _probing
+	%ServerCancel.disabled = _busy
 
 func _cancel_server() -> void:
 	if _busy and %ServerDialog.visible: _session.cancel()
+	_session.cancel_probe()
 	%ServerDialog.hide()
 
 func report_feedback_result(error: Error) -> void:
 	if error == OK: return
 	%FeedbackAddress.show()
 	_set_status("")
-	ErrorDialog.present(self, "浏览器没有打开，请手动复制下面的地址。")
+	_present_login_error("浏览器没有打开，请手动复制下面的地址。")
 
 func _layout_form() -> void:
 	%FormMargin.theme_type_variation = &"LoginCompactMargin" if size.x < 440 else &"LoginFormMargin"
@@ -373,7 +454,9 @@ static func _ascii_password(value: String) -> bool:
 		if code < 32 or code > 126: return false
 	return true
 
-static func _error_text(code: String, status: int = 0) -> String:
+static func _error_text(code: String, status: int = 0, detail: String = "") -> String:
+	if _is_tls_failure(detail):
+		return "服务器证书校验失败，连接已到达服务器但证书未被信任。请检查系统时间、代理或安全软件；可在“设置服务器”中测试连通性，或稍后重试。"
 	return {"OK":"登录成功。", "LOGGED_OUT":"已退出登录。", "PENDING":"正在处理…", "CANCELLED":"请求已取消。",
 		"AUTH_REJECTED":"用户名或密码错误，或自动登录凭据已失效。", "INVALID_INPUT":"请填写完整信息并检查服务器地址。",
 		"TIMEOUT":"连接超时，请稍后重试。", "NETWORK_ERROR":"无法连接服务器，请检查地址和网络。",
@@ -381,6 +464,31 @@ static func _error_text(code: String, status: int = 0) -> String:
 		"INVALID_RESPONSE":"服务器响应异常，请稍后重试。", "CREDENTIAL_UNAVAILABLE":"无法读取自动登录凭据，请重新登录。",
 		"HTTP_ERROR":"服务器暂时无法处理，请稍后重试。",
 		"NO_SAVED_LOGIN":"请使用密码登录。", "SERVER_CHANGED":"服务器已更新。", "CHECKING_SERVER":"正在验证服务器…", "INSECURE_SERVER":"该地址未启用 HTTPS，已拒绝发送账号信息。", "ACCOUNT_SELECTED":"", "ACCOUNT_REMOVED":"本机账号记录已移除。", "OPTIONS_CHANGED":"", "STORAGE_ERROR":"", "BUSY":"正在处理中，请稍候。"}.get(code, "操作未完成，请重试。")
+
+static func _is_tls_failure(detail: String) -> bool:
+	return detail == "RESULT_TLS_HANDSHAKE_ERROR" \
+		or detail.contains("MBEDTLS_ERR_X509_CERT_VERIFY_FAILED")
+
+## 探测结果比单次登录失败更能说明失败发生在链路哪一段。
+static func _probe_status_text(result: Dictionary, fallback: String) -> String:
+	var target: Dictionary = result.get("target", {})
+	if str(target.get("stage", "")) != "TLS":
+		return fallback
+	if bool(result.get("baseline", {}).get("ok", false)):
+		return "服务器证书校验失败：公网正常，目标服务器 TLS 握手未通过。请检查系统时间、代理/安全软件或服务器证书。"
+	return "目标服务器 TLS 证书校验失败。请检查系统时间、代理/安全软件或服务器证书。"
+
+static func _probe_text(entry: Dictionary) -> String:
+	var stage := str(entry.get("stage", "UNKNOWN"))
+	var elapsed := int(entry.get("duration_ms", 0))
+	if stage == "INVALID":
+		return "地址无效"
+	var status := int(entry.get("http_status", 0))
+	if stage == "HTTP" and status >= 400:
+		return "服务器响应异常 %d %dms" % [status, elapsed]
+	var label: String = {"HTTP":"正常", "DNS":"DNS 解析失败", "TCP":"连接失败", "TLS":"TLS 证书校验失败",
+		"TIMEOUT":"连接超时", "CANCELLED":"已取消"}.get(stage, "连接失败")
+	return "%s %dms" % [label, elapsed]
 
 func _is_error_code(code: String) -> bool:
 	return code in ["AUTH_REJECTED","INVALID_INPUT","INSECURE_SERVER","TIMEOUT","NETWORK_ERROR","PUBLIC_KEY_ERROR","ENCRYPTION_ERROR","INVALID_RESPONSE","CREDENTIAL_UNAVAILABLE","HTTP_ERROR","NO_SAVED_LOGIN","BUSY"]
@@ -391,21 +499,22 @@ func _set_status(text: String) -> void:
 
 func _sync_status_area() -> void:
 	_status.visible = not _status.text.is_empty()
-	%StatusArea.visible = _status.visible or %Cancel.visible or %FeedbackAddress.visible
+	%StatusArea.visible = _status.visible or %FeedbackAddress.visible
 
-func _show_error(code: String, status: int = 0) -> void:
-	_set_status(_error_text(code, status))
-	ErrorDialog.present(self, _error_text(code, status))
+func _show_error(code: String, status: int = 0, detail: String = "") -> void:
+	var message := _error_text(code, status, detail)
+	_set_status("")
+	_present_login_error(message)
 
 func _validate_passwords(operation: String) -> bool:
 	for name in (["password"] if operation == "login" else ["password","confirm"]):
 		if not _ascii_password(_fields[name].text):
 			_set_status("")
-			ErrorDialog.present(self, PASSWORD_HINT)
+			_present_login_error(PASSWORD_HINT)
 			return false
 	if operation != "login" and _fields.password.text != _fields.confirm.text:
-		_set_status("两次输入的密码不一致。")
-		ErrorDialog.present(self, "两次输入的密码不一致。")
+		_set_status("")
+		_present_login_error("两次输入的密码不一致。")
 		return false
 	return true
 
@@ -417,6 +526,6 @@ func _present_response(operation: String, response: Dictionary) -> void:
 			_set_status("注册成功，请登录。" if operation == "register" else "账号重置成功，请使用新账号登录。")
 	elif not response.storage_error:
 		if _is_error_code(response.code):
-			_show_error(response.code, response.get("status",0))
+			_show_error(response.code, response.get("status",0), str(response.get("detail", "")))
 		else:
-			_set_status(_error_text(response.code))
+			_set_status(_error_text(response.code, 0, str(response.get("detail", ""))))

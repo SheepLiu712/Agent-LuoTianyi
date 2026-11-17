@@ -7,6 +7,8 @@ var dynamics: Node
 var executor: Node
 var storage_worker: Node
 var persistence: RefCounted
+var scope_session: RefCounted
+var dynamics_persistence: RefCounted
 var media_migration: Node
 var avatar: Node
 var cache: RefCounted
@@ -38,8 +40,6 @@ func mount(host: Node, injected_account: Node, layout_path: String, encryption: 
 	host.add_child(account)
 	models = preload("res://src/session/model_settings.gd").new(preload("res://src/network/json_request.gd").new(15.0,8*1024*1024,log),preload("res://src/storage/model_store.gd").new(secrets,data_root.path_join("models"),log),log)
 	host.add_child(models)
-	dynamics = preload("res://src/session/dynamics_controller.gd").new(log)
-	host.add_child(dynamics)
 	cache = preload("res://src/storage/audio_cache.gd").new(data_root.path_join("audio"),log)
 	var images = preload("res://src/storage/history_images.gd").new(data_root.path_join("images"),log)
 	# 目录随登录切换而变，所以用取数回调；Python 来源只由用户显式选择。
@@ -56,11 +56,15 @@ func mount(host: Node, injected_account: Node, layout_path: String, encryption: 
 	storage_worker = preload("res://src/storage/sqlite_worker.gd").new(func() -> RefCounted: return preload("res://src/storage/sqlite_history_database.gd").new(),log)
 	host.add_child(storage_worker)
 	storage_worker.start()
-	persistence = preload("res://src/session/message_persistence.gd").new(storage_worker)
-	# 对账使用独立的历史客户端：共用实例会让上翻与对账互相取消。
+	# 聊天与动态共用同一条连接：ScopeSession 负责幂等打开账号作用域。
+	scope_session = preload("res://src/storage/scope_session.gd").new(storage_worker)
+	persistence = preload("res://src/session/message_persistence.gd").new(scope_session)
+	dynamics_persistence = preload("res://src/session/dynamics_persistence.gd").new(scope_session)
+	dynamics = preload("res://src/session/dynamics_controller.gd").new(log, dynamics_persistence)
+	dynamics.set_history_root(data_root.path_join("history"))
+	host.add_child(dynamics)
 	var history = preload("res://src/session/history_sync.gd").new(
-		preload("res://src/network/history_api.gd").new(15.0,log),persistence,log,
-		preload("res://src/network/history_api.gd").new(15.0,log))
+		preload("res://src/network/history_api.gd").new(15.0,log),persistence,log)
 	var reading = preload("res://src/storage/reading_position.gd").new(data_root.path_join("reading"))
 	executor = preload("res://src/session/model_executor.gd").new(models,log)
 	var audio = preload("res://src/media/reply_audio.gd").new(log,Callable(),cache,decoder_factory)

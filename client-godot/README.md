@@ -46,6 +46,14 @@ python client-godot/scripts/build_cubism.py --source '<gd_cubism源码目录>'
 
 截取账户页：`agentluo.exe -- --capture=<绝对PNG路径>`；截取样板增加 `--preview`，可再增加 `--scenario=empty/disconnected/error/thinking`。截图和 headless 检查不会自动登录真实账户。
 
+## TLS 信任源
+
+客户端不再依赖 Windows 当前用户根证书库：`project.godot` 通过
+`network/tls/certificate_bundle_override` 固定使用 `certs/ca-bundle.pem`
+（完整 Mozilla CA 包），覆盖账号、历史、图片、WebSocket 与连通性探测的全部
+HTTPS 请求。`export_presets.cfg` 的 `include_filter` 必须保留 `*.pem`。
+来源、快照哈希与刷新步骤见 [CA 信任源](certs/README.md)。
+
 ## Windows 凭据扩展
 
 `WindowsSecurity` 使用 CNG RSA-OAEP/SHA256 和当前用户 DPAPI。源码位于 `native/`，不需要额外运行时 DLL；编译使用上述锁定 godot-cpp 和 VS2022 工具链。
@@ -79,7 +87,7 @@ python client-godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 该命令会向本机默认音频设备播放短合成音；AudioEffectCapture 检查非零混音输出及静音，不等同人工听感或真实服务验收。
 
-未登录时显示480×690白色圆角账户窗口，登录成功后展开角色和聊天，退出再收起。默认服务器沿用旧端 release_config.base_url；已保存的自定义地址优先。账户回归含窗口切换测试，原生窗口验证可运行 `run_feature_tests.py --godot <exe> --script res://tests/test_application_window.gd --gpu`，仍仅连接本地 HTTP fixture。
+未登录时显示480×690淡蓝圆角账户窗口，登录成功后展开角色和聊天，退出再收起。登录页使用备份客户端的淡蓝底与天依蓝头像光晕，登录菜单、服务器框和错误框采用登录专用圆角；日志窗和登录后界面保持原主题。默认服务器沿用旧端 release_config.base_url；已保存的自定义地址优先。账户回归含窗口切换测试，原生窗口验证可运行 `run_feature_tests.py --godot <exe> --script res://tests/test_application_window.gd --gpu`，仍仅连接本地 HTTP fixture。
 
 语音缓存在 user://audio、历史图片在 user://images 按规范化服务器、账户与 UUID 隔离，退出及重启保留，只能手动清理，无自动容量/时间淘汰。设置中的“缓存与导入”页有清理确认窗口；清理同时取消在途流的缓存写入，保留正在输出的声音与聊天文字。登录后全量同步历史，按 UUID 恢复本账号完整缓存。用户可在同页选择 Python 客户端 exe，只读定位 temp/tts_output 与 temp/images，把 UUID 对齐的语音与历史图片复制进当前账号；源文件不改动、已有条目不覆盖，聊天正文仍从服务器读取（Python 端没有本地消息库）。日志记录 cache_committed/cache_error、replay_started/paused/resumed/stopped/finished/preempted 与 python_media_import 事务，不写音频原文或 Python 凭据。
 
@@ -98,7 +106,7 @@ release.json 是版本单一来源，界面/诊断/目录/ZIP 使用同一版本
 
 ## 窗口重设计（当前开发分支）
 
-所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括确认按钮和24段语音波形；登录后桌面窗框与三键使用系统原生实现，未登录采用透明窗口与Godot白色圆角面板。左侧仅聊天、动态、设置、日志四个居中入口；退出登录位于设置底部左侧，右侧关闭/保存全部修改，失败项留稿。退出应用使用主窗系统关闭按钮，统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
+所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括确认按钮和24段语音波形；登录后桌面窗框与三键使用系统原生实现，未登录采用透明窗口与Godot淡蓝圆角面板。左侧仅聊天、动态、设置、日志四个居中入口；退出登录位于设置底部左侧，右侧关闭/保存全部修改，失败项留稿。退出应用使用主窗系统关闭按钮，统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
 
 现行窗口行为见 [客户端说明](docs/README.md)，验证入口见 [测试说明](docs/testing.md)。桌面恢复系统标题栏、拖拽/缩放；内部下拉使用 Godot 圆角控件，正文保持清晰。系统文件选择器继续使用原生控件。
 

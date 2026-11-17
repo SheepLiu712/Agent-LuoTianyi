@@ -82,6 +82,7 @@ func set_target(path: String) -> Dictionary:
 		_audio_dir = ""
 		_images_dir = ""
 		_source_hash = ""
+		_mark_no_import_state(_scan_result)
 		_log_scan("failure")
 	return _scan_result
 
@@ -89,7 +90,7 @@ func set_target(path: String) -> Dictionary:
 func scan() -> Dictionary:
 	_ensure_loaded()
 	if _target_path.is_empty():
-		_scan_result = {"ok":false, "code":"TARGET_MISSING"}
+		_scan_result = _empty_import_scan()
 		return _scan_result
 	_scan_result = Locator.inspect(_target_path)
 	if _scan_result.get("ok", false):
@@ -98,6 +99,7 @@ func scan() -> Dictionary:
 		_audio_dir = ""
 		_images_dir = ""
 		_source_hash = ""
+		_mark_no_import_state(_scan_result)
 	_log_scan("success" if _scan_result.get("ok", false) else "failure")
 	return _scan_result
 
@@ -232,6 +234,7 @@ func _ensure_dirs() -> void:
 		_scan_result = result
 		_audio_dir = ""
 		_images_dir = ""
+		_mark_no_import_state(_scan_result)
 
 
 func _apply_scan(result: Dictionary) -> void:
@@ -244,6 +247,60 @@ func _apply_scan(result: Dictionary) -> void:
 	_images_dir = str(result.get("images_dir", ""))
 	_source_hash = next_hash
 	_mismatch = _accounts_differ(result.get("account", {}))
+	result.merge(_import_state(result), true)
+
+
+func _import_state(result: Dictionary) -> Dictionary:
+	var cache := _cache_audio()
+	var has_previous := _has_previous_import(cache)
+	var pending_audio := _pending_audio_count()
+	var pending_images := _pending_image_count()
+	var total := int(result.get("audio_count", 0)) + int(result.get("image_count", 0))
+	return {
+		"has_previous_import":has_previous,
+		"pending_audio_count":pending_audio,
+		"pending_image_count":pending_images,
+		"already_imported":has_previous and pending_audio + pending_images == 0 and total > 0,
+	}
+
+
+func _has_previous_import(cache: String) -> bool:
+	if cache.is_empty() or _source_hash.is_empty():
+		return false
+	var marker := AudioImport.read_marker(cache)
+	return not marker.is_empty() and str(marker.get("source_hash", "")) == _source_hash
+
+
+func _pending_audio_count() -> int:
+	var cache := _cache_audio()
+	var pending := 0
+	for id in Locator.audio_index(_audio_dir):
+		if not AudioImport.has_entry(cache, str(id)):
+			pending += 1
+	return pending
+
+
+func _pending_image_count() -> int:
+	var cache := _cache_images()
+	var pending := 0
+	for id in Locator.image_index(_images_dir):
+		if not ImageImport.has_entry(cache, str(id)):
+			pending += 1
+	return pending
+
+
+func _mark_no_import_state(result: Dictionary) -> void:
+	result["has_previous_import"] = false
+	result["pending_audio_count"] = 0
+	result["pending_image_count"] = 0
+	result["already_imported"] = false
+
+
+func _empty_import_scan() -> Dictionary:
+	return {
+		"ok":false, "code":"TARGET_MISSING", "has_previous_import":false,
+		"pending_audio_count":0, "pending_image_count":0, "already_imported":false,
+	}
 
 
 func _accounts_differ(account: Variant) -> bool:

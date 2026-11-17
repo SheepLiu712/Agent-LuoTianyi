@@ -2,6 +2,7 @@ extends Control
 ## 主聊天工作区页面：组合左侧导航栏、Live2D 角色区与聊天区，负责分栏布局与样式协调。
 
 const AccountScope = preload("res://src/domain/account_scope.gd")
+const ExpressionFallback = preload("res://src/avatar/expression_fallback.gd")
 ## 导航节点 → 图标名。按图标语义而非节点名映射：NavDynamics 用 @（动态/提及），NavLogs 用卷宗（日志归档）。
 const NAV_ICONS := {"NavChat":"nav_chat", "NavDynamics":"nav_at", "NavSettings":"nav_settings", "NavLogs":"nav_scroll"}
 
@@ -34,6 +35,7 @@ var _log: RefCounted
 var _rail_style: StyleBoxFlat
 var _ratio := 1.0 / 3.0
 var _initialized := false
+var _expression_fallback: Node
 
 
 func setup(chat: Node, dynamics: Node, settings_store: Resource, scope: Dictionary, ui_style: RefCounted, log_sink: RefCounted = null) -> void:
@@ -75,18 +77,36 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_disconnect_style()
+	_disconnect_dynamics()
+	_disconnect_chat()
+	if is_instance_valid(_expression_fallback):
+		_expression_fallback.cancel()
+
+
+func _disconnect_style() -> void:
 	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_workspace_style):
 		_ui_style.style_changed.disconnect(_apply_workspace_style)
-	if _dynamics != null:
-		if _dynamics.unread_changed.is_connected(_on_unread_changed):
-			_dynamics.unread_changed.disconnect(_on_unread_changed)
-		if _dynamics.latest_unread_changed.is_connected(_on_latest_unread_changed):
-			_dynamics.latest_unread_changed.disconnect(_on_latest_unread_changed)
-	if _chat != null:
-		if _chat.expression_requested.is_connected(_on_expression_requested):
-			_chat.expression_requested.disconnect(_on_expression_requested)
-		if _chat.mouth_changed.is_connected(_on_mouth_changed):
-			_chat.mouth_changed.disconnect(_on_mouth_changed)
+
+
+func _disconnect_dynamics() -> void:
+	if _dynamics == null:
+		return
+	if _dynamics.unread_changed.is_connected(_on_unread_changed):
+		_dynamics.unread_changed.disconnect(_on_unread_changed)
+	if _dynamics.latest_unread_changed.is_connected(_on_latest_unread_changed):
+		_dynamics.latest_unread_changed.disconnect(_on_latest_unread_changed)
+
+
+func _disconnect_chat() -> void:
+	if _chat == null:
+		return
+	if _chat.expression_requested.is_connected(_on_expression_requested):
+		_chat.expression_requested.disconnect(_on_expression_requested)
+	if _chat.state_changed.is_connected(_on_chat_state_changed):
+		_chat.state_changed.disconnect(_on_chat_state_changed)
+	if _chat.mouth_changed.is_connected(_on_mouth_changed):
+		_chat.mouth_changed.disconnect(_on_mouth_changed)
 
 
 func _initialize() -> void:
@@ -118,7 +138,12 @@ func _bind_session() -> void:
 	_chat_view.attachment_requested.connect(func(provider, confirm): attachment_requested.emit(provider, confirm))
 	_chat_view.attachment_cleared.connect(func(): attachment_cleared.emit())
 	_bind_composer_height(_chat_view)
+	_expression_fallback = ExpressionFallback.new()
+	add_child(_expression_fallback)
+	_expression_fallback.setup(_apply_default_expression)
 	_chat.expression_requested.connect(_on_expression_requested)
+	_chat.state_changed.connect(_on_chat_state_changed)
+	_on_chat_state_changed(_chat.get_state())
 	_chat.mouth_changed.connect(_on_mouth_changed)
 	if _dynamics != null:
 		_dynamics.unread_changed.connect(_on_unread_changed)
@@ -224,6 +249,25 @@ func _on_latest_unread_changed(post: Dictionary) -> void:
 
 
 func _on_expression_requested(command: String) -> void:
+	if is_instance_valid(_avatar):
+		if _avatar.avatar.apply_expression(command) and _expression_fallback != null:
+			_expression_fallback.expression_requested()
+			_on_chat_state_changed(_chat.get_state())
+
+
+func _on_chat_state_changed(state: Dictionary) -> void:
+	if _expression_fallback == null:
+		return
+	if bool(state.get("speaking", false)):
+		_expression_fallback.set_speaking(true)
+		return
+	var audio: Dictionary = _chat.get_audio_state()
+	_expression_fallback.set_speaking(false)
+	if not bool(audio.get("playing", false)) and int(audio.get("queued", 0)) == 0:
+		_expression_fallback.voice_idle()
+
+
+func _apply_default_expression(command: String) -> void:
 	if is_instance_valid(_avatar):
 		_avatar.avatar.apply_expression(command)
 

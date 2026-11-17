@@ -48,6 +48,15 @@ class ControlledFeed extends Node:
 		if before > last_read: last_read = before
 		unread_changed.emit(0)
 
+	func dismiss_preview(_id: String = "") -> void:
+		pass
+
+	func mark_post_read(id: String) -> void:
+		for post in posts:
+			if str(post.id) == id:
+				mark_read(str(post.created_at))
+				return
+
 	func load_comments(id: String, more: bool = false) -> void:
 		if not more or comments[id].busy or not comments[id].has_more: return
 		page_calls += 1

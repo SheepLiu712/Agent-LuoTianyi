@@ -42,6 +42,13 @@ static func import_file(cache_directory: String, id: String, source: String) -> 
 	return _result("imported", "OK")
 
 
+static func has_entry(cache_directory: String, id: String) -> bool:
+	if cache_directory.is_empty() or not is_uuid(id):
+		return false
+	var stem := cache_directory.path_join(id.sha256_text())
+	return FileAccess.file_exists(stem + AUDIO_EXTENSION) and FileAccess.file_exists(stem + MANIFEST_EXTENSION)
+
+
 static func marker_path(cache_directory: String) -> String:
 	return cache_directory.get_base_dir().path_join(MARKER_DIRECTORY).path_join(cache_directory.get_file() + ".json")
 

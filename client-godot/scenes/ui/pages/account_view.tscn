@@ -264,15 +264,6 @@ layout_mode = 2
 horizontal_alignment = 1
 autowrap_mode = 3
 
-[node name="Cancel" type="Button" parent="Column/BodyScroll/FormMargin/Body/StatusArea" unique_id=592158788]
-unique_name_in_owner = true
-visible = false
-custom_minimum_size = Vector2(0, 32)
-layout_mode = 2
-theme_type_variation = &"LoginLink"
-shortcut = SubResource("EscapeShortcut")
-text = "取消请求"
-
 [node name="FeedbackAddress" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/StatusArea" unique_id=1476210574]
 unique_name_in_owner = true
 visible = false
@@ -389,7 +380,7 @@ transient = true
 exclusive = true
 unresizable = true
 borderless = true
-min_size = Vector2i(368, 268)
+min_size = Vector2i(368, 308)
 theme = ExtResource("theme")
 
 [node name="Panel" type="PanelContainer" parent="ServerDialog" unique_id=101116583]
@@ -430,6 +421,20 @@ layout_mode = 2
 tooltip_text = "验证成功后才使用新服务器"
 theme_type_variation = &"LoginServerField"
 placeholder_text = "服务器地址"
+
+[node name="ServerProbe" type="Button" parent="ServerDialog/Panel/ServerColumn" unique_id=1984520311]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SettingsButton"
+text = "测试连通性"
+
+[node name="ProbeResult" type="Label" parent="ServerDialog/Panel/ServerColumn" unique_id=1043782592]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+autowrap_mode = 3
 
 [node name="ServerStatus" type="Label" parent="ServerDialog/Panel/ServerColumn" unique_id=1859933384]
 unique_name_in_owner = true

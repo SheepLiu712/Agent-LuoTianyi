@@ -2,6 +2,7 @@ extends Window
 ## Centralized queued error modal with deterministic sizing, transparent gutter, and focus restoration.
 
 const SCENE_PATH := "res://scenes/ui/components/error_dialog.tscn"
+const LoginStyle = preload("res://src/ui/login_style.gd")
 const ModalStack = preload("res://src/ui/modal_stack.gd")
 const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
 const MAX_QUEUE := 8
@@ -22,7 +23,8 @@ var _refine_nonce := 0
 static var _logger_ref
 
 
-static func present(source: Node, text: String, dialog_title: String = "提示") -> void:
+static func present(source: Node, text: String, dialog_title: String = "提示",
+		login_style: bool = false, crystal: bool = false) -> void:
 	var clean := text.strip_edges()
 	if source == null or clean.is_empty() or not source.is_inside_tree():
 		return
@@ -33,6 +35,7 @@ static func present(source: Node, text: String, dialog_title: String = "提示")
 	if dialog == null:
 		dialog = (load(SCENE_PATH) as PackedScene).instantiate()
 		window.add_child(dialog)
+	dialog.apply_login_style(login_style, crystal)
 	dialog.show_error(clean, dialog_title)
 
 
@@ -51,6 +54,13 @@ func _ready() -> void:
 	add_to_group("error_dialog")
 	_confirm_button.pressed.connect(_dismiss)
 	close_requested.connect(_dismiss)
+
+
+func apply_login_style(enabled: bool, crystal: bool = false) -> void:
+	if enabled:
+		LoginStyle.apply_dialog(_panel, [_confirm_button], crystal)
+	else:
+		LoginStyle.clear_dialog(_panel, [_confirm_button])
 
 
 func show_error(text: String, dialog_title: String = "提示") -> void:

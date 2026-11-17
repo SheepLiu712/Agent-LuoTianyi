@@ -28,7 +28,10 @@
 - `transaction_id`：SQLite 事务或文件原子写事务 ID（`tx_<16位hex>`），用于 `storage` 领域。
 - `stack`：脱敏后的调用栈数组（最多 12 帧）。
 - `data`：扁平调试或扩展键值字典（最多 16 键）。
-- 指标与业务字段：`phase`、`outcome`、`channel`、`scope`、`operation`、`action`、`method`、`route`、`reason_code`、`subject`、`reply_id`、`status`、`bytes`、`frames`、`count`、`queue_depth`、`uptime_ms`、`pid` 等（白名单见 `LogSchema.METRICS` 与 `LogSchema.STRING_FIELDS`）。
+- 指标与业务字段：`phase`、`outcome`、`channel`、`scope`、`operation`、`action`、`method`、`route`、`target`、`reason_code`、`subject`、`reply_id`、`status`、`bytes`、`frames`、`count`、`queue_depth`、`uptime_ms`、`pid` 等（白名单见 `LogSchema.METRICS` 与 `LogSchema.STRING_FIELDS`）。
+- `target`：实际连接的服务器 origin（`scheme://host[:port]`），由 `LogSchema.origin_for(url)` 生成：去掉 userinfo、路径、查询串与片段，host 统一小写，默认端口（http 80 / https 443）省略、非默认端口保留（如 `https://www-api.u3493359.nyat.app:11664`）；无法解析或端口非法时为空串，落盘按 128 字符截断。与只保留路径的 `route` 分工：`route` 回答「调用了哪个接口」，`target` 回答「实际连的是哪个地址」。
+
+新增字段均为向后兼容的可选字段：`SCHEMA_VERSION` 仍为 3，读取端忽略未知键。
 
 ## 分类与级别解耦
 
@@ -37,7 +40,7 @@
 | 分类标识 | 中文名 | 必填字段（公共字段之外） | 触发场景 | 记录内容 | 主要用途 |
 |---|---|---|---|---|---|
 | `business` | 业务流 | `phase` | 客户端启停、窗口与账号状态、连接与历史同步、动态发布/评论、消息排队/投递/回复、设置与模型执行、在线语音播放与重放 | 阶段（`phase`）、状态码、哈希后的 `reply_id`/`subject`、音频与消息指标 | 追踪用户可感知的业务状态流转 |
-| `network` | 网络通信 | `channel`、`route`、`outcome`、`duration_ms` | HTTP 请求与周期汇总、WebSocket 连接/收发、WebSocket 认证、WebSocket 音频分片汇总 | 通道（`http`/`ws`）、方法、脱敏路由、状态码、字节数、耗时、`trace_id` | 网络性能分析与链路排障 |
+| `network` | 网络通信 | `channel`、`route`、`outcome`、`duration_ms` | HTTP 请求与周期汇总、连通性探测、WebSocket 连接/收发、WebSocket 认证、WebSocket 音频分片汇总 | 通道（`http`/`ws`）、方法、脱敏路由、目标 origin（`target`）、状态码、字节数、耗时、`trace_id` | 网络性能分析与链路排障 |
 | `storage` | 存储持久化 | `scope`、`operation`、`outcome`、`duration_ms` | SQLite 读写与事务、数据作用域守卫、文件原子写、凭据读写、语音与图片缓存读写/清理/扫描 | 存储范围（`sqlite`/`file`）、操作名、结果、耗时、队列深度、`transaction_id` | 审计本地数据库与文件操作一致性 |
 | `system` | 系统诊断 | 无额外必填 | 运行状态快照、UI 窗口/页面访问、错误弹窗提示、安全组件检查、启动耗时、资源采样、队列深度、引擎错误与警告 | 指标数据、堆栈、采样值、引擎重复抑制计数 | 客户端自检、性能剖析与底层异常定位 |
 
@@ -48,7 +51,7 @@
 
 ## 事件命名与注册表
 
-事件名统一采用 `<subject>_<action>` 命名，直接映射所属领域与默认模块，不再保留任何旧事件别名或兼容映射。`LogSchema.EVENT_REGISTRY` 当前共定义 **71 个事件**，完整列表如下：
+事件名统一采用 `<subject>_<action>` 命名，直接映射所属领域与默认模块，不再保留任何旧事件别名或兼容映射。`LogSchema.EVENT_REGISTRY` 当前共定义 **73 个事件**，完整列表如下：
 
 ### 业务流（`business`）
 
@@ -96,9 +99,23 @@
 
 - `network_http`（`network`）：HTTP 请求
 - `network_http_summary`（`network`）：HTTP 请求汇总
+- `network_probe`（`network`）：网络连通性探测
 - `network_ws`（`network`）：WebSocket 访问
 - `network_ws_auth`（`network`）：WebSocket 认证
 - `network_ws_audio_summary`（`network`）：WebSocket 音频汇总
+
+`network_http` 与新增的 `network_probe` 都会写出 `target` 键；`LogEvents.http` 始终写出该键，调用方未传地址时为空串。`network_http` 的 `route` 语义不变（只有路径）。当 `detail == RESULT_TLS_HANDSHAKE_ERROR` 时，`network_http` 额外写出 `data={"tls_stage":"handshake","tls_result":"RESULT_TLS_HANDSHAKE_ERROR"}`；其他 HTTP 条目不写 `data`。
+
+#### 连通性探测（`network_probe`）
+
+触发时机：用户在「设置服务器」弹窗点击「测试连通性」，或点击「验证并保存」时发生链路层失败（`status == 0` 且 `code` 为 `NETWORK_ERROR`/`TIMEOUT`/`PUBLIC_KEY_ERROR`）而自动补测。探测只读，不写档案、不改会话、不保存地址（实现入口 `src/network/connectivity_probe.gd`）。
+
+一次探测包含两个端点，串行执行，各 5 秒超时：公网基线 `https://www.baidu.com/robots.txt`（GET），目标服务器 `<归一化地址>/auth/public_key`（GET）。两个端点都只要求拿到任意 HTTP 状态码，不要求响应是 JSON。
+
+- 条目字段：必填 `channel=http`、`route=/auth/public_key`、`outcome`、`duration_ms`（两次探测总和）；`target` 为目标服务器 origin；`code` 成功为 `OK`，失败取首个失败端点的 `NETWORK_ERROR`/`TIMEOUT`/`HTTP_ERROR`/`INVALID_INPUT`；`detail` 为结论码。
+- `data` 固定 9 键：`baseline_stage`、`baseline_ms`、`baseline_code`、`baseline_detail`、`target_stage`、`target_ms`、`target_code`、`target_detail`、`verdict`。`target_detail` 保留 `RESULT_TLS_HANDSHAKE_ERROR` 等传输枚举，避免只看到 `target_stage=TLS` 却丢失具体原因。
+- `stage` 取值：`HTTP`（已拿到任意 HTTP 状态，含 4xx/5xx）、`DNS`（`RESULT_CANT_RESOLVE`）、`TCP`（`RESULT_CANT_CONNECT`/`RESULT_CONNECTION_ERROR`）、`TLS`（`RESULT_TLS_HANDSHAKE_ERROR`）、`TIMEOUT`（`RESULT_TIMEOUT`）、`INVALID`（地址无法归一化，两个端点都不会发请求）、`CANCELLED`、`UNKNOWN`。
+- `verdict` 取值：`ok`（两端都通）、`target_only_fail`（基线通、目标不通，指向服务器证书或端口）、`baseline_fail`（目标通、基线不通）、`both_fail`（两端都不通，指向本机 TLS 链路/CA/中间人）、`invalid_address`、`cancelled`。
 
 ### 存储持久化（`storage`）
 
@@ -123,6 +140,7 @@
 - `ui_access`（`app`）：界面访问
 - `ui_error_shown`（`app`）：已通过弹窗提示用户错误
 - `system_security_component`（`account`）：安全组件检查
+- `system_tls_trust`（`network`）：TLS 信任源快照
 - `system_startup`（`app`）：启动阶段耗时
 - `system_resource_sample`（`app`）：资源占用采样
 - `system_queue_depth`（`app`）：队列深度
@@ -132,6 +150,19 @@
 - `engine_warning_repeated`（`engine`）：引擎重复警告
 - `log_pending_dropped`（`app`）：日志后台队列溢出丢弃（`WARN`，每次运行最多一条汇总）
 - `log_limit_reached`（`app`）：日志容量达到上限（`ERROR`，每次运行最多一条诊断）
+
+#### TLS 信任源快照（`system_tls_trust`）
+
+每次启动在 `app_started` 之后写一条，分类 `system`、模块 `network`，用于证明本次运行实际采用的信任源：
+
+- `data.trust_source`：`bundle_override`（固定使用项目 CA 包，系统根库不参与）或 `system_or_builtin`（引擎默认顺序：系统根库，读不到时回退内置包）。
+- `data.bundle_path`、`bundle_present`、`bundle_loaded`：配置路径、文件是否存在、`X509Certificate.load()` 是否成功。
+- `data.bundle_cert_count`：PEM 证书数量；`system_or_builtin` 时为 `-1`，表示系统库内容无法由 GDScript 枚举。
+- `data.bundle_has_r46`：按 Mozilla 包标签注释检测 `Sectigo Public Server Authentication Root R46`；无注释的裸 PEM 可能为 `false`，不代表证书一定缺失。
+- `data.bundle_sha256`：CA 包 SHA-256 前 16 位，用于和 `dependencies.lock.json`、`certs/README.md` 对齐。
+- `code`：`OK`、`TLS_BUNDLE_MISSING`、`TLS_BUNDLE_INVALID`；后两者为 `ERROR`。
+
+判读：若 `trust_source=bundle_override` 且 `bundle_loaded=true`，同时出现 `engine_error.data.mbedtls_code=-9984`，则问题不在 Windows 根证书库，应检查 CA 包是否过期、服务端证书链是否完整、主机名与系统时间是否正确；若 `trust_source=system_or_builtin`，才需要排查系统根库同步。
 
 ## API
 
@@ -150,7 +181,7 @@ logger.record_threadsafe("storage", "storage_image_operation", {"scope": "file",
 logger.drain()
 ```
 
-`src/storage/log_events.gd` 封装了高频场景的标准字段拼装：`LogEvents.http`（记录 `network_http`）、`LogEvents.ws`（记录 `network_ws`，支持 `detail`）、`LogEvents.ws_audio`（记录 `network_ws_audio_summary`）、`LogEvents.ui`（记录 `ui_access`）、`LogEvents.security_auth`（记录 `account_auth`，支持 `detail`）、`LogEvents.security_token`（记录 `storage_credential`）、`LogEvents.file_transaction`（记录 `storage_file_write`）。错误详情辅助函数包括：`LogEvents.http_result_name`（保留 `HTTPRequest.RESULT_*` 枚举名）、`LogEvents.request_error_detail`（保留 `error_string(error)` 与错误码）以及 `LogEvents.http_failure_detail(body, status)`（只提取服务端 JSON 中的字符串 `detail`/`message`/`error`，无可用文本时回退为 `HTTP status <n>`；结构化校验回显不会被序列化）。
+`src/storage/log_events.gd` 封装了高频场景的标准字段拼装：`LogEvents.http`（记录 `network_http`，同时写入 `target`）、`LogEvents.probe`（记录 `network_probe`，接收一次探测的完整结果字典）、`LogEvents.ws`（记录 `network_ws`，支持 `detail`）、`LogEvents.ws_audio`（记录 `network_ws_audio_summary`）、`LogEvents.ui`（记录 `ui_access`）、`LogEvents.security_auth`（记录 `account_auth`，支持 `detail`）、`LogEvents.security_token`（记录 `storage_credential`）、`LogEvents.file_transaction`（记录 `storage_file_write`）。错误详情辅助函数包括：`LogEvents.http_result_name`（保留 `HTTPRequest.RESULT_*` 枚举名）、`LogEvents.request_error_detail`（保留 `error_string(error)` 与错误码）以及 `LogEvents.http_failure_detail(body, status)`（只提取服务端 JSON 中的字符串 `detail`/`message`/`error`，无可用文本时回退为 `HTTP status <n>`；结构化校验回显不会被序列化）。
 
 当某分类的必填字段（`CATEGORY_REQUIRED`）缺失时，`LogSchema.apply_defaults` 会自动补齐默认值（`channel="app"`、`route="/unknown"`、`duration_ms=0`、`outcome="unknown"`、`scope="unknown"`、`operation="unknown"`、`phase="unknown"`），并在条目中写入以逗号分隔的 `schema_missing` 字段，同时累加 `get_stats().schema_warnings`。
 
@@ -164,6 +195,8 @@ logger.drain()
   3. `engine_*`：`detail`（转小写）含 `tls`、`ssl`、`cert`、`handshake` 时为 `network`，其余为 `client`。
   4. 错误码映射：匹配 `CLIENT_CODES` 为 `client`，匹配 `NETWORK_CODES` 为 `network`，匹配 `SERVER_CODES` 为 `server`，匹配 `UPSTREAM_CODES`（`REMOTE_AUDIO_ERROR`、`TTS_EMPTY`、`TTS_STREAM_ERROR`、`TTS_CANCELLED`、`AUDIO_TIMEOUT`、`MODEL_ERROR`）为 `upstream`。
   5. 兜底：`outcome == "failure"` 时，`network` 分类归为 `network`，其他分类归为 `client`；非失败条目归为 `none`。
+
+`system_tls_trust` 成功时没有故障归属；失败码 `TLS_BUNDLE_MISSING`/`TLS_BUNDLE_INVALID` 属于 `CLIENT_CODES`，因此归为 `client`。
 
 ## 归档与保留
 
@@ -188,7 +221,21 @@ logger.drain()
 - 按 `file:line:code:error_type` 组成聚合键。
 - 同一键在 1000ms 窗口内首次出现时，立即记录 `engine_error`（`ERROR`）或 `engine_warning`（`WARN`），`count = 1`。
 - 同一窗口内后续到达的相同键不再逐条落盘，仅累加窗口内的 `suppressed` 计数。
-- 窗口到期后（主线程每帧调用 `flush()`，或下一次任意引擎日志写入时），若 `suppressed > 0`，输出一条汇总事件 `engine_error_repeated` 或 `engine_warning_repeated`，其中 `count` 为被抑制的重复次数，`detail` 为 `"1 秒内重复 <count> 次；首条：<detail>"`，`data` 为 `{"window_ms": 1000}`。
+- 窗口到期后（主线程每帧调用 `flush()`，或下一次任意引擎日志写入时），若 `suppressed > 0`，输出一条汇总事件 `engine_error_repeated` 或 `engine_warning_repeated`，其中 `count` 为被抑制的重复次数，`detail` 为 `"1 秒内重复 <count> 次；首条：<detail>"`，`data` 为 `{"window_ms": 1000}`；若首条是 TLS 报错，`data` 会同时带上 `mbedtls_code`/`mbedtls_name`/`tls_stage`/`tls_cause`。
+
+### mbedTLS 名称标注
+
+`EngineLogSink.tls_detail(rationale)` 在 `_save` 与 `_emit_summary` 中使用：当引擎原文匹配 `TLS handshake error: <code>` 时，`detail` 追加名称，例如 `TLS handshake error: -9984 (MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)`，同时 `data` 写入 `{"mbedtls_code":-9984,"mbedtls_name":"MBEDTLS_ERR_X509_CERT_VERIFY_FAILED","tls_stage":"handshake","tls_cause":"certificate_verify_failed"}`。
+
+| `mbedtls_code` | `mbedtls_name` | `tls_cause` |
+|---|---|---|
+| `-9984` | `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`（证书校验失败） | `certificate_verify_failed` |
+| `-29312` | `MBEDTLS_ERR_SSL_PEER_VERIFY_FAILED` | `peer_verify_failed` |
+| `-30592` | `MBEDTLS_ERR_SSL_FATAL_ALERT_MESSAGE` | `fatal_alert` |
+| `-28928` | `MBEDTLS_ERR_SSL_BAD_INPUT_DATA` | `bad_input` |
+| `-32512` | `MBEDTLS_ERR_SSL_CONN_EOF` | `connection_eof` |
+
+未收录的码只写 `data.mbedtls_code`，`detail` 保持原文。`tls_cause` 只表达 mbedTLS 的失败类别，不推断具体是过期、主机名不符还是缺根；结合 `system_tls_trust` 的信任源与 `network_probe` 的 `target_stage`/`target_detail` 才能定位。这些 `data` 键是既有 `engine_*` 事件的扩展字段，不是独立事件。
 
 ## 隐私与脱敏
 
@@ -215,6 +262,8 @@ jq -c 'select(.trace_id=="net_ab12cd34ef567890")' events.jsonl
 # 按故障归属区分服务端、上游与网络链路问题
 jq -c 'select(.origin=="server")' events.jsonl
 jq -c 'select(.origin=="upstream" or .origin=="network")' events.jsonl
+# 串起 TLS 证书问题：信任源、握手阶段与 mbedTLS 原因
+jq -c 'select(.event=="system_tls_trust" or .detail=="RESULT_TLS_HANDSHAKE_ERROR" or .data.tls_cause=="certificate_verify_failed")' events.jsonl
 ```
 
 ## 调试开关

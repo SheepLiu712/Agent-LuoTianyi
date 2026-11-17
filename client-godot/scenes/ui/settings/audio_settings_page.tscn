@@ -293,7 +293,7 @@ layout_mode = 2
 size_flags_horizontal = 0
 tooltip_text = "只新增不覆盖；Python 客户端源文件保持不变。"
 theme_type_variation = &"SettingsPrimaryButton"
-text = "导入媒体…"
+text = "开始检测"
 
 [node name="CleanupCard" type="PanelContainer" parent="Column"]
 unique_name_in_owner = true

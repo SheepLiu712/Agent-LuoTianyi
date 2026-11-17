@@ -35,7 +35,7 @@ runner 使用本地 HTTP/WebSocket 夹具和独立 APPDATA，不访问公共账�
 
 ## 独立检查
 
-日志专项：`tests/test_log_schema.gd`、`tests/test_client_log.gd`、`tests/test_log_integration.gd`、`tests/test_log_window.gd`、`tests/storage/test_sqlite_transaction_log.gd` 与 `tests/storage/test_avatar_store.gd`。覆盖四域必填字段与 71 个注册事件、无旧别名、DEBUG 按级别开关、线程安全队列与每次运行一次 `log_pending_dropped` 汇总、HTTP/WS 传输枚举与 `detail`、服务端错误 body 提取、WS close code/reason、SQLite 单条合并/快读过滤/回滚失败保留原始错误、凭证与头像文件错误 `detail`、头像保存失败单条日志、音频失败 `detail`、容量首次 `log_limit_reached` 软诊断、metadata/导出丢弃计数、回复逐条去重、1000 条渲染上限与导出脱敏。
+日志专项：`tests/test_log_schema.gd`、`tests/test_client_log.gd`、`tests/test_log_integration.gd`、`tests/test_log_window.gd`、`tests/storage/test_sqlite_transaction_log.gd` 与 `tests/storage/test_avatar_store.gd`。覆盖四域必填字段与 73 个注册事件、无旧别名、DEBUG 按级别开关、线程安全队列与每次运行一次 `log_pending_dropped` 汇总、HTTP/WS 传输枚举与 `detail`、服务端错误 body 提取、WS close code/reason、SQLite 单条合并/快读过滤/回滚失败保留原始错误、凭证与头像文件错误 `detail`、头像保存失败单条日志、音频失败 `detail`、容量首次 `log_limit_reached` 软诊断、metadata/导出丢弃计数、回复逐条去重、1000 条渲染上限与导出脱敏。TLS 专项覆盖 `system_tls_trust` 的信任源/CA 包状态、`network_http` 与 `network_probe` 的 TLS 阶段/详情，以及 mbedTLS `-9984` 到 `certificate_verify_failed` 的映射。
 
 `tests/test_history_sync.gd` 的既有 fixture 时序断言（`business sent before first history boundary` / `initial failure retains pending sends`）与日志系统改动无关，当前仍需单独排查；不应据此声称全部历史同步用例通过。
 

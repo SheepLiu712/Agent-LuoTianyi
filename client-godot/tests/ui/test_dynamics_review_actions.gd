@@ -92,6 +92,15 @@ class FeedController extends Node:
 			last_read = before
 		changed.emit()
 
+	func dismiss_preview(_id: String = "") -> void:
+		pass
+
+	func mark_post_read(id: String) -> void:
+		for post in posts:
+			if str(post.id) == id:
+				mark_read(str(post.created_at))
+				return
+
 func check(ok: bool, label: String) -> void:
 	if not ok:
 		failures.append(label)

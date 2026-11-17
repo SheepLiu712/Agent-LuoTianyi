@@ -28,6 +28,7 @@ const PLACEHOLDERS := {
 }
 var _ratio := .35
 var _selected := ""
+var _read_request_key := ""
 var _details := {}
 var _detail_scroll_positions := {}
 var _rows := {}
@@ -139,11 +140,14 @@ func select_post(id: String) -> bool:
 	if _selected == id:
 		_refresh_selected_comments(id)
 		return true
-	# 点开就算读过：已读时间戳推到这条的发布时间，圆点随之消退。
-	if _controller.is_unread(posts[0]): _controller.mark_read(posts[0].created_at)
+	# 点开就算读过：只推进这条动态自己的已读水位，圆点随之消退。
+	if _controller.is_unread(posts[0]):
+		_controller.dismiss_preview(posts[0].id)
+		_controller.mark_post_read(posts[0].id)
 	if not _selected.is_empty() and _details.has(_selected):
 		_detail_scroll_positions[_selected] = _details[_selected].get_reading_position()
 	_selected = id
+	_read_request_key = ""
 	_empty.hide()
 	for detail in _details.values(): detail.hide()
 	if not _details.has(id):
@@ -197,6 +201,8 @@ func _update_unread(count: int) -> void:
 
 ## 只为「已有内容但加载失败」和未读失败保留横幅；首屏状态交给占位文案。
 func _notice_text(count: int, state: Dictionary) -> String:
+	if bool(state.get("unread_hint", false)):
+		return "有新的评论暂时不在已缓存列表中，刷新或稍后再看。"
 	return "有新的动态或评论，点击卡片查看最新评论，刷新可更新动态列表。" if count else ""
 
 ## 翻页失败不会把 phase 推成 failed，只看 phase 会漏报，所以以 code 兜底。
@@ -210,9 +216,34 @@ func _update() -> void:
 	_update_unread(state.unread)
 	var posts: Array = _controller.get_posts()
 	_sync_rows(posts)
+	_mark_selected_read(posts)
 	_sync_details(posts)
 	_sync_selection(posts)
 	_refresh_placeholder(posts, state)
+
+
+## 用户停在详情页时，新到达并已渲染的回复视为已读；窗口不可见时不动水位。
+func _mark_selected_read(posts: Array) -> void:
+	if _selected.is_empty() or not visible:
+		return
+	for post in posts:
+		if str(post.id) != _selected:
+			continue
+		# 只有本地缓存行带活动水位；纯网络内存模式没有可推进的持久水位。
+		if not post.has("last_activity_at"):
+			return
+		if not _controller.is_unread(post):
+			_read_request_key = ""
+			return
+		var key := "%s|%s|%s" % [
+			_selected, post.get("last_activity_at", ""), post.get("last_activity_id", "")]
+		if key == _read_request_key:
+			return
+		# 标记失败时 changed 会再次触发本函数；同一个水位只请求一次，避免递归。
+		_read_request_key = key
+		_controller.dismiss_preview(_selected)
+		_controller.mark_post_read(_selected)
+		return
 
 func _announce_failures(state: Dictionary) -> void:
 	_announce_posts_failure(state)
@@ -283,6 +314,7 @@ func _sync_selection(posts: Array) -> void:
 		if str(post.id) == _selected:
 			return
 	_selected = ""
+	_read_request_key = ""
 	for detail in _details.values(): detail.hide()
 
 

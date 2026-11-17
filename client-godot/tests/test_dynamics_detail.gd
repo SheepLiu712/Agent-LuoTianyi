@@ -121,6 +121,7 @@ func test_pruning_and_states() -> void:
 	await process_frame
 	var before := _detail_count(window)
 	await controller.refresh()
+	await controller.refresh()
 	await process_frame
 	check(_row_ids(window) == ["Post_d0"],"refresh removes rows the server no longer returns")
 	check(_detail_count(window) < before,"refresh releases the removed detail")
@@ -165,21 +166,24 @@ func test_open_post_from_card() -> void:
 	root.add_child(controller)
 	var scope := {"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"detail","message_token":"fixture-token"}
 	await controller.start(scope)
+	check(controller.get_latest_unread().is_empty(),"cold start has no local preview")
+	await controller.refresh()
 	var preview: Dictionary = controller.get_latest_unread()
-	check(not preview.is_empty(),"card preview fetched")
+	check(not preview.is_empty(),"card preview restored after refresh")
 	controller.dismiss_preview("other")
 	check(not controller.get_latest_unread().is_empty(),"dismiss ignores another dynamic")
 	controller.dismiss_preview(str(preview.id))
-	check(controller.get_latest_unread().is_empty() and controller.get_state().unread == 123,"dismiss hides card without marking read")
+	check(controller.get_latest_unread().is_empty() and controller.get_state().unread == 10,"dismiss hides card without marking read")
 	await controller.start(scope)
-	preview = controller.get_latest_unread()
 	await controller.refresh()
+	preview = controller.get_latest_unread()
 	var window = _open_dynamics_window(controller)
 	await process_frame
 	var opened: bool = await window.open_post(preview)
 	check(opened,"card opens its dynamic")
 	check(window.get_selected_id() == str(preview.id),"card selection matches preview")
-	check(controller.get_latest_unread().is_empty(),"opening card clears preview")
+	var next_preview: Dictionary = controller.get_latest_unread()
+	check(next_preview.is_empty() or str(next_preview.get("id","")) != str(preview.id),"opening card clears that preview")
 	var deleted := preview.duplicate(true)
 	deleted.id = "deleted-post"
 	var deleted_opened: bool = await window.open_post(deleted)

@@ -2,13 +2,14 @@ extends VBoxContainer
 signal audio_action(action: String)
 signal image_opened(texture: Texture2D)
 signal image_action(action: String)
+signal delivery_action(action: String)
 const USER_ICON := preload("res://assets/ui/user_icon.png")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
 const AudioRow = preload("res://scenes/ui/chat/message_audio.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const IMAGE_PREVIEW_MAX := 250.0
-## 送达结果不确定的消息不呈现任何气泡；列表层已先过滤，这里是兜底。
-const HIDDEN_STATUSES: Array[String] = ["uncertain", "superseded"]
+## 新状态机不再产生 uncertain；failed 必须保留可见并提供重试/删除。
+const HIDDEN_STATUSES: Array[String] = []
 @export var own_style: StyleBoxFlat
 @onready var _row: HBoxContainer = %Row
 @onready var _time_marker: CenterContainer = %TimeMarker
@@ -24,6 +25,9 @@ const HIDDEN_STATUSES: Array[String] = ["uncertain", "superseded"]
 @onready var _image_button: Button = %ImageButton
 @onready var _picture: TextureRect = %Picture
 @onready var _caption: Label = %Caption
+@onready var _failure_actions: HBoxContainer = %FailureActions
+@onready var _retry_button: Button = %RetryButton
+@onready var _delete_button: Button = %DeleteButton
 var _audio
 var _own := false
 var _system_message := false
@@ -81,6 +85,8 @@ func _ready() -> void:
 	_history_picture.activated.connect(func(): image_action.emit("preview"))
 	_picture.activated.connect(func():
 		if _picture.texture != null: image_opened.emit(_picture.texture))
+	_retry_button.pressed.connect(func(): delivery_action.emit("retry"))
+	_delete_button.pressed.connect(func(): delivery_action.emit("delete"))
 	resized.connect(_queue_layout)
 	_text.theme_changed.connect(_queue_layout)
 	_bubble.theme_changed.connect(_queue_layout)
@@ -168,19 +174,34 @@ func _sync_height() -> void:
 	_column.offset_bottom = _body.custom_minimum_size.y
 
 func update_message(message: Dictionary) -> void:
-	# 送达结果不确定：整条气泡都不出现，连占位和上一状态的字样都不留。
 	visible = not HIDDEN_STATUSES.has(str(message.get("status", "")))
 	if not visible:
 		_caption.text = ""
 		_caption.hide()
+		_failure_actions.hide()
 		return
 	if not _system_message and _text.text != message.text:
 		_text.text = message.text
 		_queue_layout()
-	if _own:
-		_caption.text = ""
-		_caption.visible = not _caption.text.is_empty()
+	var failed: bool = _own and str(message.get("status", "")) == "failed"
+	_caption.text = _failure_text(message) if failed else ""
+	_caption.visible = failed
+	_failure_actions.visible = failed
+	if failed:
 		_caption.add_theme_color_override("font_color", get_theme_color("delivery_failed", "MessageBubble"))
+
+
+## 失败提示必须区分「未发送」和「可能已发送」，后者不能诱导用户重复发送。
+static func _failure_text(message: Dictionary) -> String:
+	match str(message.get("code", "")):
+		"DELIVERY_UNCERTAIN":
+			return "发送结果未确认，可能已送达"
+		"CACHE_WRITE_FAILED":
+			return "本地保存失败，重启后可能丢失"
+		"SEND_EXPIRED":
+			return "排队超时，未发送"
+		_:
+			return "发送失败"
 
 func set_time_marker(text: String) -> void:
 	_time_text.text = text

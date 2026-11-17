@@ -36,7 +36,7 @@ func run() -> void:
 	var own_width: float = own.get_node("%Bubble").size.x
 	var normal_height := own.get_combined_minimum_size().y
 	var update := message("好",true)
-	for status in ["waiting_history", "queued", "sending", "sent"]:
+	for status in ["waiting_history", "pending", "sending", "sent"]:
 		update.status = status
 		update.demo = true
 		own.update_message(update)
@@ -44,17 +44,20 @@ func run() -> void:
 		_check_run_result(own, status)
 		check(is_equal_approx(own.get_combined_minimum_size().y, normal_height), status + " reserves no delivery caption height")
 	update.status = "failed"
+	update.code = "DELIVERY_UNCERTAIN"
 	own.update_message(update)
 	await settle()
 	_check_failed_delivery_retains_error_caption(own)
-	update.status = "uncertain"
+	update.status = "failed"
+	update.code = "SEND_EXPIRED"
 	own.update_message(update)
 	await settle()
-	_check_uncertain_delivery_leaves_no_trace(own)
+	_check_failed_delivery_switches_message(own)
 	update.status = "sent"
+	update.code = ""
 	own.update_message(update)
 	await settle()
-	_check_restored_after_uncertain(own, normal_height)
+	_check_restored_after_failure(own, normal_height)
 	own.set_audio_state({"available":true,"code":"","status":"idle","blocked":false,"duration":2.4,"position":0.0,"waveform":PackedFloat32Array([.1,.5,.9])})
 	await settle()
 	check(is_equal_approx(own.get_node("%Bubble").size.x,own_width) and own.find_child("MessageAudio",true,false).size.x > own_width, "audio remains usable without widening short text")
@@ -101,13 +104,15 @@ func _check_long_text_is_capped_at_90_percent_and_grows_vertically(long: Variant
 	check(long.get_node("%Bubble").size.x <= 620*.9+1 and long.get_node("%Bubble").size.y > medium.get_node("%Bubble").size.y*3, "long text is capped at 90 percent and grows vertically")
 
 func _check_failed_delivery_retains_error_caption(own: Variant) -> void:
-	check(own.visible and not own.get_node("%Caption").visible and own.get_node("%Caption").text.is_empty(), "failed delivery keeps status without inline error caption")
+	check(own.visible, "failed delivery keeps the bubble visible")
+	check(own.get_node("%Caption").visible and own.get_node("%Caption").text.contains("未确认"), "failed delivery explains an uncertain result")
+	check(own.get_node("%FailureActions").visible, "failed delivery exposes retry and delete")
 
-func _check_uncertain_delivery_leaves_no_trace(own: Variant) -> void:
-	check(not own.visible, "uncertain delivery leaves the bubble invisible")
-	check(own.get_node("%Caption").text.is_empty(), "uncertain delivery writes no caption")
+func _check_failed_delivery_switches_message(own: Variant) -> void:
+	check(own.get_node("%Caption").text.contains("超时"), "failure caption follows the error code")
+	check(own.get_node("%FailureActions").visible, "failure actions stay visible")
 
-func _check_restored_after_uncertain(own: Variant, normal_height: float) -> void:
-	check(own.visible, "a later status brings the bubble back")
+func _check_restored_after_failure(own: Variant, normal_height: float) -> void:
 	check(not own.get_node("%Caption").visible, "the restored bubble carries no leftover caption")
+	check(not own.get_node("%FailureActions").visible, "the restored bubble hides retry and delete")
 	check(is_equal_approx(own.get_combined_minimum_size().y, normal_height), "the restored bubble reserves no caption height")

@@ -2,6 +2,7 @@ extends Node
 const ServerAddress = preload("res://src/domain/server_address.gd")
 const AccountScope = preload("res://src/domain/account_scope.gd")
 const Events = preload("res://src/storage/log_events.gd")
+const ConnectivityProbe = preload("res://src/network/connectivity_probe.gd")
 signal changed(state: Dictionary)
 const StorageService = preload("res://src/storage/storage_service.gd")
 const DEFAULT_SERVER := "https://www-api.u3493359.nyat.app:11664"
@@ -14,12 +15,15 @@ var _generation := 0
 var _storage_error := false
 var _storage_ready := true
 var _logger: RefCounted
+var _probe: Node
 
 func _init(api: Node, storage: StorageService, logger: RefCounted = null) -> void:
 	_api = api
 	_storage = storage
 	_logger = logger
 	add_child(api)
+	_probe = ConnectivityProbe.new(logger)
+	add_child(_probe)
 	_load_profile()
 
 func _load_profile() -> void:
@@ -124,10 +128,20 @@ func set_server(address: String) -> Dictionary:
 		profile.username = "" if history.is_empty() else history[0].username
 		if _persist(profile) != OK: response = _result(false, "STORAGE_ERROR", true)
 		else: response.code = "SERVER_CHANGED"
-	_emit(response.code, response.storage_error)
+	_emit(response.code, response.storage_error, str(response.get("detail", "")))
 	_log_security("change_server", "success" if response.ok else "failure", response.code, address, "",
 		str(response.get("detail", "")))
 	return response
+
+## 只读连通性探测：不写档案、不改会话；失败也不影响登录状态。
+func probe_connectivity(address: String) -> Dictionary:
+	if _probe == null:
+		return {"ok":false, "cancelled":true, "baseline":{}, "target":{}, "verdict":"cancelled"}
+	return await _probe.run(address)
+
+func cancel_probe() -> void:
+	if _probe != null:
+		_probe.cancel()
 
 func perform(operation: String, server: String, fields: Dictionary, remember: bool = false, auto_login: bool = false) -> Dictionary:
 	if _busy: return _result(false, "BUSY")
@@ -148,7 +162,7 @@ func perform(operation: String, server: String, fields: Dictionary, remember: bo
 		_accept_account(operation, server, fields, remember, auto_login, response)
 	elif operation == "auto_login" and response.code == "AUTH_REJECTED":
 		response.storage_error = _forget_options(ServerAddress.normalize(server), str(fields.get("username", ""))) != OK
-	_emit(response.code, response.storage_error)
+	_emit(response.code, response.storage_error, str(response.get("detail", "")))
 	_log_security(operation, "success" if response.ok else "failure", response.code, server,
 		str(fields.get("username", "")), str(response.get("detail", "")))
 	return response
@@ -184,6 +198,7 @@ func login_saved(username: String) -> Dictionary:
 func cancel() -> void:
 	_generation += 1
 	_api.cancel()
+	cancel_probe()
 
 func logout() -> Error:
 	cancel()
@@ -233,9 +248,10 @@ func _persist(profile: Dictionary) -> Error:
 	if result == OK: _profile = profile
 	return result
 
-func _emit(code: String, storage_error: bool = false) -> void:
+func _emit(code: String, storage_error: bool = false, detail: String = "") -> void:
 	_storage_error = storage_error or not _storage_ready
-	changed.emit({"phase":"busy" if _busy else ("signed_in" if not _session.is_empty() else "signed_out"),"code":code,"storage_error":_storage_error})
+	changed.emit({"phase":"busy" if _busy else ("signed_in" if not _session.is_empty() else "signed_out"),
+		"code":code, "storage_error":_storage_error, "detail":detail})
 
 func _result(ok: bool, code: String, storage_error: bool = false) -> Dictionary:
 	return {"ok":ok,"code":code,"storage_error":storage_error}

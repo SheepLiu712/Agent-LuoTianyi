@@ -1,7 +1,7 @@
 extends RefCounted
-## 账号作用域内的历史库仓储：连接生命周期 + 命令白名单。
-## 对外只有一个入口 `execute(operation, payload)`，因此工作线程只需要搬运纯数据；
-## 连接、迁移、结构校验、命令分发全部收在这里，不向上层泄漏 SQLite 细节。
+## 账号作用域内的本地库仓储：连接生命周期 + 命令白名单 + 硬重置。
+## 对外只有一个入口 `execute(operation, payload)` 与 `open(root, scope)`；
+## 连接、建库、文件头检测、命令分发全部收在这里，不向上层泄漏 SQLite 细节。
 ## 除 `open_scope` 外，所有命令都必须核对 scope，防止旧账号的请求写进新账号。
 
 const Schema = preload("res://src/storage/history_schema.gd")
@@ -9,12 +9,22 @@ const Access = preload("res://src/storage/sqlite_access.gd")
 const Reader = preload("res://src/storage/timeline_reader.gd")
 const Writer = preload("res://src/storage/history_page_writer.gd")
 const Installer = preload("res://src/storage/history_schema_installer.gd")
-const Migration = preload("res://src/storage/history_migration.gd")
+const DynamicsStore = preload("res://src/storage/dynamics_store.gd")
+
+## 文件头偏移：SQLite 头固定 100 字节，user_version@60、application_id@68。
+const HEADER_SIZE := 100
+const USER_VERSION_OFFSET := 60
+const APPLICATION_ID_OFFSET := 68
+## 先删 WAL/SHM，最后删主库：即使中途失败，也不会留下「新库 + 旧 WAL」的配对。
+const CRITICAL_CACHE_SUFFIXES := ["-wal", "-shm", ""]
+const BACKUP_FILE_SUFFIXES := [".v1.bak", ".v2.bak", ".discarded"]
+const WAITING_HISTORY_TTL_MS := 24 * 60 * 60 * 1000
 
 var _db: Object
 var _access: RefCounted
 var _reader: RefCounted
 var _writer: RefCounted
+var _dynamics: RefCounted
 var _scope := ""
 var _path := ""
 var _handlers: Dictionary = {}
@@ -31,17 +41,25 @@ func open(root_path: String, scope: String) -> Dictionary:
 		return preflight
 	var opened := _open_connection(str(preflight.data.path), scope)
 	if not opened.ok:
+		close()
 		return opened
-	return _prepare()
+	var prepared: Dictionary = _prepare()
+	if not prepared.ok:
+		close()
+	return prepared
 
 
 func close() -> void:
 	if _db != null:
+		if _access != null:
+			_access.execute(Schema.WAL_CHECKPOINT)
+			_access.execute(Schema.OPTIMIZE)
 		_db.close_db()
 	_db = null
 	_access = null
 	_reader = null
 	_writer = null
+	_dynamics = null
 	_scope = ""
 	_path = ""
 
@@ -55,29 +73,10 @@ func metadata() -> Dictionary:
 		return _failure("CACHE_METADATA_INVALID")
 	return _success({
 		"scope": _scope,
-		"epoch": int(row.active_epoch),
-		"order_revision": int(row.order_revision),
 		"next_end": int(row.next_end),
-		"caught_up": int(row.caught_up),
-		"baseline": _text_or_empty(row.get("baseline_message_id")),
+		"baseline_index": int(row.baseline_index),
+		"revision": int(row.revision),
 	})
-
-
-func _configure_handlers() -> void:
-	_handlers = {
-		"open_scope": _open_command,
-		"read_latest": _read_latest_command,
-		"read_before": _read_before_command,
-		"save_live": _save_live_command,
-		"save_history": _save_history_command,
-		"save_reconcile": _save_reconcile_command,
-		"reconcile_delivery": _reconcile_delivery_command,
-		"record_attempt": _record_attempt_command,
-		"update_attempt": _update_attempt_command,
-		"read_sync_state": _read_sync_command,
-		"flush": _flush_command,
-		"close_scope": _close_command,
-	}
 
 
 func execute(operation: String, payload: Dictionary) -> Dictionary:
@@ -85,6 +84,26 @@ func execute(operation: String, payload: Dictionary) -> Dictionary:
 		return _failure("UNKNOWN_STORAGE_OPERATION")
 	var handler: Callable = _handlers[operation]
 	return handler.call(payload)
+
+
+func _configure_handlers() -> void:
+	_handlers = {
+		"open_scope": _open_command,
+		"read_latest": _read_latest_command,
+		"read_before": _read_before_command,
+		"save_page": _save_page_command,
+		"save_local": _save_local_command,
+		"update_local": _update_local_command,
+		"delete_local": _delete_local_command,
+		"read_sync_state": _read_sync_command,
+		"flush": _flush_command,
+		"close_scope": _close_command,
+		"dynamics_load": _dynamics_load_command,
+		"dynamics_save_posts": _dynamics_save_posts_command,
+		"dynamics_save_comments": _dynamics_save_comments_command,
+		"dynamics_mark_read": _dynamics_mark_read_command,
+		"dynamics_state": _dynamics_state_command,
+	}
 
 
 func _open_command(payload: Dictionary) -> Dictionary:
@@ -105,46 +124,38 @@ func _read_before_command(payload: Dictionary) -> Dictionary:
 	return _reader.before(str(payload.get("anchor_id", "")), int(payload.get("limit", Reader.DEFAULT_LIMIT)))
 
 
-func _save_live_command(payload: Dictionary) -> Dictionary:
+func _save_page_command(payload: Dictionary) -> Dictionary:
 	var guard := _guard(payload)
 	if not guard.ok:
 		return guard
-	return _writer.save_live(payload.get("message", {}))
+	var page: Dictionary = payload.get("page", {})
+	var context: Dictionary = payload.get("context", {})
+	return _access.transaction(func(): return _writer.save_page(page, context), "save_page")
 
 
-func _save_history_command(payload: Dictionary) -> Dictionary:
+func _save_local_command(payload: Dictionary) -> Dictionary:
 	var guard := _guard(payload)
 	if not guard.ok:
 		return guard
-	return _writer.save_page(payload.get("page", {}), payload.get("context", {}))
+	var message: Dictionary = payload.get("message", {})
+	var entry: Dictionary = payload.get("entry", {})
+	return _access.transaction(func(): return _writer.save_local(message, entry), "save_local")
 
 
-func _save_reconcile_command(payload: Dictionary) -> Dictionary:
+func _update_local_command(payload: Dictionary) -> Dictionary:
 	var guard := _guard(payload)
 	if not guard.ok:
 		return guard
-	return _writer.save_reconcile(payload.get("rows", []))
+	var message_id := str(payload.get("message_id", ""))
+	var patch: Dictionary = payload.get("patch", {})
+	return _access.transaction(func(): return _writer.update_local(message_id, patch), "update_local")
 
 
-func _reconcile_delivery_command(payload: Dictionary) -> Dictionary:
+func _delete_local_command(payload: Dictionary) -> Dictionary:
 	var guard := _guard(payload)
 	if not guard.ok:
 		return guard
-	return _writer.reconcile_delivery()
-
-
-func _record_attempt_command(payload: Dictionary) -> Dictionary:
-	var guard := _guard(payload)
-	if not guard.ok:
-		return guard
-	return _writer.record_attempt(payload)
-
-
-func _update_attempt_command(payload: Dictionary) -> Dictionary:
-	var guard := _guard(payload)
-	if not guard.ok:
-		return guard
-	return _writer.update_attempt(payload)
+	return _writer.delete_local(str(payload.get("message_id", "")))
 
 
 func _read_sync_command(payload: Dictionary) -> Dictionary:
@@ -158,12 +169,53 @@ func _flush_command(payload: Dictionary) -> Dictionary:
 	var guard := _guard(payload)
 	if not guard.ok:
 		return guard
-	return _access.execute(Schema.WAL_CHECKPOINT)
+	var checkpoint: Dictionary = _access.execute(Schema.WAL_CHECKPOINT)
+	if not checkpoint.ok:
+		return checkpoint
+	return _access.execute(Schema.OPTIMIZE)
 
 
-func _close_command(_payload: Dictionary) -> Dictionary:
+func _close_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
 	close()
 	return _success()
+
+
+func _dynamics_load_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
+	return _dynamics.load(payload)
+
+
+func _dynamics_save_posts_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
+	return _dynamics.save_posts(payload)
+
+
+func _dynamics_save_comments_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
+	return _dynamics.save_comments(payload)
+
+
+func _dynamics_mark_read_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
+	return _dynamics.mark_read(payload)
+
+
+func _dynamics_state_command(payload: Dictionary) -> Dictionary:
+	var guard := _guard(payload)
+	if not guard.ok:
+		return guard
+	return _dynamics.state(payload)
 
 
 func _guard(payload: Dictionary) -> Dictionary:
@@ -178,7 +230,70 @@ func _preflight(root_path: String, scope: String) -> Dictionary:
 	var directory := root_path.path_join(scope)
 	if DirAccess.make_dir_recursive_absolute(directory) != OK:
 		return _failure("CACHE_WRITE_FAILED")
-	return _success({"path": directory.path_join("history.db")})
+	var path := directory.path_join("history.db")
+	var reset := _discard_incompatible(path)
+	if not reset.ok:
+		return reset
+	return _success({"path": path})
+
+
+## 只读文件头判断版本，绝不打开旧库（避免触发 WAL 回放）。
+func _discard_incompatible(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		# 没有主库也要清掉崩溃残留的 sidecar / 旧版本备份，避免新库配旧日志。
+		var orphan_sidecars := _delete_files(path, ["-wal", "-shm"])
+		if not orphan_sidecars.ok:
+			return orphan_sidecars
+		_clear_backups(path)
+		return _success()
+	var header := _read_header(path)
+	if not header.is_empty() \
+			and int(header.get("version", -1)) == Schema.VERSION \
+			and int(header.get("application_id", -1)) == Schema.APPLICATION_ID:
+		_clear_backups(path)
+		return _success()
+	return _delete_cache_files(path)
+
+
+func _read_header(path: String) -> Dictionary:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var size := file.get_length()
+	if size < HEADER_SIZE:
+		file.close()
+		return {}
+	file.seek(0)
+	var bytes := file.get_buffer(HEADER_SIZE)
+	file.close()
+	return {
+		"version": _big_endian_32(bytes, USER_VERSION_OFFSET),
+		"application_id": _big_endian_32(bytes, APPLICATION_ID_OFFSET),
+	}
+
+
+## 三件套必须一起删除；任一句柄被占用都直接失败，禁止降级使用旧库。
+func _delete_cache_files(path: String) -> Dictionary:
+	var critical := _delete_files(path, CRITICAL_CACHE_SUFFIXES)
+	if not critical.ok:
+		return critical
+	_clear_backups(path)
+	return _success()
+
+
+func _delete_files(path: String, suffixes: Array) -> Dictionary:
+	for suffix in suffixes:
+		var target := path + str(suffix)
+		if not FileAccess.file_exists(target):
+			continue
+		if DirAccess.remove_absolute(target) != OK:
+			return _failure("CACHE_RESET_FAILED")
+	return _success()
+
+
+## 旧版本备份不参与新库配对，删除失败不应阻塞正常启动。
+func _clear_backups(path: String) -> void:
+	_delete_files(path, BACKUP_FILE_SUFFIXES)
 
 
 func _open_connection(path: String, scope: String) -> Dictionary:
@@ -187,7 +302,6 @@ func _open_connection(path: String, scope: String) -> Dictionary:
 		return _failure("STORAGE_UNAVAILABLE")
 	db.path = path
 	db.verbosity_level = 0
-	db.foreign_keys = true
 	if not db.open_db():
 		return _failure("CACHE_OPEN_FAILED")
 	_attach(db, path, scope)
@@ -201,6 +315,7 @@ func _attach(db: Object, path: String, scope: String) -> void:
 	_access = Access.new(db)
 	_reader = Reader.new(_access)
 	_writer = Writer.new(_access)
+	_dynamics = DynamicsStore.new(_access)
 
 
 func _prepare() -> Dictionary:
@@ -211,7 +326,9 @@ func _prepare() -> Dictionary:
 	if not schema.ok:
 		return _abort(schema)
 	var recovered := _recover_delivery()
-	return _abort(recovered) if not recovered.ok else metadata()
+	if not recovered.ok:
+		return _abort(recovered)
+	return metadata()
 
 
 func _configure() -> Dictionary:
@@ -223,30 +340,42 @@ func _configure() -> Dictionary:
 
 
 func _verify_pragmas() -> Dictionary:
-	var foreign: Dictionary = _access.query("PRAGMA foreign_keys")
-	if not foreign.ok:
-		return foreign
-	if int(_access.first_row(foreign).get("foreign_keys", 0)) != 1:
+	var auto_vacuum: Dictionary = _access.query(Schema.READ_AUTO_VACUUM)
+	if not auto_vacuum.ok:
+		return auto_vacuum
+	if int(_access.first_row(auto_vacuum).values()[0]) != 2:
 		return _failure("CACHE_CONFIG_FAILED")
-	var journal: Dictionary = _access.query("PRAGMA journal_mode")
+	var application: Dictionary = _access.query(Schema.READ_APPLICATION_ID)
+	if not application.ok:
+		return application
+	if int(_access.first_row(application).values()[0]) != Schema.APPLICATION_ID:
+		return _failure("CACHE_CONFIG_FAILED")
+	var journal: Dictionary = _access.query(Schema.READ_JOURNAL_MODE)
 	if not journal.ok:
 		return journal
-	var mode := str(_access.first_row(journal).values()[0]).to_lower()
-	return _success() if mode == "wal" else _failure("CACHE_CONFIG_FAILED")
+	if str(_access.first_row(journal).values()[0]).to_lower() != "wal":
+		return _failure("CACHE_CONFIG_FAILED")
+	var foreign: Dictionary = _access.query(Schema.READ_FOREIGN_KEYS)
+	if not foreign.ok:
+		return foreign
+	if int(_access.first_row(foreign).values()[0]) != 1:
+		return _failure("CACHE_CONFIG_FAILED")
+	return _success()
 
 
 func _ensure_schema() -> Dictionary:
 	var version := _version()
 	if not version.ok:
 		return version
-	var state := _schema_state(int(version.data.version))
-	if state == "current":
-		return _validate()
-	if state == "fresh":
+	if int(version.data.version) == Schema.VERSION:
+		var valid := _validate()
+		if valid.ok:
+			return valid
+		# 版本已标记但结构不完整：按测试期约定整库重建，避免永久卡死。
+		return _rebuild_cache()
+	if int(version.data.version) == 0:
 		return _install()
-	if state == "legacy":
-		return _rebuild(int(version.data.version))
-	return _failure("CACHE_VERSION_UNSUPPORTED")
+	return _rebuild_cache()
 
 
 func _version() -> Dictionary:
@@ -257,119 +386,129 @@ func _version() -> Dictionary:
 	return _success({"version": int(row.get("user_version", 0))})
 
 
-## 版本号不足信：0 号版本既可能是空库，也可能是没有 user_version 的草稿库。
-func _schema_state(version: int) -> String:
-	if version == Schema.VERSION:
-		return "current"
-	if version == 0:
-		return _unversioned_state()
-	if version == 1 or version == 2:
-		return "legacy"
-	return "unsupported"
-
-
-func _unversioned_state() -> String:
-	if not _access.has_table("messages"):
-		return "fresh"
-	if not _access.column_names("messages").has("message_id"):
-		return "legacy"
-	# version=0 且结构缺表/缺列：这是建库中断留下的半成品，不能当 current。
-	if not _missing_tables().is_empty() or not _missing_columns().is_empty():
-		return "fresh"
-	if not Schema.REQUIRED_UNIQUE_INDEX in _access.index_names("messages"):
-		return "fresh"
-	return "current"
-
-
 func _install() -> Dictionary:
 	return _access.transaction(_install_in_transaction, "install_schema")
 
 
-## 建表、写 epoch/scope、写 user_version 必须同事务；
-## 否则崩溃会留下一个被误判为 current 的永久坏库。
 func _install_in_transaction() -> Dictionary:
-	var dropped: Dictionary = _access.execute_block(Schema.DROP_V3)
-	if not dropped.ok:
-		return dropped
-	var created: Dictionary = _access.execute_block(Schema.CREATE_V3)
-	if not created.ok:
-		return created
-	var installed := Installer.install_scope(_access, _scope)
+	var installed := Installer.install(_access, _scope)
 	if not installed.ok:
 		return installed
-	var versioned := Installer.set_version(_access)
-	if not versioned.ok:
-		return versioned
 	return _validate()
 
 
-## 迁移必须先备份再改结构；备份在连接关闭状态完成。
-func _rebuild(version: int) -> Dictionary:
-	var checkpoint: Dictionary = _access.execute(Schema.WAL_CHECKPOINT)
-	if not checkpoint.ok:
-		return checkpoint
+func _rebuild_cache() -> Dictionary:
 	var path := _path
 	var scope := _scope
 	close()
-	var backup := Migration.backup(path, version)
+	if not FileAccess.file_exists(path):
+		return _failure("CACHE_RESET_FAILED")
+	var deleted := _delete_cache_files(path)
+	if not deleted.ok:
+		return deleted
 	var reopened := _open_connection(path, scope)
 	if not reopened.ok:
 		return reopened
-	if not backup.ok:
-		return backup
-	var migrated := Migration.migrate(_access, scope)
-	return migrated if not migrated.ok else _validate()
+	var configured := _configure()
+	if not configured.ok:
+		return configured
+	return _install()
 
 
 func _validate() -> Dictionary:
-	var missing := _missing_tables()
-	if not missing.is_empty():
-		return _failure("CACHE_SCHEMA_INVALID")
-	if not _missing_columns().is_empty():
-		return _failure("CACHE_SCHEMA_INVALID")
-	if not Schema.REQUIRED_UNIQUE_INDEX in _access.index_names("messages"):
-		return _failure("CACHE_SCHEMA_INVALID")
-	if not _window_functions_available():
-		return _failure("CACHE_SCHEMA_INVALID")
+	var tables := _validate_tables()
+	if not tables.ok:
+		return tables
+	var columns := _validate_columns()
+	if not columns.ok:
+		return columns
+	var indexes := _validate_indexes()
+	if not indexes.ok:
+		return indexes
+	if not _access.foreign_key_violations().is_empty():
+		return _failure("CACHE_INTEGRITY_FAILED")
+	var version := _version()
+	if not version.ok:
+		return version
+	if int(version.data.version) != Schema.VERSION:
+		return _failure("CACHE_VERSION_UNSUPPORTED")
 	return _validate_scope()
 
 
-func _missing_tables() -> Array:
-	var missing: Array = []
+func _validate_tables() -> Dictionary:
 	for table in Schema.REQUIRED_TABLES:
 		if not _access.has_table(table):
-			missing.append(table)
-	return missing
+			return _failure("CACHE_SCHEMA_INVALID")
+	return _success()
 
 
-func _missing_columns() -> Array:
-	var missing: Array = []
+func _validate_columns() -> Dictionary:
 	for table in Schema.REQUIRED_COLUMNS:
 		var present: Array = _access.column_names(table)
 		for column in Schema.REQUIRED_COLUMNS[table]:
 			if not present.has(column):
-				missing.append("%s.%s" % [table, column])
-	return missing
+				return _failure("CACHE_SCHEMA_INVALID")
+	return _success()
 
 
-func _window_functions_available() -> bool:
-	var result: Dictionary = _access.query("SELECT ROW_NUMBER() OVER(ORDER BY value) AS n FROM (SELECT 1 AS value)")
-	return result.ok
+func _validate_indexes() -> Dictionary:
+	for table in Schema.REQUIRED_INDEXES:
+		var indexes: Array = _access.index_names(table)
+		for index in Schema.REQUIRED_INDEXES[table]:
+			if not indexes.has(index):
+				return _failure("CACHE_SCHEMA_INVALID")
+	return _success()
 
 
 ## 结构就绪但缺少 scope 行时补建，避免「能查但永远写不进去」。
 func _validate_scope() -> Dictionary:
+	var repaired := _ensure_state_rows()
+	if not repaired.ok:
+		return repaired
 	var result: Dictionary = _access.query(Schema.READ_SCOPE_KEY)
 	if not result.ok:
 		return result
 	var row: Dictionary = _access.first_row(result)
 	if row.is_empty():
-		return _access.transaction(func(): return Installer.install_scope(_access, _scope), "install_scope")
-	return _success() if str(row.scope_key) == _scope else _failure("STALE_SCOPE")
+		return _failure("CACHE_METADATA_INVALID")
+	if str(row.scope_key) != _scope:
+		return _failure("STALE_SCOPE")
+	var dynamics: Dictionary = _access.query(Schema.READ_DYNAMICS_STATE)
+	if not dynamics.ok:
+		return dynamics
+	var dynamics_row: Dictionary = _access.first_row(dynamics)
+	if dynamics_row.is_empty():
+		return _failure("CACHE_METADATA_INVALID")
+	return _success() if str(dynamics_row.scope_key) == _scope else _failure("STALE_SCOPE")
 
 
+## CREATE TABLE 成功但单行状态丢失（异常退出、外部误删）时补回，不重建整库。
+func _ensure_state_rows() -> Dictionary:
+	var chat: Dictionary = _access.query(Schema.READ_SCOPE_KEY)
+	if not chat.ok:
+		return chat
+	if _access.first_row(chat).is_empty():
+		var inserted_chat: Dictionary = _access.execute(Schema.INSTALL_CHAT_STATE, [_scope])
+		if not inserted_chat.ok:
+			return inserted_chat
+	var dynamics: Dictionary = _access.query(Schema.READ_DYNAMICS_STATE)
+	if not dynamics.ok:
+		return dynamics
+	if _access.first_row(dynamics).is_empty():
+		var inserted_dynamics: Dictionary = _access.execute(Schema.INSTALL_DYNAMICS_STATE, [_scope])
+		if not inserted_dynamics.ok:
+			return inserted_dynamics
+	return _success()
+
+
+## 重启恢复：sending 一律显式失败且不重发；waiting_history 超过 24 小时过期。
 func _recover_delivery() -> Dictionary:
-	return _access.execute_block(Schema.RECOVER_UNCERTAIN + ";\n" + Schema.RECOVER_UNSENT)
+	@warning_ignore("narrowing_conversion")
+	var now := int(Time.get_unix_time_from_system() * 1000.0)
+	var sending: Dictionary = _access.execute(Schema.RECOVER_SENDING, [now])
+	if not sending.ok:
+		return sending
+	return _access.execute(Schema.RECOVER_EXPIRED_WAITING, [now, now - WAITING_HISTORY_TTL_MS])
 
 
 func _abort(result: Dictionary) -> Dictionary:
@@ -377,12 +516,15 @@ func _abort(result: Dictionary) -> Dictionary:
 	return result
 
 
+static func _big_endian_32(bytes: PackedByteArray, offset: int) -> int:
+	if bytes.size() < offset + 4:
+		return -1
+	return (int(bytes[offset]) << 24) | (int(bytes[offset + 1]) << 16) \
+		| (int(bytes[offset + 2]) << 8) | int(bytes[offset + 3])
+
+
 static func _valid_scope(scope: String) -> bool:
 	return scope.length() == 64 and scope.is_valid_hex_number(false)
-
-
-static func _text_or_empty(value: Variant) -> String:
-	return "" if value == null else str(value)
 
 
 static func _failure(code: String) -> Dictionary:

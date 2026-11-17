@@ -34,7 +34,7 @@ runner 必须同时满足进程成功、无 `FAIL:`、包含明确 PASS；超时
 领域 fixture 继续独立；测试通过公开接口，不合并成共享可变服务器或万能运行器。
 
 ## 相关场景
-`client_godot/scenes` 的 GPU capture 和真实窗口驱动；发布入口为 `scripts/build.ps1`。
+`client-godot/scenes` 的 GPU capture 和真实窗口驱动；发布入口为 `scripts/build.ps1`。
 
 ## 相关测试
 `tests/README.md`、四组 check、`verify_release_archive.py`、`verify_native_*.py`、所有 `tests/ui`/`tests/storage`/`tests/media`。

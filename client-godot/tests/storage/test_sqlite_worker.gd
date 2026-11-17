@@ -60,12 +60,12 @@ func _case_real_database() -> void:
 	worker.start()
 	var opened: Dictionary = await worker.submit("open_scope", {"root": _root, "scope": scope}).wait()
 	check(opened.ok, "worker opens a real database (%s)" % opened.code)
-	var saved: Dictionary = await worker.submit("save_live", {
+	var saved: Dictionary = await worker.submit("save_local", {
 		"scope": scope,
 		"message": {
 			"id": "worker-1", "id_source": "local", "origin": "local", "role": "user",
 			"type": "text", "text": "from thread", "timestamp": 1700000000,
-			"status": "queued", "code": "",
+			"status": "pending", "code": "",
 		},
 	}).wait()
 	check(saved.ok, "worker writes through the thread (%s)" % saved.code)

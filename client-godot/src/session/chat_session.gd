@@ -26,6 +26,11 @@ var _state := {"phase":"idle", "code":"", "thinking":false, "speaking":false}
 var _history: Node
 var _waiting_history := false
 var _pending_history: Dictionary = {}
+## 已提交到 local_messages 的待发记录。boundary 放行时只发送这些记录，
+## 仍在 save_local 中的记录由保存协程在提交成功后自行发送。
+var _committed_local: Dictionary = {}
+var _outgoing: Dictionary = {}
+var _delivering: Dictionary = {}
 var _wire_ids: Dictionary = {}
 var _reading: RefCounted
 var _images: Node
@@ -72,9 +77,6 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 		history.page_received.connect(_latest_page)
 		history.older_page.connect(_history_page)
 		history.restore_page.connect(_restore_page)
-		# 旧夹具可能还没有对账信号；缺了就不接，避免整个 _init 中断。
-		if history.has_signal("reconciled"):
-			history.reconciled.connect(_reconcile_page)
 		if history.has_signal("delivery_reconciled"):
 			history.delivery_reconciled.connect(_delivery_reconciled)
 		history.boundary_ready.connect(_release_history_sends)
@@ -192,7 +194,7 @@ func _make_local_message(kind: String, text: String) -> Dictionary:
 		"type": kind,
 		"text": text,
 		"timestamp": Time.get_unix_time_from_system(),
-		"status": "queued" if not _waiting_history else "waiting_history",
+		"status": "pending" if not _waiting_history else "waiting_history",
 		"code": "",
 		"content_origin": "local",
 		"stream_complete": true,
@@ -209,35 +211,79 @@ func _queue_or_send(message: Dictionary, event_type: String, payload: Dictionary
 		_system_error("SEND_REJECTED", "", "message exceeds the 8 MiB payload limit")
 		return ""
 	message.status = "waiting_history"
-	_pending_history[message.id] = {"type": event_type, "payload": payload}
-	return _accept_local(message)
-
-
-func _send_now(message: Dictionary, event_type: String, payload: Dictionary) -> String:
-	payload["llm_mode"] = {"types": _model_types()}
-	var wire: String = _transport.send_event(event_type, payload, true)
-	if wire.is_empty():
-		_system_error("SEND_REJECTED", "", "transport rejected %s (state %s)" % [
-			event_type, str(_transport.get_state().get("code", ""))])
-		return ""
-	message.status = "queued"
+	var entry := {"event": event_type, "payload": payload.duplicate(true)}
+	_pending_history[message.id] = entry
+	_outgoing[message.id] = entry
 	var accepted := _accept_local(message)
-	# send_attempts.message_id 有外键，必须先落下 messages 行再记录尝试。
-	_record_sent(message.id, wire)
+	_persist_and_deliver(message, entry)
 	return accepted
 
 
-func _record_sent(message_id: String, wire: String) -> void:
-	_wire_ids[wire] = message_id
+func _send_now(message: Dictionary, event_type: String, payload: Dictionary) -> String:
+	var entry := {"event": event_type, "payload": payload.duplicate(true)}
+	_outgoing[message.id] = entry
+	message.status = "pending"
+	var accepted := _accept_local(message)
+	# 先落本地尾部，提交成功后才允许网络发送。
+	_persist_and_deliver(message, entry)
+	return accepted
+
+
+## 本地尾部提交 → 视 boundary 状态立即发送或继续排队。
+func _persist_and_deliver(message: Dictionary, entry: Dictionary) -> void:
+	var id := str(message.id)
 	if _persistence != null:
-		_persistence.record_attempt(message_id, wire)
+		var saved: Dictionary = await _persistence.save_local(message.duplicate(true), entry)
+		if not saved.ok:
+			_pending_history.erase(id)
+			_committed_local.erase(id)
+			_mark_failed(message, "CACHE_WRITE_FAILED")
+			return
+		if _waiting_history:
+			_committed_local[id] = true
+	if _waiting_history:
+		if message.status != "waiting_history":
+			message.status = "waiting_history"
+			changed.emit()
+		return
+	_committed_local.erase(id)
+	await _deliver(message, entry)
+
+
+func _deliver(message: Dictionary, entry: Dictionary) -> void:
+	var id := str(message.id)
+	if message.status in ["sending", "sent"] or _delivering.has(id):
+		return
+	if not _by_id.has(id):
+		return
+	_delivering[id] = true
+	var payload: Dictionary = entry.get("payload", {}).duplicate(true)
+	payload["llm_mode"] = {"types": _model_types()}
+	var wire: String = _transport.send_event(str(entry.get("event", "")), payload, true)
+	if wire.is_empty():
+		_delivering.erase(id)
+		_system_error("SEND_REJECTED", "", "transport rejected %s (state %s)" % [
+			str(entry.get("event", "")), str(_transport.get_state().get("code", ""))])
+		_mark_failed(message, "SEND_REJECTED")
+		return
+	_wire_ids[wire] = id
+	message.status = "sending"
+	_outgoing[id] = entry
+	_delivering.erase(id)
+	var persisted: Dictionary = await _persist_state(message, {"attempts_delta": 1})
+	if not persisted.ok:
+		# 帧已经交给传输层，不能让库里的 pending 在重启后再次自动发送。
+		message.status = "failed"
+		message.code = "DELIVERY_UNCERTAIN"
+		changed.emit()
+		await _persist_state(message)
+		return
+	changed.emit()
 
 
 func _accept_local(message: Dictionary) -> String:
 	_messages.append(message)
 	_by_id[message.id] = message
-	if _persistence != null:
-		_persistence.save_live(message.duplicate(true))
 	if _logger != null:
 		_logger.record_as("business", "message_queued", {"reply_id": message.id, "phase":"queued", "code":"OK"})
 		var text: Variant = message.get("text", "")
@@ -338,6 +384,9 @@ func stop() -> void:
 	_transport.stop()
 	_waiting_history = false
 	_pending_history.clear()
+	_committed_local.clear()
+	_outgoing.clear()
+	_delivering.clear()
 	_wire_ids.clear()
 	if _history != null:
 		_history.stop()
@@ -362,6 +411,7 @@ func _fail_pending_history() -> void:
 			continue
 		_by_id[id].status = "failed"
 		_by_id[id].code = "SEND_CANCELLED"
+		_committed_local.erase(id)
 		_persist_status(id)
 
 func _connection_changed(connection: Dictionary) -> void:
@@ -384,19 +434,33 @@ func _connection_changed(connection: Dictionary) -> void:
 
 func _delivery_changed(wire_id: String, status: String, code: String) -> void:
 	var id := str(_wire_ids.get(wire_id, wire_id))
+	var next_state := _delivery_state(status)
+	var next_code := code
+	if status == "uncertain" and next_code.is_empty():
+		next_code = "DELIVERY_UNCERTAIN"
 	if _logger != null:
-		_logger.record_as("business", "message_delivery", {"reply_id":id,"phase":status,"code":code,
-			"level":"WARN" if status in ["failed", "uncertain"] else "INFO"})
+		_logger.record_as("business", "message_delivery", {"reply_id":id,"phase":next_state,"code":next_code,
+			"level":"WARN" if next_state == "failed" else "INFO"})
 	if not _by_id.has(id):
 		return
-	_by_id[id].status = status
-	_by_id[id].code = code
-	if _persistence != null:
-		_persistence.update_attempt(id, wire_id, status, code)
+	_by_id[id].status = next_state
+	_by_id[id].code = next_code
+	if next_state == "sent":
+		_outgoing.erase(id)
+	_committed_local.erase(id)
+	_persist_state(_by_id[id])
 	changed.emit()
-	# 送达结果不确定时主动向服务端核对一次；其余状态不需要。
-	if status == "uncertain":
-		request_reconcile()
+
+
+## 传输层状态映射到新的本地尾部状态机：不再产生 uncertain。
+static func _delivery_state(status: String) -> String:
+	match status:
+		"sent":
+			return "sent"
+		"failed", "uncertain":
+			return "failed"
+		_:
+			return "sending"
 
 func _system_error(code: String, reply_id: String = "", detail: String = "") -> void:
 	if _logger != null:
@@ -547,21 +611,18 @@ func skip_history() -> void:
 
 func _release_history_sends() -> void:
 	_waiting_history = false
-	for id in _pending_history:
-		# restore_page 可能已经用历史窗口替换了视图；缺失条目不能再按下标访问。
-		if not _by_id.has(id):
-			continue
-		var pending: Dictionary = _pending_history[id]
-		pending.payload.llm_mode = {"types":_model_types()}
-		var wire: String = _transport.send_event(pending.type,pending.payload,true)
-		if wire.is_empty():
-			_by_id[id].status = "failed"
-			_by_id[id].code = "SEND_REJECTED"
-		else:
-			_by_id[id].status = "queued"
-			_record_sent(id, wire)
-		_persist_status(id)
+	var queued := _pending_history.duplicate()
 	_pending_history.clear()
+	for id in queued:
+		# restore_page 可能已经用历史窗口替换了视图；缺失条目不能按下标访问。
+		if not _by_id.has(id):
+			_committed_local.erase(id)
+			continue
+		# save_local 尚未提交：保存协程会在成功后看到 boundary 已释放并自行发送。
+		if _persistence != null and not _committed_local.has(id):
+			continue
+		_committed_local.erase(id)
+		await _deliver(_by_id[id], queued[id])
 	changed.emit()
 
 
@@ -574,8 +635,26 @@ func _restore_page(messages: Array[Dictionary]) -> void:
 	_append_local_tail(next_messages, next_by_id)
 	_messages = next_messages
 	_by_id = next_by_id
+	_adopt_restored_local(messages)
 	_request_missing_audio(_messages)
 	changed.emit()
+
+
+## 重启后恢复本地尾部的发送意图：pending 与 waiting_history 继续等待 boundary，
+## failed 保留原状态供用户手动重试；sending 已由存储层转成 failed。
+func _adopt_restored_local(messages: Array[Dictionary]) -> void:
+	for message in messages:
+		if str(message.get("id_source", "")) != "local":
+			continue
+		var payload: Variant = message.get("payload", {})
+		if not payload is Dictionary or not payload.has("event"):
+			continue
+		var id := str(message.id)
+		_outgoing[id] = payload
+		if str(message.get("status", "")) in ["pending", "waiting_history"]:
+			_pending_history[id] = payload
+			# 这行本来就来自 local_messages，boundary 放行时可以直接发送。
+			_committed_local[id] = true
 
 func _merge_history_page(messages: Array[Dictionary], next_messages: Array[Dictionary], next_by_id: Dictionary) -> void:
 	for message in messages:
@@ -627,9 +706,35 @@ func close_persistence() -> Dictionary:
 
 
 func _persist_status(id: String) -> void:
-	if _persistence == null or not _by_id.has(id):
+	if not _by_id.has(id):
 		return
-	_persistence.save_live(_by_id[id].duplicate(true))
+	_persist_state(_by_id[id])
+
+
+func _persist_state(message: Dictionary, patch: Dictionary = {}) -> Dictionary:
+	var ok := {"ok": true, "code": "OK", "data": {}}
+	if _persistence == null:
+		return ok
+	var next := patch.duplicate(true)
+	next["state"] = str(message.get("status", "pending"))
+	next["error_code"] = str(message.get("code", ""))
+	next["content"] = str(message.get("text", ""))
+	next["stream_complete"] = bool(message.get("stream_complete", true))
+	return await _persistence.update_local(str(message.id), next)
+
+
+## 重试与首次发送共用的“先提交本地意图”：失败时绝不触碰网络。
+func _save_intent(message: Dictionary, entry: Dictionary) -> Dictionary:
+	if _persistence == null:
+		return {"ok": true, "code": "OK", "data": {}}
+	return await _persistence.save_local(message.duplicate(true), entry)
+
+
+func _mark_failed(message: Dictionary, code: String) -> void:
+	message.status = "failed"
+	message.code = code
+	changed.emit()
+	_persist_state(message)
 
 func _history_page(messages: Array[Dictionary]) -> void:
 	var prepend: Array[Dictionary] = []
@@ -638,6 +743,7 @@ func _history_page(messages: Array[Dictionary]) -> void:
 			# 历史以 UUID 为唯一身份，不做文本/时间匹配；搬入历史位置时保留实时内容。
 			var existing: Dictionary = _by_id[message.id]
 			existing.timestamp = message.timestamp
+			existing.id_source = "server"
 			_messages.erase(existing)
 			prepend.append(existing)
 		else:
@@ -659,6 +765,7 @@ func _latest_page(messages: Array[Dictionary]) -> void:
 			continue
 		var existing: Dictionary = _by_id[message.id]
 		existing.timestamp = message.timestamp
+		existing.id_source = "server"
 		_insert_pending(pending, _message_index(str(message.id)))
 		pending.clear()
 	_insert_pending(pending, _latest_tail())
@@ -699,57 +806,101 @@ func _request_missing_audio(messages: Array[Dictionary]) -> void:
 	if not ids.is_empty():
 		_media_migration.request_ids(ids)
 
-## 对账只走历史控制器：会话层不发 HTTP、不写库。
+## 新的发送状态机不再需要主动对账；历史页会直接确认并移除本地副本。
 func request_reconcile() -> void:
-	if _history != null and _history.has_method("request_reconcile"):
-		_history.request_reconcile()
+	return
 
 
-## 对账页按「页内已有 id 当锚点」并入内存，顺序与库里的 timeline_order 一致。
-## 已存在的 id 只移动游标，绝不覆盖正文与状态（本地未确认消息、在途流式回复）。
-func _reconcile_page(messages: Array[Dictionary], position: String) -> void:
-	if _state.phase in ["idle", "auth_rejected"]:
-		return
-	var cursor := 0 if position == "head" else _reconcile_anchor(messages)
-	var added := 0
-	for message in messages:
-		if _by_id.has(message.id):
-			cursor = maxi(cursor, _message_index(str(message.id)) + 1)
-			continue
-		_by_id[message.id] = message
-		_messages.insert(cursor, message)
-		cursor += 1
-		added += 1
-	if added == 0:
-		return
-	changed.emit()
-
-
-## 服务器历史已确认的本地副本：从内存窗口移除，由服务器副本继续显示。
+## 服务器历史已确认的本地副本：只移除仍是 local 身份的行，
+## 已并入服务器页的同 id 消息必须保留。
 func _delivery_reconciled(ids: Array) -> void:
 	if ids.is_empty():
 		return
 	var removed := false
 	for index in range(_messages.size() - 1, -1, -1):
-		var id := str(_messages[index].id)
+		var message: Dictionary = _messages[index]
+		var id := str(message.id)
 		if not ids.has(id):
+			continue
+		if str(message.get("id_source", "")) != "local":
 			continue
 		_by_id.erase(id)
 		_pending_history.erase(id)
+		_committed_local.erase(id)
+		_outgoing.erase(id)
 		_messages.remove_at(index)
 		removed = true
 	if removed:
 		changed.emit()
 
 
-## 无锚点时的起点：tail 追加到末尾，head 插到最前；
-## 有锚点时从页内第一个已知消息开始，它前面的未知块落在它之前。
-func _reconcile_anchor(messages: Array[Dictionary]) -> int:
-	for message in messages:
-		var index := _message_index(str(message.id))
-		if index >= 0:
-			return index
-	return _messages.size()
+## 用户手动重试：只接受本地失败记录，sending/sent 永不重发。
+func retry_message(id: String) -> bool:
+	if not _by_id.has(id):
+		return false
+	var message: Dictionary = _by_id[id]
+	if str(message.get("id_source", "")) != "local" or str(message.get("status", "")) != "failed":
+		return false
+	var entry: Variant = _outgoing.get(id, _entry_from_message(message))
+	if not entry is Dictionary or not entry.has("event"):
+		return false
+	_outgoing[id] = entry
+	message.code = ""
+	if _waiting_history:
+		message.status = "waiting_history"
+		_pending_history[id] = entry
+		changed.emit()
+		var queued: Dictionary = await _save_intent(message, entry)
+		if not queued.ok:
+			_pending_history.erase(id)
+			_committed_local.erase(id)
+			_mark_failed(message, str(queued.code))
+			return false
+		if not _waiting_history:
+			# boundary 在保存期间释放，而这条记录当时还没提交；现在补发。
+			_committed_local.erase(id)
+			await _deliver(message, entry)
+			return true
+		_committed_local[id] = true
+		changed.emit()
+		return true
+	message.status = "pending"
+	changed.emit()
+	var saved: Dictionary = await _save_intent(message, entry)
+	if not saved.ok:
+		_mark_failed(message, str(saved.code))
+		return false
+	await _deliver(message, entry)
+	return true
+
+
+## 删除本地失败记录；服务器确认过的历史不允许从这里删除。
+func delete_message(id: String) -> bool:
+	if not _by_id.has(id) or str(_by_id[id].get("id_source", "")) != "local":
+		return false
+	if _persistence != null:
+		var deleted: Dictionary = await _persistence.delete_local(id)
+		if not deleted.ok:
+			return false
+	_by_id.erase(id)
+	_pending_history.erase(id)
+	_committed_local.erase(id)
+	_outgoing.erase(id)
+	for wire in _wire_ids.keys():
+		if str(_wire_ids[wire]) == id:
+			_wire_ids.erase(wire)
+	for index in range(_messages.size() - 1, -1, -1):
+		if str(_messages[index].id) == id:
+			_messages.remove_at(index)
+			break
+	changed.emit()
+	return true
+
+
+static func _entry_from_message(message: Dictionary) -> Dictionary:
+	if str(message.get("type", "text")) != "text":
+		return {}
+	return {"event": "user_text", "payload": {"message": str(message.get("text", ""))}}
 
 
 func _message_index(id: String) -> int:

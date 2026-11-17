@@ -47,23 +47,25 @@ func _run() -> void:
 	var empty: Array[Dictionary] = []
 	list.set_messages(empty)
 	_check_clearing_history_immediately_clears_anchor_and_visible_ids(list)
-	await _check_uncertain_messages_leave_no_trace(list)
+	await _check_failed_messages_stay_visible(list)
 	list.queue_free()
 	await process_frame
 
-## 送达结果不确定的消息按「没发生过」处理：不建气泡、不占位、也跳不过去。
-## 过滤只发生在渲染层，原数组不动，所以落盘与退出流程完全不受影响。
-func _check_uncertain_messages_leave_no_trace(list) -> void:
+## 新的状态机不再产生 uncertain：失败消息必须留在时间线里，并提供重试/删除入口。
+func _check_failed_messages_stay_visible(list) -> void:
 	var mixed: Array[Dictionary] = [
 		{"id":"keep","role":"user","text":"在吗","status":"sent","code":""},
-		{"id":"ghost","role":"user","text":"重庆","status":"uncertain","code":"DELIVERY_UNCERTAIN"},
+		{"id":"failed","role":"user","text":"重庆","status":"failed","code":"DELIVERY_UNCERTAIN"},
 	]
 	list.set_messages(mixed)
 	await _wait_frames(12)
-	check(list.get_visible_ids() == ["keep"], "uncertain delivery never becomes visible")
-	check(not list.scroll_to_message("ghost"), "uncertain delivery has no row to jump to")
-	check(list.find_children("*","RichTextLabel",true,false).size() == 1, "uncertain delivery renders no bubble")
-	check(mixed.size() == 2, "hiding stays a rendering decision, the stored list is intact")
+	check(list.get_visible_ids() == ["keep", "failed"], "failed delivery stays visible")
+	check(list.scroll_to_message("failed"), "failed delivery can be located")
+	check(list.find_children("*","RichTextLabel",true,false).size() == 2, "failed delivery renders a bubble")
+	var captions: Array = list.find_children("Caption","Label",true,false)
+	check(captions.any(func(label): return label.visible and label.text.contains("未确认")), "failed delivery explains the uncertain result")
+	var actions: Array = list.find_children("FailureActions","HBoxContainer",true,false)
+	check(actions.any(func(box): return box.visible), "failed delivery exposes retry and delete actions")
 	print("Virtual history list: ","PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 func _check_clearing_history_immediately_clears_anchor_and_visible_ids(list: Variant) -> void:

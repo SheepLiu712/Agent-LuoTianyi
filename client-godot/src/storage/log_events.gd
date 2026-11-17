@@ -34,7 +34,7 @@ static func method_name(method: int) -> String:
 			return "OTHER"
 
 static func http(logger: RefCounted, response: Dictionary, status: int, bytes: int, started_usec: int,
-		trace_id: String, route: String, method: String = "GET") -> void:
+		trace_id: String, route: String, method: String = "GET", target: String = "") -> void:
 	if logger == null:
 		return
 	var outcome := _outcome(response)
@@ -42,10 +42,47 @@ static func http(logger: RefCounted, response: Dictionary, status: int, bytes: i
 	var detail := ""
 	if not ok and response.get("detail") is String:
 		detail = response.detail
-	logger.record_as("network", "network_http", {"channel":"http", "action":"request", "method":method, "route":route,
+	var fields := {"channel":"http", "action":"request", "method":method, "route":route,
+		"target":Schema.sanitize_text(target, 128),
 		"status":status, "duration_ms":_duration_ms(started_usec), "bytes":bytes, "outcome":outcome,
 		"trace_id":trace_id, "code":"OK" if ok else str(response.get("code", "UNKNOWN")),
-		"detail":detail})
+		"detail":detail}
+	if detail == "RESULT_TLS_HANDSHAKE_ERROR":
+		fields.data = {"tls_stage":"handshake", "tls_result":detail}
+	logger.record_as("network", "network_http", fields)
+
+## 一次探测包含公网基线与目标服务器两个端点；结论只落日志，界面保持两行。
+static func probe(logger: RefCounted, result: Dictionary) -> void:
+	if logger == null:
+		return
+	var baseline: Dictionary = result.get("baseline", {})
+	var target: Dictionary = result.get("target", {})
+	var baseline_ok := bool(baseline.get("ok", false))
+	var target_ok := bool(target.get("ok", false))
+	var ok := baseline_ok and target_ok
+	var failing: Dictionary = target if baseline_ok else baseline
+	var code := str(failing.get("code", "NETWORK_ERROR"))
+	if not code in ["NETWORK_ERROR", "TIMEOUT", "HTTP_ERROR", "INVALID_INPUT"]:
+		code = "NETWORK_ERROR"
+	logger.record_as("network", "network_probe", {
+		"channel":"http", "action":"probe", "method":"GET", "route":"/auth/public_key",
+		"target":Schema.sanitize_text(str(target.get("origin", "")), 128),
+		"outcome":"success" if ok else "failure",
+		"duration_ms":int(result.get("duration_ms", 0)),
+		"code":"OK" if ok else code,
+		"detail":str(result.get("verdict", "")),
+		"data":{
+			"baseline_stage":str(baseline.get("stage", "UNKNOWN")),
+			"baseline_ms":int(baseline.get("duration_ms", 0)),
+			"baseline_code":str(baseline.get("code", "")),
+			"baseline_detail":str(baseline.get("detail", "")),
+			"target_stage":str(target.get("stage", "UNKNOWN")),
+			"target_ms":int(target.get("duration_ms", 0)),
+			"target_code":str(target.get("code", "")),
+			"target_detail":str(target.get("detail", "")),
+			"verdict":str(result.get("verdict", "")),
+		},
+	})
 
 static func ui(logger: RefCounted, route: String, action: String = "open", duration_ms: int = 0,
 		outcome: String = "success", method: String = "OPEN") -> void:

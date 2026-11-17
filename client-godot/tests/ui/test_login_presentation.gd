@@ -48,6 +48,7 @@ func run() -> void:
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await create_timer(.1).timeout
 	var view: Control = app.get_login_page()
+	_check_login_style_overrides(view)
 	check(not view.get_node("%Server").is_visible_in_tree(), "server address is not part of the login form")
 	_check_bottom_register_and_forgotten_password_links_are_visible(view)
 	var password: LineEdit = view.get_node("%Password")
@@ -77,6 +78,7 @@ func run() -> void:
 	await capture("login-menu")
 	press(view,"SetServer")
 	check(view.get_node("%ServerDialog").visible, "server settings is an owned temporary window")
+	await capture("login-server")
 	view.get_node("%Server").text = OS.get_environment("GODOT_TEST_SERVER")
 	press(view,"ServerSave")
 	check(await until(func(): return not view.get_node("%ServerDialog").visible), "successful verification closes server editor")
@@ -199,14 +201,58 @@ func _check_login_checkbox_is_a_24px_hollow_circle_not_a_square(circle: Variant)
 func _check_remembered_account_shows_an_honest_status_without_fake_password_dots(session: Variant, view: Variant) -> void:
 	check(session.get_session().is_empty() and view.get_node("%SavedLogin").is_visible_in_tree() and not view.get_node("%Password").visible and view.get_node("%Password").text.is_empty(), "remembered account shows an honest status without fake password dots")
 
+func _check_login_style_overrides(view: Control) -> void:
+	_check_login_page_style(view)
+	_check_login_popup_style(view)
+	_check_login_dialog_style(view)
+
+
+func _check_login_page_style(view: Control) -> void:
+	var surface := view.get_theme_stylebox("panel") as StyleBoxFlat
+	check(surface != null, "login surface is themed")
+	if surface != null:
+		check(surface.bg_color.is_equal_approx(Color(0.935,0.97,1,1)), "login surface uses the backup pale-blue tint")
+	var avatar_frame := view.find_child("AvatarFrame", true, false) as Control
+	check(avatar_frame != null, "login avatar frame exists")
+	if avatar_frame == null:
+		return
+	var avatar := avatar_frame.get_theme_stylebox("panel") as StyleBoxFlat
+	check(avatar != null, "login avatar is themed")
+	if avatar == null:
+		return
+	check(avatar.border_width_left == 2 and avatar.border_color.is_equal_approx(Color(0.4,0.8,1,0.8)), "login avatar uses the backup blue border")
+	check(avatar.shadow_size == 12, "login avatar uses the backup glow")
+
+
+func _check_login_popup_style(view: Control) -> void:
+	var menu := view.get_node("%MenuPopup").get_theme_stylebox("panel") as StyleBoxFlat
+	check(menu != null, "login menu is themed")
+	if menu != null:
+		check(menu.corner_radius_top_left == 16, "login menu uses the backup flat radius")
+
+
+func _check_login_dialog_style(view: Control) -> void:
+	var server_dialog := view.get_node("%ServerDialog")
+	var server_panel := server_dialog.find_child("Panel", true, false) as Control
+	check(server_panel != null, "server dialog panel exists")
+	if server_panel != null:
+		var dialog_box := server_panel.get_theme_stylebox("panel") as StyleBoxFlat
+		check(dialog_box != null and dialog_box.corner_radius_top_left == 16, "server dialog uses the backup radius")
+		if dialog_box != null:
+			check(dialog_box.shadow_color.is_equal_approx(Color(0.063,0.157,0.227,0.20)), "server dialog uses the backup shadow")
+	var save := view.get_node("%ServerSave").get_theme_stylebox("normal") as StyleBoxFlat
+	check(save != null, "server button is themed")
+	if save != null:
+		check(save.corner_radius_top_left == 16, "server dialog buttons use the backup radius")
+
 func _check_missing_account_service_still_permits_diagnostic_menu(unavailable: Variant) -> void:
 	check(unavailable.get_node("%MenuPopup").visible and unavailable.get_node("%SetServer").disabled, "missing account service still permits the diagnostic menu")
 
 func _check_back_keeps_name_and_clears_secrets(view: Variant) -> void:
 	check(view.get_node("%Username").text == "test" and view.get_node("%Password").text.is_empty() and view.get_node("%Invite").text.is_empty(), "back keeps name and clears secrets")
 
-func _check_rounded_outside_is_transparent_and_body_is_white(pixels: Variant) -> void:
-	check(pixels.get_pixel(0,0).a < .1 and pixels.get_pixel(12,100).is_equal_approx(Color.WHITE), "rounded outside is transparent and body is white")
+func _check_body_uses_login_tint(pixels: Variant) -> void:
+	check(pixels.get_pixel(12,100).is_equal_approx(Color8(239,248,255,255)), "login body uses the backup pale-blue tint")
 
 func _check_logout_restores_compact_presentation() -> void:
 	check(not root.borderless and root.unresizable, "logout restores the fixed system frame")
@@ -282,7 +328,7 @@ func _check_login_native_presentation(view: Control) -> void:
 		_check_login_uses_a_fixed_system_frame()
 		check(root.size == Vector2i(480,690), "compact login has the approved default dimensions")
 		var pixels := root.get_texture().get_image()
-		_check_rounded_outside_is_transparent_and_body_is_white(pixels)
+		_check_body_uses_login_tint(pixels)
 
 func _check_login_scales(view: Control) -> void:
 	if DisplayServer.get_name() != "headless":

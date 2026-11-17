@@ -24,6 +24,12 @@ static func import_file(cache_directory: String, id: String, source: String) -> 
 	return _result("imported", "OK")
 
 
+static func has_entry(cache_directory: String, id: String) -> bool:
+	if cache_directory.is_empty() or not Locator.is_uuid(id):
+		return false
+	return FileAccess.file_exists(cache_directory.path_join(id.sha256_text() + EXTENSION))
+
+
 static func _read(path: String) -> PackedByteArray:
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:

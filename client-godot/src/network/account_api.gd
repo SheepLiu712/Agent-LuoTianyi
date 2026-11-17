@@ -82,6 +82,7 @@ func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary
 	var started := Time.get_ticks_usec()
 	var trace_id := Schema.new_trace_id("req")
 	var route := Schema.route_for(url)
+	var target := Schema.origin_for(url)
 	var method_name := Events.method_name(method)
 	var http := HTTPRequest.new()
 	_http = http
@@ -104,7 +105,7 @@ func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary
 			var parser := JSON.new()
 			var valid := parser.parse(body.get_string_from_utf8()) == OK and parser.data is Dictionary
 			response = {"ok":true, "code":"OK", "status":status, "data":parser.data} if valid else _failure("INVALID_RESPONSE", status)
-		Events.http(_logger, response, status, body.size(), started, trace_id, route, method_name)
+		Events.http(_logger, response, status, body.size(), started, trace_id, route, method_name, target)
 		response.trace_id = trace_id
 		response.duration_ms = int((Time.get_ticks_usec() - started) / 1000)
 		response.bytes = body.size()
@@ -114,7 +115,7 @@ func _exchange(url: String, method: int, payload: Dictionary = {}) -> Dictionary
 	var response: Dictionary
 	if error != OK:
 		response = _failure("NETWORK_ERROR", 0, Events.request_error_detail(error))
-		Events.http(_logger, response, 0, 0, started, trace_id, route, method_name)
+		Events.http(_logger, response, 0, 0, started, trace_id, route, method_name, target)
 	else:
 		response = await _http_finished
 	response.trace_id = trace_id

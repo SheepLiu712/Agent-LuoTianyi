@@ -18,10 +18,10 @@ const CHANNELS := ["http", "ws", "ui", "app"]
 const SCOPES := ["sqlite", "file", "unknown"]
 const MODULES := ["app", "account", "network", "message", "audio", "cache", "history", "settings", "dynamics", "engine"]
 
-const CODES := "OK UNKNOWN INVALID_INPUT INSECURE_SERVER INVALID_RESPONSE BUSY CANCELLED TIMEOUT NETWORK_ERROR HTTP_ERROR AUTH_REJECTED PUBLIC_KEY_ERROR ENCRYPTION_ERROR CREDENTIAL_UNAVAILABLE NO_SAVED_LOGIN LOGGED_OUT PENDING SEND_REJECTED DELIVERY_UNCERTAIN TRANSPORT_STOPPED ACK_TIMEOUT DISCONNECTED CONNECT_TIMEOUT AUTH_TIMEOUT INVALID_BASE64 AUDIO_ERROR REMOTE_AUDIO_ERROR TTS_EMPTY TTS_STREAM_ERROR TTS_CANCELLED AUDIO_TIMEOUT BUFFER_LIMIT DECODER_UNAVAILABLE PLAYBACK_FAILED REPLAY_FAILED CACHE_WRITE_FAILED CACHE_CLEAR_FAILED INVALID_WAV UNSUPPORTED_FORMAT TRUNCATED_AUDIO EMPTY_AUDIO STREAM_FINISHED STOPPED INTERRUPTED ENGINE_ERROR ENGINE_WARNING ENGINE_SCRIPT ENGINE_SHADER HISTORY_FAILED HISTORY_INVALID HISTORY_DUPLICATE MODEL_ERROR MODEL_DISABLED MODEL_INVALID SAVE_FAILED INVALID_JSON MODEL_BUSY UNKNOWN_MODEL_TYPE INVALID_CONFIG MODEL_KIND_MISMATCH MODEL_CAPABILITY_MISMATCH MODEL_FIELDS_REQUIRED STREAMING_NOT_SUPPORTED PLAINTEXT_CONFIRMATION_REQUIRED KEY_UNAVAILABLE NOT_FOUND COMMENT_NOT_ALLOWED INVALID_REPLY_TARGET STORAGE_ERROR ACCOUNT_START_FAILED SERVER_CHANGED ACCOUNT_SELECTED OPTIONS_CHANGED ACCOUNT_REMOVED CHECKING_SERVER IMAGE_READ_FAILED AVATAR_WRITE_FAILED NO_ACCOUNT IMAGE_TOO_LARGE IMAGE_FORMAT INVALID_IMAGE IMAGE_DIMENSIONS IMAGE_MISSING SERVER_ERROR UNAVAILABLE CACHE_SQL_FAILED CACHE_CONNECTION_INVALID CONNECTION_FAILED SEND_FAILED SYSTEM_RUNTIME_NOT_READY STORAGE_RUNNING STORAGE_UNAVAILABLE SECURITY_UNAVAILABLE PROTECT_FAILED UNPROTECT_FAILED STALE_SCOPE SCHEMA_MISSING SETTINGS_SAVE_FAILED ABNORMAL_SHUTDOWN TARGET_INVALID TARGET_MISSING SOURCE_EMPTY SOURCE_NOT_FOUND SOURCE_UNREADABLE ALREADY_CACHED UNSUPPORTED_IMAGE UI_ERROR CAPABILITY_START_FAILED LOG_PENDING_DROPPED LOG_LIMIT_REACHED"
+const CODES := "OK UNKNOWN INVALID_INPUT INSECURE_SERVER INVALID_RESPONSE BUSY CANCELLED TIMEOUT NETWORK_ERROR HTTP_ERROR AUTH_REJECTED PUBLIC_KEY_ERROR ENCRYPTION_ERROR CREDENTIAL_UNAVAILABLE NO_SAVED_LOGIN LOGGED_OUT PENDING SEND_REJECTED DELIVERY_UNCERTAIN TRANSPORT_STOPPED ACK_TIMEOUT DISCONNECTED CONNECT_TIMEOUT AUTH_TIMEOUT INVALID_BASE64 AUDIO_ERROR REMOTE_AUDIO_ERROR TTS_EMPTY TTS_STREAM_ERROR TTS_CANCELLED AUDIO_TIMEOUT BUFFER_LIMIT DECODER_UNAVAILABLE PLAYBACK_FAILED REPLAY_FAILED CACHE_WRITE_FAILED CACHE_CLEAR_FAILED INVALID_WAV UNSUPPORTED_FORMAT TRUNCATED_AUDIO EMPTY_AUDIO STREAM_FINISHED STOPPED INTERRUPTED ENGINE_ERROR ENGINE_WARNING ENGINE_SCRIPT ENGINE_SHADER HISTORY_FAILED HISTORY_INVALID HISTORY_DUPLICATE MODEL_ERROR MODEL_DISABLED MODEL_INVALID SAVE_FAILED INVALID_JSON MODEL_BUSY UNKNOWN_MODEL_TYPE INVALID_CONFIG MODEL_KIND_MISMATCH MODEL_CAPABILITY_MISMATCH MODEL_FIELDS_REQUIRED STREAMING_NOT_SUPPORTED PLAINTEXT_CONFIRMATION_REQUIRED KEY_UNAVAILABLE NOT_FOUND COMMENT_NOT_ALLOWED INVALID_REPLY_TARGET STORAGE_ERROR ACCOUNT_START_FAILED SERVER_CHANGED ACCOUNT_SELECTED OPTIONS_CHANGED ACCOUNT_REMOVED CHECKING_SERVER IMAGE_READ_FAILED AVATAR_WRITE_FAILED NO_ACCOUNT IMAGE_TOO_LARGE IMAGE_FORMAT INVALID_IMAGE IMAGE_DIMENSIONS IMAGE_MISSING SERVER_ERROR UNAVAILABLE CACHE_SQL_FAILED CACHE_CONNECTION_INVALID CONNECTION_FAILED SEND_FAILED SYSTEM_RUNTIME_NOT_READY STORAGE_RUNNING STORAGE_UNAVAILABLE SECURITY_UNAVAILABLE PROTECT_FAILED UNPROTECT_FAILED STALE_SCOPE SCHEMA_MISSING SETTINGS_SAVE_FAILED ABNORMAL_SHUTDOWN TARGET_INVALID TARGET_MISSING SOURCE_EMPTY SOURCE_NOT_FOUND SOURCE_UNREADABLE ALREADY_CACHED UNSUPPORTED_IMAGE UI_ERROR CAPABILITY_START_FAILED LOG_PENDING_DROPPED LOG_LIMIT_REACHED TLS_BUNDLE_MISSING TLS_BUNDLE_INVALID"
 const PHASES := "saving first_loading first_failed idle connecting authenticating ready reconnecting auth_rejected signed_out signed_in busy queued sending sent received failed uncertain loading complete error warning skipped playing paused stopped receiving decoded begin committed rolled_back begin_failed commit_failed rollback_failed starting running stopping start stop open close close_dialog unknown abnormal"
 const METRICS := ["has_audio", "audio_chars", "bytes", "frames", "sample_rate", "channels", "bits", "final", "audio_error", "queued", "volume", "latency_ms", "skips", "count", "status", "index", "duration_ms", "uptime_ms", "pid", "queue_depth", "memory_bytes", "objects", "draw_calls", "fps", "avg_ms", "max_ms", "failures", "affected_rows", "seq", "window_ms", "next_end"]
-const STRING_FIELDS := ["detail", "code", "phase", "module", "level", "category", "channel", "action", "method", "route", "outcome", "origin", "reason_code", "subject", "trace_id", "transaction_id", "scope", "operation", "schema_missing", "reply_id", "reason", "previous_run_id", "storage", "initial", "catchup", "older", "model_type"]
+const STRING_FIELDS := ["detail", "code", "phase", "module", "level", "category", "channel", "action", "method", "route", "target", "outcome", "origin", "reason_code", "subject", "trace_id", "transaction_id", "scope", "operation", "schema_missing", "reply_id", "reason", "previous_run_id", "storage", "initial", "catchup", "older", "model_type"]
 const SUBJECT_SECRET_KEYS := ["token", "password", "passwd", "secret", "authorization", "auth", "cookie", "key", "cipher", "private", "credential", "body", "content", "text", "audio", "base64", "message"]
 
 const CATEGORY_REQUIRED := {
@@ -77,6 +77,7 @@ const EVENT_REGISTRY := {
 	"audio_decoded": {"category":"business", "module":"audio", "message":"音频解码完成", "phase":"decoded"},
 	"network_http": {"category":"network", "module":"network", "message":"HTTP 请求", "phase":"complete"},
 	"network_http_summary": {"category":"network", "module":"network", "message":"HTTP 请求汇总", "phase":"complete"},
+	"network_probe": {"category":"network", "module":"network", "message":"网络连通性探测", "phase":"complete"},
 	"network_ws": {"category":"network", "module":"network", "message":"WebSocket 访问", "phase":"complete"},
 	"network_ws_auth": {"category":"network", "module":"network", "message":"WebSocket 认证", "phase":"complete"},
 	"network_ws_audio_summary": {"category":"network", "module":"network", "message":"WebSocket 音频汇总", "phase":"complete"},
@@ -98,6 +99,7 @@ const EVENT_REGISTRY := {
 	"ui_access": {"category":"system", "module":"app", "message":"界面访问", "phase":"complete"},
 	"ui_error_shown": {"category":"system", "module":"app", "message":"已通过弹窗提示用户错误", "phase":"failed"},
 	"system_security_component": {"category":"system", "module":"account", "message":"安全组件检查", "phase":"failed"},
+	"system_tls_trust": {"category":"system", "module":"network", "message":"TLS 信任源快照", "phase":"complete"},
 	"system_startup": {"category":"system", "module":"app", "message":"启动阶段耗时", "phase":"complete"},
 	"system_resource_sample": {"category":"system", "module":"app", "message":"资源占用采样", "phase":"complete"},
 	"system_queue_depth": {"category":"system", "module":"app", "message":"队列深度", "phase":"complete"},
@@ -146,6 +148,7 @@ const CLIENT_CODES := [
 	"ALREADY_CACHED", "UNSUPPORTED_IMAGE", "SEND_REJECTED", "CREDENTIAL_UNAVAILABLE",
 	"PROTECT_FAILED", "UNPROTECT_FAILED", "SECURITY_UNAVAILABLE", "UI_ERROR",
 	"CAPABILITY_START_FAILED", "INSECURE_SERVER", "LOG_PENDING_DROPPED", "LOG_LIMIT_REACHED",
+	"TLS_BUNDLE_MISSING", "TLS_BUNDLE_INVALID",
 ]
 const NETWORK_CODES := [
 	"NETWORK_ERROR", "TIMEOUT", "CONNECTION_FAILED", "CONNECT_TIMEOUT", "DISCONNECTED",
@@ -335,6 +338,79 @@ static func safe_route(value: Variant) -> String:
 		_route_pattern = RegEx.new()
 		_route_pattern.compile("^/[A-Za-z0-9_./*-]{0,63}$")
 	return text if _route_pattern.search(text) != null else "/unknown"
+
+
+## 只保留 scheme://host[:port]：用于日志里区分实际连的是哪个地址，去掉路径、查询和凭据。
+static func origin_for(url: String) -> String:
+	var parts := _origin_parts(url)
+	if parts.is_empty():
+		return ""
+	return _canonical_origin(parts.scheme, parts.host, parts.port)
+
+## 拆出 scheme 与 host/port 原始片段；任何不合法输入都返回空字典。
+static func _origin_parts(url: String) -> Dictionary:
+	var text := url.strip_edges()
+	var scheme_end := text.find("://")
+	if scheme_end <= 0:
+		return {}
+	var scheme := text.left(scheme_end).to_lower()
+	if scheme != "http" and scheme != "https":
+		return {}
+	var authority := _origin_authority(text.substr(scheme_end + 3))
+	if authority.is_empty():
+		return {}
+	var host_port := _split_host_port(authority)
+	if host_port.is_empty():
+		return {}
+	return {"scheme":scheme, "host":host_port[0].to_lower(), "port":host_port[1]}
+
+static func _origin_authority(rest: String) -> String:
+	var end := rest.length()
+	for separator in ["/", "?", "#"]:
+		var index := rest.find(separator)
+		if index >= 0 and index < end:
+			end = index
+	var authority := rest.left(end)
+	var at := authority.rfind("@")
+	if at >= 0:
+		authority = authority.substr(at + 1)
+	return authority
+
+static func _split_host_port(authority: String) -> Array:
+	if authority.is_empty():
+		return []
+	if authority.begins_with("["):
+		var close := authority.find("]")
+		if close < 0:
+			return []
+		var host := authority.left(close + 1)
+		var port := ""
+		if authority.length() > close + 1 and authority.substr(close + 1, 1) == ":":
+			port = authority.substr(close + 2)
+		return [host, port]
+	if authority.count(":") == 1:
+		var colon := authority.find(":")
+		return [authority.left(colon), authority.substr(colon + 1)]
+	return [authority, ""]
+
+static func _canonical_origin(scheme: String, host: String, port: String) -> String:
+	if host.is_empty():
+		return ""
+	if port.is_empty():
+		return "%s://%s" % [scheme, host]
+	if not port.is_valid_int() or int(port) < 1 or int(port) > 65535:
+		return ""
+	var canonical := str(int(port))
+	if _is_default_port(scheme, canonical):
+		return "%s://%s" % [scheme, host]
+	return "%s://%s:%s" % [scheme, host, canonical]
+
+static func _is_default_port(scheme: String, port: String) -> bool:
+	if scheme == "https":
+		return port == "443"
+	if scheme == "http":
+		return port == "80"
+	return false
 
 static func safe_action(value: Variant) -> String:
 	if not value is String:

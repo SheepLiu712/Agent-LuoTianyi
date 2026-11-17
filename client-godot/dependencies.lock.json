@@ -9,6 +9,11 @@
     "executable_sha256": "323f9c4cc5db674e98815cdd8e69da007d5efc779abedc8c0e42883b7fdea12a",
     "url": "https://github.com/godotengine/godot/releases/download/4.7.1-stable/Godot_v4.7.1-stable_win64.exe.zip"
   },
+  "ca_bundle": {
+    "url": "https://curl.se/ca/cacert.pem",
+    "snapshot_date": "2026-11-16",
+    "sha256": "427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285"
+  },
   "export_templates": {
     "version": "4.7.1.stable",
     "sha256": "86409db6200b6f8fd3230989c2d2002851f3dd18acf11d7bdbafddf5a0dd0f72",

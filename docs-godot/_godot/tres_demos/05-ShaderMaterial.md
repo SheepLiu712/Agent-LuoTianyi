@@ -2,7 +2,7 @@
 
 ## 现有工程演示
 
-[`frost_popup.tres`](../../../client_godot/theme/frost_popup.tres) 是 `ShaderMaterial`：
+[`frost_popup.tres`](../../../client-godot/theme/frost_popup.tres) 是 `ShaderMaterial`：
 
 ```ini
 [gd_resource type="ShaderMaterial" load_steps=2 format=3]
@@ -14,7 +14,7 @@ shader_parameter/tint = Color(0.12,0.2,0.28,0.24)
 shader_parameter/radius = 5.0
 ```
 
-外部 [`frost_surface.gdshader`](../../../client_godot/assets/ui/frost_surface.gdshader) 声明了 `tint`、`radius` 两个 uniform；`.tres` 为它们提供具体值。[`publish_overlay.tscn`](../../../client_godot/scenes/ui/publish_overlay.tscn) 把此材质赋给 `Shade` 节点。`tint` 控制混合色，`radius` 传给 `textureLod`，表示屏幕纹理的 mip 采样层级和模糊强度，不是固定的像素半径。实际效果还取决于渲染器、底层画面及该场景的运行条件。
+外部 [`frost_surface.gdshader`](../../../client-godot/assets/ui/frost_surface.gdshader) 声明了 `tint`、`radius` 两个 uniform；`.tres` 为它们提供具体值。[`publish_overlay.tscn`](../../../client-godot/scenes/ui/publish_overlay.tscn) 把此材质赋给 `Shade` 节点。`tint` 控制混合色，`radius` 传给 `textureLod`，表示屏幕纹理的 mip 采样层级和模糊强度，不是固定的像素半径。实际效果还取决于渲染器、底层画面及该场景的运行条件。
 
 ## 独立练习：调整一份局部材质
 

@@ -1,6 +1,6 @@
 # Godot `.tres` 实例教程
 
-本目录用当前 Godot 4.7.1 工程解释 `.tres` 的主要用法。实际可运行工程位于仓库根目录的 `client_godot/`；本目录 `client/_godot/tres_demos/` 只放教学 Markdown，不是 Godot 项目根目录。下面代码中的 `res://` 均以 `client_godot/project.godot` 为根。
+本目录用当前 Godot 4.7.1 工程解释 `.tres` 的主要用法。实际可运行工程位于仓库根目录的 `client-godot/`；本目录 `docs-godot/_godot/tres_demos/` 只放教学 Markdown，不是 Godot 项目根目录。下面代码中的 `res://` 均以 `client-godot/project.godot` 为根。
 
 ## 阅读顺序
 
@@ -16,15 +16,15 @@
 
 ## 如何运行示例
 
-1. 用 Godot 4.7.1 standard / Windows x64 导入 `client_godot/project.godot`。
+1. 用 Godot 4.7.1 standard / Windows x64 导入 `client-godot/project.godot`。
 2. 文中标为“现有工程演示”的步骤可直接在编辑器中操作；代码块标为“独立练习”的内容需放入临时脚本或临时场景。请不要覆盖项目的正式资源。
 3. 单独试运行 GDScript 片段时，建一个临时 `Node` 场景，将片段放在其 `_ready()` 中并运行该场景。涉及 `Control` 的例子可使用 `Control` 根节点。
 4. 修改正式 `.tres` 前先复制一份；这些资源已被多个场景引用。
 
 ## 五分钟跑通第一个 demo
 
-1. 用 Godot 4.7.1 standard 打开 `client_godot/project.godot`，等待 FileSystem 导入完成。
-2. 在 `client_godot/tests/manual/` 新建一个脚本，把 01 篇的 `TresDemoProfile` 类代码粘进去并保存。
+1. 用 Godot 4.7.1 standard 打开 `client-godot/project.godot`，等待 FileSystem 导入完成。
+2. 在 `client-godot/tests/manual/` 新建一个脚本，把 01 篇的 `TresDemoProfile` 类代码粘进去并保存。
 3. 在同一目录创建 `Node` 场景，挂一个脚本，把 01 篇的 `load()` 代码放进 `_ready()`。
 4. 按 **F6** 运行当前场景，在底部 **Output** 面板查看 `Luo Tianyi / 75`。
 5. 运行后删除临时场景和脚本；如果测试写入了 `user://`，可在脚本中用 `DirAccess.remove_absolute(ProjectSettings.globalize_path(path))` 清理测试文件。
@@ -79,11 +79,11 @@
 在仓库根目录执行 PowerShell：
 
 ```powershell
-Get-ChildItem -LiteralPath client_godot -Recurse -Filter *.tres
-rg -n 'type="Resource"|type="Theme"|type="Material"|\.tres' client_godot/scenes client_godot/project.godot
-rg -n 'resource_local_to_scene|ResourceSaver|ConfigFile|user://' client_godot
+Get-ChildItem -LiteralPath client-godot -Recurse -Filter *.tres
+rg -n 'type="Resource"|type="Theme"|type="Material"|\.tres' client-godot/scenes client-godot/project.godot
+rg -n 'resource_local_to_scene|ResourceSaver|ConfigFile|user://' client-godot
 ```
 
 如果引用路径存在但 Godot 仍报资源加载错误，先查看 Output 面板中的第一条脚本解析错误，再检查资源路径和外部依赖。不要直接删除 `.godot/` 或 `.import` 来“修复”源码引用；这些目录是生成物。
 
-这些教程说明资源机制，不代表工程中所有平台功能已通过正式验收。工程入口和测试命令见 [Godot README](../../../client_godot/README.md)。
+这些教程说明资源机制，不代表工程中所有平台功能已通过正式验收。工程入口和测试命令见 [Godot README](../../../client-godot/README.md)。

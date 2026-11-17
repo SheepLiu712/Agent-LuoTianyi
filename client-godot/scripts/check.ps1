@@ -30,14 +30,17 @@ Write-Host 'Starting isolated contract checks.'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_reply_audio_errors.gd') 'reply-audio-errors' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--quit-after', '3') 'startup'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_theme_contract.gd') 'theme-contract'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_login_style.gd') 'login-style'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_error_dialog.gd') 'error-dialog'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_ui_scenes.gd') 'ui-scenes'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_avatar_driver.gd') 'avatar-contract'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/avatar/test_eye_restoration.gd') 'avatar-eyes'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/avatar/test_expression_fallback.gd') 'expression-fallback'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_avatar_framing.gd') 'framing-contract'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_demo_session.gd') 'preview-contract'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_preview_input.gd') 'preview-input'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_windows_security.gd') 'windows-security'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_tls_trust.gd') 'tls-trust'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_pcm_decoder.gd') 'pcm-decoder'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_reply_audio.gd') 'reply-audio'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_audio_cache.gd') 'audio-cache'
@@ -68,6 +71,7 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_main_navigation.gd') 'main-navigation'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_visual_surfaces.gd') 'visual-surfaces'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_audio_settings.gd') 'audio-settings'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_import_states.gd') 'import-states'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_settings_prewarm.gd') 'settings-prewarm' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_ui_style.gd') 'ui-style-preferences'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_image_attachment.gd') 'image-attachment'
@@ -78,12 +82,13 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_login_storage.gd') 'login-storage'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_sqlite_runtime.gd') 'sqlite-runtime' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_sqlite_database.gd') 'sqlite-database' -RequirePass
-Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_sqlite_migration.gd') 'sqlite-migration' -RequirePass
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_dynamics_store.gd') 'dynamics-store' -RequirePass
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_scope_session.gd') 'scope-session' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_sqlite_worker.gd') 'sqlite-worker' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_message_persistence.gd') 'message-persistence' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_send_persistence_order.gd') 'send-persistence-order' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_history_paging.gd') 'history-paging' -RequirePass
-Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_message_reconcile.gd') 'message-reconcile' -RequirePass
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_message_merge.gd') 'message-merge' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_model_result_cache.gd') 'model-result-cache' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/application/test_service_graph.gd') 'service-graph' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_cache_usage_ring.gd') 'cache-usage-ring'

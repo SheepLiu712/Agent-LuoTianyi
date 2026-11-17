@@ -4,6 +4,9 @@ const StorageService = preload("res://src/storage/storage_service.gd")
 const MigrationPort = preload("res://src/storage/python_media_migration_port.gd")
 const StatusBanner = preload("res://src/ui/status_banner.gd")
 const USAGE_REFRESH_MS := 2000
+const ACTION_START := "start"
+const ACTION_DETECT := "detect"
+const ACTION_IMPORT := "import"
 
 var _ui_style: RefCounted
 var _migration_kind := "muted"
@@ -22,6 +25,10 @@ var _usage_refreshed_ms := 0
 var _usage_loaded := false
 var _scan_ok := false
 var _importable := false
+var _already_imported := false
+var _pending_audio := 0
+var _pending_images := 0
+var _button_action := ACTION_START
 
 
 func setup(
@@ -41,9 +48,9 @@ func setup(
 	if is_node_ready():
 		%ClearCache.disabled = not _clear_cache.is_valid()
 		_apply_migration()
-		# 设置窗预暖时父 Window 仍隐藏；子控件自身 visible 仍为 true，不能据此触发磁盘扫描。
+		# 设置窗预暖时父 Window 仍隐藏；显示后再恢复未检测状态。
 		if is_visible_in_tree():
-			_refresh_scan()
+			_reset_import_view()
 			_refresh_usage()
 
 
@@ -53,7 +60,7 @@ func set_media_migration(migration: MigrationPort) -> void:
 	if is_node_ready():
 		_apply_migration()
 		if is_visible_in_tree():
-			_refresh_scan()
+			_reset_import_view()
 
 
 ## 兼容旧调用名：该页面现在同时管理语音与图片。
@@ -91,11 +98,11 @@ func _ready() -> void:
 	%RefreshUsage.pressed.connect(_refresh_usage)
 	visibility_changed.connect(func():
 		if is_visible_in_tree():
-			_refresh_scan()
+			_reset_import_view()
 			_refresh_usage_if_needed())
 	_apply_migration()
 	if is_visible_in_tree():
-		_refresh_scan()
+		_reset_import_view()
 		_refresh_usage_if_needed()
 
 
@@ -106,14 +113,16 @@ func _apply_migration() -> void:
 	if _migration == null:
 		%PythonPath.text = ""
 		%PythonPath.tooltip_text = ""
+		_button_action = ACTION_START
 		_set_migration_status("导入暂不可用。", "muted")
+		_update_import_button(false)
 		return
 	if not _migration.progress.is_connected(_on_migration_progress):
 		_migration.progress.connect(_on_migration_progress)
 	_on_migration_progress(_migration.get_state())
 
 
-## 打开页面才重新校验：启动不阻塞、不弹窗；路径失效时引导重选。
+## 显式检测才扫描：打开页面不自动读盘。
 func _refresh_scan() -> void:
 	if _migration == null:
 		_set_migration_status("导入暂不可用。", "muted")
@@ -121,6 +130,22 @@ func _refresh_scan() -> void:
 	var result := _migration.scan()
 	_show_target()
 	_apply_scan(result)
+
+
+func _reset_import_view() -> void:
+	_scan_ok = false
+	_importable = false
+	_already_imported = false
+	_pending_audio = 0
+	_pending_images = 0
+	_show_target()
+	if _migration == null:
+		_button_action = ACTION_START
+		_set_migration_status("导入暂不可用。", "muted")
+	else:
+		_button_action = ACTION_DETECT if not %PythonPath.text.strip_edges().is_empty() else ACTION_START
+		_set_migration_status("", "muted")
+	_update_import_button(false)
 
 
 func _show_target() -> void:
@@ -133,20 +158,42 @@ func _apply_scan(result: Dictionary) -> void:
 	_scan_ok = bool(result.get("ok", false))
 	var audio := int(result.get("audio_count", 0))
 	var images := int(result.get("image_count", 0))
-	_importable = _scan_ok and audio + images > 0
-	_update_import_button(false)
+	_pending_audio = int(result.get("pending_audio_count", 0))
+	_pending_images = int(result.get("pending_image_count", 0))
+	_already_imported = _scan_ok and bool(result.get("already_imported", false))
+	_importable = _scan_ok and _pending_audio + _pending_images > 0
 	if not _scan_ok:
-		var code := str(result.get("code", "TARGET_MISSING"))
-		var kind := "muted" if code == "TARGET_MISSING" and %PythonPath.text.is_empty() else ("warning" if code == "TARGET_MISSING" else "error")
-		_set_migration_status(_scan_failure(code), kind)
+		_button_action = ACTION_DETECT if not %PythonPath.text.strip_edges().is_empty() else ACTION_START
+		_update_import_button(false)
+		_show_scan_failure(result)
 		return
+	_button_action = ACTION_IMPORT if _importable or _already_imported else ACTION_DETECT
+	_update_import_button(false)
+	_set_migration_status(_scan_summary(result, audio, images), _scan_kind())
+
+
+func _show_scan_failure(result: Dictionary) -> void:
+	var code := str(result.get("code", "TARGET_MISSING"))
+	var kind := "muted" if code == "TARGET_MISSING" and %PythonPath.text.is_empty() else ("warning" if code == "TARGET_MISSING" else "error")
+	_set_migration_status(_scan_failure(code), kind)
+
+
+func _scan_kind() -> String:
+	if _already_imported:
+		return "success"
 	var mismatch := _migration != null and bool(_migration.get_state().get("mismatch", false))
-	var kind := "warning" if mismatch or not _importable else "success"
-	_set_migration_status(_scan_summary(result, audio, images), kind)
+	return "warning" if mismatch or not _importable else "success"
 
 
 func _scan_summary(result: Dictionary, audio: int, images: int) -> String:
-	var text := "没有可导入的媒体。" if audio + images == 0 else "可导入：语音 %d 条，图片 %d 张。" % [audio, images]
+	if bool(result.get("already_imported", false)):
+		return "已导入：语音 %d 条，图片 %d 张。" % [audio, images]
+	var pending_audio := int(result.get("pending_audio_count", 0))
+	var pending_images := int(result.get("pending_image_count", 0))
+	var text := "没有可导入的媒体。"
+	if pending_audio + pending_images > 0:
+		text = ("新增：语音 %d 条，图片 %d 张。" if bool(result.get("has_previous_import", false))
+			else "可导入：语音 %d 条，图片 %d 张。") % [pending_audio, pending_images]
 	var unmatched := int(result.get("unmatched_count", 0))
 	if unmatched > 0:
 		text += " 另有 %d 张图片无法匹配，将跳过。" % unmatched
@@ -173,9 +220,23 @@ func _scan_failure(code: String) -> String:
 
 
 func _update_import_button(busy: bool) -> void:
-	%MigrateMedia.disabled = _migration == null or busy or not _importable
+	var enabled := _migration != null and not busy
+	if _button_action == ACTION_IMPORT:
+		enabled = enabled and _importable and not _already_imported
+	%MigrateMedia.disabled = not enabled
+	%MigrateMedia.text = _action_text()
 	%BrowsePython.disabled = _migration == null or busy
 	%ClearCache.disabled = busy or not _clear_cache.is_valid()
+
+
+func _action_text() -> String:
+	match _button_action:
+		ACTION_IMPORT:
+			return "导入媒体…"
+		ACTION_DETECT:
+			return "重新检测"
+		_:
+			return "开始检测"
 
 
 func _request_pick() -> void:
@@ -230,6 +291,12 @@ func _clear() -> void:
 func _request_migrate() -> void:
 	if _migration == null or _migration.is_busy():
 		return
+	if _button_action != ACTION_IMPORT:
+		if _migration.get_target_path().strip_edges().is_empty():
+			_request_pick()
+		else:
+			_refresh_scan()
+		return
 	if not _scan_ok:
 		_refresh_scan()
 		return
@@ -266,17 +333,45 @@ func _on_migration_progress(state: Dictionary) -> void:
 	var imported := int(state.get("imported", 0))
 	_update_import_button(busy)
 	if busy:
-		_set_migration_status("正在导入 %d / %d（语音 %d / %d，图片 %d / %d）…" % [
-			int(state.get("done", 0)), int(state.get("total", 0)),
-			int(state.get("audio_done", 0)), int(state.get("audio_total", 0)),
-			int(state.get("image_done", 0)), int(state.get("image_total", 0)),
-		], "info")
-	elif mode == "done":
-		_set_migration_status(_summary(state), "warning" if _migration_failure(state) else "success")
+		_show_migration_progress(state)
+	else:
+		_show_migration_result(state, mode, imported)
+	_track_imported(imported)
+
+
+func _show_migration_progress(state: Dictionary) -> void:
+	_set_migration_status("正在导入 %d / %d（语音 %d / %d，图片 %d / %d）…" % [
+		int(state.get("done", 0)), int(state.get("total", 0)),
+		int(state.get("audio_done", 0)), int(state.get("audio_total", 0)),
+		int(state.get("image_done", 0)), int(state.get("image_total", 0)),
+	], "info")
+
+
+func _show_migration_result(state: Dictionary, mode: String, imported: int) -> void:
+	if mode == "done":
+		_show_done(state)
 	elif mode == "unavailable":
+		_set_detection_action()
 		_set_migration_status(_unavailable(str(state.get("code", ""))), "error")
 	elif mode == "incremental" and imported > 0:
 		_set_migration_status("已按需导入 %d 条语音。" % imported, "success")
+
+
+func _show_done(state: Dictionary) -> void:
+	if not _migration_failure(state):
+		_refresh_scan()
+		return
+	_set_migration_status(_summary(state), "warning")
+	if str(state.get("code", "")) != "PARTIAL":
+		_set_detection_action()
+
+
+func _set_detection_action() -> void:
+	_button_action = ACTION_DETECT if not %PythonPath.text.strip_edges().is_empty() else ACTION_START
+	_update_import_button(false)
+
+
+func _track_imported(imported: int) -> void:
 	if imported != _last_imported:
 		_last_imported = imported
 		if is_visible_in_tree():
@@ -410,8 +505,11 @@ func _set_usage_legend(
 
 func _set_migration_status(text: String, kind: String) -> void:
 	_migration_kind = kind
+	var active := not text.is_empty()
+	%MigrationStatusPanel.visible = active
 	%MigrationStatus.text = text
-	StatusBanner.apply_surface_status(%MigrationStatusPanel, %MigrationStatus, kind, _ui_style)
+	if active:
+		StatusBanner.apply_surface_status(%MigrationStatusPanel, %MigrationStatus, kind, _ui_style)
 
 
 func _set_cache_status(text: String, kind: String) -> void:

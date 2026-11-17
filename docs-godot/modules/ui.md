@@ -101,12 +101,15 @@ stateDiagram-v2
 ## 源码核对补充
 
 - `AccountView._send()` 只接受 ASCII 密码字符，注册/重置校验确认密码；登录成功清除密码等敏感字段，网络/认证失败保留当前页输入。菜单、服务器对话框和历史账号弹层均由 authored 场景提供。
+- `AccountView.setup()` 可接收 `UiStyle`；登录页通过 `src/ui/login_style.gd` 复制主题 StyleBox 后覆盖淡蓝底、头像光晕、菜单/服务器/错误/移除账号框的登录圆角。覆盖只挂在登录控件实例上，不修改 `theme/app_theme.tres`，因此日志窗和登录后的聊天/设置仍使用原主题。
 - `ChatView._initialize()` 连接历史重试/跳过、虚拟列表媒体信号、ComposerInput、FileDialog 和 ChatSession；`_send()` 只有 `send_text/send_image` 成功后才清空输入或附件。
 - `VirtualMessageList` 使用 `_heights/_offsets/_nodes/_indices` 做像素布局，实测行高为 `max(54, minimum)+17`，窗口宽度变化会清高度缓存；渲染视口前后额外保留约两行并释放视口外节点。
 - `MessageBubble.configure()` 区分 system/user/image 布局；`set_audio_state/set_image_state()` 只更新已有媒体控件，不让语音状态或错误文案撑大短文本气泡。
 - `SettingsWindow.save_changes()` 先全量 validate ModelPage，再按 model → preference 顺序保存；保存中 `_request_close()` 只设置 close-after-save，失败继续保留窗口。
+- `SettingsWindow` 在登录阶段由窗口协调器隐藏预热，`is_data_settled()` 等偏好与模型卡片就绪后才允许显示；干净关闭保留缓存窗口，重新打开不再重复请求。
 - `DynamicsWindow` 只继承 `DraftWindow`，发布使用当前窗口内的 `publish_overlay.tscn` Control 浮层；`dynamic_detail` 会把 ReplyBox reparent 到具体评论行，取消回复时保留文本草稿。
 - `LogWindow` 关闭只 hide；实时 entry 只有在窗口可见、当前 run 且筛选命中时追加，导出始终读取完整运行记录，不受筛选影响。
 - `ImagePresenter` 全局只保持一个 ImageWindow；切换来源时 reparent，关闭时释放纹理/provider/confirm 并恢复来源窗口焦点。
-- `UnifiedDropdown.set_items()` 校验 id/label 唯一性，`open_menu()` 根据窗口几何选择上下位置；程序性 set_selected 不发 activated，只有用户 `_activate()` 发信号。
+- `UnifiedDropdown.set_items()` 校验 id/label 唯一性，`open_menu()` 根据窗口几何选择上下位置；程序性 set_selected 不发 activated，只有用户 `_activate()` 发信号。按下态只跟随弹层可见性，鼠标双击关闭不会重新打开；焦点环采用键盘可见策略。
+- 选择型下拉统一实例化 `unified_dropdown.tscn`，覆盖日志筛选、相处模式、模型配置复制、风格外观与离线预览。设置页的 `SettingsStyle` 不得把 `DropdownTrigger` / `DropdownItem*` 改写成普通设置按钮。
 - `WindowChrome` 只转发 WindowHost 的 attach/configure/open/tick/save/detach，不在业务窗口内调用 DisplayServer。

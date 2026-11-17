@@ -1,5 +1,6 @@
 extends SceneTree
 const Schema = preload("res://src/storage/log_schema.gd")
+const EngineSink = preload("res://src/storage/engine_log_sink.gd")
 var failures: Array[String] = []
 
 func check(value: bool, description: String) -> void:
@@ -13,6 +14,9 @@ func _initialize() -> void:
 	_check_defaults()
 	_check_sanitizers()
 	_check_routes_and_ids()
+	_check_origins_for_logs()
+	_check_tls_annotation()
+	_check_tls_cause()
 	_check_origins()
 	print("Log schema: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
@@ -26,9 +30,14 @@ func _check_catalog() -> void:
 	check(Schema.category_for("engine_error") == "system", "system event category")
 	check(Schema.category_for("unknown_event") == "system", "unknown event falls back to system")
 	check(Schema.module_for("storage_sqlite_operation") == "history", "registered module")
-	check(Schema.EVENT_REGISTRY.size() == 71, "event registry stays explicitly enumerated")
+	check(Schema.EVENT_REGISTRY.size() == 73, "event registry stays explicitly enumerated")
+	check(Schema.category_for("network_probe") == "network", "probe event is network")
+	check(Schema.category_for("system_tls_trust") == "system", "TLS trust snapshot is system")
+	check(Schema.module_for("system_tls_trust") == "network", "TLS trust snapshot belongs to network")
 	check(Schema.category_for("log_pending_dropped") == "system", "pending drop diagnostic is system")
 	check(Schema.category_for("log_limit_reached") == "system", "limit diagnostic is system")
+	check(Schema.safe_code("TLS_BUNDLE_MISSING") == "TLS_BUNDLE_MISSING", "missing bundle code is registered")
+	check(Schema.safe_code("TLS_BUNDLE_INVALID") == "TLS_BUNDLE_INVALID", "invalid bundle code is registered")
 
 func _check_levels() -> void:
 	check(Schema.default_level("business", {}) == "INFO", "success defaults to info")
@@ -64,6 +73,28 @@ func _check_routes_and_ids() -> void:
 	check(Schema.is_trace_id(Schema.new_trace_id("net")), "trace id format")
 	check(Schema.is_token(Schema.new_transaction_id(), 64), "transaction id format")
 
+func _check_origins_for_logs() -> void:
+	check(Schema.origin_for("https://example.com/auth/login?x=1") == "https://example.com", "origin drops path, query and default port")
+	check(Schema.origin_for("https://www-api.u3493359.nyat.app:11664/auth/auto_login") == "https://www-api.u3493359.nyat.app:11664", "origin keeps custom port")
+	check(Schema.origin_for("http://127.0.0.1:60030/x") == "http://127.0.0.1:60030", "origin keeps loopback port")
+	check(Schema.origin_for("https://user:pass@host.example:443/x") == "https://host.example", "origin strips userinfo and default port")
+	check(Schema.origin_for("https://[::1]:443/x") == "https://[::1]", "origin keeps ipv6 literal")
+	check(Schema.origin_for("host.example/x").is_empty(), "origin requires scheme")
+	check(Schema.origin_for("https://host.example:abc/x").is_empty(), "origin rejects invalid port")
+
+func _check_tls_annotation() -> void:
+	var annotated := EngineSink.tls_detail("TLS handshake error: -9984")
+	check(int(annotated.get("mbedtls_code", 0)) == -9984, "mbedtls code extracted")
+	check(str(annotated.get("detail", "")).contains("MBEDTLS_ERR_X509_CERT_VERIFY_FAILED"), "mbedtls name annotated")
+	check(int(EngineSink.tls_detail("something else").get("mbedtls_code", 0)) == 0, "non-tls rationale untouched")
+	check(str(EngineSink.tls_detail("TLS handshake error: -1").get("detail", "")) == "TLS handshake error: -1", "unknown tls code keeps raw text")
+
+
+func _check_tls_cause() -> void:
+	check(EngineSink.tls_cause(-9984) == "certificate_verify_failed", "certificate verification cause")
+	check(EngineSink.tls_cause(-29312) == "peer_verify_failed", "peer verification cause")
+	check(EngineSink.tls_cause(-1) == "", "unknown tls code has no cause")
+
 func _check_origins() -> void:
 	check(Schema.is_origin("client") and not Schema.is_origin("local"), "origin enum")
 	check(Schema.infer_origin("network_http", {"outcome":"failure", "status":0}, "network") == "network", "status 0 maps to network")
@@ -77,3 +108,5 @@ func _check_origins() -> void:
 	check(Schema.infer_origin("message_error", {"code":"TIMEOUT"}, "business") == "network", "timeout maps to network")
 	check(Schema.infer_origin("ui_error_shown", {"code":"UI_ERROR", "outcome":"failure"}, "system") == "client", "UI error maps to client")
 	check(Schema.infer_origin("log_limit_reached", {"code":"LOG_LIMIT_REACHED", "outcome":"failure"}, "system") == "client", "log drop maps to client")
+	check(Schema.infer_origin("system_tls_trust", {"outcome":"failure", "code":"TLS_BUNDLE_MISSING"}, "system") == "client", "missing CA bundle maps to client")
+	check(Schema.infer_origin("system_tls_trust", {"outcome":"success", "code":"OK"}, "system") == "none", "successful trust snapshot has no fault origin")

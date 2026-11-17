@@ -8,10 +8,12 @@ signal interacted
 signal audio_action(id: String, action: String)
 signal image_opened(texture: Texture2D)
 signal image_action(id: String, action: String)
+signal delivery_action(id: String, action: String)
 
 const Bubble = preload("res://scenes/ui/chat/message_bubble.tscn")
 const ChatTime = preload("res://src/ui/chat_time.gd")
-const HIDDEN_STATUSES: Array[String] = ["uncertain", "superseded"]
+## failed / DELIVERY_UNCERTAIN 必须留在时间线里可见；新状态机不再产生 uncertain。
+const HIDDEN_STATUSES: Array[String] = []
 
 @onready var _canvas: Control = %Canvas
 
@@ -491,6 +493,7 @@ func _create_bubble(id: String, message: Dictionary) -> void:
 	bubble.audio_action.connect(func(action): audio_action.emit(id, action))
 	bubble.image_opened.connect(func(texture): image_opened.emit(texture))
 	bubble.image_action.connect(func(action): image_action.emit(id, action))
+	bubble.delivery_action.connect(func(action): delivery_action.emit(id, action))
 	_nodes[id] = bubble
 	bubble.minimum_size_changed.connect(_bubble_minimum_changed.bind(id))
 	_queue_measure()

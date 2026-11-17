@@ -1,7 +1,7 @@
 # Platform 模块
 
 ## 模块目的
-封装桌面窗口、运行环境、输入法/剪贴板、文件选择器、外链和系统安全能力。源码在 `client_godot/src/platform/`，场景资源装配在 `client_godot/resources/platform/`。
+封装桌面窗口、运行环境、输入法/剪贴板、文件选择器、外链和系统安全能力。源码在 `client-godot/src/platform/`，场景资源装配在 `client-godot/resources/platform/`。
 
 ## 职责边界
 `WindowSystem`、`WindowHost`、`RuntimeEnvironment`、`InputService`、`FileInteraction`、`ExternalLinkOpener`、`PasswordEncryption`、`SecretProtection` 是抽象接口；Godot/Windows 类提供具体实现。

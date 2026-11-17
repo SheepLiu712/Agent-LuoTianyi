@@ -3,6 +3,7 @@ const VIEW_SCENE := "res://scenes/ui/pages/account_view.tscn"
 const Session = preload("res://src/session/account_session.gd")
 const Store = preload("res://src/storage/credential_store.gd")
 const Api = preload("res://src/network/account_api.gd")
+const AccountView = preload("res://src/ui/account_view.gd")
 var failures: Array[String] = []
 
 func check(value: bool, description: String) -> void:
@@ -23,7 +24,7 @@ func press(view: Control, caption: String) -> void:
 			return
 	check(false, "visible action: " + caption)
 
-func has_text(view: Control, text: String) -> bool:
+func has_text(view: Node, text: String) -> bool:
 	for label in view.find_children("*", "Label", true, false):
 		if label.is_visible_in_tree() and label.text.contains(text):
 			return true
@@ -63,14 +64,20 @@ func run() -> void:
 	var username := input(view, "用户名")
 	var password := input(view, "密码")
 	_check_account_form_is_available(server, username, password)
+	_check_probe_controls(view)
+	_check_tls_messages()
+	await _check_probe_rejects_empty_address(view)
 	if server != null and username != null and password != null:
 		await check_focus_order(view, username)
 		await session.set_server(OS.get_environment("GODOT_TEST_SERVER"))
 		username.text = "reject"
 		password.text = "synthetic-password"
 		press(view, "登录")
+		check(view.get_node("%Submit").text == "登录中", "submit button shows 登录中 while busy")
 		await create_timer(0.4).timeout
-		check(has_text(view, "用户名或密码错误"), "authentication rejection visible")
+		check(view.get_node("%Submit").text == "登录", "submit button restores 登录 text after busy")
+		check(has_text(view.get_window(), "用户名或密码错误"), "authentication rejection visible in error dialog")
+		check(not has_text(view, "用户名或密码错误"), "authentication rejection not duplicated in form")
 		check(password.text == "synthetic-password", "failed login preserves draft")
 		view.select_mode("register")
 		username.text = "test"
@@ -78,7 +85,8 @@ func run() -> void:
 		input(view, "确认密码").text = "different"
 		input(view, "邀请码").text = "invite-test"
 		press(view, "注册")
-		check(has_text(view, "两次输入的密码不一致"), "password confirmation checked locally")
+		check(has_text(view.get_window(), "两次输入的密码不一致"), "password confirmation checked locally")
+		check(not has_text(view, "两次输入的密码不一致"), "password mismatch not duplicated in form")
 		input(view, "确认密码").text = "synthetic-password"
 		press(view, "注册")
 		await create_timer(0.4).timeout
@@ -100,6 +108,38 @@ func run() -> void:
 
 func _check_account_form_is_available(server: Variant, username: Variant, password: Variant) -> void:
 	check(server != null and username != null and password != null, "account form is available")
+
+func _check_probe_controls(view: Control) -> void:
+	var button := view.get_node_or_null("%ServerProbe") as Button
+	var result := view.get_node_or_null("%ProbeResult") as Label
+	check(button != null and button.text == "测试连通性", "server probe control exists")
+	check(result != null and not result.visible, "probe result starts hidden")
+
+func _check_tls_messages() -> void:
+	var tls := AccountView._error_text("NETWORK_ERROR", 0, "RESULT_TLS_HANDSHAKE_ERROR")
+	check(tls.contains("证书校验失败") and tls.contains("代理"), "tls certificate failure has a specific message")
+	check(AccountView._error_text("PUBLIC_KEY_ERROR", 0, "RESULT_TLS_HANDSHAKE_ERROR") == tls,
+		"tls detail overrides public key generic text")
+	check(AccountView._is_tls_failure("TLS handshake error: -9984 (MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)"),
+		"engine certificate detail is recognized")
+	check(not AccountView._is_tls_failure("RESULT_CANT_CONNECT"), "non-tls transport failure is not misclassified")
+	check(AccountView._error_text("NETWORK_ERROR", 0, "RESULT_CANT_CONNECT") == "无法连接服务器，请检查地址和网络。",
+		"non-tls network message is unchanged")
+	var result := {"ok":false, "baseline":{"ok":true, "stage":"HTTP"}, "target":{"ok":false, "stage":"TLS"}}
+	var hint := AccountView._probe_status_text(result, "fallback")
+	check(hint.contains("公网正常") and hint.contains("TLS"), "probe result refines the tls hint")
+	var both := {"ok":false, "baseline":{"ok":false, "stage":"DNS"}, "target":{"ok":false, "stage":"TLS"}}
+	check(AccountView._probe_status_text(both, "fallback").contains("TLS 证书校验失败"),
+		"tls hint without baseline is still specific")
+	check(AccountView._probe_text({"stage":"TLS", "duration_ms":533}) == "TLS 证书校验失败 533ms",
+		"probe line names the tls stage")
+
+func _check_probe_rejects_empty_address(view: Control) -> void:
+	view.get_node("%Server").text = ""
+	view.get_node("%ServerProbe").pressed.emit()
+	await process_frame
+	var result := view.get_node("%ProbeResult") as Label
+	check(result.visible and result.text.contains("地址无效"), "empty server address is rejected without network")
 
 func check_focus_order(view: Control, username: LineEdit) -> void:
 	username.focus_next = NodePath()

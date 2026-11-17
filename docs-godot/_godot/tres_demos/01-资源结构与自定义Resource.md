@@ -2,7 +2,7 @@
 
 ## 项目中的例子
 
-[`decoder.tres`](../../../client_godot/resources/platform/decoder.tres) 只有四个有效行：
+[`decoder.tres`](../../../client-godot/resources/platform/decoder.tres) 只有四个有效行：
 
 ```ini
 [gd_resource type="Resource" load_steps=2 format=3]
@@ -97,7 +97,7 @@ func _ready() -> void:
 
 ## 如何手工读懂一份文本资源
 
-阅读项目的 [`dynamics.tres`](../../../client_godot/resources/platform/dynamics.tres) 时按这个顺序：
+阅读项目的 [`dynamics.tres`](../../../client-godot/resources/platform/dynamics.tres) 时按这个顺序：
 
 1. 看 `[gd_resource]`：根类型是 `Resource`。
 2. 看 `[ext_resource]`：它挂载 `godot_settings_store.gd`。

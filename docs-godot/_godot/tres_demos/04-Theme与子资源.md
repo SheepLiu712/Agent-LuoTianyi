@@ -2,7 +2,7 @@
 
 ## 现有工程演示
 
-[`app_theme.tres`](../../../client_godot/theme/app_theme.tres) 的根类型是 `Theme`。它通过 `[ext_resource]` 引用滑块和复选框图标，通过 `[sub_resource]` 在文件内部创建 `StyleBoxFlat`、`StyleBoxLine`、`SystemFont` 等资源。文件后面的 `[resource]` 将这些资源绑定到控件状态：
+[`app_theme.tres`](../../../client-godot/theme/app_theme.tres) 的根类型是 `Theme`。它通过 `[ext_resource]` 引用滑块和复选框图标，通过 `[sub_resource]` 在文件内部创建 `StyleBoxFlat`、`StyleBoxLine`、`SystemFont` 等资源。文件后面的 `[resource]` 将这些资源绑定到控件状态：
 
 ```ini
 [ext_resource type="Texture2D" path="res://assets/ui/slider_dot.png" id="1_5ln1w"]
@@ -16,7 +16,7 @@ Button/styles/normal = SubResource("StyleBoxFlat_ykw30")
 HSlider/icons/grabber = ExtResource("1_5ln1w")
 ```
 
-`ExtResource(...)` 指向独立文件；`SubResource(...)` 指向当前 `.tres` 内部的对象。`Button/styles/normal`、`HSlider/icons/grabber` 是 `Theme` 的控件类型、资源类别和名称。文件中还有 `PrimaryButton/base_type = &"Button"` 等自定义主题类型变体。项目在 [`project.godot`](../../../client_godot/project.godot) 的 `[gui]` 段将该主题设为全局主题，多个 `.tscn` 也显式引用它。
+`ExtResource(...)` 指向独立文件；`SubResource(...)` 指向当前 `.tres` 内部的对象。`Button/styles/normal`、`HSlider/icons/grabber` 是 `Theme` 的控件类型、资源类别和名称。文件中还有 `PrimaryButton/base_type = &"Button"` 等自定义主题类型变体。项目在 [`project.godot`](../../../client-godot/project.godot) 的 `[gui]` 段将该主题设为全局主题，多个 `.tscn` 也显式引用它。
 
 ## 独立练习：读取并局部改动按钮样式
 

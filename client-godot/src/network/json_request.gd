@@ -11,19 +11,21 @@ func _init(timeout: float = 15.0, limit: int = 8*1024*1024, logger: RefCounted =
 	_timeout = timeout
 	_limit = limit
 	_logger = logger
-func send(url: String, method: int, data: Dictionary = {}, headers: PackedStringArray = []) -> Dictionary:
+func send(url: String, method: int, data: Dictionary = {}, headers: PackedStringArray = [],
+		expect_json: bool = true) -> Dictionary:
 	var started := Time.get_ticks_usec()
 	var trace_id := Schema.new_trace_id("req")
 	var route := Schema.route_for(url)
+	var target := Schema.origin_for(url)
 	var method_name := Events.method_name(method)
 	if not _allowed_url(url):
-		Events.http(_logger, _failure("INSECURE_SERVER"), 0, 0, started, trace_id, route, method_name)
+		Events.http(_logger, _failure("INSECURE_SERVER"), 0, 0, started, trace_id, route, method_name, target)
 		return _failure("INSECURE_SERVER")
 	if _http != null:
-		Events.http(_logger, _failure("BUSY"), 0, 0, started, trace_id, route, method_name)
+		Events.http(_logger, _failure("BUSY"), 0, 0, started, trace_id, route, method_name, target)
 		return _failure("BUSY")
 	if not is_inside_tree():
-		Events.http(_logger, _failure("CANCELLED"), 0, 0, started, trace_id, route, method_name)
+		Events.http(_logger, _failure("CANCELLED"), 0, 0, started, trace_id, route, method_name, target)
 		return _failure("CANCELLED")
 	var http := HTTPRequest.new()
 	_http = http
@@ -40,11 +42,13 @@ func send(url: String, method: int, data: Dictionary = {}, headers: PackedString
 				Events.http_result_name(result))
 		elif status < 200 or status >= 300:
 			response = _failure("AUTH_REJECTED" if status == 401 else "HTTP_ERROR",status,Events.http_failure_detail(body,status))
+		elif not expect_json:
+			response = {"ok":true,"code":"OK","status":status,"data":{}}
 		else:
 			var parser := JSON.new()
 			var valid := parser.parse(body.get_string_from_utf8()) == OK and parser.data is Dictionary
 			response = {"ok":true,"code":"OK","status":status,"data":parser.data} if valid else _failure("INVALID_RESPONSE",status)
-		Events.http(_logger, response, status, body.size(), started, trace_id, route, method_name)
+		Events.http(_logger, response, status, body.size(), started, trace_id, route, method_name, target)
 		response.trace_id = trace_id
 		response.duration_ms = int((Time.get_ticks_usec() - started) / 1000)
 		response.bytes = body.size()
@@ -55,7 +59,7 @@ func send(url: String, method: int, data: Dictionary = {}, headers: PackedString
 	var result: Dictionary
 	if error != OK:
 		result = _failure("NETWORK_ERROR", 0, Events.request_error_detail(error))
-		Events.http(_logger, result, 0, 0, started, trace_id, route, method_name)
+		Events.http(_logger, result, 0, 0, started, trace_id, route, method_name, target)
 	else:
 		result = await _done
 	if _http == http:

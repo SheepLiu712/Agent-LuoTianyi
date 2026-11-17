@@ -1,27 +1,17 @@
 extends Node
-## 历史同步控制器：本地优先、单请求分页、缺口与补齐边界。
+## 历史同步控制器：本地优先、单请求分页、写失败停游标。
 ## 只做编排：谁先显示、补到哪停、失败怎么报。落地与网络分别由
 ## MessagePersistence 与 HistoryFetcher 负责，因此这里既没有 SQL 也没有 HTTP。
-## 三种变更来源分开上报：
-##   restore_page —— 本机缓存，先显示；
-##   page_received —— 本轮首批网络页，进入视图；
-##   older_page —— 用户上翻取到的一页，前插；
-##   reconciled —— 送达不确定后的对账页，按锚点并入视图；
-## 自动补齐的页只落库、不推给视图（避免后台把用户正在读的窗口顶走）。
 
 signal page_received(messages: Array[Dictionary])
 signal older_page(messages: Array[Dictionary])
 signal restore_page(messages: Array[Dictionary])
-signal reconciled(messages: Array[Dictionary], position: String)
 signal delivery_reconciled(ids: Array)
 signal boundary_ready
 signal state_changed(state: Dictionary)
 
 const Policy = preload("res://src/session/history_sync_policy.gd")
 const Fetcher = preload("res://src/session/history_fetcher.gd")
-
-## 对账防抖：同一窗口内多条 uncertain 只发一次请求。
-const RECONCILE_DEBOUNCE := 1.2
 
 const LEGACY_PHASES := {
 	"failed": "first_failed",
@@ -40,24 +30,16 @@ var _boundary_released := false
 var _next_end := -1
 var _oldest_id := ""
 var _seen: Dictionary = {}
-var _epoch := 0
-var _baseline := ""
+var _baseline_index := -1
+var _join_target := -1
 var _open := false
-var _reconcile_fetcher: Node
-var _reconcile_seq := 0
-var _reconcile_wanted := false
-var _reconcile_inflight := false
 var _older_wanted := false
-var _delivery_reconcile_inflight := false
-var _delivery_reconcile_wanted := false
 
 
-func _init(source: Node, persistence: RefCounted = null, logger: RefCounted = null, reconcile_source: Node = null) -> void:
+func _init(source: Node, persistence: RefCounted = null, logger: RefCounted = null, _legacy_reconcile_source: Node = null) -> void:
 	_persistence = persistence
 	_logger = logger
 	_fetcher = _build_fetcher(source)
-	# 对账必须有独立的抓取器：共用实例会让上翻/首屏的 generation 取消对账（反之亦然）。
-	_reconcile_fetcher = _fetcher if reconcile_source == null else _build_fetcher(reconcile_source)
 	_state = _empty()
 
 
@@ -79,20 +61,14 @@ func start(session: Dictionary) -> void:
 
 func stop() -> void:
 	_generation += 1
-	_reconcile_seq += 1
-	_reconcile_wanted = false
-	_reconcile_inflight = false
-	_delivery_reconcile_wanted = false
 	if _fetcher != null:
 		_fetcher.cancel()
-	if _reconcile_fetcher != null and _reconcile_fetcher != _fetcher:
-		_reconcile_fetcher.cancel()
 	_session.clear()
 	_seen.clear()
 	_next_end = -1
 	_oldest_id = ""
-	_epoch = 0
-	_baseline = ""
+	_baseline_index = -1
+	_join_target = -1
 	_open = false
 	_boundary_released = false
 	_older_wanted = false
@@ -126,14 +102,12 @@ func skip() -> void:
 	_state.code = ""
 	_notify()
 	_release_boundary_once()
-	_reconcile_check_wanted.call_deferred()
 
 
 func load_older() -> void:
 	if _state.initial != "ready" or _state.older == "loading":
 		return
-	# catchup 与上翻共用 fetcher：直接发起会让两个请求互相判 CANCELLED/BUSY。
-	# 先记下意图，等补齐结束后再读本地或发网络页。
+	# catchup 与上翻共用 fetcher：先记下意图，等补齐结束后再读本地或发网络页。
 	if _state.catchup == "running":
 		_older_wanted = true
 		return
@@ -143,94 +117,6 @@ func load_older() -> void:
 func pause_catchup(paused: bool) -> void:
 	_state.paused = paused
 	_notify()
-
-
-## 可重复调用：同一窗口内的多次 uncertain 只发起一次请求。
-## 只补消息与顺序，不推进分页游标，因此与 _save()/分页状态完全解耦。
-func request_reconcile() -> void:
-	if _persistence == null or _session.is_empty():
-		return
-	_reconcile_wanted = true
-	_reconcile_seq += 1
-	_reconcile_later(_reconcile_seq, _generation)
-
-
-func _reconcile_later(seq: int, generation: int) -> void:
-	await get_tree().create_timer(RECONCILE_DEBOUNCE).timeout
-	if not is_inside_tree() or seq != _reconcile_seq or generation != _generation or not _reconcile_wanted:
-		return
-	if not _reconcile_ready():
-		return
-	await _reconcile_run(seq, generation)
-
-
-## 首屏/补齐/上翻进行中一律让路：不抢占抓取器，也不在落位途中动尾部。
-func _reconcile_ready() -> bool:
-	if _reconcile_inflight or not _open or _persistence == null:
-		return false
-	if _state.initial in ["idle", "loading"]:
-		return false
-	return _state.catchup != "running" and _state.older != "loading"
-
-
-func _reconcile_run(seq: int, generation: int) -> void:
-	_reconcile_wanted = false
-	_reconcile_inflight = true
-	var response: Dictionary = await _reconcile_fetcher.fetch(_session, -1, Policy.PAGE_SIZE)
-	if seq != _reconcile_seq or generation != _generation:
-		_reconcile_inflight = false
-		return
-	var page := _validated(response, -1)
-	if not page.ok:
-		_reconcile_done(str(page.code), 0)
-		return
-	await _reconcile_store(_unique_page(page.data.rows), seq, generation)
-
-
-func _reconcile_store(rows: Array, seq: int, generation: int) -> void:
-	if rows.is_empty():
-		_reconcile_done("OK", 0)
-		return
-	var saved: Dictionary = await _persistence.save_reconcile(rows)
-	if seq != _reconcile_seq or generation != _generation:
-		_reconcile_inflight = false
-		return
-	if not saved.ok:
-		_reconcile_done(str(saved.code), 0)
-		return
-	_reconcile_delivery_async(generation)
-	var inserted := int(saved.data.get("inserted", 0))
-	# 整页下发而不是只发新增：内存需要页内已有 id 当锚点才能插到正确位置。
-	if inserted > 0:
-		reconciled.emit(_typed(_messages_of(rows)), str(saved.data.get("position", "tail")))
-	_reconcile_done("OK", inserted)
-
-
-func _reconcile_done(code: String, inserted: int) -> void:
-	_reconcile_inflight = false
-	if _logger != null:
-		var ok := code == "OK"
-		_logger.record_as("business", "history_reconcile", {"count": inserted, "reason":"reconcile",
-			"code":code, "phase":"complete" if ok else "failed", "level":"INFO" if ok else "ERROR"})
-	_reconcile_check_wanted()
-
-
-func _reconcile_check_wanted() -> void:
-	if _reconcile_wanted:
-		request_reconcile.call_deferred()
-
-
-## 页内重复 uuid 只保留第一次出现：同一页里它必然是同一个事实。
-func _unique_page(rows: Array) -> Array:
-	var seen := {}
-	var unique: Array = []
-	for row in rows:
-		var uuid := str(row.uuid)
-		if seen.has(uuid):
-			continue
-		seen[uuid] = true
-		unique.append(row)
-	return unique
 
 
 func _bootstrap(generation: int) -> void:
@@ -262,11 +148,7 @@ func _open_storage(generation: int) -> bool:
 	var scope := str(_session.get("scope", ""))
 	if root.is_empty() or scope.is_empty():
 		_state.storage = "unavailable"
-		if _logger != null:
-			_logger.record_as("storage", "history_storage_unavailable", {
-				"scope":"sqlite", "operation":"open_scope", "outcome":"failure", "duration_ms":0,
-				"code":"INVALID_CONFIG", "phase":"failed", "level":"ERROR",
-				"detail":"history_root or scope missing"})
+		_log_open_failure("INVALID_CONFIG", "history_root or scope missing")
 		return false
 	var result: Dictionary = await _persistence.open_scope(root, scope)
 	if generation != _generation:
@@ -274,35 +156,42 @@ func _open_storage(generation: int) -> bool:
 	if not result.ok:
 		_state.storage = "unavailable"
 		_state.code = str(result.code)
-		if _logger != null:
-			_logger.record_as("storage", "history_storage_unavailable", {
-				"scope":"sqlite", "operation":"open_scope", "outcome":"failure", "duration_ms":0,
-				"code":str(result.code), "phase":"failed", "level":"ERROR",
-				"detail":str(result.get("detail", "Local SQLite database failed to open"))})
+		_log_open_failure(str(result.code), str(result.get("detail", "Local SQLite database failed to open")))
+		return false
+	# ScopeSession 会复用已打开的连接；游标必须以库里的最新值为准，
+	# 不能沿用上一次登录缓存的 open 元数据。
+	var state: Dictionary = await _persistence.read_sync_state()
+	if generation != _generation:
+		return false
+	if not state.ok:
+		_state.storage = "unavailable"
+		_state.code = str(state.code)
+		_log_open_failure(str(state.code), "sync state could not be read")
 		return false
 	_open = true
 	_state.storage = "ready"
-	_epoch = int(result.data.get("epoch", 0))
-	_baseline = str(result.data.get("baseline", ""))
-	_next_end = int(result.data.get("next_end", -1))
-	_state.has_baseline = not _baseline.is_empty()
+	_next_end = int(state.data.meta.get("next_end", -1))
+	_baseline_index = int(state.data.meta.get("baseline_index", -1))
+	_join_target = _baseline_index
+	_state.has_baseline = _baseline_index >= 0
 	return true
 
 
+func _log_open_failure(code: String, detail: String) -> void:
+	if _logger == null:
+		return
+	_logger.record_as("storage", "history_storage_unavailable", {
+		"scope":"sqlite", "operation":"open_scope", "outcome":"failure", "duration_ms":0,
+		"code":code, "phase":"failed", "level":"ERROR", "detail":detail})
+
+
 func _restore_local(generation: int) -> void:
-	if _persistence != null:
-		# 先把库内已有服务器副本能确认的本地 uncertain 副本收敛掉，
-		# 再读最新窗口；这样启动时不会把已确认的副本又送进 UI。
-		await _persistence.reconcile_delivery()
-		if generation != _generation:
-			return
 	var result: Dictionary = await _persistence.read_latest(Policy.PAGE_SIZE)
 	if generation != _generation or not result.ok:
 		return
 	var messages: Array = result.data.get("messages", [])
 	if messages.is_empty():
 		return
-	# 本地窗口不参与「跨页重复即缺口」判定：它就是首屏将要覆盖的那批消息。
 	_oldest_id = str(messages[0].id)
 	restore_page.emit(_typed(messages))
 	_release_boundary_once()
@@ -318,14 +207,24 @@ func _fetch_initial(generation: int) -> void:
 	if not page.ok:
 		_fail_initial(str(page.code))
 		return
-	_save(page.data.rows, int(page.data.start), -1, "initial")
+	var saved := await _persist(page.data.rows, int(page.data.start), "initial")
+	if generation != _generation:
+		return
+	if not saved.ok:
+		_fail_initial(str(saved.code))
+		return
+	var previous_baseline := _join_target
+	_apply_saved(saved)
+	_join_target = previous_baseline
 	_next_end = int(page.data.start)
-	_note_overlap(page.data.rows)
-	_state.initial = "ready"
+	_state.has_baseline = _baseline_index >= 0
+	_state.joined = previous_baseline < 0 or _next_end <= previous_baseline
 	_state.has_older = _next_end > 0
+	_state.initial = "ready"
 	_notify()
 	var messages := _messages_of(page.data.rows)
 	_remember(messages, true)
+	_emit_removed(saved)
 	page_received.emit(_typed(messages))
 	_release_boundary_once()
 
@@ -334,10 +233,8 @@ func _fail_initial(code: String) -> void:
 	_state.initial = "failed"
 	_state.code = code
 	_notify()
-	# 首屏失败不能阻塞后续发送：本地无缓存时 boundary 否则永远不会释放，
-	# 用户之后发出的每条消息都会停在 waiting_history。
-	_release_boundary_once()
-	_reconcile_check_wanted.call_deferred()
+	# 首屏失败时保持发送等待：只有重试成功或用户显式跳过才释放 boundary，
+	# 避免在历史基线未知时先把消息发出去、随后分页无法正确对账。
 
 
 func _catchup(generation: int) -> void:
@@ -353,7 +250,20 @@ func _catchup(generation: int) -> void:
 			_state.code = str(page.code)
 			_notify()
 			return
-		_advance_catchup(page.data)
+		var saved := await _persist(page.data.rows, int(page.data.start), "catchup")
+		if generation != _generation:
+			return
+		if not saved.ok:
+			_state.catchup = "failed"
+			_state.code = str(saved.code)
+			_notify()
+			return
+		_apply_saved(saved)
+		_emit_removed(saved)
+		_next_end = int(page.data.start)
+		_state.has_older = _next_end > 0
+		if _joined(_next_end):
+			_state.joined = true
 	_settle_catchup()
 
 
@@ -366,17 +276,9 @@ func _catchup_facts() -> Dictionary:
 	}
 
 
-func _advance_catchup(page: Dictionary) -> void:
-	_save(page.rows, int(page.start), _next_end, "catchup")
-	_note_overlap(page.rows)
-	_next_end = int(page.start)
-	_state.has_older = _next_end > 0
-
-
-## 补到的页一旦压住上次的边界，新区间就和旧缓存接上了，可以停。
-func _note_overlap(rows: Array) -> void:
-	if _contains_baseline(rows):
-		_state.joined = true
+## 追平页压住上次基线索引即与既有历史接合。
+func _joined(start: int) -> bool:
+	return _join_target < 0 or start <= _join_target
 
 
 func _settle_catchup() -> void:
@@ -387,16 +289,6 @@ func _settle_catchup() -> void:
 	if _older_wanted and _state.older == "idle":
 		_older_wanted = false
 		_load_older.call_deferred(_generation)
-	_reconcile_check_wanted.call_deferred()
-
-
-func _contains_baseline(rows: Array) -> bool:
-	if _baseline.is_empty():
-		return false
-	for row in rows:
-		if str(row.uuid) == _baseline:
-			return true
-	return false
 
 
 func _load_older(generation: int) -> void:
@@ -409,11 +301,13 @@ func _load_older(generation: int) -> void:
 	if not messages.is_empty():
 		_finish_older(messages)
 		return
+	if _next_end <= 0:
+		_exhaust_older()
+		return
 	await _fetch_older(generation)
 
 
-## 本地还有连续的更早记录时直接读库，不发起网络请求。
-## 存在缺口时不读本地：跨缺口连起来会把两段记录伪装成连续。
+## 本地还有连续记录时直接读库；存在缺口时不读本地，避免跨缺口伪装连续。
 func _read_local_older(generation: int) -> Dictionary:
 	var unusable := not _open or _oldest_id.is_empty() or bool(_state.has_gap)
 	if unusable:
@@ -423,9 +317,6 @@ func _read_local_older(generation: int) -> Dictionary:
 
 
 func _fetch_older(generation: int) -> void:
-	if _next_end <= 0:
-		_exhaust_older()
-		return
 	var response: Dictionary = await _fetcher.fetch(_session, _next_end, Policy.PAGE_SIZE)
 	if generation != _generation:
 		return
@@ -435,7 +326,16 @@ func _fetch_older(generation: int) -> void:
 		_state.code = str(page.code)
 		_notify()
 		return
-	_save(page.data.rows, int(page.data.start), _next_end, "older")
+	var saved := await _persist(page.data.rows, int(page.data.start), "older")
+	if generation != _generation:
+		return
+	if not saved.ok:
+		_state.older = "failed"
+		_state.code = str(saved.code)
+		_notify()
+		return
+	_apply_saved(saved)
+	_emit_removed(saved)
 	_next_end = int(page.data.start)
 	_state.has_older = _next_end > 0
 	_finish_older(_messages_of(page.data.rows))
@@ -443,46 +343,36 @@ func _fetch_older(generation: int) -> void:
 
 func _finish_older(messages: Array) -> void:
 	_remember(messages, true)
+	_state.has_older = _next_end > 0 or messages.size() >= Policy.PAGE_SIZE
 	_state.older = "idle" if _state.has_older else "exhausted"
 	_notify()
 	older_page.emit(_typed(messages))
-	_reconcile_check_wanted.call_deferred()
 
 
 func _exhaust_older() -> void:
 	_state.older = "exhausted"
 	_state.has_older = false
 	_notify()
-	_reconcile_check_wanted.call_deferred()
 
 
-func _save(rows: Array, start: int, end_index: int, direction: String) -> void:
+func _persist(rows: Array, start: int, direction: String) -> Dictionary:
 	if not _open or _persistence == null:
-		return
-	_persistence.save_history(
+		return {"ok": true, "code": "OK", "data": {}}
+	return await _persistence.save_page(
 		{"start_index": start, "history": rows},
-		{"epoch": _epoch, "end_index": end_index, "direction": direction}
+		{"direction": direction}
 	)
-	# worker 按提交顺序执行：这条对账一定排在 save_history 之后。
-	_reconcile_delivery_async(_generation)
 
 
-func _reconcile_delivery_async(generation: int) -> void:
-	if _persistence == null or not _open:
-		return
-	if _delivery_reconcile_inflight:
-		_delivery_reconcile_wanted = true
-		return
-	_delivery_reconcile_inflight = true
-	var result: Dictionary = await _persistence.reconcile_delivery()
-	_delivery_reconcile_inflight = false
-	if generation == _generation and result.ok:
-		var ids: Array = result.data.get("ids", [])
-		if not ids.is_empty():
-			delivery_reconciled.emit(ids)
-	if _delivery_reconcile_wanted:
-		_delivery_reconcile_wanted = false
-		_reconcile_delivery_async(generation)
+func _apply_saved(saved: Dictionary) -> void:
+	if saved.data.has("baseline_index"):
+		_baseline_index = int(saved.data.baseline_index)
+
+
+func _emit_removed(saved: Dictionary) -> void:
+	var removed: Array = saved.get("data", {}).get("removed", [])
+	if not removed.is_empty():
+		delivery_reconciled.emit(removed)
 
 
 func _validated(response: Dictionary, end_index: int) -> Dictionary:
@@ -523,6 +413,7 @@ func _messages_of(rows: Array) -> Array:
 	for row in rows:
 		messages.append({
 			"id": str(row.uuid),
+			"id_source": "server",
 			"role": "assistant" if str(row.source) == "agent" else str(row.source),
 			"text": "" if str(row.type) == "image" else str(row.get("content", "")),
 			"type": str(row.type),

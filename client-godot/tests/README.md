@@ -89,7 +89,8 @@ python client-godot/tests/run_feature_tests.py --godot 'D:/godot/godot4.7.1/godo
 | ui/test_settings_prewarm.gd | 直接Godot --script，headless | 隐藏预暖不触发媒体扫描，首次可见才执行一次扫描 |
 | ui/test_modal_visual_contract.gd | 直接Godot --script；GPU时生成截图 | 确认框/错误框共用样式、无重复 X、危险按钮层级、三档宿主尺寸、扁平/清透圆角与常驻阴影 |
 | ui/test_action_and_icon_styles.gd | 直接Godot --script，GPU时验证真实 hover | 图片/音量图标灰底悬停与焦点、聊天发送键、设置底部三键、动态窗口首开/热切换及详情输入样式 |
-| ui/test_login_presentation.gd | run_feature_tests.py --gpu | 纯白透明圆角、菜单、服务器取消、账号历史、记住状态、四档缩放与小屏 |
+| ui/test_login_presentation.gd | run_feature_tests.py --gpu | 淡蓝圆角、头像光晕、菜单、服务器框、账号历史、记住状态、四档缩放与小屏 |
+| ui/test_login_style.gd | 直接Godot --script，可headless | 登录专用样式、扁平/清透圆角、登录后共享主题不变 |
 | ui/test_bubble_sizing.gd、ui/test_image_bubble_sizing.gd | 直接Godot --script，可headless或GPU | 实际排版宽度、90%上限、图片原比例、长图延迟加载及部分可见图片的稳定锚点 |
 | ui/test_chat_reading_buttons.gd | 直接Godot --script，可headless或GPU | “回到最新”优先消费未读目标、未读定位、缺失目标翻页重试及自动定位抑制 |
 | ui/test_logout_confirmation.gd | run_feature_tests.py --gpu | 鼠标触发、确认来源、取消焦点、实际退出提示、保存失败留稿 |

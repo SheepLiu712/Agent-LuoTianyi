@@ -136,9 +136,9 @@ func _check_save_exposes_processing_feedback(window: Variant) -> void:
 
 func _check_navigation_unread(dynamics: Button, unread: Control) -> void:
 	var deadline := Time.get_ticks_msec() + 5000
-	while dynamics.tooltip_text != "动态 · 123 条未读" and Time.get_ticks_msec() < deadline:
+	while dynamics.tooltip_text != "动态 · 1 条未读" and Time.get_ticks_msec() < deadline:
 		await process_frame
-	check(unread.visible and dynamics.text == "动态" and dynamics.tooltip_text == "动态 · 123 条未读", "navigation shows unread dot and exact count without changing reviewed label")
+	check(unread.visible and dynamics.text == "动态" and dynamics.tooltip_text == "动态 · 1 条未读", "navigation shows the unread dynamic count without changing reviewed label")
 
 func _wait_editable(input: TextEdit, deadline: int) -> void:
 	while not input.editable and Time.get_ticks_msec()<deadline: await process_frame

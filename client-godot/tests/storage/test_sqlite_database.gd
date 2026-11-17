@@ -1,10 +1,8 @@
 extends SceneTree
-## 真实临时库验证：身份去重、锚点插入、更早页前插、重编号后顺序不变、关闭重开。
-##
-## 每个用例都在自己的 scope 目录里跑，避免互相污染；
-## 断言只看可观察结果（查询到的行与顺序），不镜像实现常数。
+## 新聊天库：PRAGMA/版本、槽位自愈、尾部状态机、历史页确认与硬重置。
 
 const Database = preload("res://src/storage/sqlite_history_database.gd")
+const MessageTime = preload("res://src/domain/message_time.gd")
 
 var failures: Array[String] = []
 var _root := ""
@@ -18,19 +16,18 @@ func run() -> void:
 	# 每次运行使用独立根目录：避免上一轮遗留的行影响顺序断言。
 	_root = "user://test-sqlite-db-%d" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_root))
-	await _case_install()
-	await _case_live_identity()
-	await _case_history_order()
-	await _case_renumber()
-	await _case_unlisted_gap()
-	await _case_zero_order_head()
-	await _case_reopen()
-	await _case_reconcile_tail()
-	await _case_reconcile_head()
-	await _case_reconcile_conflict()
-	await _case_reconcile_closed()
-	await _case_reconcile_delivery()
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(_root))
+	_case_install()
+	_case_save_and_page()
+	_case_slot_self_heal()
+	_case_local_tail()
+	_case_restart_recovery()
+	_case_confirmation()
+	_case_delete_local()
+	_case_query_plan()
+	_case_stale_scope()
+	_case_reset_legacy()
+	_case_reset_orphans()
+	_case_repair_metadata()
 	print("SQLite database: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -42,360 +39,353 @@ func check(ok: bool, label: String) -> void:
 	print("FAIL: ", label)
 
 
+func _scope(tag: String) -> String:
+	return (tag + "0".repeat(64)).substr(0, 64)
+
+
 func _open(scope: String) -> RefCounted:
-	var database := Database.new()
+	var database = Database.new()
 	var opened: Dictionary = database.open(_root, scope)
-	check(opened.ok, "open %s (%s)" % [scope.substr(0, 6), opened.code])
+	check(opened.ok, "open scope (%s)" % opened.code)
 	return database
 
 
-func _scope(seed: String) -> String:
-	return (seed + "0".repeat(64)).substr(0, 64)
+func _row(database: RefCounted, sql: String, bindings: Array = []) -> Dictionary:
+	var result: Dictionary = database._access.query(sql, bindings)
+	return database._access.first_row(result)
 
 
-func _history(count: int, start_ordinal: int) -> Array:
+func _execute(database: RefCounted, operation: String, scope: String, extra: Dictionary = {}) -> Dictionary:
+	var payload := {"scope": scope}
+	payload.merge(extra, true)
+	return database.execute(operation, payload)
+
+
+func _server_rows(seed: String, start: int, count: int) -> Array:
 	var rows: Array = []
-	for index in count:
+	for index in range(start, start + count):
 		rows.append({
-			"uuid": "m%d" % (start_ordinal + index),
-			"source": "user",
+			"uuid": "m-%s-%d" % [seed, index],
+			"source": "user" if index % 2 == 0 else "agent",
 			"type": "text",
-			"content": "text-%d" % (start_ordinal + index),
-			"timestamp": 1700000000 + start_ordinal + index,
+			"content": "record %d" % index,
+			"timestamp": "2026-09-19 %02d:%02d:%02d" % [index / 3600 % 24, index / 60 % 60, index % 60],
 		})
 	return rows
 
 
-func _page(start_index: int, rows: Array) -> Dictionary:
-	return {"start_index": start_index, "history": rows}
+func _ids(messages: Array) -> Array:
+	return messages.map(func(message): return str(message.id))
 
-
-func _latest(database: RefCounted, limit: int = 30) -> Array:
-	var result: Dictionary = database.execute("read_latest", {"scope": database._scope, "limit": limit})
-	return result.get("data", {}).get("messages", [])
-
-
-# ---------------------------------------------------------------- 用例
 
 func _case_install() -> void:
-	var database := _open(_scope("a1"))
-	var meta: Dictionary = database.metadata()
-	check(meta.ok and int(meta.data.epoch) == 1, "fresh database starts at epoch 1")
-	check(meta.ok and int(meta.data.order_revision) == 1, "fresh database starts at revision 1")
-	check(_latest(database).is_empty(), "fresh database has no messages")
-	database.close()
-
-
-func _case_live_identity() -> void:
-	var database := _open(_scope("b2"))
-	var message := _local("local-1", "hello", "sending")
-	check(database.execute("save_live", {"scope": database._scope, "message": message}).ok, "save live message")
-	var rows := _latest(database)
-	check(rows.size() == 1 and str(rows[0].content) == "hello", "live message is readable")
-	message.text = "edited"
-	message.status = "sent"
-	check(database.execute("save_live", {"scope": database._scope, "message": message}).ok, "update live message")
-	rows = _latest(database)
-	check(rows.size() == 1 and str(rows[0].content) == "edited", "update keeps a single row")
-	check(str(rows[0].delivery_state) == "sent", "update writes delivery state")
-	var conflict := _local("local-1", "changed", "sent")
-	conflict.id_source = "server"
-	var rejected: Dictionary = database.execute("save_live", {"scope": database._scope, "message": conflict})
-	check(rejected.code == "MESSAGE_ID_CONFLICT", "cross-source id conflict is rejected")
-	check(str(_latest(database)[0].content) == "edited", "conflict keeps the original content")
-	var epoch := int(database.metadata().data.epoch)
-	var history: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, [{"uuid":"local-1", "source":"user", "type":"text", "content":"server overwrite", "timestamp":9}]),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	check(history.ok, "history page with a local duplicate still saves")
-	check(str(_latest(database)[0].content) == "edited", "history cannot overwrite a local message with the same UUID")
-	database.close()
-
-
-func _case_history_order() -> void:
-	var database := _open(_scope("c3"))
-	var epoch := int(database.metadata().data.epoch)
-	var first: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(3, _history(3, 3)),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	check(first.ok, "save initial page (%s)" % first.code)
-	check(_order_of(database) == ["m3", "m4", "m5"], "initial page keeps server order")
-	var older: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, _history(3, 0)),
-		"context": {"epoch": epoch, "end_index": 3, "direction": "older"},
-	})
-	check(older.ok, "save older page (%s)" % older.code)
-	check(_order_of(database) == ["m0", "m1", "m2", "m3", "m4", "m5"], "older page is prepended")
-	await _case_anchor(database, epoch)
-	database.close()
-
-
-## 页内已知锚点两侧都要插入，不能整页放在锚点一侧。
-func _case_anchor(database: RefCounted, epoch: int) -> void:
-	var rows: Array = [
-		{"uuid": "new-x", "source": "user", "type": "text", "content": "x", "timestamp": 1},
-		{"uuid": "m4", "source": "user", "type": "text", "content": "refreshed", "timestamp": 2},
-		{"uuid": "new-y", "source": "user", "type": "text", "content": "y", "timestamp": 3},
-	]
-	var saved: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(2, rows),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	check(saved.ok, "save anchored page (%s)" % saved.code)
-	var order := _order_of(database)
-	check(order.size() == 8, "anchored page inserts only unknown rows")
-	check(order.find("new-x") == order.find("m4") - 1, "unknown block before an anchor stays before it")
-	check(order.find("new-y") == order.find("m4") + 1, "unknown block after an anchor stays after it")
-	check(str(_row_of(database, "m4").content) == "refreshed", "known row content is refreshed")
-
-
-func _case_renumber() -> void:
-	var database := _open(_scope("d4"))
-	var epoch := int(database.metadata().data.epoch)
-	database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, _history(2, 0)),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	# 人为把两个位置压到相邻，制造「间隔耗尽」。
-	database.execute("flush", {"scope": database._scope})
-	_force_orders(database)
-	var rows: Array = [
-		{"uuid": "gap-a", "source": "user", "type": "text", "content": "a", "timestamp": 1},
-		{"uuid": "m0", "source": "user", "type": "text", "content": "m0", "timestamp": 2},
-		{"uuid": "gap-b", "source": "user", "type": "text", "content": "b", "timestamp": 3},
-		{"uuid": "m1", "source": "user", "type": "text", "content": "m1", "timestamp": 4},
-	]
-	var saved: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, rows),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	check(saved.ok, "exhausted gap triggers renumber (%s)" % saved.code)
-	check(_order_of(database) == ["gap-a", "m0", "gap-b", "m1"], "renumber preserves relative order")
-	var meta: Dictionary = database.metadata()
-	check(int(meta.data.order_revision) == 2, "renumber bumps order_revision exactly once")
-	database.close()
-
-
-func _case_reopen() -> void:
-	var scope := _scope("e5")
+	var scope := _scope("a")
 	var database := _open(scope)
-	database.execute("save_live", {"scope": scope, "message": _local("persist-1", "kept", "sent")})
-	database.close()
-	var reopened := _open(scope)
-	var rows := _latest(reopened)
-	check(rows.size() == 1 and str(rows[0].content) == "kept", "messages survive close and reopen")
-	check(int(reopened.metadata().data.order_revision) == 1, "metadata survives reopen")
-	reopened.close()
-
-
-## 页内两个锚点之间可能还有本页没带上的旧行（本地消息、分页漂移）。
-## 分配器必须避开这些行，不能把整个锚点区间均分后正好占用旧行的槽位。
-func _case_unlisted_gap() -> void:
-	var database := _open(_scope("a7"))
-	var epoch := int(database.metadata().data.epoch)
-	var seeded: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, _history(3, 0)),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	check(seeded.ok, "seed page for unlisted gap")
-	var rows: Array = [
-		_server_row("m0", 1),
-		_server_row("new-in-gap", 2),
-		_server_row("m2", 3),
-	]
-	var saved: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, rows),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	check(saved.ok, "unlisted row between anchors is skipped (%s)" % saved.code)
-	check(_order_of(database) == ["m0", "new-in-gap", "m1", "m2"], "new row lands in a free slot between anchors")
+	check(int(_row(database, "PRAGMA auto_vacuum")["auto_vacuum"]) == 2, "auto_vacuum is incremental")
+	check(int(_row(database, "PRAGMA user_version")["user_version"]) == 100, "schema version is 100")
+	check(int(_row(database, "PRAGMA application_id")["application_id"]) == 1280591961, "application id is LTHY")
+	check(str(_row(database, "PRAGMA journal_mode")["journal_mode"]).to_lower() == "wal", "journal is WAL")
+	check(int(_row(database, "PRAGMA foreign_keys")["foreign_keys"]) == 1, "foreign keys are on")
+	var tables: Array = database._access.table_names()
+	for table in ["messages", "local_messages", "sync_state", "dynamic_posts", "dynamic_comments", "dynamic_state"]:
+		check(tables.has(table), "table %s exists" % table)
+	var meta: Dictionary = database.metadata()
+	check(meta.ok and int(meta.data.baseline_index) == -1 and int(meta.data.next_end) == -1, "fresh sync state")
+	var state: Dictionary = _execute(database, "dynamics_state", scope)
+	check(state.ok and str(state.data.state.scope_key) == scope, "dynamics state is bound to scope")
 	database.close()
 
 
-## timeline_order=0 是合法位置，不能当成「空库」哨兵；
-## 否则更早页会从 GAP 重新起算，正面撞上已有行。
-func _case_zero_order_head() -> void:
-	var database := _open(_scope("b8"))
-	var epoch := int(database.metadata().data.epoch)
-	database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, _history(3, 0)),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
+func _case_save_and_page() -> void:
+	var scope := _scope("b")
+	var database := _open(scope)
+	var first: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 0, "history": _server_rows("b", 0, 60)},
+		"context": {"direction": "initial"},
 	})
-	database.execute("flush", {"scope": database._scope})
-	var seeded := _latest(database, 10)
-	var gap := int(seeded[1].timeline_order) - int(seeded[0].timeline_order)
-	var access = database._access
-	access.execute("UPDATE messages SET timeline_order=0 WHERE message_id='m0'")
-	access.execute("UPDATE messages SET timeline_order=%d WHERE message_id='m1'" % gap)
-	access.execute("UPDATE messages SET timeline_order=%d WHERE message_id='m2'" % (gap * 2))
-	var saved: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, [_server_row("before-zero", 0)]),
-		"context": {"epoch": epoch, "end_index": 1, "direction": "older"},
+	check(first.ok, "save initial page")
+	check(int(first.data.baseline_index) == 59, "initial page records the newest slot")
+	var latest: Dictionary = _execute(database, "read_latest", scope, {"limit": 30})
+	check(_ids(latest.data.messages) == _server_ids("b", 30, 30), "latest returns the newest server page in ascending order")
+	var anchor := "m-b-30"
+	var older: Dictionary = _execute(database, "read_before", scope, {"anchor_id": anchor, "limit": 30})
+	check(_ids(older.data.messages) == _server_ids("b", 0, 30), "older page stops before the anchor")
+	var again: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 30, "history": _server_rows("b", 30, 30)},
+		"context": {"direction": "catchup"},
 	})
-	check(saved.ok, "zero order is not treated as an empty database (%s)" % saved.code)
-	check(_order_of(database) == ["before-zero", "m0", "m1", "m2"], "older page prepends before zero")
+	check(again.ok and int(again.data.baseline_index) == 59, "catch-up pages do not move the baseline")
 	database.close()
 
 
-# ---------------------------------------------------------------- 对账用例
-
-## 有服务器时间线时贴尾：新增行插在尾部锚点之后、本地记录之前；
-## 页内重复 uuid 只落一条，第二次写入幂等，且同步游标完全不动。
-func _case_reconcile_tail() -> void:
-	var database := _open(_scope("f6"))
-	var epoch := int(database.metadata().data.epoch)
-	database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, _history(3, 0)),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	database.execute("save_live", {"scope": database._scope, "message": _local("local-1", "unsure", "uncertain")})
-	var before := _cursor_snapshot(database)
-	var page: Array = [_server_row("m2", 3), _server_row("new-a", 4), _server_row("new-a", 4), _server_row("new-b", 5)]
-	var saved: Dictionary = database.execute("save_reconcile", {"scope": database._scope, "rows": page})
-	check(saved.ok, "reconcile saves with a known tail anchor (%s)" % saved.code)
-	check(int(saved.data.inserted) == 2, "only unknown uuids are inserted")
-	check(int(saved.data.duplicates) == 1, "duplicate uuid inside one page is reported")
-	check(str(saved.data.position) == "tail", "server timeline keeps the page at the tail")
-	check(_order_of(database) == ["m0", "m1", "m2", "new-a", "new-b", "local-1"], "reconcile keeps server order before the local record")
-	check(_cursor_snapshot(database) == before, "reconcile never advances or rewrites sync cursors")
-	var again: Dictionary = database.execute("save_reconcile", {"scope": database._scope, "rows": page})
-	check(again.ok and int(again.data.inserted) == 0, "second reconcile of the same page is idempotent")
-	check(_order_of(database).size() == 6, "idempotent reconcile adds no duplicate row")
-	check(str(_row_of(database, "local-1").delivery_state) == "uncertain", "local delivery state is untouched")
-	database.close()
-
-
-## 库里只有本机记录（首屏跳过/失败）时贴头，服务器历史不会被排到本机记录之后。
-func _case_reconcile_head() -> void:
-	var database := _open(_scope("f7"))
-	database.execute("save_live", {"scope": database._scope, "message": _local("local-1", "unsure", "uncertain")})
-	var saved: Dictionary = database.execute("save_reconcile", {
-		"scope": database._scope,
-		"rows": [_server_row("a", 1), _server_row("b", 2)],
-	})
-	check(saved.ok and str(saved.data.position) == "head", "local-only database places history at the head")
-	check(_order_of(database) == ["a", "b", "local-1"], "history precedes the local record")
-	database.close()
-
-
-## 页内已知锚点顺序与库内 timeline_order 相反时整页拒绝，不改动任何行。
-func _case_reconcile_conflict() -> void:
-	var database := _open(_scope("f8"))
-	var epoch := int(database.metadata().data.epoch)
-	database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, _history(2, 0)),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	var before := _order_of(database)
-	var saved: Dictionary = database.execute("save_reconcile", {
-		"scope": database._scope,
-		"rows": [_server_row("m1", 2), _server_row("lost", 3), _server_row("m0", 4)],
-	})
-	check(not saved.ok and saved.code == "ORDER_CONFLICT", "reversed anchors are rejected")
-	check(_order_of(database) == before, "rejected reconcile leaves rows untouched")
-	database.close()
-
-
-func _case_reconcile_closed() -> void:
-	var database := _open(_scope("f9"))
-	database.close()
-	var saved: Dictionary = database.execute("save_reconcile", {"scope": _scope("f9"), "rows": [_server_row("a", 1)]})
-	check(not saved.ok, "closed database refuses reconcile writes (%s)" % saved.code)
-
-
-## 服务器已有同正文副本时，本地 uncertain 只软标记为 superseded：
-## 不删除消息、不占用户时间线、不让重启恢复把它重新变成 uncertain。
-func _case_reconcile_delivery() -> void:
-	var database := _open(_scope("c9"))
-	var server_text := "2023-11-14 22:13:20"
-	var server_epoch := float(Time.get_unix_time_from_datetime_string("2023-11-14T22:13:20"))
-	var local := _local("local-q", "重庆", "uncertain")
-	local.timestamp = server_epoch - Time.get_time_zone_from_system().bias * 60.0 + 30.0
-	check(database.execute("save_live", {"scope": database._scope, "message": local}).ok, "seed local uncertain")
-	check(database.execute("record_attempt", {
-		"scope": database._scope, "attempt_id": "attempt:local-q", "message_id": "local-q",
-		"wire_id": "wire-q", "state": "sending", "ever_sent": true,
-	}).ok, "seed send attempt")
-	var epoch := int(database.metadata().data.epoch)
-	var saved: Dictionary = database.execute("save_history", {
-		"scope": database._scope,
-		"page": _page(0, [{
-			"uuid": "server-q", "source": "user", "type": "text",
-			"content": "重庆", "timestamp": server_text,
-		}]),
-		"context": {"epoch": epoch, "end_index": -1, "direction": "initial"},
-	})
-	check(saved.ok, "seed server copy")
-	var result: Dictionary = database.execute("reconcile_delivery", {"scope": database._scope})
-	check(result.ok and result.data.ids.has("local-q"), "server copy supersedes the local duplicate")
-	check(_order_of(database) == ["server-q"], "superseded local copy leaves the visible timeline")
-	var row: Dictionary = database._access.first_row(database._access.query(
-		"SELECT delivery_state,error_code FROM messages WHERE message_id='local-q'"
-	))
-	check(str(row.delivery_state) == "superseded" and str(row.error_code) == "SERVER_COPY_MATCHED", "local copy is marked, not deleted")
-	var attempt: Dictionary = database._access.first_row(database._access.query(
-		"SELECT state FROM send_attempts WHERE message_id='local-q'"
-	))
-	check(str(attempt.state) == "superseded", "attempt no longer recovers as uncertain")
-	database.close()
-
-
-# ---------------------------------------------------------------- 辅助
-
-func _server_row(uuid: String, timestamp: int) -> Dictionary:
-	return {"uuid": uuid, "source": "user", "type": "text", "content": "server-%s" % uuid, "timestamp": timestamp}
-
-
-## 对账不得触碰分页游标与位置记录，这里把可观察到的状态一次拍平比较。
-func _cursor_snapshot(database: RefCounted) -> Dictionary:
-	var meta: Dictionary = database.metadata().data
-	var access = database._access
-	return {
-		"next_end": int(meta.next_end), "baseline": str(meta.baseline),
-		"caught_up": int(meta.caught_up), "revision": int(meta.order_revision),
-		"ranges": int(access.first_row(access.query("SELECT COUNT(*) AS n FROM cached_ranges")).n),
-		"positions": int(access.first_row(access.query("SELECT COUNT(*) AS n FROM history_positions")).n),
-	}
-
-
-func _force_orders(database: RefCounted) -> void:
-	for spec in [["m0", 1], ["m1", 2]]:
-		database.execute("flush", {"scope": database._scope})
-		var access = database._access
-		access.execute("UPDATE messages SET timeline_order=? WHERE message_id=?", [int(spec[1]), str(spec[0])])
-
-
-func _order_of(database: RefCounted) -> Array:
+func _server_ids(seed: String, start: int, count: int) -> Array:
 	var ids: Array = []
-	for row in _latest(database, 100):
-		ids.append(str(row.message_id))
+	for index in range(start, start + count):
+		ids.append("m-%s-%d" % [seed, index])
 	return ids
 
 
-func _row_of(database: RefCounted, message_id: String) -> Dictionary:
-	for row in _latest(database, 100):
-		if str(row.message_id) == message_id:
-			return row
-	return {}
+func _case_slot_self_heal() -> void:
+	var scope := _scope("c")
+	var database := _open(scope)
+	var page: Array = _server_rows("c", 0, 3)
+	_execute(database, "save_page", scope, {"page": {"start_index": 10, "history": page}, "context": {"direction": "initial"}})
+	var replaced: Array = [_server_row("replacement", 42)]
+	var saved: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 10, "history": replaced}, "context": {"direction": "catchup"},
+	})
+	check(saved.ok, "same-slot replacement is accepted")
+	var rows: Array = database._access.rows_of(database._access.query("SELECT * FROM messages WHERE server_index=10"))
+	check(rows.size() == 1 and str(rows[0].id) == "replacement", "same slot keeps exactly one row")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM messages")["count"]) == 3, "only the replaced slot is overwritten")
+	# 同一 id 换槽位也只能留一行。
+	var moved: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 20, "history": [_server_row("replacement", 43)]},
+		"context": {"direction": "catchup"},
+	})
+	check(moved.ok, "same id at a new slot is accepted")
+	var moved_rows: Array = database._access.rows_of(database._access.query("SELECT * FROM messages WHERE id='replacement'"))
+	check(moved_rows.size() == 1 and int(moved_rows[0].server_index) == 20, "id moves without duplication")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM messages WHERE server_index=10")["count"]) == 0, "old slot is released")
+	database.close()
 
 
-func _local(id: String, text: String, status: String) -> Dictionary:
+func _server_row(id: String, index: int) -> Dictionary:
 	return {
-		"id": id, "id_source": "local", "origin": "local", "role": "user", "type": "text",
-		"text": text, "timestamp": 1700000000, "status": status, "code": "",
-		"content_origin": "local", "stream_complete": true,
+		"uuid": id, "source": "agent", "type": "text",
+		"content": "record %d" % index, "timestamp": "2026-09-19 10:00:00",
+	}
+
+
+func _local(id: String, text: String, status: String, timestamp: float = 0.0) -> Dictionary:
+	return {
+		"id": id, "id_source": "local", "origin": "local", "role": "user",
+		"type": "text", "text": text,
+		"timestamp": timestamp if timestamp > 0 else Time.get_unix_time_from_system(),
+		"status": status, "code": "", "stream_complete": true,
+	}
+
+
+func _case_local_tail() -> void:
+	var scope := _scope("d")
+	var database := _open(scope)
+	var entry := {"event": "user_text", "payload": {"message": "hello"}}
+	var saved: Dictionary = _execute(database, "save_local", scope, {
+		"message": _local("local-1", "hello", "pending"), "entry": entry,
+	})
+	check(saved.ok, "local tail insert")
+	check(int(saved.data.local_seq) == 1, "local sequence starts at one")
+	var updated: Dictionary = _execute(database, "update_local", scope, {
+		"message_id": "local-1", "patch": {"state": "sending", "attempts_delta": 1},
+	})
+	check(updated.ok, "local tail state update")
+	var latest: Dictionary = _execute(database, "read_latest", scope, {"limit": 30})
+	check(_ids(latest.data.messages) == ["local-1"], "local tail is returned")
+	check(str(latest.data.messages[0].state) == "sending", "local state round trips")
+	var payload: Variant = JSON.parse_string(str(latest.data.messages[0].payload_json))
+	check(payload is Dictionary and str(payload.event) == "user_text", "send intent round trips")
+	check(int(_row(database, "SELECT attempts FROM local_messages WHERE id='local-1'")["attempts"]) == 1, "attempts accumulate")
+	database.close()
+
+
+func _case_restart_recovery() -> void:
+	var scope := _scope("e")
+	var database := _open(scope)
+	_execute(database, "save_local", scope, {"message": _local("sending-1", "maybe", "sending")})
+	_execute(database, "save_local", scope, {"message": _local("pending-1", "later", "pending")})
+	database.close()
+	database = _open(scope)
+	var latest: Dictionary = _execute(database, "read_latest", scope, {"limit": 30})
+	var rows: Array = latest.data.messages
+	check(_status(rows, "sending-1") == "failed", "sending becomes failed on restart")
+	check(_code(rows, "sending-1") == "DELIVERY_UNCERTAIN", "sending carries DELIVERY_UNCERTAIN")
+	check(_status(rows, "pending-1") == "pending", "pending stays pending for automatic resend")
+	database.close()
+	# waiting_history 超过 24 小时 → SEND_EXPIRED。
+	database = _open(scope)
+	var old := _local("old-waiting", "old", "waiting_history")
+	var stale_ms := MessageTime.now_ms() - 25 * 60 * 60 * 1000
+	_execute(database, "save_local", scope, {"message": old})
+	database._access.execute("UPDATE local_messages SET created_at_ms=? WHERE id='old-waiting'", [stale_ms])
+	database.close()
+	database = _open(scope)
+	var expired: Dictionary = _row(database, "SELECT state,error_code FROM local_messages WHERE id='old-waiting'")
+	check(str(expired.state) == "failed" and str(expired.error_code) == "SEND_EXPIRED", "stale waiting_history expires")
+	database.close()
+
+
+func _status(messages: Array, id: String) -> String:
+	for message in messages:
+		if str(message.id) == id:
+			return str(message.get("state", ""))
+	return ""
+
+
+func _code(messages: Array, id: String) -> String:
+	for message in messages:
+		if str(message.id) == id:
+			return str(message.get("error_code", ""))
+	return ""
+
+
+func _case_confirmation() -> void:
+	var scope := _scope("f")
+	var database := _open(scope)
+	var server_display: float = float(Time.get_unix_time_from_datetime_string("2026-09-19T10:00:00"))
+	var local_ts: float = server_display - float(Time.get_time_zone_from_system().bias) * 60.0
+	_execute(database, "save_local", scope, {"message": _local("local-hello", "hello", "sent", local_ts)})
+	_execute(database, "save_local", scope, {"message": {
+		"id": "reply-uuid", "id_source": "local", "role": "assistant", "type": "text",
+		"text": "hi", "timestamp": local_ts, "status": "received", "code": "",
+	}})
+	var page: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 0, "history": [
+			{"uuid": "srv-hello", "source": "user", "type": "text", "content": "hello", "timestamp": "2026-09-19 10:00:00"},
+			{"uuid": "reply-uuid", "source": "agent", "type": "text", "content": "hi", "timestamp": "2026-09-19 10:00:01"},
+		]},
+		"context": {"direction": "initial"},
+	})
+	check(page.ok, "confirmation page saves")
+	var removed: Array = page.data.removed
+	check(removed.has("local-hello") and removed.has("reply-uuid"), "both confirmation paths remove local rows")
+	var remaining: int = int(_row(database, "SELECT COUNT(*) AS count FROM local_messages")["count"])
+	check(remaining == 0, "confirmed local tail is gone")
+	check(page.data.ids == ["srv-hello", "reply-uuid"], "server ids are reported for the view")
+	database.close()
+
+
+func _case_delete_local() -> void:
+	var scope := _scope("1")
+	var database := _open(scope)
+	_execute(database, "save_local", scope, {"message": _local("victim", "x", "failed")})
+	var deleted: Dictionary = _execute(database, "delete_local", scope, {"message_id": "victim"})
+	check(deleted.ok, "delete local row")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM local_messages")["count"]) == 0, "deleted row is gone")
+	var missing: Dictionary = _execute(database, "update_local", scope, {
+		"message_id": "victim", "patch": {"state": "sent"},
+	})
+	check(not missing.ok and missing.code == "LOCAL_MESSAGE_MISSING", "updating a missing row is explicit")
+	database.close()
+
+
+func _case_query_plan() -> void:
+	var scope := _scope("2")
+	var database := _open(scope)
+	var latest: Dictionary = database._access.query(
+		"EXPLAIN QUERY PLAN SELECT * FROM messages ORDER BY server_index DESC LIMIT 30")
+	var older: Dictionary = database._access.query(
+		"EXPLAIN QUERY PLAN SELECT * FROM messages WHERE server_index < ? ORDER BY server_index DESC LIMIT 30", [10])
+	check(_plan_uses(latest, "messages_server_index"), "latest page uses the slot index")
+	check(_plan_uses(older, "messages_server_index"), "older page uses the slot index")
+	var local: Dictionary = database._access.query(
+		"EXPLAIN QUERY PLAN SELECT * FROM local_messages WHERE local_seq < ? ORDER BY local_seq DESC LIMIT 30", [10])
+	check(_plan_uses(local, "local_messages_seq"), "local tail paging uses the sequence index")
+	database.close()
+
+
+func _plan_uses(result: Dictionary, index: String) -> bool:
+	for row in database_rows(result):
+		if str(row.get("detail", "")).contains(index):
+			return true
+	return false
+
+
+func database_rows(result: Dictionary) -> Array:
+	return result.get("data", {}).get("rows", [])
+
+
+func _case_stale_scope() -> void:
+	var scope := _scope("3")
+	var database := _open(scope)
+	var stale: Dictionary = _execute(database, "read_latest", _scope("4"), {"limit": 30})
+	check(not stale.ok and stale.code == "STALE_SCOPE", "cross-scope reads are rejected")
+	var write: Dictionary = _execute(database, "save_local", _scope("4"), {
+		"message": _local("x", "x", "pending"),
+	})
+	check(not write.ok and write.code == "STALE_SCOPE", "cross-scope writes are rejected")
+	var stale_close: Dictionary = _execute(database, "close_scope", _scope("4"))
+	check(not stale_close.ok and stale_close.code == "STALE_SCOPE", "cross-scope close is rejected")
+	check(database.metadata().ok, "stale close leaves the connection open")
+	var closed: Dictionary = _execute(database, "close_scope", scope)
+	check(closed.ok, "own scope can close the connection")
+
+
+func _case_reset_legacy() -> void:
+	var scope := _scope("5")
+	var directory := _root.path_join(scope)
+	DirAccess.make_dir_recursive_absolute(directory)
+	var path := directory.path_join("history.db")
+	var legacy: Object = ClassDB.instantiate("SQLite")
+	legacy.path = path
+	legacy.open_db()
+	legacy.query("PRAGMA user_version=3")
+	legacy.query("CREATE TABLE messages (message_id TEXT PRIMARY KEY)")
+	legacy.query("INSERT INTO messages(message_id) VALUES ('old')")
+	legacy.close_db()
+	check(FileAccess.file_exists(path), "legacy fixture exists")
+	for suffix in ["-wal", "-shm", ".v1.bak", ".v2.bak", ".discarded"]:
+		var stale := FileAccess.open(path + suffix, FileAccess.WRITE)
+		stale.store_string("stale")
+		stale.close()
+	var database = Database.new()
+	var reset: Dictionary = database._discard_incompatible(path)
+	check(reset.ok, "legacy reset succeeds")
+	for suffix in ["-wal", "-shm", ".v1.bak", ".v2.bak", ".discarded"]:
+		check(not FileAccess.file_exists(path + suffix), "legacy %s is removed" % suffix)
+	var opened: Dictionary = database.open(_root, scope)
+	check(opened.ok, "legacy cache is rebuilt (%s)" % opened.code)
+	check(int(_row(database, "PRAGMA user_version")["user_version"]) == 100, "rebuilt cache has version 100")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM messages")["count"]) == 0, "legacy rows are not migrated")
+	var columns: Array = database._access.column_names("messages")
+	check(columns.has("server_index") and columns.has("sent_ts_ms"), "rebuilt table uses the new columns")
+	database.close()
+	var header := _header(path)
+	check(int(header.application_id) == 1280591961 and int(header.version) == 100, "file header advertises the new cache")
+
+
+## 主库不存在时，残留 sidecar/备份也不能与新库配对。
+func _case_reset_orphans() -> void:
+	var scope := _scope("8")
+	var directory := _root.path_join(scope)
+	DirAccess.make_dir_recursive_absolute(directory)
+	var path := directory.path_join("history.db")
+	for suffix in ["-wal", "-shm", ".v1.bak", ".v2.bak", ".discarded"]:
+		var stale := FileAccess.open(path + suffix, FileAccess.WRITE)
+		stale.store_string("orphan")
+		stale.close()
+	var database = Database.new()
+	var cleanup: Dictionary = database._discard_incompatible(path)
+	check(cleanup.ok, "orphan cleanup succeeds")
+	for suffix in ["-wal", "-shm", ".v1.bak", ".v2.bak", ".discarded"]:
+		check(not FileAccess.file_exists(path + suffix), "orphan %s is removed" % suffix)
+	var opened: Dictionary = database.open(_root, scope)
+	check(opened.ok, "orphan sidecars do not block a fresh cache (%s)" % opened.code)
+	database.close()
+
+
+## 表结构完整但单行状态丢失时，补回绑定当前 scope 的状态行。
+func _case_repair_metadata() -> void:
+	var scope := _scope("9")
+	var database := _open(scope)
+	database._access.execute("DELETE FROM sync_state")
+	database._access.execute("DELETE FROM dynamic_state")
+	database.close()
+	database = _open(scope)
+	var meta: Dictionary = database.metadata()
+	check(meta.ok and int(meta.data.baseline_index) == -1, "missing chat state is recreated")
+	var state: Dictionary = _execute(database, "dynamics_state", scope)
+	check(state.ok and str(state.data.state.scope_key) == scope, "missing dynamics state is recreated")
+	database.close()
+
+
+func _header(path: String) -> Dictionary:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	file.seek(0)
+	var bytes := file.get_buffer(100)
+	file.close()
+	return {
+		"version": (int(bytes[60]) << 24) | (int(bytes[61]) << 16) | (int(bytes[62]) << 8) | int(bytes[63]),
+		"application_id": (int(bytes[68]) << 24) | (int(bytes[69]) << 16) | (int(bytes[70]) << 8) | int(bytes[71]),
 	}

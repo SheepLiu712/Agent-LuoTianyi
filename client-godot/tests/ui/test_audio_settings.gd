@@ -20,7 +20,7 @@ func _check_contract(page: Control) -> void:
 	check(column.get_node("StorageCard").get_index() < column.get_node("ImportCard").get_index() and column.get_node("ImportCard").get_index() < column.get_node("CleanupCard").get_index(), "cards follow storage, import, cleanup order")
 	for removed in ["MigrationHint", "Scope", "AgeHint", "Hint"]:
 		check(page.find_child(removed, true, false) == null, "redundant copy node removed: " + removed)
-	check(page.get_node("%MigrateMedia").text == "导入媒体…", "import action names its result")
+	check(page.get_node("%MigrateMedia").text == "开始检测", "media action starts with detection")
 	check(page.get_node("%RefreshUsage").text == "刷新容量", "storage refresh is not confused with client scanning")
 	check(page.get_node("%ClearCache").text == "清理语音…", "cleanup action stays scoped to voice")
 

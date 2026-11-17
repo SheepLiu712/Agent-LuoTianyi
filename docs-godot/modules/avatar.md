@@ -13,7 +13,7 @@
 Driver 拥有模型实例和参数；Panel 拥有触摸区域/涟漪节点；Framing 读写设置值而不持有路径。
 
 ## 公开接口
-`load_character/load_avatar/apply_expression/play_motion/set_mouth_openness/set_gaze/hit_test/get_status`；面板信号 `touched(areas)`；构图 `zoom_by/pan_by/reset/get_transform/save_settings/load_settings`。
+`load_character/load_avatar/apply_expression/play_motion/set_mouth_openness/set_gaze/hit_test/get_status`；面板信号 `touched(areas)`、`dynamic_requested(post)`；构图 `zoom_by/pan_by/reset/get_transform/save_settings/load_settings`。未读卡片左键点击先播放反馈动画，再发出 `dynamic_requested`。
 
 ## 信号与数据结构
 触摸区域是字符串数组，状态为可复制 Dictionary；失败状态含错误码和当前模型信息。

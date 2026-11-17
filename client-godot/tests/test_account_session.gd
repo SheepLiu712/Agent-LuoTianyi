@@ -4,6 +4,17 @@ const Session = preload("res://src/session/account_session.gd")
 const Api = preload("res://src/network/account_api.gd")
 var failures: Array[String] = []
 
+class FailingTlsApi:
+	extends Node
+	func request(_operation: String, _server: String, _fields: Dictionary) -> Dictionary:
+		return {"ok":false, "code":"NETWORK_ERROR", "status":0,
+			"detail":"RESULT_TLS_HANDSHAKE_ERROR", "data":{}}
+	func probe_server(_address: String) -> Dictionary:
+		return {"ok":false, "code":"NETWORK_ERROR", "status":0,
+			"detail":"RESULT_TLS_HANDSHAKE_ERROR", "data":{}}
+	func cancel() -> void:
+		pass
+
 func check(ok: bool, description: String) -> void:
 	if not ok:
 		failures.append(description)
@@ -20,6 +31,7 @@ func run() -> void:
 	var folder := "user://session-test-%s" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(folder)
 	var security = ClassDB.instantiate("WindowsSecurity")
+	await check_tls_detail_reaches_state(folder, security, server)
 	var store = Store.new(security, folder + "/tokens")
 	check(store.save(server, "test", "login-test") == OK, "protected token saved")
 	check(store.read(server, "test").get("token") == "login-test", "token restores")
@@ -68,7 +80,22 @@ func run() -> void:
 	await process_frame
 	for filename in ["account.cfg", "unsaved.cfg", "blocked"]:
 		DirAccess.remove_absolute(folder + "/" + filename)
+	DirAccess.remove_absolute(folder + "/tls.cfg")
 	DirAccess.remove_absolute(folder + "/tokens")
 	DirAccess.remove_absolute(folder)
 	print("Account session: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+func check_tls_detail_reaches_state(folder: String, security: Object, server: String) -> void:
+	var session = Session.new(FailingTlsApi.new(),
+		load("res://src/storage/godot_storage_service.gd").new(folder + "/tls.cfg", Store.new(security, folder + "/tls_tokens")))
+	root.add_child(session)
+	var states: Array[Dictionary] = []
+	session.changed.connect(func(state): states.append(state))
+	var response: Dictionary = await session.perform("login", server, {"username":"test", "password":"synthetic-password"})
+	check(response.code == "NETWORK_ERROR" and response.get("detail") == "RESULT_TLS_HANDSHAKE_ERROR",
+		"tls failure detail survives the account API")
+	check(not states.is_empty() and states[-1].get("detail") == "RESULT_TLS_HANDSHAKE_ERROR",
+		"tls failure detail reaches account state")
+	session.queue_free()
+	await process_frame

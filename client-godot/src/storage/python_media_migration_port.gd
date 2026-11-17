@@ -23,7 +23,10 @@ func set_target(_path: String) -> Dictionary:
 
 
 func scan() -> Dictionary:
-	return {"ok":false, "code":"UNAVAILABLE"}
+	return {
+		"ok":false, "code":"UNAVAILABLE", "has_previous_import":false,
+		"pending_audio_count":0, "pending_image_count":0, "already_imported":false,
+	}
 
 
 func get_state() -> Dictionary:

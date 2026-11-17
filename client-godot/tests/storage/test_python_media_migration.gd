@@ -13,6 +13,7 @@ const Samples = preload("res://tests/support/audio_samples.gd")
 const UUID_A := "11111111-2222-4333-8444-555555555555"
 const UUID_B := "66666666-7777-4888-9999-aaaaaaaaaaaa"
 const UUID_C := "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+const UUID_D := "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb"
 
 var failures: Array[String] = []
 var _root := ""
@@ -95,8 +96,10 @@ func test_audio_import() -> void:
 	var bytes := Samples.tone(0.05)
 	check(Wav.describe(bytes).ok, "valid wav header accepted")
 	var path := _write_audio(UUID_A)
+	check(not Import.has_entry(_audio_dir, UUID_A), "audio entry absent before import")
 	var first: Dictionary = Import.import_file(_audio_dir, UUID_A, path)
 	check(first.status == "imported", "first audio import lands")
+	check(Import.has_entry(_audio_dir, UUID_A), "audio entry exists after import")
 	var entry: Dictionary = _audio_cache.lookup(UUID_A)
 	check(not entry.is_empty() and is_equal_approx(float(entry.duration), 0.05), "imported audio is visible")
 	var second: Dictionary = Import.import_file(_audio_dir, UUID_A, path)
@@ -110,8 +113,10 @@ func test_audio_import() -> void:
 func test_image_import() -> void:
 	var path := _write_png(UUID_A)
 	var target := _image_dir.path_join(UUID_A.sha256_text() + ".image")
+	check(not ImageImport.has_entry(_image_dir, UUID_A), "image entry absent before import")
 	var first: Dictionary = ImageImport.import_file(_image_dir, UUID_A, path)
 	check(first.status == "imported" and FileAccess.file_exists(target), "image import lands as account cache")
+	check(ImageImport.has_entry(_image_dir, UUID_A), "image entry exists after import")
 	check(not FileAccess.file_exists(target + ".import.tmp"), "image import leaves no temporary file")
 	var second: Dictionary = ImageImport.import_file(_image_dir, UUID_A, path)
 	check(second.status == "skipped" and second.code == "ALREADY_CACHED", "image re-import never overwrites")
@@ -129,7 +134,11 @@ func test_incremental() -> void:
 	_migration.imported.connect(func(kind: String, ids: Array): _landed[kind].append_array(ids))
 	var scan: Dictionary = _migration.set_target(_client)
 	check(scan.ok and not _migration.get_state().mismatch, "same account is not flagged")
+	check(not bool(scan.get("already_imported", true)), "a new source starts importable")
+	check(not bool(scan.get("has_previous_import", true)), "a new source has no completed import")
 	var path := _write_audio(UUID_B)
+	var before_incremental: Dictionary = _migration.scan()
+	check(int(before_incremental.pending_audio_count) == 1, "only uncached audio is pending")
 	_migration.request_ids([UUID_B])
 	var landed := await _wait_for(func() -> bool: return not _landed.audio.is_empty(), 120)
 	check(landed, "incremental import touches only the requested page")
@@ -143,23 +152,66 @@ func test_incremental() -> void:
 func test_bulk() -> void:
 	_write_audio(UUID_C)
 	_write_png(UUID_C)
+	var before_bulk: Dictionary = _migration.scan()
+	check(int(before_bulk.pending_audio_count) == 1 and int(before_bulk.pending_image_count) == 1, "bulk pending counts uncached media")
 	_migration.request_import()
 	var finished := await _wait_for(func() -> bool: return _migration.get_state().mode == "done", 240)
 	check(finished, "bulk import finishes")
-	var state: Dictionary = _migration.get_state()
+	_check_bulk_state(_migration.get_state())
+	_check_completed_marker()
+	await _check_incremental_stops()
+	await _check_failed_bulk()
+	await _check_source_switch()
+
+
+func _check_bulk_state(state: Dictionary) -> void:
 	check(not state.busy, "bulk import clears its busy flag")
 	check(int(state.audio_total) >= 2 and int(state.image_total) >= 1, "bulk import counts both kinds")
 	check(int(state.failed) == 0, "bulk import reports no failures for valid sources")
+
+
+func _check_completed_marker() -> void:
 	var marker: Dictionary = Import.read_marker(_audio_dir)
 	check(not marker.is_empty() and not str(marker.get("source_hash", "")).is_empty(), "bulk marker records the source")
+	var completed: Dictionary = _migration.scan()
+	check(bool(completed.has_previous_import) and int(completed.pending_audio_count) == 0 \
+		and int(completed.pending_image_count) == 0 and bool(completed.already_imported), "completed bulk scan restores imported state")
+	var restored := Migration.new()
+	root.add_child(restored)
+	restored.bind(func() -> String: return _audio_dir, func() -> String: return _image_dir)
+	restored.set_scope_provider(func() -> Dictionary: return {"username":"alice", "server":"https://client.invalid"})
+	var restored_scan: Dictionary = restored.set_target(_client)
+	check(bool(restored_scan.has_previous_import) and int(restored_scan.pending_audio_count) == 0 \
+		and bool(restored_scan.already_imported), "a fresh migrator reads the completed marker")
+	restored.queue_free()
+
+
+func _check_incremental_stops() -> void:
 	_landed.audio.clear()
 	_migration.request_ids([UUID_B])
 	await process_frame
 	check(_landed.audio.is_empty() and not _migration.is_busy(), "incremental stops scanning once bulk completed")
+
+
+func _check_failed_bulk() -> void:
+	_write_bytes(_audio_sources.path_join(UUID_D + ".wav"), Samples.tone(0.05).slice(0, 200))
+	var changed: Dictionary = _migration.scan()
+	check(bool(changed.has_previous_import) and int(changed.pending_audio_count) == 1 \
+		and not bool(changed.already_imported), "new source media returns to importable")
+	_migration.request_import()
+	var second_run := await _wait_for(func() -> bool: return _migration.get_state().mode == "done", 240)
+	check(second_run and _migration.get_state().failed > 0, "partial bulk import reports its failure")
+	var failed: Dictionary = _migration.scan()
+	check(bool(failed.has_previous_import) and int(failed.pending_audio_count) == 1 \
+		and not bool(failed.already_imported), "failed bulk import does not claim completion")
+
+
+func _check_source_switch() -> void:
 	# 换源后旧标记失效：同一文件在新目录里仍可被按需处理。
 	var second := _root.path_join("python2")
 	_make_second_client(second)
-	check(_migration.set_target(second).ok, "second client accepted")
+	var switched: Dictionary = _migration.set_target(second)
+	check(switched.ok and not bool(switched.has_previous_import), "second client accepted without the old marker")
 	check(_migration.get_state().mismatch, "different account is flagged")
 	_migration.request_ids([UUID_B])
 	await process_frame

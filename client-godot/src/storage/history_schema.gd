@@ -1,124 +1,131 @@
 extends RefCounted
-## 单一职责：集中持有历史库的 SQL 文本与结构契约。
-## 这里只有常量与纯函数：不建立连接、不读写文件、不依赖任何其它模块。
-## 结构化校验所需的表/列/索引名单也放在这里，供存储层比对，
-## 避免「schema 定义」与「schema 校验」分散在两个文件里漂移。
+## 单一职责：集中持有聊天与动态库的 SQL 文本、结构契约与版本标识。
+## 这里只有常量与纯函数：不建立连接、不读写文件、不依赖其它模块。
+##
+## 本地库是「可重建缓存 + 在途发送队列」：没有旧版本迁移，
+## 文件头不是 (application_id, 100) 时由仓储层整库物理删除后重建。
 
-const VERSION := 3
+## 0x4C544859 == "LTHY"
+const APPLICATION_ID := 1280591961
+const VERSION := 100
 
-## 每个 PRAGMA 必须单独执行：SQLite 的返回行语义不适合多语句一次提交。
+## 顺序有硬约束：auto_vacuum 必须最先执行，早于任何会初始化数据库头的 PRAGMA。
 const PRAGMAS := [
-	"PRAGMA foreign_keys=ON",
+	"PRAGMA auto_vacuum=INCREMENTAL",
+	"PRAGMA application_id=1280591961",
 	"PRAGMA journal_mode=WAL",
 	"PRAGMA synchronous=FULL",
 	"PRAGMA busy_timeout=3000",
+	"PRAGMA journal_size_limit=16777216",
+	"PRAGMA foreign_keys=ON",
 ]
 
-const CREATE_V3 := """
+const CREATE_SCHEMA := """
 CREATE TABLE messages (
- message_id TEXT PRIMARY KEY NOT NULL CHECK(length(message_id)>0),
- id_source TEXT NOT NULL CHECK(id_source IN ('server','local')),
- timeline_order INTEGER NOT NULL,
- origin TEXT NOT NULL,
- source TEXT NOT NULL,
- message_type TEXT NOT NULL,
- content TEXT NOT NULL DEFAULT '',
- timestamp_json TEXT NOT NULL,
- delivery_state TEXT NOT NULL,
- error_code TEXT NOT NULL DEFAULT '',
- stream_complete INTEGER NOT NULL DEFAULT 1 CHECK(stream_complete IN (0,1)),
- content_origin TEXT NOT NULL DEFAULT 'history',
- created_at_ms INTEGER NOT NULL,
- updated_at_ms INTEGER NOT NULL
+  id TEXT PRIMARY KEY,
+  server_index INTEGER NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('user','agent','system')),
+  kind TEXT NOT NULL CHECK(kind IN ('text','image','sing','cmd')),
+  content TEXT NOT NULL DEFAULT '',
+  sent_ts_ms INTEGER NOT NULL,
+  created_at_ms INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX messages_timeline ON messages(timeline_order);
-CREATE TABLE send_attempts (
- attempt_id TEXT PRIMARY KEY NOT NULL,
- message_id TEXT NOT NULL REFERENCES messages(message_id),
- wire_id TEXT UNIQUE,
- state TEXT NOT NULL,
- ever_sent INTEGER NOT NULL DEFAULT 0 CHECK(ever_sent IN (0,1)),
- error_code TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX send_attempts_message ON send_attempts(message_id);
-CREATE TABLE message_media (
- message_id TEXT NOT NULL REFERENCES messages(message_id),
- kind TEXT NOT NULL,
- relative_path TEXT NOT NULL DEFAULT '',
- state TEXT NOT NULL,
- PRIMARY KEY(message_id,kind)
-);
-CREATE TABLE sync_epochs (
- epoch INTEGER PRIMARY KEY,
- valid INTEGER NOT NULL CHECK(valid IN (0,1))
-);
-CREATE TABLE history_positions (
- epoch INTEGER NOT NULL REFERENCES sync_epochs(epoch),
- ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
- message_id TEXT NOT NULL REFERENCES messages(message_id),
- PRIMARY KEY(epoch,ordinal),
- UNIQUE(epoch,message_id)
-);
-CREATE TABLE cached_ranges (
- epoch INTEGER NOT NULL REFERENCES sync_epochs(epoch),
- start_index INTEGER NOT NULL,
- end_index INTEGER NOT NULL,
- first_message_id TEXT NOT NULL REFERENCES messages(message_id),
- last_message_id TEXT NOT NULL REFERENCES messages(message_id),
- PRIMARY KEY(epoch,start_index),
- CHECK(end_index > start_index)
-);
-CREATE TABLE history_segments (
- segment_id TEXT PRIMARY KEY NOT NULL,
- epoch INTEGER NOT NULL REFERENCES sync_epochs(epoch),
- state TEXT NOT NULL,
- first_message_id TEXT REFERENCES messages(message_id),
- last_message_id TEXT REFERENCES messages(message_id)
-);
-CREATE TABLE segment_members (
- segment_id TEXT NOT NULL REFERENCES history_segments(segment_id),
- message_id TEXT NOT NULL REFERENCES messages(message_id),
- member_order INTEGER NOT NULL,
- PRIMARY KEY(segment_id,message_id),
- UNIQUE(segment_id,member_order)
-);
-CREATE TABLE sync_state (
- singleton INTEGER PRIMARY KEY CHECK(singleton=1),
- scope_key TEXT NOT NULL,
- active_epoch INTEGER REFERENCES sync_epochs(epoch),
- order_revision INTEGER NOT NULL DEFAULT 1,
- baseline_message_id TEXT REFERENCES messages(message_id),
- next_end INTEGER NOT NULL DEFAULT -1,
- head_message_id TEXT REFERENCES messages(message_id),
- caught_up INTEGER NOT NULL DEFAULT 0 CHECK(caught_up IN (0,1))
-)
-"""
+CREATE UNIQUE INDEX messages_server_index ON messages(server_index);
 
-## 只用于 version=0 的不完整草稿库：按外键反序清理后整套重建。
-const DROP_V3 := """
-DROP TABLE IF EXISTS segment_members;
-DROP TABLE IF EXISTS history_segments;
-DROP TABLE IF EXISTS cached_ranges;
-DROP TABLE IF EXISTS history_positions;
-DROP TABLE IF EXISTS message_media;
-DROP TABLE IF EXISTS send_attempts;
-DROP TABLE IF EXISTS sync_state;
-DROP TABLE IF EXISTS sync_epochs;
-DROP TABLE IF EXISTS messages
+CREATE TABLE local_messages (
+  id TEXT PRIMARY KEY,
+  local_seq INTEGER NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('user','agent','system')),
+  kind TEXT NOT NULL CHECK(kind IN ('text','image','sing','cmd')),
+  content TEXT NOT NULL DEFAULT '',
+  sent_ts_ms INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK(state IN
+    ('waiting_history','pending','sending','sent','failed','received')),
+  error_code TEXT NOT NULL DEFAULT '',
+  stream_complete INTEGER NOT NULL DEFAULT 1,
+  payload_json TEXT NOT NULL DEFAULT '',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX local_messages_seq ON local_messages(local_seq);
+
+CREATE TABLE sync_state (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  scope_key TEXT NOT NULL,
+  next_end INTEGER NOT NULL DEFAULT -1,
+  baseline_index INTEGER NOT NULL DEFAULT -1,
+  revision INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE dynamic_posts (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL DEFAULT '',
+  author_name TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  allow_comment INTEGER NOT NULL DEFAULT 0,
+  comment_count INTEGER NOT NULL DEFAULT 0,
+  comment_synced_count INTEGER NOT NULL DEFAULT 0,
+  user_commented INTEGER NOT NULL DEFAULT 0,
+  needs_comment_sync INTEGER NOT NULL DEFAULT 0,
+  comment_cursor TEXT NOT NULL DEFAULT '',
+  comment_has_more INTEGER NOT NULL DEFAULT 0,
+  comment_loaded_at_ms INTEGER NOT NULL DEFAULT 0,
+  last_activity_at TEXT NOT NULL DEFAULT '',
+  last_activity_id TEXT NOT NULL DEFAULT '',
+  last_activity_kind TEXT NOT NULL DEFAULT '',
+  read_activity_at TEXT NOT NULL DEFAULT '',
+  read_activity_id TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL,
+  first_seen_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE INDEX dynamic_posts_feed ON dynamic_posts(created_at DESC, id DESC);
+CREATE INDEX dynamic_posts_activity ON dynamic_posts(last_activity_at DESC, last_activity_id DESC);
+CREATE INDEX dynamic_posts_unread ON dynamic_posts(last_activity_at, last_activity_id)
+  WHERE last_activity_at <> '';
+
+CREATE TABLE dynamic_comments (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL REFERENCES dynamic_posts(id) ON DELETE CASCADE,
+  parent_comment_id TEXT,
+  created_at TEXT NOT NULL,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL DEFAULT '',
+  author_name TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE INDEX dynamic_comments_post ON dynamic_comments(post_id, created_at, id);
+CREATE INDEX dynamic_comments_unread ON dynamic_comments(created_at, id)
+  WHERE author_type <> 'user';
+
+CREATE TABLE dynamic_state (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  scope_key TEXT NOT NULL,
+  server_read_at TEXT NOT NULL DEFAULT '',
+  server_comment_read_at TEXT NOT NULL DEFAULT '',
+  posts_cursor TEXT NOT NULL DEFAULT '',
+  has_more INTEGER NOT NULL DEFAULT 0,
+  refresh_version INTEGER NOT NULL DEFAULT 0,
+  last_sync_ms INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 1
+);
 """
 
 const SET_VERSION := "PRAGMA user_version=%d"
-
-## 新库初始化：第一个 epoch 与 scope 绑定的 sync_state 单行。绑定参数为 scope_key。
-const INSTALL_SCOPE := """
-INSERT INTO sync_epochs(epoch,valid) VALUES(1,1);
-INSERT INTO sync_state(singleton,scope_key,active_epoch,order_revision,next_end,caught_up)
-VALUES(1,?,1,1,-1,0)
-"""
-
 const READ_VERSION := "PRAGMA user_version"
+const READ_APPLICATION_ID := "PRAGMA application_id"
+const READ_AUTO_VACUUM := "PRAGMA auto_vacuum"
+const READ_JOURNAL_MODE := "PRAGMA journal_mode"
+const READ_FOREIGN_KEYS := "PRAGMA foreign_keys"
 const FOREIGN_KEY_CHECK := "PRAGMA foreign_key_check"
 const WAL_CHECKPOINT := "PRAGMA wal_checkpoint(TRUNCATE)"
+const OPTIMIZE := "PRAGMA optimize"
+const INCREMENTAL_VACUUM := "PRAGMA incremental_vacuum"
 
 const SCHEMA_TABLES := """
 SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name
@@ -126,217 +133,280 @@ SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' O
 const TABLE_COLUMNS := "PRAGMA table_info(%s)"
 const TABLE_INDEXES := "PRAGMA index_list(%s)"
 
-const READ_SYNC_STATE := "SELECT * FROM sync_state WHERE singleton=1"
-const READ_ORDER_REVISION := "SELECT order_revision FROM sync_state WHERE singleton=1"
-const READ_SCOPE_KEY := "SELECT scope_key FROM sync_state WHERE singleton=1"
-## 空表返回 NULL；0 是合法位置，不能与「没有行」混为一谈。
-const READ_MAX_ORDER := "SELECT MAX(timeline_order) AS tail FROM messages"
-const READ_MIN_ORDER := "SELECT MIN(timeline_order) AS head FROM messages"
-
-## 对账落位依据：库里出现过服务器来源的行，才说明服务器时间线已经在库内延续。
-const READ_HAS_SERVER := "SELECT 1 AS present FROM messages WHERE id_source='server' LIMIT 1"
-
-## 精确命中索引，不做全表排序：timeline_order 唯一，无需第二排序键。
-## superseded 只表示「本地副本已被服务器历史确认」，不再进入用户时间线。
-const READ_LATEST := "SELECT * FROM messages WHERE delivery_state<>'superseded' ORDER BY timeline_order DESC LIMIT ?"
-const READ_ORDER_OF := "SELECT timeline_order FROM messages WHERE message_id=?"
-const READ_BEFORE := """
-SELECT * FROM messages WHERE delivery_state<>'superseded' AND timeline_order < ?
-ORDER BY timeline_order DESC LIMIT ?
+## 新库初始化：聊天游标与动态全局状态各一行，都绑定当前 scope。
+const INSTALL_CHAT_STATE := """
+INSERT OR IGNORE INTO sync_state(id,scope_key,next_end,baseline_index,revision)
+VALUES(1,?,-1,-1,1)
+"""
+const INSTALL_DYNAMICS_STATE := """
+INSERT OR IGNORE INTO dynamic_state(id,scope_key,server_read_at,server_comment_read_at,posts_cursor,has_more,refresh_version,last_sync_ms,revision)
+VALUES(1,?,'','','',0,0,0,1)
 """
 
-## 页内已知锚点：除顺序外还取身份列，历史页不得覆盖来源/角色/类型不同
-## 的同 UUID 记录（尤其本地消息）。只取这些 UUID 的顺序，用来把整页切成若干未知块。
-const READ_KNOWN := """
-SELECT message_id,timeline_order,id_source,source,message_type FROM messages WHERE message_id IN (%s)
+## ---------------------------------------------------------------- 聊天读
+
+const READ_SYNC_STATE := "SELECT * FROM sync_state WHERE id=1"
+const READ_SCOPE_KEY := "SELECT scope_key FROM sync_state WHERE id=1"
+const READ_REVISION := "SELECT revision FROM sync_state WHERE id=1"
+const READ_NEXT_END := "SELECT next_end FROM sync_state WHERE id=1"
+
+## 最新窗口：服务端槽位倒序取一页，本地尾部单独按 local_seq 正序全取。
+const READ_LATEST_SERVER := "SELECT * FROM messages ORDER BY server_index DESC LIMIT ?"
+const READ_ALL_LOCAL := "SELECT * FROM local_messages ORDER BY local_seq ASC"
+
+const READ_SERVER_BY_ID := "SELECT * FROM messages WHERE id=?"
+const READ_LOCAL_BY_ID := "SELECT * FROM local_messages WHERE id=?"
+
+const READ_SERVER_BEFORE := """
+SELECT * FROM messages WHERE server_index < ?
+ORDER BY server_index DESC LIMIT ?
+"""
+const READ_LOCAL_BEFORE := """
+SELECT * FROM local_messages WHERE local_seq < ?
+ORDER BY local_seq DESC LIMIT ?
+"""
+## 从本地尾部向上翻、页内数量不足时，用服务器历史补足差额。
+const READ_SERVER_TAIL := "SELECT * FROM messages ORDER BY server_index DESC LIMIT ?"
+const READ_MAX_LOCAL_SEQ := "SELECT MAX(local_seq) AS tail FROM local_messages"
+
+## ---------------------------------------------------------------- 聊天写
+
+## 槽位是缓存位置而不是消息身份：同槽位换 id 或同 id 换槽位都由 REPLACE 自愈。
+const INSERT_SERVER := """
+INSERT OR REPLACE INTO messages
+(id,server_index,role,kind,content,sent_ts_ms,created_at_ms)
+VALUES (?,?,?,?,?,?,?)
+"""
+const INSERT_LOCAL := """
+INSERT INTO local_messages
+(id,local_seq,role,kind,content,sent_ts_ms,state,error_code,stream_complete,
+ payload_json,attempts,created_at_ms,updated_at_ms)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+"""
+const UPDATE_LOCAL_FULL := """
+UPDATE local_messages SET
+ role=?, kind=?, content=?, sent_ts_ms=?, state=?, error_code=?,
+ stream_complete=?, payload_json=?, attempts=?, updated_at_ms=?
+WHERE id=?
+"""
+const DELETE_LOCAL := "DELETE FROM local_messages WHERE id=?"
+
+const UPDATE_PROGRESS := """
+UPDATE sync_state SET next_end=?, baseline_index=?, revision=revision+1 WHERE id=1
+"""
+const BUMP_REVISION := "UPDATE sync_state SET revision=revision+1 WHERE id=1"
+
+## 本地用户消息对账候选：只有已经交给传输层的记录才允许被历史页认领，
+## 还没发出去的 pending / waiting_history 不能因为正文相同而消失。
+const READ_LOCAL_USER_CANDIDATES := """
+SELECT * FROM local_messages
+WHERE role='user' AND state IN ('sending','sent')
+ORDER BY sent_ts_ms ASC, local_seq ASC
 """
 
-## 找真实邻居：缺一侧锚点时补边界；两侧锚点都在时收窄可分配区间，
-## 避免均分出来的位置撞到本页没带上的旧行。
-const READ_NEIGHBOR_BEFORE := """
-SELECT message_id,timeline_order FROM messages
-WHERE timeline_order < ? ORDER BY timeline_order DESC LIMIT 1
+## 重启恢复：sending 无法确认是否送达，只能显式失败且不自动重发。
+const RECOVER_SENDING := """
+UPDATE local_messages SET state='failed', error_code='DELIVERY_UNCERTAIN', updated_at_ms=?
+WHERE state='sending'
 """
-const READ_NEIGHBOR_AFTER := """
-SELECT message_id,timeline_order FROM messages
-WHERE timeline_order > ? ORDER BY timeline_order ASC LIMIT 1
-"""
-
-## 保存历史页：位置、范围、段与同步进度都必须和消息同事务提交。
-const UPSERT_MESSAGE := """
-INSERT INTO messages
-(message_id,id_source,timeline_order,origin,source,message_type,content,timestamp_json,
- delivery_state,error_code,stream_complete,content_origin,created_at_ms,updated_at_ms)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(message_id) DO UPDATE SET
-content=excluded.content,
-timestamp_json=excluded.timestamp_json,
-delivery_state=excluded.delivery_state,
-error_code=excluded.error_code,
-stream_complete=excluded.stream_complete,
-content_origin=excluded.content_origin,
-updated_at_ms=excluded.updated_at_ms
-WHERE messages.id_source=excluded.id_source
- AND messages.source=excluded.source
- AND messages.message_type=excluded.message_type
+const RECOVER_EXPIRED_WAITING := """
+UPDATE local_messages SET state='failed', error_code='SEND_EXPIRED', updated_at_ms=?
+WHERE state='waiting_history' AND created_at_ms < ?
 """
 
-const UPDATE_MESSAGE_CONTENT := """
-UPDATE messages SET content=?,timestamp_json=?,stream_complete=?,content_origin=?,updated_at_ms=?
-WHERE message_id=?
+## ---------------------------------------------------------------- 动态读
+
+const READ_DYNAMICS_STATE := "SELECT * FROM dynamic_state WHERE id=1"
+const READ_POSTS := """
+SELECT * FROM dynamic_posts
+ORDER BY created_at DESC, id DESC LIMIT ?
+"""
+const READ_POST := "SELECT * FROM dynamic_posts WHERE id=?"
+const READ_COMMENTS := """
+SELECT * FROM dynamic_comments WHERE post_id=?
+ORDER BY created_at ASC, id ASC LIMIT ?
 """
 
-const UPDATE_DELIVERY := """
-UPDATE messages SET delivery_state=?,error_code=?,updated_at_ms=? WHERE message_id=?
+## 徽标按「未读动态条数」计；一条动态多条新评论仍只算 1。
+const UNREAD_POST_COUNT := """
+SELECT COUNT(*) AS count FROM dynamic_posts
+WHERE last_activity_at <> ''
+  AND (
+    last_activity_at > read_activity_at
+    OR (last_activity_at = read_activity_at AND last_activity_id > read_activity_id)
+  )
+"""
+const LATEST_UNREAD_POST := """
+SELECT * FROM dynamic_posts
+WHERE last_activity_at <> ''
+  AND (
+    last_activity_at > read_activity_at
+    OR (last_activity_at = read_activity_at AND last_activity_id > read_activity_id)
+  )
+ORDER BY last_activity_at DESC, last_activity_id DESC
+LIMIT 1
+"""
+const LOCAL_UNREAD_COMMENTS := """
+SELECT COUNT(*) AS count FROM dynamic_comments c
+WHERE c.author_type <> 'user'
+  AND EXISTS (
+    SELECT 1 FROM dynamic_posts p
+    WHERE p.id = c.post_id
+      AND (
+        c.created_at > p.read_activity_at
+        OR (c.created_at = p.read_activity_at AND c.id > p.read_activity_id)
+      )
+  )
 """
 
-## 位置是「观察记录」：同一条消息在一个 epoch 只记一次，
-## 冲突时放弃写入而不是让整页失败——消息本身才是必须落库的事实。
-const UPSERT_POSITION := """
-INSERT INTO history_positions(epoch,ordinal,message_id) VALUES (?,?,?)
-ON CONFLICT DO NOTHING
+## ---------------------------------------------------------------- 动态写
+
+## 首次见到一行时按服务端基线初始化活动/已读水位；
+## 已存在的行只更新正文与计数，评论游标、水位与本地簿记列全部保留。
+const INSERT_POST := """
+INSERT INTO dynamic_posts
+(id,created_at,author_type,author_id,author_name,content,allow_comment,comment_count,
+ comment_synced_count,user_commented,needs_comment_sync,comment_cursor,comment_has_more,
+ comment_loaded_at_ms,last_activity_at,last_activity_id,last_activity_kind,
+ read_activity_at,read_activity_id,payload_json,first_seen_ms,updated_at_ms)
+VALUES (?,?,?,?,?,?,?,?,0,0,?, '',0,0,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+ created_at=excluded.created_at,
+ author_type=excluded.author_type,
+ author_id=excluded.author_id,
+ author_name=excluded.author_name,
+ content=excluded.content,
+ allow_comment=excluded.allow_comment,
+ comment_count=excluded.comment_count,
+ needs_comment_sync=CASE
+   WHEN excluded.comment_count > dynamic_posts.comment_synced_count THEN 1
+   ELSE dynamic_posts.needs_comment_sync END,
+ payload_json=excluded.payload_json,
+ updated_at_ms=excluded.updated_at_ms
 """
-
-const UPSERT_RANGE := """
-INSERT INTO cached_ranges(epoch,start_index,end_index,first_message_id,last_message_id)
-VALUES (?,?,?,?,?)
-ON CONFLICT(epoch,start_index) DO UPDATE SET
-end_index=excluded.end_index,
-first_message_id=excluded.first_message_id,
-last_message_id=excluded.last_message_id
+## 无评论缓存的新动态：计数增长本身就是「有新回复」的信号。
+const POST_NEEDS_SYNC := """
+UPDATE dynamic_posts SET needs_comment_sync=1
+WHERE id=? AND comment_count > comment_synced_count
 """
-
-const UPDATE_SYNC_PROGRESS := """
-UPDATE sync_state SET next_end=?,baseline_message_id=?,head_message_id=?,caught_up=?
-WHERE singleton=1
+## 首屏刷新以本页最旧时间为下界：服务端撤下的、比本页更新的缓存都清掉。
+## 更早的分页不清理，避免同秒并列把上一页的条目误删。
+const DELETE_POSTS_SINCE := """
+DELETE FROM dynamic_posts
+WHERE created_at >= ? AND id NOT IN (%s)
 """
-
-const UPDATE_NEXT_END := """
-UPDATE sync_state SET next_end=?,caught_up=? WHERE singleton=1
-"""
-
-const READ_MESSAGE := "SELECT * FROM messages WHERE message_id=?"
-
-const BUMP_ORDER_REVISION := """
-UPDATE sync_state SET order_revision=order_revision+1 WHERE singleton=1
-"""
-
-const INSERT_ATTEMPT := """
-INSERT INTO send_attempts(attempt_id,message_id,wire_id,state,ever_sent,error_code)
-VALUES (?,?,?,?,?,?)
-ON CONFLICT(attempt_id) DO UPDATE SET
-wire_id=excluded.wire_id,
-state=excluded.state,
-ever_sent=MAX(send_attempts.ever_sent,excluded.ever_sent),
-error_code=excluded.error_code
-"""
-
-const UPDATE_ATTEMPT_BY_WIRE := """
-UPDATE send_attempts SET state=?,error_code=?,ever_sent=MAX(ever_sent,?) WHERE wire_id=?
-"""
-
-const UPDATE_ATTEMPT_BY_MESSAGE := """
-UPDATE send_attempts SET state=?,error_code=?,ever_sent=MAX(ever_sent,?)
-WHERE message_id=?
-"""
-
-## 重启后只影响展示，不恢复 outbox：
-## 曾进入过发送流程且仍处于在途的记录显示「结果不确定」。
-const RECOVER_UNCERTAIN := """
-UPDATE messages
-SET delivery_state='uncertain',error_code='DELIVERY_UNCERTAIN'
-WHERE message_id IN (
-	SELECT message_id FROM send_attempts
-	WHERE ever_sent=1 AND state IN ('queued','sending')
+const EVICT_POSTS := """
+DELETE FROM dynamic_posts WHERE id NOT IN (
+  SELECT id FROM dynamic_posts ORDER BY created_at DESC, id DESC LIMIT ?
 )
-AND delivery_state NOT IN ('superseded')
 """
+const EVICT_OLD_POSTS := "DELETE FROM dynamic_posts WHERE created_at < ?"
 
-## 启动/历史页落库后的本地副本对账：
-## 只匹配「同正文、同角色、同类型、时间相邻」且候选唯一的文本消息。
-const RECONCILE_LOCAL_UNCERTAIN := """
-SELECT message_id,content,message_type,timestamp_json FROM messages
-WHERE id_source='local' AND delivery_state='uncertain'
-AND message_type='text' AND content<>''
-ORDER BY timeline_order
+const INSERT_COMMENT := """
+INSERT INTO dynamic_comments
+(id,post_id,parent_comment_id,created_at,author_type,author_id,author_name,content,payload_json,updated_at_ms)
+VALUES (?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+ parent_comment_id=excluded.parent_comment_id,
+ created_at=excluded.created_at,
+ author_type=excluded.author_type,
+ author_id=excluded.author_id,
+ author_name=excluded.author_name,
+ content=excluded.content,
+ payload_json=excluded.payload_json,
+ updated_at_ms=excluded.updated_at_ms
 """
-
-const RECONCILE_SERVER_CANDIDATES := """
-SELECT message_id,timestamp_json FROM messages
-WHERE id_source='server' AND source='user' AND message_type=?
-AND content=? AND message_id<>?
-ORDER BY timeline_order
+const UPDATE_POST_COMMENT_SYNC := """
+UPDATE dynamic_posts
+SET comment_cursor=?, comment_has_more=?, comment_loaded_at_ms=?
+WHERE id=?
 """
-
-const MARK_SUPERSEDED := """
-UPDATE messages
-SET delivery_state='superseded',error_code='SERVER_COPY_MATCHED',updated_at_ms=?
-WHERE message_id=? AND delivery_state='uncertain'
+const UPDATE_POST_ACTIVITY := """
+UPDATE dynamic_posts
+SET last_activity_at=?, last_activity_id=?, last_activity_kind=?,
+    read_activity_at=?, read_activity_id=?
+WHERE id=?
 """
-
-const MARK_ATTEMPT_SUPERSEDED := """
-UPDATE send_attempts SET state='superseded',error_code='SERVER_COPY_MATCHED'
-WHERE message_id=?
+const MARK_COMMENT_SYNCED := """
+UPDATE dynamic_posts SET comment_synced_count=comment_count, needs_comment_sync=0
+WHERE id=?
 """
-
-## 从未真正发出的排队记录退回「未发送」。
-const RECOVER_UNSENT := """
-UPDATE messages
-SET delivery_state='unsent',error_code=''
-WHERE delivery_state IN ('queued','waiting_history')
-AND NOT EXISTS (
-	SELECT 1 FROM send_attempts
-	WHERE send_attempts.message_id=messages.message_id AND ever_sent=1
-)
+const MARK_USER_COMMENT := """
+UPDATE dynamic_posts
+SET user_commented=1,
+    comment_count=comment_count+1,
+    comment_synced_count=comment_synced_count+1
+WHERE id=?
 """
+const MARK_USER_COMMENT_FLAG := "UPDATE dynamic_posts SET user_commented=1 WHERE id=?"
 
-## 重编号：只改位置数值，不改相对顺序，禁止用负数充当临时命名空间。
-const RENUMBER := """
-CREATE TEMP TABLE IF NOT EXISTS order_rebuild(
-	message_id TEXT PRIMARY KEY,
-	new_order INTEGER NOT NULL
-);
-DELETE FROM order_rebuild;
-INSERT INTO order_rebuild(message_id,new_order)
-SELECT message_id,ROW_NUMBER() OVER(ORDER BY timeline_order)*1048576 FROM messages;
-DROP INDEX IF EXISTS messages_timeline;
-UPDATE messages SET timeline_order=(
-	SELECT new_order FROM order_rebuild WHERE order_rebuild.message_id=messages.message_id
-);
-CREATE UNIQUE INDEX messages_timeline ON messages(timeline_order);
-DROP TABLE order_rebuild
+const MARK_ALL_READ := """
+UPDATE dynamic_posts
+SET read_activity_at=last_activity_at, read_activity_id=last_activity_id
+WHERE last_activity_at <> ''
+"""
+const MARK_ONE_READ := """
+UPDATE dynamic_posts
+SET read_activity_at=last_activity_at, read_activity_id=last_activity_id
+WHERE id=? AND last_activity_at <> ''
+"""
+## 服务端基线只单向推进：本地已读水位不回退。
+const APPLY_SERVER_READ_BASELINE := """
+UPDATE dynamic_posts
+SET read_activity_at=last_activity_at, read_activity_id=last_activity_id
+WHERE last_activity_at <> '' AND last_activity_at <= ?
+"""
+const APPLY_SERVER_COMMENT_BASELINE := """
+UPDATE dynamic_posts
+SET read_activity_at=last_activity_at, read_activity_id=last_activity_id
+WHERE last_activity_kind='comment' AND last_activity_at <> '' AND last_activity_at <= ?
+"""
+const WRITE_DYNAMICS_STATE := """
+UPDATE dynamic_state SET
+ scope_key=?, server_read_at=?, server_comment_read_at=?, posts_cursor=?,
+ has_more=?, refresh_version=?, last_sync_ms=?, revision=revision+1
+WHERE id=1
 """
 
 const REQUIRED_TABLES := [
-	"messages", "send_attempts", "message_media", "sync_epochs",
-	"history_positions", "cached_ranges", "history_segments",
-	"segment_members", "sync_state",
+	"messages", "local_messages", "sync_state",
+	"dynamic_posts", "dynamic_comments", "dynamic_state",
 ]
 
 const REQUIRED_COLUMNS := {
 	"messages": [
-		"message_id", "id_source", "timeline_order", "origin", "source",
-		"message_type", "content", "timestamp_json", "delivery_state",
-		"error_code", "stream_complete", "content_origin",
+		"id", "server_index", "role", "kind", "content", "sent_ts_ms", "created_at_ms",
+	],
+	"local_messages": [
+		"id", "local_seq", "role", "kind", "content", "sent_ts_ms", "state",
+		"error_code", "stream_complete", "payload_json", "attempts",
 		"created_at_ms", "updated_at_ms",
 	],
-	"send_attempts": ["attempt_id", "message_id", "wire_id", "state", "ever_sent", "error_code"],
-	"message_media": ["message_id", "kind", "relative_path", "state"],
-	"sync_epochs": ["epoch", "valid"],
-	"history_positions": ["epoch", "ordinal", "message_id"],
-	"cached_ranges": [
-		"epoch", "start_index", "end_index", "first_message_id", "last_message_id",
+	"sync_state": ["id", "scope_key", "next_end", "baseline_index", "revision"],
+	"dynamic_posts": [
+		"id", "created_at", "author_type", "author_id", "author_name", "content",
+		"allow_comment", "comment_count", "comment_synced_count", "user_commented",
+		"needs_comment_sync", "comment_cursor", "comment_has_more", "comment_loaded_at_ms",
+		"last_activity_at", "last_activity_id", "last_activity_kind",
+		"read_activity_at", "read_activity_id", "payload_json",
+		"first_seen_ms", "updated_at_ms",
 	],
-	"history_segments": ["segment_id", "epoch", "state", "first_message_id", "last_message_id"],
-	"segment_members": ["segment_id", "message_id", "member_order"],
-	"sync_state": [
-		"singleton", "scope_key", "active_epoch", "order_revision",
-		"baseline_message_id", "next_end", "head_message_id", "caught_up",
+	"dynamic_comments": [
+		"id", "post_id", "parent_comment_id", "created_at", "author_type",
+		"author_id", "author_name", "content", "payload_json", "updated_at_ms",
+	],
+	"dynamic_state": [
+		"id", "scope_key", "server_read_at", "server_comment_read_at", "posts_cursor",
+		"has_more", "refresh_version", "last_sync_ms", "revision",
 	],
 }
 
-## 重编号与分页都依赖的唯一索引必须存在。
-const REQUIRED_UNIQUE_INDEX := "messages_timeline"
+const REQUIRED_INDEXES := {
+	"messages": ["messages_server_index"],
+	"local_messages": ["local_messages_seq"],
+	"dynamic_posts": ["dynamic_posts_feed", "dynamic_posts_activity", "dynamic_posts_unread"],
+	"dynamic_comments": ["dynamic_comments_post", "dynamic_comments_unread"],
+}
 
 
 ## 把多语句块拆成可逐条执行的语句。
@@ -363,7 +433,3 @@ static func repeated(token: String, count: int) -> Array[String]:
 	for _index in range(count):
 		items.append(token)
 	return items
-
-
-static func is_supported_version(version: int) -> bool:
-	return version == 0 or version == VERSION

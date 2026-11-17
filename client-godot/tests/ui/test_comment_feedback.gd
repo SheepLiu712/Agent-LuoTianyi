@@ -12,7 +12,8 @@ func run() -> void:
 		await controller.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":username,"message_token":"fixture-token"})
 		await controller.refresh()
 		var detail = load("res://scenes/ui/dynamics/dynamic_detail.tscn").instantiate()
-		detail.setup(controller, controller.get_posts()[0])
+		var post: Dictionary = controller.get_posts().filter(func(item): return item.id == "d0")[0]
+		detail.setup(controller, post)
 		root.add_child(detail)
 		check(detail.find_child("CommentTitle",true,false) == null, "redundant comment heading is removed")
 		detail.get_node("%CommentDraft").text = "feedback fixture"

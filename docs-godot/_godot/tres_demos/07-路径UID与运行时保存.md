@@ -7,7 +7,7 @@
 | `res://` | Godot 工程根目录；导出后多为打包资源 | `res://theme/app_theme.tres` |
 | `user://` | 应用的用户数据目录；可写 | `user://dynamics-window.cfg` |
 
-本工程根目录是 `client_godot/`，不是本教程所在的 `client/_godot/`。[`project.godot`](../../../client_godot/project.godot) 使用自定义用户目录 `AgentLuo-Godot`。可运行以下临时脚本查看真实绝对路径：
+本工程根目录是 `client-godot/`，不是本教程所在的 `client/_godot/`。[`project.godot`](../../../client-godot/project.godot) 使用自定义用户目录 `AgentLuo-Godot`。可运行以下临时脚本查看真实绝对路径：
 
 ```gdscript
 extends Node
@@ -63,7 +63,7 @@ func _ready() -> void:
 
 ## 与项目现状的对应关系
 
-[`dynamics.tres`](../../../client_godot/resources/platform/dynamics.tres) 保存 `file_path` 这种配置；[`godot_settings_store.gd`](../../../client_godot/src/storage/godot_settings_store.gd) 使用 `ConfigFile` 写入 `user://*.cfg`。因此 `ResourceSaver` 的例子是 API 教学，不是建议把项目现有存储方案替换掉。
+[`dynamics.tres`](../../../client-godot/resources/platform/dynamics.tres) 保存 `file_path` 这种配置；[`godot_settings_store.gd`](../../../client-godot/src/storage/godot_settings_store.gd) 使用 `ConfigFile` 写入 `user://*.cfg`。因此 `ResourceSaver` 的例子是 API 教学，不是建议把项目现有存储方案替换掉。
 
 ## `ResourceLoader` 的错误处理
 

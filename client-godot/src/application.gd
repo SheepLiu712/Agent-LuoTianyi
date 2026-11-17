@@ -13,6 +13,7 @@ extends Control
 const Services = preload("res://src/composition/application_services.gd")
 const LogSchema = preload("res://src/storage/log_schema.gd")
 const LogEvents = preload("res://src/storage/log_events.gd")
+const TlsTrust = preload("res://src/network/tls_trust.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const LoginPage = preload("res://scenes/ui/pages/account_view.tscn")
 const Workspace = preload("res://scenes/ui/pages/chat_workspace.tscn")
@@ -115,6 +116,7 @@ func _init_services_and_logging() -> void:
 	_log.write_failed.connect(func(error): push_warning("Client log write failed: %s" % error))
 	_log.ensure_ready()
 	_log.record_as("business", "app_started", {"phase":"starting", "reason":"normal", "uptime_ms":0, "pid":runtime.process_id()})
+	_log.record_as("system", "system_tls_trust", TlsTrust.event_fields())
 	_log_previous_incomplete()
 	_record_startup_phase("services_ready")
 
@@ -174,7 +176,7 @@ func _mount_account_session() -> void:
 	_chat = _services.chat
 	_lifecycle = preload("res://src/application/account_lifecycle.gd").new(_chat, _models, _dynamics, appearance, world, devices, _services.avatar, _log)
 
-	_login_page.setup(_session)
+	_login_page.setup(_session, _services.ui_style)
 	_session.changed.connect(_account_changed)
 	var settings: Resource = _services.settings
 	_restore_settings(settings)
@@ -199,6 +201,7 @@ func _account_changed(state: Dictionary) -> void:
 	_log.record_as("business", "account_state", {
 		"phase":state.phase,
 		"code":"STORAGE_ERROR" if state.storage_error else state.code,
+		"detail":str(state.get("detail", "")),
 		"reason":"account",
 		"level":"WARN" if state.code not in ["", "OK"] or state.storage_error else "INFO",
 		"uptime_ms":Time.get_ticks_msec() - _started_msec,

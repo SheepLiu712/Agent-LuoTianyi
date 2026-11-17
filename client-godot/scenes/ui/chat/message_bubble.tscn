@@ -127,3 +127,24 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 12
 horizontal_alignment = 2
 autowrap_mode = 3
+
+[node name="FailureActions" type="HBoxContainer" parent="Row/Body/MessageColumn"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+alignment = 2
+theme_override_constants/separation = 8
+
+[node name="RetryButton" type="Button" parent="Row/Body/MessageColumn/FailureActions"]
+unique_name_in_owner = true
+layout_mode = 2
+flat = true
+theme_override_font_sizes/font_size = 12
+text = "重试"
+
+[node name="DeleteButton" type="Button" parent="Row/Body/MessageColumn/FailureActions"]
+unique_name_in_owner = true
+layout_mode = 2
+flat = true
+theme_override_font_sizes/font_size = 12
+text = "删除"

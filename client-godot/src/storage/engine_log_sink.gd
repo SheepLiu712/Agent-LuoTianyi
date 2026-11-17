@@ -1,6 +1,21 @@
 extends Logger
 
 const WINDOW_MS := 1000
+## Godot 的 TLS 报错会把 mbedTLS 原始负码直接打进 detail；这里补上名称，避免只能靠猜。
+const MBEDTLS_ERRORS := {
+	-9984: "MBEDTLS_ERR_X509_CERT_VERIFY_FAILED",
+	-29312: "MBEDTLS_ERR_SSL_PEER_VERIFY_FAILED",
+	-30592: "MBEDTLS_ERR_SSL_FATAL_ALERT_MESSAGE",
+	-28928: "MBEDTLS_ERR_SSL_BAD_INPUT_DATA",
+	-32512: "MBEDTLS_ERR_SSL_CONN_EOF",
+}
+const MBEDTLS_CAUSES := {
+	-9984: "certificate_verify_failed",
+	-29312: "peer_verify_failed",
+	-30592: "fatal_alert",
+	-28928: "bad_input",
+	-32512: "connection_eof",
+}
 
 var _logger: RefCounted
 var _windows := {}
@@ -25,17 +40,22 @@ func _save(function: String, file: String, line: int, code: String, rationale: S
 		return
 	if not window.is_empty():
 		_emit_summary(key, window)
-	_windows[key] = {"started":now, "suppressed":0, "code":resolved, "detail":rationale, "warning":error_type == 1}
+	var annotated := tls_detail(rationale if not rationale.is_empty() else code)
+	_windows[key] = {"started":now, "suppressed":0, "code":resolved, "detail":annotated.detail,
+		"mbedtls_code":annotated.mbedtls_code, "mbedtls_name":annotated.mbedtls_name, "warning":error_type == 1}
 	var warning := error_type == 1
 	var fields := {
 		"module": "engine",
 		"code": resolved,
-		"detail": rationale if not rationale.is_empty() else code,
+		"detail": annotated.detail,
 		"stack": frames,
 		"phase": "warning" if warning else "error",
 		"count": 1,
 		"level": "WARN" if warning else "ERROR",
 	}
+	var tls_data := _tls_data(annotated)
+	if not tls_data.is_empty():
+		fields.data = tls_data
 	_logger.record_as("system", "engine_warning" if warning else "engine_error", fields)
 
 ## 由主线程每帧调用；没有窗口时立即返回，不产生额外开销。
@@ -65,9 +85,52 @@ func _emit_summary(key: String, window: Dictionary) -> void:
 		"phase":"warning" if warning else "error",
 		"count":count,
 		"level":"WARN" if warning else "ERROR",
-		"data":{"window_ms":WINDOW_MS},
 	}
+	var tls_data := _tls_data(window)
+	tls_data.window_ms = WINDOW_MS
+	fields.data = tls_data
 	_logger.record_as("system", "engine_warning_repeated" if warning else "engine_error_repeated", fields)
+
+
+## 把 “TLS handshake error: -9984” 这类引擎原文补成 “-9984 (MBEDTLS_ERR_...)”。
+static func tls_detail(rationale: String) -> Dictionary:
+	var marker := "TLS handshake error:"
+	var index := rationale.find(marker)
+	if index < 0:
+		return {"detail":rationale, "mbedtls_code":0, "mbedtls_name":""}
+	var rest := rationale.substr(index + marker.length()).strip_edges()
+	var digits := ""
+	var offset := 0
+	while offset < rest.length():
+		var code_point := rest.unicode_at(offset)
+		var character := rest.substr(offset, 1)
+		if character == "-" or (code_point >= 48 and code_point <= 57):
+			digits += character
+			offset += 1
+		else:
+			break
+	if digits.is_empty() or digits == "-":
+		return {"detail":rationale, "mbedtls_code":0, "mbedtls_name":""}
+	var mbedtls_code := int(digits)
+	var mbedtls_name := str(MBEDTLS_ERRORS.get(mbedtls_code, ""))
+	if mbedtls_name.is_empty():
+		return {"detail":rationale, "mbedtls_code":mbedtls_code, "mbedtls_name":""}
+	return {"detail":"%s (%s)" % [rationale, mbedtls_name], "mbedtls_code":mbedtls_code, "mbedtls_name":mbedtls_name}
+
+
+static func _tls_data(annotated: Dictionary) -> Dictionary:
+	var code := int(annotated.get("mbedtls_code", 0))
+	if code == 0:
+		return {}
+	var data := {"mbedtls_code":code, "mbedtls_name":str(annotated.mbedtls_name), "tls_stage":"handshake"}
+	var cause := tls_cause(code)
+	if not cause.is_empty():
+		data.tls_cause = cause
+	return data
+
+
+static func tls_cause(code: int) -> String:
+	return str(MBEDTLS_CAUSES.get(code, ""))
 
 func _engine_code(error_type: int, code: String) -> String:
 	match error_type:
