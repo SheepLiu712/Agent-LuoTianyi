@@ -1,15 +1,16 @@
 """匿名取消仍能打断旧回复，并允许下一轮回答和记忆检索继续。"""
 
 import asyncio
-from uuid import uuid4
 
 import pytest
 from support.aliyun_realtime_speech import FakeAliyunWebSocket
-from support.call_omni import _eventually, create_stage, factory, send_reply
+from support.call_omni import _eventually, create_stage, send_reply
 from support.call_omni import call_setup as call_setup
 from support.stage_lifecycle import finish_call
 
 from src.domain.call.omni import MemoryLookupRequested, MemoryLookupResult, ReplyFinished, ReplySegment, ReplyStarted
+
+from .test_call_omni import _open_owned_session
 
 
 async def cancel(socket):
@@ -58,7 +59,7 @@ async def test_anonymous_interruption_stops_playback_and_next_reply_survives(cal
 @pytest.mark.parametrize("new_turn", [False, True], ids=["sole-reply", "new-turn-before-local-cancel"])
 async def test_anonymous_cancel_settles_generation_and_does_not_block_memory_reply(new_turn):
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     stream = session.events()
     try:
         await send_reply(socket, text="未完成", item_id=None, done=False)
@@ -101,7 +102,7 @@ async def test_anonymous_cancel_settles_generation_and_does_not_block_memory_rep
 @pytest.mark.asyncio
 async def test_ambiguous_anonymous_cancel_reports_candidates_without_guessing():
     socket = FakeAliyunWebSocket()
-    session = await factory(socket).open(uuid4(), "背景")
+    session = await _open_owned_session(socket)
     try:
         await send_reply(socket, response_id="old-one", item_id=None, text="", done=False)
         await send_reply(socket, response_id="old-two", item_id=None, text="", done=False)
