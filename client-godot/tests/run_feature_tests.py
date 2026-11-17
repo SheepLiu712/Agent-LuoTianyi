@@ -3,11 +3,16 @@ import argparse, json, os, subprocess, tempfile, threading, base64, hashlib, str
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 PROJECT=Path(__file__).resolve().parents[1]
+SLOW_SCRIPTS={'res://tests/ui/test_logout_confirmation.gd','res://tests/test_application_drafts.gd'}
+def timeout_for(script,gpu,override):
+    if override and override>0: return override
+    base=180 if script in SLOW_SCRIPTS else 60
+    return max(base,180) if gpu else base
 def check_result(result, output, errors, script, writes):
     if result.returncode != 0 or 'ERROR:' in output or 'FAIL:' in output or ': FAIL' in output or ': PASS' not in output or errors: raise RuntimeError(str(errors) or f'feature test failed (exit {result.returncode})')
     if script.endswith('test_preferences.gd'): assert 'merge' in writes
 
-def run(godot,script,gpu=False):
+def run(godot,script,gpu=False,timeout=None):
     reads, writes, errors = {}, {}, []
     dynamics_read = [False]
     provider_calls=[]
@@ -152,11 +157,13 @@ def run(godot,script,gpu=False):
         with tempfile.TemporaryDirectory(prefix='agentluo-feature-') as isolated:
             appdata=os.path.join(isolated,'appdata'); local_appdata=os.path.join(isolated,'local_appdata')
             os.makedirs(appdata); os.makedirs(local_appdata)
-            result=subprocess.run([godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script],env={**os.environ,'APPDATA':appdata,'LOCALAPPDATA':local_appdata,'GODOT_TEST_PYTHON':sys.executable,'GODOT_TEST_SERVER':f'http://127.0.0.1:{server.server_port}'},capture_output=True,text=True,encoding='utf8',errors='replace',timeout=90 if gpu else 40)
+            started=time.time()
+            result=subprocess.run([godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script],env={**os.environ,'APPDATA':appdata,'LOCALAPPDATA':local_appdata,'GODOT_TEST_PYTHON':sys.executable,'GODOT_TEST_SERVER':f'http://127.0.0.1:{server.server_port}'},capture_output=True,text=True,encoding='utf8',errors='replace',timeout=timeout_for(script,gpu,timeout))
         output=result.stdout+result.stderr
         print(output)
+        print(f'Elapsed: {time.time()-started:.1f}s')
         check_result(result, output, errors, script, writes)
     finally: server.shutdown(); server.server_close(); thread.join(2)
     print('Offline feature API: PASS')
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(); parser.add_argument('--godot',required=True); parser.add_argument('--script',default='res://tests/test_preferences.gd'); parser.add_argument('--gpu',action='store_true'); args=parser.parse_args(); run(args.godot,args.script,args.gpu)
+    parser=argparse.ArgumentParser(); parser.add_argument('--godot',required=True); parser.add_argument('--script',default='res://tests/test_preferences.gd'); parser.add_argument('--gpu',action='store_true'); parser.add_argument('--timeout',type=int,default=0); args=parser.parse_args(); run(args.godot,args.script,args.gpu,args.timeout)

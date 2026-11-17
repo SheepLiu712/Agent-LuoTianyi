@@ -15,6 +15,11 @@ func until(predicate: Callable) -> bool:
 	while not predicate.call() and Time.get_ticks_msec() < deadline: await process_frame
 	return predicate.call()
 
+func until_ms(predicate: Callable, milliseconds: int) -> bool:
+	var deadline := Time.get_ticks_msec() + milliseconds
+	while not predicate.call() and Time.get_ticks_msec() < deadline: await process_frame
+	return predicate.call()
+
 func click(button: Button) -> void:
 	if DisplayServer.get_name() == "headless":
 		button.pressed.emit()
@@ -65,7 +70,7 @@ func run() -> void:
 	var logs = app.find_child("LogWindow", true, false)
 	workspace.get_node("%NavSettings").pressed.emit()
 	var settings = app.find_child("SettingsWindow", true, false)
-	check(await until(func(): return settings.visible), "settings opens after prewarm")
+	check(await until_ms(func(): return settings.visible, 1000), "settings opens promptly after prewarm")
 	var field = settings.find_child("CustomContextField", true, false)
 	check(await until(func(): return field.editable), "preferences loaded")
 	field.text = "retain settings on cancel"
@@ -97,7 +102,7 @@ func run() -> void:
 	await click(dialog.get_cancel_button())
 	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
-	check(await until(func(): return settings.visible), "settings reopens after prewarm")
+	check(await until_ms(func(): return settings.visible, 1000), "settings reopens promptly after prewarm")
 	await click(settings.get_node("%LogoutButton"))
 	await inspect_dialog(dialog, settings)
 	await click(dialog.get_ok_button())
@@ -106,7 +111,7 @@ func run() -> void:
 	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"fail_save", "password":"synthetic", "request_token":false}, false)
 	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
-	check(await until(func(): return settings.visible), "settings opens for the second account")
+	check(await until_ms(func(): return settings.visible, 1000), "settings opens promptly for the second account")
 	field = settings.find_child("CustomContextField", true, false)
 	check(await until(func(): return field.editable), "second account preferences loaded")
 	field.text = "failed save must retain this"

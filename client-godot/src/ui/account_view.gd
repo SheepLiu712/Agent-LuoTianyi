@@ -472,6 +472,8 @@ static func _is_tls_failure(detail: String) -> bool:
 ## 探测结果比单次登录失败更能说明失败发生在链路哪一段。
 static func _probe_status_text(result: Dictionary, fallback: String) -> String:
 	var target: Dictionary = result.get("target", {})
+	if str(target.get("stage", "")) == "INSECURE":
+		return "服务器地址必须使用 HTTPS；仅本机回环地址允许明文 HTTP。"
 	if str(target.get("stage", "")) != "TLS":
 		return fallback
 	if bool(result.get("baseline", {}).get("ok", false)):
@@ -487,7 +489,8 @@ static func _probe_text(entry: Dictionary) -> String:
 	if stage == "HTTP" and status >= 400:
 		return "服务器响应异常 %d %dms" % [status, elapsed]
 	var label: String = {"HTTP":"正常", "DNS":"DNS 解析失败", "TCP":"连接失败", "TLS":"TLS 证书校验失败",
-		"TIMEOUT":"连接超时", "CANCELLED":"已取消"}.get(stage, "连接失败")
+		"TIMEOUT":"连接超时", "CANCELLED":"已取消", "SKIPPED":"已跳过",
+		"INSECURE":"必须使用 HTTPS"}.get(stage, "连接失败")
 	return "%s %dms" % [label, elapsed]
 
 func _is_error_code(code: String) -> bool:

@@ -17,6 +17,7 @@ func run() -> void:
 	root.add_child(probe)
 	await _check_closed_port(probe)
 	await _check_invalid_address(probe)
+	await _check_insecure_address(probe)
 	probe.queue_free()
 	await process_frame
 	print("Connectivity probe: ", "PASS" if failures.is_empty() else "FAIL")
@@ -50,3 +51,8 @@ func _check_invalid_address(probe: Node) -> void:
 	var result: Dictionary = await probe.run("")
 	check(str(result.get("verdict", "")) == "invalid_address", "empty address is rejected before any request")
 	check(str(result.get("baseline", {}).get("stage", "")) == "INVALID", "invalid probe marks first line invalid")
+
+func _check_insecure_address(probe: Node) -> void:
+	var result: Dictionary = await probe.run("http://example.com")
+	check(str(result.get("verdict", "")) == "insecure_address", "non-loopback http is rejected before requesting")
+	check(str(result.get("target", {}).get("code", "")) == "INSECURE_SERVER", "insecure address reports its reason")

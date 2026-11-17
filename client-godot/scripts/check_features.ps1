@@ -1,4 +1,4 @@
-param([string]$Godot, [Parameter(Mandatory=$true)][string]$Python)
+param([string]$Godot, [Parameter(Mandatory=$true)][string]$Python, [int]$TimeoutSeconds = 0)
 . (Join-Path $PSScriptRoot 'common.ps1')
 $engine = Resolve-Godot $Godot
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_dynamics_reading_position.gd') 'dynamics-reading-position' -RequirePass
@@ -9,7 +9,9 @@ $groups = @{
 }
 foreach ($runner in $groups.Keys) {
     foreach ($test in $groups[$runner]) {
-        & $Python (Join-Path $ProjectRoot "tests/$runner") --godot $engine --script "res://tests/$test"
+        $timeoutArgs = @()
+        if ($TimeoutSeconds -gt 0) { $timeoutArgs = @('--timeout', "$TimeoutSeconds") }
+        & $Python (Join-Path $ProjectRoot "tests/$runner") --godot $engine --script "res://tests/$test" @timeoutArgs
         if ($LASTEXITCODE -ne 0) { throw "$test failed." }
     }
 }

@@ -53,8 +53,14 @@ def main() -> None:
     docs_only = bool(paths) and all(
         path.parts[0] == "docs" and path.suffix == ".md" for path in paths
     )
+    client_godot = any(
+        path.parts[0] == "client-godot"
+        or path in {Path(".gitignore"), Path(".github/workflows/ci.yml")}
+        for path in paths
+    )
     if args.command == "classify":
         print("docs_only=" + str(docs_only).lower())
+        print("client_godot=" + str(client_godot).lower())
     elif docs_only:
         check_links(paths)
     else:

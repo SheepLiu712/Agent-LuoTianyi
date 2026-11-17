@@ -46,6 +46,10 @@ func _run() -> void:
 	check(await until(func(): return events.any(func(e): return e.type == "heartbeat_seen" and e.payload.ping_id == 2)), "heartbeat repeats after ten seconds")
 	now_ms += 20000
 	transport._ping_sent_at = now_ms - 16000
+	transport._note_received({"type":"agent_message", "payload":{"text":"still alive"}}, 1, now_ms)
+	check(transport._ping_sent_at == -1, "any inbound packet clears the pending heartbeat")
+	transport._tick_heartbeat(now_ms)
+	transport._ping_sent_at = now_ms - 16000
 	transport._tick_heartbeat(now_ms)
 	check(transport.get_state().phase == "reconnecting", "unanswered heartbeat marks a half-open socket dead")
 	transport.stop()
@@ -72,7 +76,8 @@ func _run() -> void:
 	transport.start(session("bad"))
 	check(await until(func(): return errors.has("INVALID_RESPONSE")), "malformed wire input reports safe system error")
 	transport.start(session("policy"))
-	check(await until(func(): return transport.get_state().phase == "auth_rejected"), "authentication policy close is terminal even with coalesced close frame")
+	check(await until(func(): return transport.get_state().phase == "reconnecting"), "temporary auth exhaustion retries instead of blacklisting")
+	check(transport.get_state().code == "AUTH_ATTEMPTS_EXCEEDED", "temporary auth code is preserved")
 	transport.stop()
 	transport.stop()
 	transport.queue_free()

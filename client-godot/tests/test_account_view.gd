@@ -95,23 +95,7 @@ func run() -> void:
 		check(not has_text(view, "用户名或密码错误"), "authentication rejection not duplicated in form")
 		check(password.text == "synthetic-password", "failed login preserves draft")
 		await dismiss_error_dialog()
-		view.select_mode("register")
-		username.text = "test"
-		password.text = "synthetic-password"
-		input(view, "确认密码").text = "different"
-		input(view, "邀请码").text = "invite-test"
-		press(view, "注册")
-		check(has_text(view.get_window(), "两次输入的密码不一致"), "password confirmation checked locally")
-		var mismatch_dialog := error_dialog()
-		check(mismatch_dialog != null and mismatch_dialog.get_current_text().contains("两次输入的密码不一致"),
-			"password mismatch is the current queued error")
-		check(not has_text(view, "两次输入的密码不一致"), "password mismatch not duplicated in form")
-		await dismiss_error_dialog()
-		input(view, "确认密码").text = "synthetic-password"
-		press(view, "注册")
-		await create_timer(0.4).timeout
-		check(has_text(view, "注册成功"), "registration success returns to login")
-		check(password.text.is_empty() and input(view, "邀请码").text.is_empty(), "success clears sensitive fields")
+		await _check_registration(view, username, password)
 		password.text = "synthetic-password"
 		press(view, "登录")
 		await create_timer(0.4).timeout
@@ -123,6 +107,26 @@ func run() -> void:
 	await process_frame
 	DirAccess.remove_absolute(folder + "/account.cfg")
 	DirAccess.remove_absolute(folder)
+
+
+func _check_registration(view: Control, username: LineEdit, password: LineEdit) -> void:
+	view.select_mode("register")
+	username.text = "test"
+	password.text = "synthetic-password"
+	input(view, "确认密码").text = "different"
+	input(view, "邀请码").text = "invite-test"
+	press(view, "注册")
+	check(has_text(view.get_window(), "两次输入的密码不一致"), "password confirmation checked locally")
+	var mismatch_dialog := error_dialog()
+	check(mismatch_dialog != null and mismatch_dialog.get_current_text().contains("两次输入的密码不一致"),
+		"password mismatch is the current queued error")
+	check(not has_text(view, "两次输入的密码不一致"), "password mismatch not duplicated in form")
+	await dismiss_error_dialog()
+	input(view, "确认密码").text = "synthetic-password"
+	press(view, "注册")
+	await create_timer(0.4).timeout
+	check(has_text(view, "注册成功"), "registration success returns to login")
+	check(password.text.is_empty() and input(view, "邀请码").text.is_empty(), "success clears sensitive fields")
 	print("Account view: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 

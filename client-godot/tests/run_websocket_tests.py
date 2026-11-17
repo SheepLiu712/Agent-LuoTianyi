@@ -71,7 +71,7 @@ def run(godot, script="res://tests/test_websocket_transport.gd", gpu=False):
             return True
         if username == "policy":
             send("auth_error", {"code": "AUTH_ATTEMPTS_EXCEEDED"}, auth["client_msg_id"])
-            socket.close(1008)
+            socket.recv(timeout=3)
             return True
         if username == "slow":
             try:

@@ -7,17 +7,18 @@ const Events = preload("res://src/storage/log_events.gd")
 const JsonRequest = preload("res://src/network/json_request.gd")
 const ServerAddress = preload("res://src/domain/server_address.gd")
 
-const BASELINE_URL := "https://www.baidu.com/robots.txt"
 const TARGET_ROUTE := "/auth/public_key"
 const PROBE_TIMEOUT := 5.0
 const PROBE_BODY_LIMIT := 64 * 1024
 
 var _logger: RefCounted
+var _baseline_url := ""
 var _generation := 0
 var _active: Node
 
-func _init(logger: RefCounted = null) -> void:
+func _init(logger: RefCounted = null, baseline_url: String = "") -> void:
 	_logger = logger
+	_baseline_url = baseline_url.strip_edges()
 
 func run(base: String) -> Dictionary:
 	var generation := begin()
@@ -29,8 +30,18 @@ func run(base: String) -> Dictionary:
 			"verdict":"invalid_address", "duration_ms":0}
 		Events.probe(_logger, rejected)
 		return rejected
+	if not ServerAddress.allows_insecure(address):
+		var insecure := {"ok":false, "stage":"INSECURE", "code":"INSECURE_SERVER",
+			"detail":"服务器地址必须使用 HTTPS（仅回环地址允许 HTTP）", "duration_ms":0,
+			"http_status":0, "origin":Schema.origin_for(address)}
+		var blocked := {"ok":false, "baseline":insecure, "target":insecure,
+			"verdict":"insecure_address", "duration_ms":0}
+		Events.probe(_logger, blocked)
+		return blocked
 	var started := Time.get_ticks_usec()
-	var baseline := await _request(BASELINE_URL, generation)
+	var baseline := {"ok":true, "stage":"SKIPPED", "code":"OK", "detail":"", "duration_ms":0, "http_status":0, "origin":""}
+	if not _baseline_url.is_empty():
+		baseline = await _request(_baseline_url, generation)
 	var target := await _request(address + TARGET_ROUTE, generation)
 	if generation != _generation:
 		return {"ok":false, "cancelled":true, "baseline":baseline, "target":target,
@@ -99,6 +110,8 @@ static func stage_for(detail: String, status: int = 0) -> String:
 static func verdict_for(baseline: Dictionary, target: Dictionary) -> String:
 	var baseline_ok := bool(baseline.get("ok", false))
 	var target_ok := bool(target.get("ok", false))
+	if str(baseline.get("stage", "")) == "SKIPPED":
+		return "ok" if target_ok else "target_only_fail"
 	if baseline_ok and target_ok:
 		return "ok"
 	if baseline_ok:

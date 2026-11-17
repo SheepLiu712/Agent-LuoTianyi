@@ -8,6 +8,8 @@ signal event_received(event: Dictionary)
 signal system_error(code: String)
 const Outbox = preload("res://src/network/reliable_outbox.gd")
 const MAX_PACKET := 8 * 1024 * 1024
+const TEMPORARY_AUTH := ["AUTH_ATTEMPTS_EXCEEDED", "AUTH_TIMEOUT", "AUTH_UNAVAILABLE"]
+const CONFIG_AUTH := ["MISSING_AUTH_FIELDS"]
 var _clock: Callable
 var _outbox = Outbox.new()
 var _peer: WebSocketPeer
@@ -15,6 +17,7 @@ var _session: Dictionary = {}
 var _state := {"phase":"idle", "code":""}
 var _fingerprint := ""
 var _rejected := ""
+var _rejected_code := ""
 var _deadline := 0
 var _next_connect := 0
 var _reconnect_attempt := 0
@@ -53,11 +56,13 @@ func start(session: Dictionary) -> Error:
 	if fingerprint == _rejected:
 		if _logger != null:
 			_logger.record_as("network", "network_ws_auth", {"action":"auth", "outcome":"denied",
-				"reason_code":"AUTH_REJECTED", "code":"AUTH_REJECTED",
+				"reason_code":_rejected_code, "code":_rejected_code,
 				"subject":Schema.hash_subject(base, str(session.username)), "channel":"ws",
 				"route":"/chat_ws", "duration_ms":0, "trace_id":Schema.new_trace_id("ws")})
-		_set_state("auth_rejected", "AUTH_REJECTED")
+		_set_state("auth_rejected", _rejected_code)
 		return ERR_UNAUTHORIZED
+	_rejected = ""
+	_rejected_code = ""
 	_session = {"server":base, "username":session.username, "message_token":session.message_token}
 	_fingerprint = fingerprint
 	_reconnect_attempt = 0
@@ -137,7 +142,7 @@ func _connect_socket(now: int) -> void:
 
 func _handle_event(event: Dictionary, now: int) -> void:
 	if event.type == "auth_error":
-		_reject_auth(_error_code(event.payload, "AUTH_REJECTED"), _payload_detail(event.payload))
+		_handle_auth_error(event, now)
 		return
 	# 限流、系统未就绪等错误不是凭据失败，不能写永久黑名单。
 	if event.type == "error" and _state.phase == "authenticating":
@@ -163,6 +168,28 @@ func _handle_event(event: Dictionary, now: int) -> void:
 	if _state.phase != "ready":
 		return
 	_dispatch_event(event, now)
+
+
+func _handle_auth_error(event: Dictionary, now: int) -> void:
+	var code := _error_code(event.payload, "AUTH_REJECTED")
+	var detail := _payload_detail(event.payload)
+	if code in TEMPORARY_AUTH:
+		_log_auth(code, detail)
+		_disconnect(now, code, detail)
+	elif code in CONFIG_AUTH:
+		_config_auth_error(code, detail)
+	else:
+		_reject_auth(code, detail)
+
+
+func _config_auth_error(code: String, detail: String) -> void:
+	_log_auth(code, detail)
+	_close_socket()
+	_session.clear()
+	_fingerprint = ""
+	_set_state("auth_config_error", code)
+	_outbox.stop(code)
+	system_error.emit(code)
 func _send_control(type: String, payload: Dictionary, now: int) -> void:
 	var packet := {"type":type, "payload":payload, "client_msg_id":"c-" + Crypto.new().generate_random_bytes(16).hex_encode(),
 		"ts":int(Time.get_unix_time_from_system() * 1000), "reply_to":null}
@@ -206,15 +233,26 @@ func _reject_auth(code: String, detail: String = "") -> void:
 			"trace_id":_connect_trace if Schema.is_trace_id(_connect_trace) else Schema.new_trace_id("ws"),
 			"detail":detail})
 	_rejected = _fingerprint
+	_rejected_code = code
 	_close_socket()
 	_session.clear()
 	_fingerprint = ""
 	_set_state("auth_rejected", code)
-	_outbox.stop("AUTH_REJECTED")
+	_outbox.stop(code)
 	system_error.emit(code)
 
 static func _error_code(payload: Dictionary, fallback: String) -> String:
 	return payload.code if payload.get("code") is String and not payload.code.is_empty() else fallback
+
+func _log_auth(code: String, detail: String = "") -> void:
+	if _logger == null:
+		return
+	_logger.record_as("network", "network_ws_auth", {"action":"auth", "outcome":"denied",
+		"reason_code":code, "code":code,
+		"subject":Schema.hash_subject(str(_session.get("server", "")), str(_session.get("username", ""))),
+		"channel":"ws", "route":"/chat_ws", "duration_ms":0,
+		"trace_id":_connect_trace if Schema.is_trace_id(_connect_trace) else Schema.new_trace_id("ws"),
+		"detail":detail})
 
 func _exit_tree() -> void:
 	stop()
@@ -264,6 +302,8 @@ func _parse_packet(bytes: PackedByteArray) -> Dictionary:
 
 func _note_received(event: Dictionary, bytes: int, now: int) -> void:
 	_last_rx = now
+	# 任何合法入站包都证明连接仍然活跃，长任务期间不能只等 hb_pong。
+	_ping_sent_at = -1
 	if _is_audio_event(event):
 		if _audio_started < 0:
 			_audio_started = now

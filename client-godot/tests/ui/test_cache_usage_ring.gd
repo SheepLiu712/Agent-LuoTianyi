@@ -138,6 +138,7 @@ func run() -> void:
 	await _check_restored_snapshot(store)
 	await _check_scope_isolation(store)
 	await _check_clear_invalidation(page, storage, store)
+	await _check_kib_format()
 	_check_marker()
 	await _check_states(page, ring, storage)
 	window.queue_free()
@@ -227,6 +228,25 @@ func _check_clear_invalidation(page: Control, storage: FakeStorage, store: Resou
 	check(int(store.get_value("storage", "last_scan_at", -1)) == 0, "clearing the cache removes the saved timestamp")
 	var cleared: Variant = store.get_value("storage", "usage_snapshot", {})
 	check(cleared is Dictionary and cleared.is_empty(), "clearing the cache removes the saved snapshot")
+
+
+func _check_kib_format() -> void:
+	var storage := FakeStorage.new()
+	storage.values[APP_DIRECTORY] = {
+		"directory_bytes":2048, "total_bytes":100000, "free_bytes":50000, "file_count":2, "code":"OK",
+	}
+	storage.values[ACCOUNT_DIRECTORY] = {
+		"directory_bytes":1024, "total_bytes":-1, "free_bytes":-1, "file_count":1, "code":"OK",
+	}
+	var store = Store.new("user://usage-ring-kib-%s.cfg" % Time.get_ticks_usec())
+	store.load_settings()
+	var window := _mount_window(storage, store, SCOPE)
+	var page = window.get_node("%AudioPage")
+	await create_timer(0.1).timeout
+	await _scan(page)
+	check(page.get_node("%ClientValue").text == "2.00 KiB", "kilobyte usage keeps its readable unit")
+	check(page.get_node("%AccountNote").text.contains("1.00 KiB"), "account cache keeps its readable unit")
+	window.queue_free()
 
 
 func _check_marker() -> void:
