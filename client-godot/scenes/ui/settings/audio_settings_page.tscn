@@ -64,9 +64,16 @@ text = "整盘 --"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(96, 40)
 layout_mode = 2
-tooltip_text = "重新测量 Godot 客户端数据与所在磁盘容量。"
+tooltip_text = "扫描 Godot 客户端数据与所在磁盘容量。"
 theme_type_variation = &"SettingsButton"
-text = "刷新容量"
+text = "开始扫描"
+
+[node name="LastScan" type="Label" parent="Column/StorageCard/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "尚未扫描"
+autowrap_mode = 3
 
 [node name="UsageFlow" type="HFlowContainer" parent="Column/StorageCard/Content"]
 layout_mode = 2
@@ -109,7 +116,7 @@ horizontal_alignment = 1
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"SettingsHelpText"
-text = "容量数据扫描中"
+text = "尚未扫描"
 horizontal_alignment = 1
 
 [node name="UsageLegend" type="VBoxContainer" parent="Column/StorageCard/Content/UsageFlow"]

@@ -84,8 +84,10 @@ func mount(host: Node, injected_account: Node, layout_path: String, encryption: 
 func create_settings() -> Dictionary:
 	var controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(15.0,8*1024*1024,log),log)
 	var window = preload("res://scenes/ui/windows/settings_window.tscn").instantiate()
+	var session: Dictionary = account.get_session()
+	var scope := "%s\n%s" % [str(session.get("server", "")), str(session.get("username", ""))]
 	window.set_ui_style(ui_style)
-	window.setup(controller,models,executor,chat.clear_cache,storage,cache.get_directory(),_data_root)
+	window.setup(controller,models,executor,chat.clear_cache,storage,cache.get_directory(),_data_root,settings,scope)
 	window.set_media_migration(media_migration)
 	window.set_avatar_source(avatar)
 	return {"window":window,"start":func(): controller.start(account.get_session())}

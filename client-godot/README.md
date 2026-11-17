@@ -121,7 +121,7 @@ $env:GODOT_TEST_PYTHON = 'D:\anaconda\python.exe'
 
 设置最小尺寸的可见滚动验收已并入`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`：验证720×640及四档内容缩放下表单底部可滚动到达且不覆盖固定操作栏。headless分支只检查状态，不能代替该GPU布局验收。
 
-历史反馈已体现在现行行为说明与测试中。桌面使用系统窗框，内部下拉为嵌入式 Godot 圆角控件；缓存与导入页提供 StorageService 占用圆环、按用户天数清理与 Python 媒体导入，未知容量显示“--%”。PNG/JPEG/WebP/BMP 文件及 Ctrl+V 已接入正式图片预览/发送，未提交附件仅本次运行保留。
+历史反馈已体现在现行行为说明与测试中。桌面使用系统窗框，内部下拉为嵌入式 Godot 圆角控件；缓存与导入页提供 StorageService 占用圆环、按用户天数清理与 Python 媒体导入，容量只在用户点击“开始扫描/重新扫描”时读取并保存上次扫描时间与快照，未知容量显示“--%”。PNG/JPEG/WebP/BMP 文件及 Ctrl+V 已接入正式图片预览/发送，未提交附件仅本次运行保留。
 
 GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及既有本地API测试依赖；Pillow仅用于测试，不进入客户端运行依赖。磁盘查询的Windows实现已实测，移动端需复用StorageService接口并在目标构建注册容量适配，当前不宣称完成Android/iOS移植。
 

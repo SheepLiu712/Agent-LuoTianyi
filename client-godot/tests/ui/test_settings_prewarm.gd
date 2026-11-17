@@ -20,6 +20,14 @@ class ScanProbe extends "res://src/storage/python_media_migration_port.gd":
 		return target_path
 
 
+class UsageProbe extends "res://src/storage/storage_service.gd":
+	var query_count := 0
+
+	func query_directory(_path: String) -> Dictionary:
+		query_count += 1
+		return {"directory_bytes":1, "total_bytes":1000, "free_bytes":500, "file_count":1, "code":"OK"}
+
+
 func _initialize() -> void:
 	_run.call_deferred()
 
@@ -38,13 +46,16 @@ func _run() -> void:
 	await process_frame
 	host.hide()
 	var probe := ScanProbe.new()
+	var usage := UsageProbe.new()
 	page.set_media_migration(probe)
-	page.setup(func(_days: int) -> Error: return OK, null, "", probe)
+	page.setup(func(_days: int) -> Error: return OK, usage, "user://prewarm-cache", probe, "user://prewarm-cache")
 	await process_frame
 	check(probe.scan_count == 0, "hidden prewarm does not scan media")
+	check(usage.query_count == 0, "hidden prewarm does not scan capacity")
 	host.show()
 	await process_frame
 	check(probe.scan_count == 0, "showing the page does not scan media")
+	check(usage.query_count == 0, "showing the page does not scan capacity")
 	var status: Label = page.get_node("%MigrationStatus")
 	var migrate: Button = page.get_node("%MigrateMedia")
 	var panel: Control = page.get_node("%MigrationStatusPanel")
@@ -55,6 +66,7 @@ func _run() -> void:
 	host.show()
 	await process_frame
 	check(probe.scan_count == 0 and not panel.visible, "reopening keeps a saved target for explicit detection")
+	check(usage.query_count == 0, "reopening does not scan capacity")
 	check(migrate.text == "重新检测" and not migrate.disabled, "saved target offers redetection")
 	migrate.pressed.emit()
 	await process_frame

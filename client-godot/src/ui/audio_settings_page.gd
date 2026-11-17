@@ -3,7 +3,17 @@ extends MarginContainer
 const StorageService = preload("res://src/storage/storage_service.gd")
 const MigrationPort = preload("res://src/storage/python_media_migration_port.gd")
 const StatusBanner = preload("res://src/ui/status_banner.gd")
-const USAGE_REFRESH_MS := 2000
+const SETTINGS_SECTION := "storage"
+const SETTINGS_LAST_SCAN := "last_scan_at"
+const SETTINGS_SNAPSHOT := "usage_snapshot"
+const SNAPSHOT_VERSION := 1
+const BUTTON_START := "开始扫描"
+const BUTTON_RESCAN := "重新扫描"
+const BUTTON_SCANNING := "正在扫描…"
+const LABEL_UNSCANNED := "尚未扫描"
+const LABEL_SCANNING := "扫描中…"
+const LABEL_AVAILABLE := "客户端占磁盘"
+const LABEL_UNAVAILABLE := "容量数据暂不可用"
 const ACTION_START := "start"
 const ACTION_DETECT := "detect"
 const ACTION_IMPORT := "import"
@@ -21,8 +31,11 @@ var _scan_generation := 0
 var _pending_days := 0
 var _migration: MigrationPort
 var _last_imported := 0
-var _usage_refreshed_ms := 0
-var _usage_loaded := false
+var _settings_store: Resource
+var _scope := ""
+var _scanning := false
+var _last_scan_at := 0
+var _has_snapshot := false
 var _scan_ok := false
 var _importable := false
 var _already_imported := false
@@ -36,22 +49,26 @@ func setup(
 	storage_service: StorageService = null,
 	cache_directory: String = "",
 	migration: MigrationPort = null,
-	app_data_directory: String = ""
+	app_data_directory: String = "",
+	settings_store: Resource = null,
+	scope: String = ""
 ) -> void:
 	_clear_cache = clear_cache
 	_storage = storage_service
 	_directory = cache_directory
 	_app_directory = app_data_directory if not app_data_directory.is_empty() else cache_directory
 	_migration = migration
-	_usage_loaded = false
+	_settings_store = settings_store
+	_scope = scope
 	_scan_generation += 1
+	_scanning = false
 	if is_node_ready():
 		%ClearCache.disabled = not _clear_cache.is_valid()
 		_apply_migration()
 		# 设置窗预暖时父 Window 仍隐藏；显示后再恢复未检测状态。
 		if is_visible_in_tree():
 			_reset_import_view()
-			_refresh_usage()
+		_load_saved_usage()
 
 
 ## 设置窗可能在页面就绪后才拿到导入服务，所以允许二次注入。
@@ -95,15 +112,14 @@ func _ready() -> void:
 	%PythonPicker.canceled.connect(func(): %PythonPicker.hide())
 	%ClearDialog.confirmed.connect(_clear)
 	%MigrationDialog.confirmed.connect(_migrate)
-	%RefreshUsage.pressed.connect(_refresh_usage)
+	%RefreshUsage.pressed.connect(_scan_usage)
 	visibility_changed.connect(func():
 		if is_visible_in_tree():
-			_reset_import_view()
-			_refresh_usage_if_needed())
+			_reset_import_view())
 	_apply_migration()
+	_load_saved_usage()
 	if is_visible_in_tree():
 		_reset_import_view()
-		_refresh_usage_if_needed()
 
 
 ## 未接线时导入按钮保持禁用：没有服务就不能让用户以为已经点过了。
@@ -119,7 +135,10 @@ func _apply_migration() -> void:
 		return
 	if not _migration.progress.is_connected(_on_migration_progress):
 		_migration.progress.connect(_on_migration_progress)
-	_on_migration_progress(_migration.get_state())
+	var state: Dictionary = _migration.get_state()
+	# 预暖时同步一次已有进度，不能把历史导入量当成刚刚发生的缓存变化。
+	_last_imported = int(state.get("imported", 0))
+	_on_migration_progress(state)
 
 
 ## 显式检测才扫描：打开页面不自动读盘。
@@ -279,13 +298,13 @@ func _clear() -> void:
 	%ClearCache.disabled = false
 	%OlderThanDays.editable = true
 	if result == OK:
+		_invalidate_usage()
 		_set_cache_status(
 			"已清理本账号全部语音缓存。" if _pending_days == 0 else "已清理本账号 %s 天之前的语音缓存。" % _pending_days,
 			"success"
 		)
 	else:
 		_set_cache_status("部分语音文件被占用，关闭后重试。", "error")
-	_refresh_usage()
 
 
 func _request_migrate() -> void:
@@ -372,12 +391,11 @@ func _set_detection_action() -> void:
 
 
 func _track_imported(imported: int) -> void:
-	if imported != _last_imported:
-		_last_imported = imported
-		if is_visible_in_tree():
-			_refresh_usage_throttled()
-		else:
-			_usage_loaded = false
+	if imported == _last_imported:
+		return
+	_last_imported = imported
+	if imported > 0:
+		_invalidate_usage()
 
 
 func _unavailable(code: String) -> String:
@@ -411,37 +429,32 @@ func _summary(state: Dictionary) -> String:
 			return text
 
 
-func _refresh_usage_if_needed() -> void:
-	if not _usage_loaded:
-		_refresh_usage()
-
-
-func _refresh_usage_throttled() -> void:
-	if not visible:
+## 唯一的容量入口：只有用户点击按钮时才读盘。
+func _scan_usage() -> void:
+	if _scanning:
 		return
-	var now := Time.get_ticks_msec()
-	if now - _usage_refreshed_ms < USAGE_REFRESH_MS:
-		return
-	_usage_refreshed_ms = now
-	_refresh_usage()
-
-
-func _refresh_usage() -> void:
 	_scan_generation += 1
 	var generation := _scan_generation
-	%UsageRing.set_unavailable()
-	%UsagePercent.text = "--%"
-	%UsageState.text = "容量数据扫描中"
-	%StorageTotal.text = "整盘 --"
-	%AccountNote.text = "其中本账号语音缓存：--"
-	_set_usage_legend("--", "--", "--", "--", "--", "--")
-	%RefreshUsage.disabled = true
+	_scanning = true
+	%UsageState.text = LABEL_SCANNING
+	_update_scan_controls()
 	await get_tree().process_frame
+	if generation != _scan_generation or not is_inside_tree():
+		return
 	var root_directory := _app_directory if not _app_directory.is_empty() else _directory
 	var root_data := _query_directory(root_directory)
 	var cache_data := root_data if _directory == root_directory else _query_directory(_directory)
 	if generation != _scan_generation:
 		return
+	_scanning = false
+	_has_snapshot = _is_renderable(root_data, cache_data)
+	_last_scan_at = int(Time.get_unix_time_from_system())
+	_render_usage(root_data, cache_data)
+	_update_scan_controls()
+	_persist_usage(root_data, cache_data)
+
+
+func _render_usage(root_data: Dictionary, cache_data: Dictionary) -> void:
 	var client: int = root_data.get("directory_bytes", -1)
 	var total: int = root_data.get("total_bytes", -1)
 	var free: int = root_data.get("free_bytes", -1)
@@ -455,7 +468,7 @@ func _refresh_usage() -> void:
 		var other_used := _segment_bytes(segments, "other")
 		var free_used := _segment_bytes(segments, "free")
 		%UsagePercent.text = _format_share(client_used, total)
-		%UsageState.text = "客户端占磁盘"
+		%UsageState.text = LABEL_AVAILABLE
 		%StorageTotal.text = "整盘 %s" % _format_bytes(total)
 		_set_usage_legend(
 			_format_bytes(client_used), _format_share(client_used, total),
@@ -466,12 +479,120 @@ func _refresh_usage() -> void:
 	else:
 		%UsageRing.set_unavailable()
 		%UsagePercent.text = "--%"
-		%UsageState.text = "容量数据暂不可用"
+		%UsageState.text = LABEL_UNAVAILABLE
 		%StorageTotal.text = "整盘 --"
 		_set_usage_legend("--", "--", "--", "--", "--", "--")
 		%AccountNote.text = "其中本账号语音缓存：%s" % (_format_bytes(account) if account >= 0 else "暂不可用")
-	_usage_loaded = true
-	%RefreshUsage.disabled = false
+
+
+func _render_unscanned() -> void:
+	%UsageRing.set_unavailable()
+	%UsagePercent.text = "--%"
+	%UsageState.text = LABEL_UNSCANNED
+	%StorageTotal.text = "整盘 --"
+	_set_usage_legend("--", "--", "--", "--", "--", "--")
+	%AccountNote.text = "其中本账号语音缓存：--"
+	_update_scan_controls()
+
+
+func _update_scan_controls() -> void:
+	%RefreshUsage.disabled = _scanning
+	%RefreshUsage.text = BUTTON_SCANNING if _scanning else (
+		BUTTON_RESCAN if _has_snapshot or _last_scan_at > 0 else BUTTON_START)
+	%LastScan.text = "尚未扫描" if _last_scan_at <= 0 else "上次扫描：%s" % _format_scan_time(_last_scan_at)
+
+
+func _format_scan_time(timestamp: int) -> String:
+	var bias: int = int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	return Time.get_datetime_string_from_unix_time(timestamp + bias).replace("T", " ").substr(0, 16)
+
+
+func _is_renderable(root_data: Dictionary, cache_data: Dictionary) -> bool:
+	var client := int(root_data.get("directory_bytes", -1))
+	var total := int(root_data.get("total_bytes", -1))
+	var free := int(root_data.get("free_bytes", -1))
+	return client >= 0 and total > 0 and free >= 0 and free <= total
+
+
+func _load_saved_usage() -> void:
+	_last_scan_at = 0
+	_has_snapshot = false
+	if _settings_store != null:
+		var saved_at: Variant = _settings_store.get_value(SETTINGS_SECTION, SETTINGS_LAST_SCAN, 0)
+		if saved_at is int or saved_at is float:
+			_last_scan_at = maxi(0, int(saved_at))
+		var snapshot: Variant = _settings_store.get_value(SETTINGS_SECTION, SETTINGS_SNAPSHOT, {})
+		if _last_scan_at > 0 and _valid_snapshot(snapshot):
+			_has_snapshot = true
+			var root_data := {
+				"directory_bytes": int(snapshot.app_bytes),
+				"total_bytes": int(snapshot.total_bytes),
+				"free_bytes": int(snapshot.free_bytes),
+			}
+			_render_usage(root_data, {"directory_bytes": int(snapshot.account_bytes)})
+			_update_scan_controls()
+			return
+	_last_scan_at = 0
+	_render_unscanned()
+
+
+func _valid_snapshot(snapshot: Variant) -> bool:
+	if not snapshot is Dictionary:
+		return false
+	if int(snapshot.get("version", 0)) != SNAPSHOT_VERSION:
+		return false
+	if str(snapshot.get("scope", "")) != _scope:
+		return false
+	return _valid_snapshot_bytes(snapshot)
+
+
+func _valid_snapshot_bytes(snapshot: Dictionary) -> bool:
+	for key in ["app_bytes", "total_bytes", "free_bytes", "account_bytes"]:
+		var value: Variant = snapshot.get(key)
+		if not (value is int or value is float):
+			return false
+	var app_bytes := int(snapshot.app_bytes)
+	var total_bytes := int(snapshot.total_bytes)
+	var free_bytes := int(snapshot.free_bytes)
+	var account_bytes := int(snapshot.account_bytes)
+	if app_bytes < 0 or total_bytes <= 0 or free_bytes < 0:
+		return false
+	return free_bytes <= total_bytes and account_bytes >= -1
+
+
+func _persist_usage(root_data: Dictionary, cache_data: Dictionary) -> void:
+	if _settings_store == null:
+		return
+	_settings_store.set_value(SETTINGS_SECTION, SETTINGS_LAST_SCAN, _last_scan_at)
+	_settings_store.set_value(SETTINGS_SECTION, SETTINGS_SNAPSHOT, _snapshot(root_data, cache_data) if _has_snapshot else {})
+	var error: Error = _settings_store.save_settings()
+	if error != OK:
+		push_warning("Storage usage could not be saved (%s)" % error)
+
+
+func _snapshot(root_data: Dictionary, cache_data: Dictionary) -> Dictionary:
+	return {
+		"version": SNAPSHOT_VERSION,
+		"scope": _scope,
+		"app_bytes": int(root_data.get("directory_bytes", -1)),
+		"total_bytes": int(root_data.get("total_bytes", -1)),
+		"free_bytes": int(root_data.get("free_bytes", -1)),
+		"account_bytes": int(cache_data.get("directory_bytes", -1)),
+	}
+
+
+func _invalidate_usage() -> void:
+	_scan_generation += 1
+	_scanning = false
+	_last_scan_at = 0
+	_has_snapshot = false
+	if _settings_store != null:
+		_settings_store.set_value(SETTINGS_SECTION, SETTINGS_LAST_SCAN, 0)
+		_settings_store.set_value(SETTINGS_SECTION, SETTINGS_SNAPSHOT, {})
+		var error: Error = _settings_store.save_settings()
+		if error != OK:
+			push_warning("Storage usage could not be cleared (%s)" % error)
+	_render_unscanned()
 
 
 func _query_directory(path: String) -> Dictionary:

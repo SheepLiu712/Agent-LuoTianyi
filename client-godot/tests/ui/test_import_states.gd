@@ -41,6 +41,14 @@ class ImportProbe extends "res://src/storage/python_media_migration_port.gd":
 		}
 
 
+class UsageProbe extends "res://src/storage/storage_service.gd":
+	var query_count := 0
+
+	func query_directory(_path: String) -> Dictionary:
+		query_count += 1
+		return {"directory_bytes":10, "total_bytes":1000, "free_bytes":500, "file_count":1, "code":"OK"}
+
+
 func _initialize() -> void:
 	_run.call_deferred()
 
@@ -58,14 +66,18 @@ func _run() -> void:
 	host.add_child(page)
 	await process_frame
 	var probe := ImportProbe.new()
+	var usage := UsageProbe.new()
 	page.set_media_migration(probe)
-	page.setup(func(_days: int) -> Error: return OK, null, "", probe)
+	page.setup(func(_days: int) -> Error: return OK, usage, "user://import-cache-account", probe, "user://import-cache-app")
 	await process_frame
 	var status_panel: Control = page.get_node("%MigrationStatusPanel")
 	var status: Label = page.get_node("%MigrationStatus")
 	var migrate: Button = page.get_node("%MigrateMedia")
 	await _check_initial(host, page, probe, status_panel, status, migrate)
-	await _check_import(page, probe, status, migrate)
+	page.get_node("%RefreshUsage").pressed.emit()
+	await create_timer(0.1).timeout
+	check(usage.query_count == 2, "manual scan queries the cache once per directory")
+	await _check_import(page, probe, usage, status, migrate)
 	await _check_new_media(host, probe, status_panel, status, migrate)
 	await _check_no_new(host, probe, status_panel, status, migrate)
 	await _check_failure(host, probe, status_panel, migrate)
@@ -95,13 +107,15 @@ func _check_initial(host: Control, page: Control, probe: ImportProbe,
 	check(migrate.text == "导入媒体…" and not migrate.disabled, "first detection offers import")
 
 
-func _check_import(page: Control, probe: ImportProbe, status: Label, migrate: Button) -> void:
+func _check_import(page: Control, probe: ImportProbe, usage: UsageProbe, status: Label, migrate: Button) -> void:
 	migrate.pressed.emit()
 	await process_frame
 	page.get_node("%MigrationDialog").get_ok_button().pressed.emit()
 	await process_frame
 	check(probe.import_requests == 1, "import action requests a migration")
 	check(status.text.begins_with("已导入") and migrate.disabled, "successful import stays imported until reopen")
+	check(page.get_node("%UsageRing").get_segments().is_empty() and page.get_node("%RefreshUsage").text == "开始扫描", "successful import invalidates the old capacity snapshot")
+	check(usage.query_count == 2, "successful import never rescans capacity automatically")
 
 
 func _check_new_media(host: Control, probe: ImportProbe, status_panel: Control,

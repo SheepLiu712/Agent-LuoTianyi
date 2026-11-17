@@ -84,9 +84,9 @@ python client-godot/tests/run_feature_tests.py --godot 'D:/godot/godot4.7.1/godo
 | ui/test_settings_control_states.gd | run_feature_tests.py --gpu | 延迟/失败读取、重试、保存、六态开关、默认/最小及100/125/150/200%缩放；包含原最小布局Reload滚动验收 |
 | ui/test_settings_export_layout.gd | 源码直接GPU运行；或同版本引擎 `--main-pack <导出PCK> --script <本脚本绝对路径>`（验证目录放置导出的DLL） | 默认/最小尺寸、五个设置模块纵向堆叠、左栏锚点滚动、缓存页流式换行与顶部/底部截图、退出登录与侧栏对齐；release EXE不执行外部script，另用原生输入实测 |
 | ui/test_settings_page_transition.gd | 直接Godot --script，可headless或GPU | 五模块同滚动容器、点击标签平滑滚动、滚轮联动选中态、快速切换后的最终锚点 |
-| ui/test_cache_usage_ring.gd | 直接Godot --script，可headless或GPU | 旧版淡蓝圆底与蓝色圆点、三段字节比例、中心客户端占比、图例数值与配色同步、极小/零/不可用状态 |
+| ui/test_cache_usage_ring.gd | 直接Godot --script，可headless或GPU | 未扫描不读盘、手动首次扫描/扫描中/重新扫描、快照恢复与账号作用域、清理后失效、三段字节比例与极小/零/不可用状态 |
 | ui/test_audio_settings.gd | 直接Godot --script，可headless或GPU | 三卡片顺序、精简文案节点移除、导入入口和仅语音清理确认流程 |
-| ui/test_settings_prewarm.gd | 直接Godot --script，headless | 隐藏预暖不触发媒体扫描，首次可见才执行一次扫描 |
+| ui/test_settings_prewarm.gd | 直接Godot --script，headless | 隐藏预暖与首次显示都不触发媒体或容量扫描 |
 | ui/test_modal_visual_contract.gd | 直接Godot --script；GPU时生成截图 | 确认框/错误框共用样式、无重复 X、危险按钮层级、三档宿主尺寸、扁平/清透圆角与常驻阴影 |
 | ui/test_action_and_icon_styles.gd | 直接Godot --script，GPU时验证真实 hover | 图片/音量图标灰底悬停与焦点、聊天发送键、设置底部三键、动态窗口首开/热切换及详情输入样式 |
 | ui/test_login_presentation.gd | run_feature_tests.py --gpu | 淡蓝圆角、头像光晕、菜单、服务器框、账号历史、记住状态、四档缩放与小屏 |

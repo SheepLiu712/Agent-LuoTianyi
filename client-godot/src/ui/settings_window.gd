@@ -23,6 +23,8 @@ var _notice_kind := ""
 var _ui_style: RefCounted
 var _avatar_source: Node
 var _media_migration: Object
+var _settings_store: Resource
+var _scope := ""
 var _current_page_key := ""
 var _scroll_tween: Tween
 @onready var _preferences_page = %PreferencesPage
@@ -67,7 +69,9 @@ func setup(
 	clear_cache: Callable = Callable(),
 	storage_service: StorageService = null,
 	cache_directory: String = "",
-	app_data_directory: String = ""
+	app_data_directory: String = "",
+	settings_store: Resource = null,
+	scope: String = ""
 ) -> void:
 	_preferences = preferences
 	_models = models
@@ -76,6 +80,8 @@ func setup(
 	_storage_service = storage_service
 	_cache_directory = cache_directory
 	_app_data_directory = app_data_directory
+	_settings_store = settings_store
+	_scope = scope
 
 func _ready() -> void:
 	_profile_page.set_avatar_source(_avatar_source)
@@ -83,7 +89,7 @@ func _ready() -> void:
 	_model_page.setup(_models,_executor)
 	if _ui_style != null:
 		_forward_ui_style()
-	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory, _media_migration, _app_data_directory)
+	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory, _media_migration, _app_data_directory, _settings_store, _scope)
 	%AudioTab.disabled = not _clear_cache.is_valid()
 	%AudioTab.pressed.connect(func(): select_page("audio"))
 	%StyleTab.disabled = _ui_style == null

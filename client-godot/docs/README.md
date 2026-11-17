@@ -7,6 +7,7 @@
 - [日志规范](logging.md)：四域日志、字段、隐私、保留、导出与检索。
 - [打包规范](packaging.md)：目录版、ZIP、单文件自解压、版本字段、图标与发布验证。
 - [测试与门禁](testing.md)：依赖、四组入口、GPU 与验收边界。
+- [原生 DLL 解析](native-dll.md)：`windows_security.dll` 的 PE 结构、四个源码文件、构建与 GDScript 调用链。
 - [开发者查看 SQLite](dev-database.md)：数据库路径、VS Code 插件、表结构与 WAL 注意事项。
 - [PR #186 第四轮整改证据](../../archive/worklog/pr-186/review-186-4th-round.md)：N22–N30 的处理与真实验证结果（原文已归档）。
 - [PR 描述与复审回复草稿](../../archive/worklog/pr-186/pr-186-response-draft.md)：仅供提交推送后的人工更新，不代表远端已更新。
