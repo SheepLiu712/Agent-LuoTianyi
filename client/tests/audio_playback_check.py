@@ -1,8 +1,13 @@
+"""手动试听脚本：读取 example_audio.wav，做 base64 往返后用 PyAudio 播放。
+
+不由 pytest 自动收集；在 client 目录执行 python tests/audio_playback_check.py 手动运行。
+"""
+
 import base64
 import os
-import sys
 
-def test_audio_codec_and_play():
+
+def check_audio_codec_and_play():
     # 路径设定
     current_dir = os.path.dirname(os.path.abspath(__file__))
     # example_audio.wav 与当前测试脚本放在同一目录。
@@ -77,4 +82,4 @@ def test_audio_codec_and_play():
         print(f"   Error utilizing PyAudio: {e}")
 
 if __name__ == "__main__":
-    test_audio_codec_and_play()
+    check_audio_codec_and_play()
