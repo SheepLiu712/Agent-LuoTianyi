@@ -19,6 +19,8 @@ class DueEvent:
     is_personal: bool
     target_user_id: str | None
     is_notified: bool
+    title: str
+    description: str
 
 
 class DueEventProvider(Protocol):

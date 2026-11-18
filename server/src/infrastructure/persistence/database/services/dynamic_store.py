@@ -420,6 +420,66 @@ class DynamicStore:
         finally:
             db.close()
 
+    def read_thread(self, user_id: str | None, character_id: str, dynamic_id: str):
+        with self._get_session() as db:
+            post = db.get(DynamicPost, dynamic_id)
+            if post is None or not _dynamic_is_visible_to_user(post, user_id):
+                raise PermissionError("动态不存在或无权读取")
+            if post.visibility == "private" and post.author_type == "agent" and post.author_id != character_id:
+                raise PermissionError("不能读取其他角色的私密动态")
+            comments = (
+                db.query(DynamicComment)
+                .filter(
+                    DynamicComment.dynamic_id == dynamic_id,
+                    DynamicComment.owner_user_id == user_id,
+                    DynamicComment.status == "published",
+                )
+                .order_by(DynamicComment.created_at, DynamicComment.id)
+                .all()
+            )
+            user_ids = {row.author_id for row in (post, *comments) if row.author_type == "user"}
+            names = self._load_user_names(db, user_ids)
+            return self._serialize_dynamic_post(post, names), [
+                self._serialize_dynamic_comment(row, names) for row in comments
+            ]
+
+    def create_agent_reply(self, *, identity, character_id, dynamic_id, owner_user_id, parent_comment_id, content):
+        def existing():
+            with self._get_session() as db:
+                row = db.get(DynamicComment, identity)
+                if row is None:
+                    return None
+                if (row.author_id, row.dynamic_id, row.owner_user_id, row.parent_comment_id) != (
+                    character_id,
+                    dynamic_id,
+                    owner_user_id,
+                    parent_comment_id,
+                ):
+                    raise ValueError("动态回复提交身份与目标冲突")
+                return row.id
+
+        identifier = existing()
+        if identifier is not None:
+            return identifier, False
+        ok, _, item = self.create_dynamic_comment(
+            dynamic_id=dynamic_id,
+            author_type="agent",
+            author_id=character_id,
+            owner_user_id=owner_user_id,
+            parent_comment_id=parent_comment_id,
+            content=content,
+            memory_policy="disabled",
+            memory_status="disabled",
+            reply_status="not_applicable",
+            comment_id=identity,
+        )
+        if ok and item:
+            return item["id"], True
+        identifier = existing()
+        if identifier is not None:
+            return identifier, False
+        raise RuntimeError("动态回复未成功提交")
+
     # ── 评论创建与查询 ───────────────────────────────────────
 
     def list_dynamic_comments_for_user(
@@ -477,6 +537,7 @@ class DynamicStore:
         memory_policy: str = "candidate",
         memory_status: str | None = None,
         reply_status: str | None = None,
+        comment_id: str | None = None,
     ) -> tuple[bool, str, Optional[dict[str, Any]]]:
         normalized_content = str(content or "").strip()
         if not normalized_content:
@@ -491,6 +552,7 @@ class DynamicStore:
             created = run_sql_write(
                 lambda: self._create_comment_in_session(
                     db=db,
+                    id=comment_id,
                     dynamic_id=dynamic_id,
                     author_type=author_type,
                     author_id=author_id,

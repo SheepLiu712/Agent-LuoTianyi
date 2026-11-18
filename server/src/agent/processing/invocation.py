@@ -55,7 +55,7 @@ async def call_handler(
     try:
         return await asyncio.shield(worker)
     except asyncio.CancelledError:
-        worker.cancel()
+        cancelled_active_worker = not worker.done() and worker.cancel()
         while not worker.done():
             try:
                 await asyncio.shield(worker)
@@ -66,6 +66,8 @@ async def call_handler(
         if not worker.cancelled():
             cleanup_error = worker.exception()
             if cleanup_error is not None:
+                if cancelled_active_worker:
+                    cancellation.record_cleanup_error(type(cleanup_error).__name__)
                 agent._record_exception(
                     call_id, interaction_id, agent._error_code(cleanup_error, d.ExecutionErrorCode), cleanup_error
                 )

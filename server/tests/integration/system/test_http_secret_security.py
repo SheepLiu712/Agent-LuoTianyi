@@ -4,6 +4,8 @@ import pytest
 from fastapi import HTTPException
 
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.store import ConfigStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
 from src.web.admin import admin_interface
 from src.web.http import routes
 from src.web.http.runtime_access import require_bearer_token
@@ -129,11 +131,19 @@ def test_secret_deletion_removes_environment_key_without_original(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_secret_update_marks_running_runtime_for_restart(tmp_path, monkeypatch):
+@pytest.mark.parametrize("citywalk_enabled", [False, True])
+async def test_secret_update_marks_running_runtime_for_restart(tmp_path, monkeypatch, citywalk_enabled):
+    for key in ("JWT_SECRET", "AMAP_KEY", "RUNTIME_SECRET_TEST"):
+        monkeypatch.setenv(key, "test-original")
     store = SecretStore(tmp_path / "secrets.env")
+    store.write({"JWT_SECRET": "test-jwt", "AMAP_KEY": "test-map"})
+    config_store = ConfigStore(tmp_path / "config.json", root_dir=tmp_path)
+    config_store.write_raw({"world": {"citywalk": {"enabled": citywalk_enabled}}})
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=store)
     shell = SimpleNamespace(
         secret_store=store,
-        config_store=SimpleNamespace(read_raw=lambda: {}),
+        config_store=config_store,
+        validator=validator,
         runtime_supervisor=SimpleNamespace(is_running=lambda: True),
     )
     monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
@@ -142,3 +152,5 @@ async def test_secret_update_marks_running_runtime_for_restart(tmp_path, monkeyp
 
     assert result["restart_required"] is True
     assert result["changed_keys"] == ["RUNTIME_SECRET_TEST"]
+    assert result["secrets"]["JWT_SECRET"]["required"] is True
+    assert result["secrets"]["AMAP_KEY"]["required"] is citywalk_enabled

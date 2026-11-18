@@ -1,4 +1,5 @@
 """从运行时取得门面，验证当前空注册版本的可观察契约。"""
+
 from dataclasses import replace
 from datetime import datetime, timezone
 import inspect
@@ -25,33 +26,62 @@ def facade(runtime):
 def request():
     now = datetime(2026, 9, 6, tzinfo=timezone.utc)
     first = d.TextMessage(
-        stimulus_id="m2", schema_version=1, occurred_at=now, source=d.StimulusSource.USER,
-        target_character_ids=("luotianyi",), user_id="u", ephemeral=False,
-        text="你好", client_msg_id="client-2",
+        stimulus_id="m2",
+        schema_version=1,
+        occurred_at=now,
+        source=d.StimulusSource.USER,
+        target_character_ids=("luotianyi",),
+        user_id="u",
+        ephemeral=False,
+        text="你好",
+        client_msg_id="client-2",
     )
     second = replace(first, stimulus_id="m1", client_msg_id="client-1")
     snapshot = d.ChatInteractionSnapshot(
-        interaction_id="i", interaction_revision=3, user_id="u", pending_stimuli=(first, second),
-        now=now, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
-        response_deadline=None, connection_state=d.ConnectionState.CONNECTED,
+        interaction_id="i",
+        interaction_revision=3,
+        user_id="u",
+        pending_stimuli=(first, second),
+        now=now,
+        timezone=ZoneInfo("UTC"),
+        supported_outputs=frozenset(),
+        response_deadline=None,
+        connection_state=d.ConnectionState.CONNECTED,
     )
     return d.HandleStimulusRequest(
-        request_id="r", stimulus=first, interaction=snapshot, cancellation=d.CancellationToken(),
+        request_id="r",
+        stimulus=first,
+        interaction=snapshot,
+        cancellation=d.CancellationToken(),
     )
 
 
 def plan_and_context():
     plan = d.ActionPlan(
-        plan_id="p", origin_request_id="r", plan_ordinal=1, target_character_id="luotianyi",
-        interaction_id="i", basis_interaction_revision=3, source_stimulus_ids=("m2", "m1"),
+        plan_id="p",
+        origin_request_id="r",
+        plan_ordinal=1,
+        target_character_id="luotianyi",
+        interaction_id="i",
+        basis_interaction_revision=3,
+        source_stimulus_ids=("m2", "m1"),
         actions=(
-            d.Say(action_id="a2", content="你好", sound_content=None, prepared_audio_ref=None,
-                  tone=d.Tone(value="normal"), expression=None, delivery=d.OutputDelivery.CONVERSATION),
+            d.Say(
+                action_id="a2",
+                content="你好",
+                sound_content=None,
+                prepared_audio_ref=None,
+                tone=d.Tone(value="normal"),
+                expression=None,
+                delivery=d.OutputDelivery.CONVERSATION,
+            ),
             d.Sing(action_id="a1", song_id="song", segment_id="verse", expression=None),
         ),
     )
     context = d.ExecutionContext(
-        execution_id="e", interaction_id="i", current_interaction_revision=3,
+        execution_id="e",
+        interaction_id="i",
+        current_interaction_revision=3,
         cancellation=d.CancellationToken(),
     )
     return plan, context
@@ -90,10 +120,18 @@ def test_facade_exports_only_agent_and_has_two_documented_business_methods(runti
     assert set(getattr(agent_package, "__all__", ())) == {"Agent"}
     assert isinstance(agent, agent_package.Agent)
     methods = {name for name, value in inspect.getmembers(type(agent), callable) if not name.startswith("_")}
-    assert methods == {"handle_stimulus", "realize_action_plan", "is_handle_interruptible", "is_realize_interruptible"}
+    assert methods == {
+        "handle_stimulus",
+        "realize_action_plan",
+        "is_handle_interruptible",
+        "is_realize_interruptible",
+        "open_omni_session",
+    }
     for name in methods:
         method = getattr(agent, name)
-        assert inspect.iscoroutinefunction(method) is (name in {"handle_stimulus", "realize_action_plan"})
+        assert inspect.iscoroutinefunction(method) is (
+            name in {"handle_stimulus", "realize_action_plan", "open_omni_session"}
+        )
         assert any("\u4e00" <= char <= "\u9fff" for char in (inspect.getdoc(method) or ""))
     for name in ("mind", "capabilities", "database_manager", "conscious", "character_runtime", "main_chat"):
         assert not hasattr(agent, name)
@@ -124,11 +162,14 @@ async def test_handle_pre_cancelled_retains_reason_and_pending(runtime, reason):
     assert req.cancellation.reason is reason
 
 
-@pytest.mark.parametrize("change,code", [
-    ({"target_character_id": "miku"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
-    ({"interaction_id": "another"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
-    ({"basis_interaction_revision": 4}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
-])
+@pytest.mark.parametrize(
+    "change,code",
+    [
+        ({"target_character_id": "miku"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
+        ({"interaction_id": "another"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
+        ({"basis_interaction_revision": 4}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
+    ],
+)
 async def test_execution_preflight_rejects_whole_plan(runtime, change, code):
     plan, context = plan_and_context()
     report = await facade(runtime).realize_action_plan(replace(plan, **change), context, RejectUnexpectedEmission())

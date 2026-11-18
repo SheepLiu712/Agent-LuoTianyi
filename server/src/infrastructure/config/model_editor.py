@@ -9,6 +9,13 @@ def build_llm_config_view(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "available_llms": llm_service.get("available_llms", {}),
         "available_vlms": llm_service.get("available_vlms", {}),
+        "available_audio_models": llm_service.get("available_audio_models", {}),
+        "call_transport": copy.deepcopy(config.get("call_transport", {})),
+        "component_startup": {
+            "speaking_enabled": _get_by_path(config, "agent_runtime.skills.speaking.enabled") is not False,
+            "vector_store_enabled": _get_by_path(config, "agent_runtime.vector_store.enabled") is not False,
+        },
+        "call_setup_timeout": config.get("stage_manager", {}).get("call_setup_timeout", 10.0),
         "client_model_types": llm_service.get("client_model_types", []),
         "module_bindings": collect_module_bindings(config),
     }
@@ -19,32 +26,21 @@ def collect_module_bindings(config: dict[str, Any]) -> list[dict[str, Any]]:
 
     def walk(value: Any, path: list[str]) -> None:
         if isinstance(value, dict):
-            if isinstance(value.get("llm"), dict) and value["llm"].get("name") is not None:
-                llm_cfg = value["llm"]
+            for kind in ("llm", "vlm", "audio"):
+                model_cfg = value.get(kind)
+                if not isinstance(model_cfg, dict) or model_cfg.get("name") is None:
+                    continue
+                settings = model_cfg if kind == "llm" else {**model_cfg, **value}
                 bindings.append(
                     {
                         "path": ".".join(path),
-                        "kind": "llm",
-                        "interface_name": llm_cfg.get("name", ""),
+                        "kind": kind,
+                        "interface_name": model_cfg.get("name", ""),
                         "prompt_name": value.get("prompt_name", ""),
-                        "enable_thinking": bool(llm_cfg.get("enable_thinking", False)),
-                        "use_json": bool(llm_cfg.get("use_json", False)),
-                        "client_model_type": str(llm_cfg.get("client_model_type") or ""),
-                        "params": copy.deepcopy(llm_cfg.get("params", {})),
-                    }
-                )
-            if isinstance(value.get("vlm"), dict) and value["vlm"].get("name") is not None:
-                vlm_cfg = value["vlm"]
-                bindings.append(
-                    {
-                        "path": ".".join(path),
-                        "kind": "vlm",
-                        "interface_name": vlm_cfg.get("name", ""),
-                        "prompt_name": value.get("prompt_name", ""),
-                        "enable_thinking": bool(value.get("enable_thinking", vlm_cfg.get("enable_thinking", False))),
-                        "use_json": bool(value.get("use_json", vlm_cfg.get("use_json", False))),
-                        "client_model_type": str(vlm_cfg.get("client_model_type") or ""),
-                        "params": copy.deepcopy(value.get("params", vlm_cfg.get("params", {}))),
+                        "enable_thinking": bool(settings.get("enable_thinking", False)),
+                        "use_json": bool(settings.get("use_json", kind == "audio")),
+                        "client_model_type": str(model_cfg.get("client_model_type") or ""),
+                        "params": copy.deepcopy(settings.get("params", {})),
                     }
                 )
             for key, item in value.items():
@@ -59,16 +55,24 @@ def collect_module_bindings(config: dict[str, Any]) -> list[dict[str, Any]]:
 
 def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     next_config = copy.deepcopy(config)
+    _apply_component_startup(next_config, payload)
     llm_service = next_config.setdefault("llm_service", {})
-    llm_service["available_llms"] = _normalize_interfaces(payload.get("available_llms", {}))
-    llm_service["available_vlms"] = _normalize_interfaces(payload.get("available_vlms", {}))
-    llm_service["client_model_types"] = _normalize_client_model_types(payload.get("client_model_types"))
+    for key in ("available_llms", "available_vlms", "available_audio_models"):
+        if key in payload:
+            llm_service[key] = _normalize_interfaces(payload[key])
+    _apply_call_setup_budget(next_config, payload)
+    if "call_transport" in payload:
+        if not isinstance(payload["call_transport"], dict):
+            raise ValueError("call_transport 必须是对象")
+        next_config["call_transport"] = copy.deepcopy(payload["call_transport"])
+    if "client_model_types" in payload:
+        llm_service["client_model_types"] = _normalize_client_model_types(payload["client_model_types"])
 
     for binding in payload.get("module_bindings", []):
         kind = str(binding.get("kind") or "").strip()
         path = str(binding.get("path") or "").strip()
         interface_name = str(binding.get("interface_name") or "").strip()
-        if kind not in {"llm", "vlm"} or not path:
+        if kind not in {"llm", "vlm", "audio"} or not path:
             continue
         module_cfg = _get_by_path(next_config, path)
         if not isinstance(module_cfg, dict):
@@ -90,6 +94,40 @@ def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> d
     return next_config
 
 
+class ComponentStartupDraftError(ValueError):
+    """组件面板输入错误；只映射这条新增契约为 HTTP 422。"""
+
+
+def _apply_component_startup(config: dict[str, Any], payload: dict[str, Any]) -> None:
+    if "component_startup" not in payload:
+        return
+    draft = payload["component_startup"]
+    if not isinstance(draft, dict):
+        raise ComponentStartupDraftError("component_startup 必须是对象")
+    paths = {
+        "speaking_enabled": ("agent_runtime", "skills", "speaking", "enabled"),
+        "vector_store_enabled": ("agent_runtime", "vector_store", "enabled"),
+    }
+    for key, value in draft.items():
+        path = f"component_startup.{key}"
+        if key not in paths:
+            raise ComponentStartupDraftError(f"{path} 未定义")
+        if type(value) is not bool:
+            raise ComponentStartupDraftError(f"{path} 必须是布尔值")
+        target = config
+        for name in paths[key][:-1]:
+            child = target.setdefault(name, {})
+            if not isinstance(child, dict):
+                raise ComponentStartupDraftError(f"{path} 无法写入：{name} 必须是对象")
+            target = child
+        target["enabled"] = value
+
+
+def _apply_call_setup_budget(config: dict[str, Any], payload: dict[str, Any]) -> None:
+    if "call_setup_timeout" in payload:
+        config.setdefault("stage_manager", {})["call_setup_timeout"] = payload["call_setup_timeout"]
+
+
 def _normalize_client_model_types(value: Any) -> list[dict[str, Any]]:
     """规范化客户端委托需求；服务端不保存任何客户端供应商或模型目录。"""
     if not isinstance(value, list):
@@ -109,7 +147,7 @@ def _normalize_client_model_types(value: Any) -> list[dict[str, Any]]:
                 "id": type_id,
                 "name": str(item.get("name") or "").strip(),
                 "description": str(item.get("description") or "").strip(),
-                "model_kind": model_kind if model_kind in {"llm", "vlm"} else "llm",
+                "model_kind": model_kind if model_kind in {"llm", "vlm", "audio"} else "llm",
                 "requires_json": bool(item.get("requires_json", False)),
                 "requires_thinking": bool(item.get("requires_thinking", False)),
             }

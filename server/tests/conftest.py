@@ -6,6 +6,11 @@ import pytest
 
 TEST_ROOT = Path(__file__).resolve().parent
 SERVER_ROOT = TEST_ROOT.parent
+# Windows 本地不收集依赖 Unix 文件锁、用户库及 systemd 的部署验收。
+# Ubuntu CI 仍收集完整目录；这是平台选择，不将失败改成 skipped。
+collect_ignore = ["integration/deployment"] if sys.platform == "win32" else []
+
+
 for import_root in (TEST_ROOT, SERVER_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
@@ -13,6 +18,13 @@ for import_root in (TEST_ROOT, SERVER_ROOT):
 from support.agent_runtime_support import runtime, runtime_dependencies  # noqa: E402,F401
 from support.routing_support import routed_runtime  # noqa: E402,F401
 from src.utils.logger import get_logger  # noqa: E402
+
+
+def pytest_terminal_summary(terminalreporter):
+    if sys.platform == "win32":
+        terminalreporter.write_line(
+            "Windows 本地测试范围不含 integration/deployment；Linux 部署验收由 Ubuntu CI 执行。"
+        )
 
 
 @pytest.fixture

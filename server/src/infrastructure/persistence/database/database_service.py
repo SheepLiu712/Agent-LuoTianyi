@@ -1,6 +1,8 @@
 import os
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from src.infrastructure.persistence.call_maintenance import SqlCallMaintenanceBatchRepository
+from src.infrastructure.persistence.call_sessions import SqlCallSessionRepository
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer, get_redis_buffer, init_redis_buffer
 from src.infrastructure.persistence.database.services.conversation_service import ConversationService
 from src.infrastructure.persistence.database.services.credential_service import JWT_SECRET_ENV, CredentialService
@@ -14,6 +16,7 @@ from src.infrastructure.persistence.database.utils import (
     normalize_message_token_ttl_seconds,
 )
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -49,13 +52,15 @@ class DatabaseManager:
         self.user_store: Optional[UserStore] = None
         self.credential_service: Optional[CredentialService] = None
         self.conversation_service: Optional[ConversationService] = None
+        self.call_sessions: Optional[SqlCallSessionRepository] = None
+        self.call_maintenance_batches: Optional[SqlCallMaintenanceBatchRepository] = None
         self.init_all_databases()
 
     def init_all_databases(self) -> None:
         """初始化所有数据库组件（SQL/Redis 缓存）。"""
         try:
             init_sql_db(
-                self.config.get("sql_db_folder", "data/database"),
+                str(resolve_server_path(self.config.get("sql_db_folder", "data/database"))),
                 self.config.get("sql_db_file", "luotianyi.db"),
             )
             init_redis_buffer(self.config.get("redis", {}))
@@ -92,6 +97,8 @@ class DatabaseManager:
                 redis_buffer=self._ensure_redis(),
                 user_store=self.user_store,
             )
+            self.call_sessions = SqlCallSessionRepository(self.open_sql_session)
+            self.call_maintenance_batches = SqlCallMaintenanceBatchRepository(self.open_sql_session)
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
@@ -118,6 +125,8 @@ class DatabaseManager:
             "dynamic_store": self.dynamic_store,
             "credential_service": self.credential_service,
             "conversation_service": self.conversation_service,
+            "call_sessions": self.call_sessions,
+            "call_maintenance_batches": self.call_maintenance_batches,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
@@ -153,7 +162,10 @@ class DatabaseManager:
     def init_all(config: Dict[str, Any]) -> None:
         """初始化主数据库组件（SQL/Redis 缓存）。"""
         try:
-            init_sql_db(config.get("sql_db_folder", "data/database"), config.get("sql_db_file", "luotianyi.db"))
+            init_sql_db(
+                str(resolve_server_path(config.get("sql_db_folder", "data/database"))),
+                config.get("sql_db_file", "luotianyi.db"),
+            )
             init_redis_buffer(config.get("redis", {}))
             logger.info("Main database initialized successfully.")
         except Exception as e:

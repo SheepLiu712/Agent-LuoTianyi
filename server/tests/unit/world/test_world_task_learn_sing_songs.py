@@ -72,6 +72,7 @@ def test_auto_song_learner_does_not_mark_invalid_segments_as_learned(monkeypatch
     _write_playable_song_output(song_dir, "坏歌")
     config_path = song_dir / "坏歌.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["segments"][0]["start_time"] = 2.1
     config["segments"][0]["end_time"] = 3
     config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
 
@@ -1215,3 +1216,60 @@ def test_auto_song_learner_does_not_report_redirect_to_existing_song_as_new(
 
     assert result.learned == []
     assert result.already_learned == [existing_name]
+
+
+@pytest.mark.parametrize("outcome", ["empty", "title_mismatch"])
+def test_unmatched_song_stops_normally_and_does_not_retry(monkeypatch, tmp_path, capsys, outcome):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    module = run_song_workflow.download_qq_song
+    songs = [] if outcome == "empty" else [{"title": "完全不同", "singer": [{"name": "洛天依"}]}]
+    payload = {"code": 0, "request": {"code": 0, "data": {"body": {"song": {"list": songs}}}}}
+    monkeypatch.setattr(module.requests, "post", lambda *a, **k: SimpleNamespace(
+        raise_for_status=lambda: None, json=lambda: payload))
+    output = tmp_path / "outputs"
+    monkeypatch.setattr(sys, "argv", ["run_song_workflow.py", "测试歌曲", "--output_dir", str(output)])
+    run_song_workflow.main()
+    captured = capsys.readouterr()
+    assert "[SONGLEARNER_STOP]" in captured.out
+    assert not captured.err
+    assert list(output.iterdir()) == []
+
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None))
+    wishlist.add("测试歌曲")
+    learner = AutoSongLearner({}, "洛天依", wishlist, resource_path=tmp_path / "music")
+    errors = []
+    learner.logger = SimpleNamespace(info=lambda *_: None, warning=errors.append, error=errors.append)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess([], 0, captured.out, ""))
+    result = learner.try_learn_pending()
+    assert result.abandoned == ["测试歌曲"]
+    assert not result.learned and not result.awaiting and not errors
+    restored = WishlistManager(str(tmp_path / "metadata.json"), learner.logger)
+    assert restored.get_pending() == []
+    assert restored.wished_songs["测试歌曲"].failure_reason
+    assert learner.try_learn_pending().abandoned == []
+
+
+@pytest.mark.parametrize("payload", [
+    {"code": 1},
+    {"code": 0, "request": {"code": 2001}},
+    {"code": 0, "request": {"code": 0, "data": {}}},
+])
+def test_search_failure_is_not_reported_as_song_absent(monkeypatch, payload):
+    monkeypatch.setattr(download_qq_song.requests, "post", lambda *a, **k: SimpleNamespace(
+        raise_for_status=lambda: None, json=lambda: payload))
+    with pytest.raises(RuntimeError):
+        download_qq_song.qq_search_songs("测试歌曲")
+
+
+def test_wishlist_removes_slashes_before_persisting(tmp_path):
+    logger = SimpleNamespace(info=lambda *_: None)
+    path = str(tmp_path / "metadata.json")
+    wishlist = WishlistManager(path, logger)
+    assert wishlist.add("1/10000的光芒")
+    assert not wishlist.add("110000的光芒")
+    assert not wishlist.add("/\\")
+    restored = WishlistManager(path, logger)
+    assert [entry.safe_name for entry in restored.get_pending()] == ["110000的光芒"]

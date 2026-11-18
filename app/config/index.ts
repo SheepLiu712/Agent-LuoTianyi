@@ -11,7 +11,7 @@ export const server_config: {
   LOAD_HISTORY_COUNT: number;
 } = {
   // 服务器基础URL - 默认值
-  BASE_URL: 'https://www-api.u3493359.nyat.app:11664',
+  BASE_URL: process.env.EXPO_PUBLIC_SERVER_URL || 'https://www-api.u3493359.nyat.app:11664',
   
   // 可以添加其他配置项
   API_TIMEOUT: 10000, // 10秒超时

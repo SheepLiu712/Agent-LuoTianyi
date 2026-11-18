@@ -9,7 +9,7 @@ import src.domain.agent as d
 from src.agent.handlers.stimulus.song_knowledge import SongKnowledgeHandler
 from src.agent.skills.knowledge.song_acceptance import (
     SongAcceptanceStatus,
-    SongKnowledgeAcceptanceSkill,
+    SongKnowledgeStore,
 )
 from src.infrastructure.persistence import Song, get_song_session
 from src.world.get_new_songs.daily_new_song_fetcher import _fetch_candidate
@@ -56,7 +56,7 @@ def stored_names(session):
 
 
 def test_skill_rejects_invalid_arguments(tmp_path):
-    skill = SongKnowledgeAcceptanceSkill(skill_config(tmp_path))
+    skill = SongKnowledgeStore(skill_config(tmp_path))
     import asyncio
 
     for kwargs in (
@@ -73,7 +73,7 @@ def test_skill_rejects_invalid_arguments(tmp_path):
 
 
 async def test_accept_writes_knowledge_and_keywords(tmp_path):
-    skill = SongKnowledgeAcceptanceSkill(skill_config(tmp_path))
+    skill = SongKnowledgeStore(skill_config(tmp_path))
 
     result = await accept(skill)
 
@@ -116,7 +116,7 @@ async def test_fetcher_single_version_and_keywords_reach_agent_storage(monkeypat
     )
     fetched = _fetch_candidate(fetcher, SONG_NAME)
     assert fetched is not None
-    skill = SongKnowledgeAcceptanceSkill(skill_config(tmp_path))
+    skill = SongKnowledgeStore(skill_config(tmp_path))
 
     result = await skill.accept(
         source_ref=source_ref(),
@@ -145,7 +145,7 @@ async def test_fetcher_single_version_and_keywords_reach_agent_storage(monkeypat
 
 
 async def test_second_accept_skips_existing_without_duplicate_keywords(tmp_path):
-    skill = SongKnowledgeAcceptanceSkill(skill_config(tmp_path))
+    skill = SongKnowledgeStore(skill_config(tmp_path))
     await accept(skill)
 
     second = await accept(skill, revision=8)
@@ -169,7 +169,7 @@ async def test_blank_introduction_is_rejected_by_the_domain_type():
 
 
 async def test_keyword_failure_rolls_back_knowledge(tmp_path):
-    skill = SongKnowledgeAcceptanceSkill(skill_config(tmp_path))
+    skill = SongKnowledgeStore(skill_config(tmp_path))
 
     def boom(song_name, lyric_keywords):
         raise OSError("磁盘不可写")
@@ -231,7 +231,7 @@ def discovered(song_name=SONG_NAME):
 
 
 async def test_handler_accepts_and_consumes_stimulus(tmp_path):
-    handler = SongKnowledgeHandler(SongKnowledgeAcceptanceSkill(skill_config(tmp_path)))
+    handler = SongKnowledgeHandler(SongKnowledgeStore(skill_config(tmp_path)))
 
     report = await handler.handle(world_request(discovered()), None)
 
@@ -244,7 +244,7 @@ async def test_handler_accepts_and_consumes_stimulus(tmp_path):
 
 
 async def test_handler_skips_existing_without_error(tmp_path):
-    handler = SongKnowledgeHandler(SongKnowledgeAcceptanceSkill(skill_config(tmp_path)))
+    handler = SongKnowledgeHandler(SongKnowledgeStore(skill_config(tmp_path)))
     await handler.handle(world_request(discovered()), None)
 
     report = await handler.handle(world_request(discovered()), None)
@@ -254,7 +254,7 @@ async def test_handler_skips_existing_without_error(tmp_path):
 
 
 async def test_handler_reports_store_failure_as_dependency_failure(tmp_path):
-    handler = SongKnowledgeHandler(SongKnowledgeAcceptanceSkill(skill_config(tmp_path)))
+    handler = SongKnowledgeHandler(SongKnowledgeStore(skill_config(tmp_path)))
 
     def boom(song_name, lyric_keywords):
         raise OSError("磁盘不可写")
@@ -270,7 +270,7 @@ async def test_handler_reports_store_failure_as_dependency_failure(tmp_path):
 
 
 async def test_handler_rejects_other_stimulus_kinds(tmp_path):
-    handler = SongKnowledgeHandler(SongKnowledgeAcceptanceSkill(skill_config(tmp_path)))
+    handler = SongKnowledgeHandler(SongKnowledgeStore(skill_config(tmp_path)))
     now = datetime(2026, 9, 15, tzinfo=timezone.utc)
     foreign = d.WorldObservation(
         stimulus_id="wo1",

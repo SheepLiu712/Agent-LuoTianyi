@@ -6,7 +6,7 @@
 | --- | ---: | --- | --- |
 | SL001 | - | startup | AutoSongLearner 找不到 Songlearner 启动脚本。 |
 | SL010 | 10 | startup | 参数、路径或工作流状态初始化失败。 |
-| SL020 | 20 | download_song | 下载歌曲或歌词失败，包括 QQ 音乐搜索、歌手/标题匹配、凭证、网络、歌词为空等问题。 |
+| SL020 | 20 | download_song | 下载歌曲或歌词失败，包括 QQ 音乐接口异常、歌手不匹配、网络、歌词为空等问题。 |
 | SL030 | 30 | normalize_download | 下载结果目录或文件归一化失败，例如下载标题与请求歌名不同后移动文件失败。 |
 | SL040 | 40 | clean_audio | 音频清洗、人声分离或降噪失败。 |
 | SL050 | 50 | generate_boundary | MSAF 伴奏边界生成失败。 |
@@ -24,3 +24,5 @@ stderr 示例：
 ```text
 [SONGLEARNER_ERROR] code=SL040 exit_code=40 step=clean_audio message=清洗后音频不存在: ...
 ```
+
+搜索成功但歌曲列表为空、或没有标题匹配时，流水线正常退出（退出码 0），stdout 输出 `[SONGLEARNER_STOP] 原因`，不输出错误堆栈。自动学习器将愿望记为 `abandoned` 并保存原因，只记录 INFO，不再自动重试，也不视为学会歌曲。供应商状态失败或响应格式异常仍属于 SL020。

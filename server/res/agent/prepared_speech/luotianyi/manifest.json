@@ -1,0 +1,134 @@
+[
+  {
+    "name": "touch_voice1",
+    "audio_path": "audio/touch_voice1.wav",
+    "text": "",
+    "expression": ""
+  },
+  {
+    "name": "touch_voice2",
+    "audio_path": "audio/touch_voice2.wav",
+    "text": "",
+    "expression": ""
+  },
+  {
+    "name": "touch_voice3",
+    "audio_path": "audio/touch_voice3.wav",
+    "text": "",
+    "expression": "moemoe"
+  },
+  {
+    "name": "touch_voice4",
+    "audio_path": "audio/touch_voice4.wav",
+    "text": "",
+    "expression": "ease"
+  },
+  {
+    "name": "touch_voice5",
+    "audio_path": "audio/touch_voice5.wav",
+    "text": "",
+    "expression": ""
+  },
+  {
+    "name": "touch_voice6",
+    "audio_path": "audio/touch_voice6.wav",
+    "text": "",
+    "expression": "moemoe"
+  },
+  {
+    "name": "touch_voice7",
+    "audio_path": "audio/touch_voice7.wav",
+    "text": "",
+    "expression": "ease"
+  },
+  {
+    "name": "touch_voice8",
+    "audio_path": "audio/touch_voice8.wav",
+    "text": "",
+    "expression": ""
+  },
+  {
+    "name": "first_greet_1",
+    "audio_path": "audio/first_greet_1.wav",
+    "text": "你好呀，我是洛天依！",
+    "expression": ""
+  },
+  {
+    "name": "first_greet_2",
+    "audio_path": "audio/first_greet_2.wav",
+    "text": "欢迎来到这里，今天想聊点什么呢？",
+    "expression": ""
+  },
+  {
+    "name": "call_apology_opening_1",
+    "audio_path": "audio/call_apology_opening_1.wav",
+    "text": "喂，我在呢，刚才卡了一下。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_opening_2",
+    "audio_path": "audio/call_apology_opening_2.wav",
+    "text": "接通啦，抱歉让你等了一下。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_opening_3",
+    "audio_path": "audio/call_apology_opening_3.wav",
+    "text": "你好呀，刚才有点小状况。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_opening_4",
+    "audio_path": "audio/call_apology_opening_4.wav",
+    "text": "我在这里，刚才没能顺利开口。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_turn_1",
+    "audio_path": "audio/call_apology_turn_1.wav",
+    "text": "抱歉，刚才没能回答好。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_turn_2",
+    "audio_path": "audio/call_apology_turn_2.wav",
+    "text": "不好意思，我刚才卡了一下。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_turn_3",
+    "audio_path": "audio/call_apology_turn_3.wav",
+    "text": "刚才出了点小问题，我们接着聊吧。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_turn_4",
+    "audio_path": "audio/call_apology_turn_4.wav",
+    "text": "抱歉，我刚才没能顺利说出来。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_silence_1",
+    "audio_path": "audio/call_apology_silence_1.wav",
+    "text": "我还在呢，刚才卡了一下。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_silence_2",
+    "audio_path": "audio/call_apology_silence_2.wav",
+    "text": "刚想开口，就出了点小状况。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_silence_3",
+    "audio_path": "audio/call_apology_silence_3.wav",
+    "text": "抱歉，让你等了一会儿。",
+    "expression": "normal"
+  },
+  {
+    "name": "call_apology_silence_4",
+    "audio_path": "audio/call_apology_silence_4.wav",
+    "text": "我还在听，你想聊点什么？",
+    "expression": "normal"
+  }
+]

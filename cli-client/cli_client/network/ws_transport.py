@@ -66,7 +66,8 @@ class WsTransport:
         self._agent_state_listener: Callable[[bool], None] | None = None  # agent状态变化的监听器
         self._client_mode = {"types": []}  # 服务端当前客户端委托类型列表（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
-        self._llm_request_listener: Callable[[dict], object] | None = None
+        self._llm_request_listener: Callable[..., object] | None = None
+        self._llm_tasks: dict[str, asyncio.Task] = {}
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -124,7 +125,7 @@ class WsTransport:
         agent_message_listener: Callable[[AgentMessage], None] | None,
         agent_state_listener: Callable[[bool], None] | None,
         system_message_listener: Callable[[str], None] | None = None,
-        llm_request_listener: Callable[[dict], object] | None = None,
+        llm_request_listener: Callable[..., object] | None = None,
     ) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
@@ -425,6 +426,11 @@ class WsTransport:
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 30)  # 指数退避，最大30秒
             finally:
+                tasks = tuple(self._llm_tasks.values())
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                self._llm_tasks.clear()
                 self._ws = None
                 self._connected_event.clear()
                 self._ready_event.clear()
@@ -519,7 +525,17 @@ class WsTransport:
                 continue
 
             if event_type == WSEventType.LLM_REQUEST:
-                asyncio.create_task(self._handle_llm_request(ws, msg.payload))
+                request_id = msg.payload.get("request_id")
+                if request_id in self._llm_tasks:
+                    raise ValueError("重复的模型委托请求")
+                task = asyncio.create_task(self._handle_llm_request(ws, msg.payload))
+                self._llm_tasks[request_id] = task
+                continue
+
+            if event_type == WSEventType.LLM_CANCEL:
+                task = self._llm_tasks.get(msg.payload.get("request_id"))
+                if task is not None:
+                    task.cancel()
                 continue
 
             if event_type == WSEventType.AGENT_STATE_CHANGED:
@@ -548,11 +564,26 @@ class WsTransport:
     async def _handle_llm_request(self, ws, payload: dict) -> None:
         if self._llm_request_listener is None:
             return
+        sequence = 0
+
+        async def on_delta(text):
+            nonlocal sequence
+            event = build_event(WSEventType.LLM_RESPONSE, payload={
+                "request_id": payload.get("request_id"), "sequence": sequence, "delta": text,
+            })
+            await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
+            sequence += 1
+
         try:
-            result = self._llm_request_listener(payload)
+            result = (
+                self._llm_request_listener(payload, on_delta=on_delta)
+                if payload.get("stream") is True else self._llm_request_listener(payload)
+            )
             if asyncio.iscoroutine(result):
                 result = await result
             if result:
+                if payload.get("stream") is True:
+                    result = {**result, "sequence": sequence, "done": True}
                 event = build_event(WSEventType.LLM_RESPONSE, payload=result)
                 await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
         except Exception as exc:
@@ -568,6 +599,9 @@ class WsTransport:
                 await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
             except Exception as response_exc:
                 self.logger.error(f"Failed to send client LLM error response: {response_exc}")
+
+        finally:
+            self._llm_tasks.pop(payload.get("request_id"), None)
 
     async def _heartbeat_loop(self, ws) -> None:
         ping_id = 0

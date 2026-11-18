@@ -1,7 +1,10 @@
+import queue
+import threading
+
 import pytest
 
 from src.message_process import message_processor as message_processor_module
-from src.message_process.message_processor import MessageProcessor
+from src.message_process.message_processor import MessageProcessor, PreparedAgentMessage
 
 
 @pytest.fixture
@@ -181,7 +184,30 @@ async def test_process_request_rejects_missing_thinking_capability(processor, co
 
 
 def test_get_llm_mode_reads_both_module_states(processor, config):
-    assert processor.get_llm_mode() == {"types": ["main_chat", "image_understanding"]}
+    assert processor.get_llm_mode() == {"types": ["main_chat", "image_understanding"], "stream": True}
+
+
+@pytest.mark.asyncio
+async def test_stream_request_keeps_client_configuration_and_forwards_deltas(processor, config, monkeypatch):
+    captured, deltas = {}, []
+
+    async def receive(text):
+        deltas.append(text)
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        await kwargs["on_delta"]("第一句话。")
+        return {"content": "第一句话。", "usage": {"total_tokens": 4}}
+
+    monkeypatch.setattr(message_processor_module, "call_llm_api_async", fake_call)
+    result = await processor.process_llm_request(
+        {"request_id": "stream-1", "type": "main_chat", "prompt": "你好", "stream": True}, on_delta=receive
+    )
+    assert captured["payload"]["stream"] is True
+    assert captured["payload"]["model"] == "text-model"
+    assert captured["api_key"] == "sk-text"
+    assert deltas == ["第一句话。"]
+    assert result["content"] == "第一句话。"
 
 
 @pytest.mark.asyncio
@@ -233,3 +259,67 @@ async def test_process_request_rejects_disabled_module(processor, config, monkey
         "error": "no api key configured on client",
     }
     assert "url" not in called
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.errors = []
+
+    def error(self, message, *args, **kwargs):
+        self.errors.append(message)
+
+
+def _bare_processor():
+    processor = MessageProcessor.__new__(MessageProcessor)
+    processor._running = True
+    processor._event_queue = queue.Queue()
+    processor._playback_queue = queue.Queue()
+    processor.logger = _RecordingLogger()
+    return processor
+
+
+def test_listener_thread_survives_poison_message():
+    processor = _bare_processor()
+    prepared_payloads = []
+
+    def prepare(payload):
+        if payload == "poison":
+            raise RuntimeError("prepare boom")
+        prepared_payloads.append(payload)
+        return PreparedAgentMessage(response=payload, audio_saved=False)
+
+    processor._prepare_agent_message = prepare
+    thread = threading.Thread(target=processor._listen_ws_events, daemon=True)
+    thread.start()
+    processor._event_queue.put("poison")
+    processor._event_queue.put("good")
+    processor._event_queue.put(None)
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert prepared_payloads == ["good"]
+    assert processor._playback_queue.get(timeout=1).response == "good"
+    assert processor._playback_queue.get(timeout=1) is None
+    assert processor.logger.errors, "预处理异常必须被记录"
+
+
+def test_playback_thread_survives_poison_message():
+    processor = _bare_processor()
+    processed = []
+
+    def process(response, audio_saved=False):
+        if response == "poison":
+            raise RuntimeError("playback boom")
+        processed.append(response)
+
+    processor.process_transport_message = process
+    thread = threading.Thread(target=processor._process_playback_events, daemon=True)
+    thread.start()
+    processor._playback_queue.put(PreparedAgentMessage(response="poison"))
+    processor._playback_queue.put(PreparedAgentMessage(response="good"))
+    processor._playback_queue.put(None)
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert processed == ["good"]
+    assert processor.logger.errors, "展示/播放异常必须被记录"

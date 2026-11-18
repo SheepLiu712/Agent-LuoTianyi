@@ -31,18 +31,6 @@ class TouchInteractionHandler:
             interaction_id=identity.interaction_id,
             cancellation=request.cancellation,
         )
-        if not self._reactions.allows(invocation, request.stimulus):
-            get_logger(__name__).warning(
-                "Touch interaction rejected request_id=%s stimulus_id=%s",
-                request.request_id,
-                request.stimulus.stimulus_id,
-            )
-            return self._report(
-                request,
-                plans,
-                status=d.HandlingRequestStatus.FAILED,
-                error_code=d.HandlingErrorCode.UNSUPPORTED_INTERACTION,
-            )
         reaction = self._reactions.choose(invocation, request.stimulus)
         if reaction is None:
             get_logger(__name__).error(

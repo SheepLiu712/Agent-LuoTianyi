@@ -3,21 +3,21 @@ import * as SecureStore from 'expo-secure-store';
 import React, { useEffect } from 'react';
 import { act, create } from 'react-test-renderer';
 
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../features/account/useAuth';
 import { server_config } from '../config';
 import { loadRegistrationResume } from '../utils/registration_resume';
 import { markRegistrationSameUserLogin } from '../utils/registration_resume';
-import { encryptPassword } from '../utils/crypto';
+import { encryptPassword } from '../features/account/crypto';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
   default: { getItem: jest.fn(), setItem: jest.fn(), removeItem: jest.fn() },
 }));
-jest.mock('../utils/crypto', () => ({
+jest.mock('../features/account/crypto', () => ({
   encryptPassword: jest.fn(async (value: string) => ({ ok: true, encrypted: `encrypted:${value}` })),
   getPublicKey: jest.fn(async () => 'key'),
 }));
-jest.mock('../utils/voice_playback_manager', () => ({ voicePlaybackManager: { clear: jest.fn() } }));
+jest.mock('../features/chat/voice_playback_manager', () => ({ voicePlaybackManager: { clear: jest.fn() } }));
 
 const storage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 const secureStore = SecureStore as jest.Mocked<typeof SecureStore>;

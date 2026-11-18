@@ -3,12 +3,15 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from src.utils.helpers import ensure_directory
+from src.utils.server_paths import resolve_server_path
 from src.world.citywalk.history_store import append_citywalk_history
 from src.world.citywalk.types import CitywalkSessionResult
 
 
 class CitywalkReportGenerator:
-    def __init__(self, title_prefix: str = "逛街小洛", history_file: str = "data/citywalk_reports/citywalk_history.json"):
+    def __init__(
+        self, title_prefix: str = "逛街小洛", history_file: str = "data/citywalk_reports/citywalk_history.json"
+    ):
         self.title_prefix = title_prefix
         self.history_file = history_file
 
@@ -32,6 +35,7 @@ class CitywalkReportGenerator:
                     "reason": event.llm_reason,
                     "moving_activity": event.moving_activity,
                     "poi_activity": event.poi_activity,
+                    "environment_feedback": event.environment_feedback,
                     "state": {
                         "energy": [event.energy_before, event.energy_after],
                         "fullness": [event.fullness_before, event.fullness_after],
@@ -44,6 +48,7 @@ class CitywalkReportGenerator:
             "title": self.title_prefix,
             "created_at": result.created_at.isoformat(),
             "overview": {
+                "province": result.province,
                 "city": result.city,
                 "selected_destination": result.selected_destination,
                 "destination_reason": result.destination_reason,
@@ -66,9 +71,9 @@ class CitywalkReportGenerator:
         ensure_directory(output_dir)
         session_tag = result.created_at.strftime("%Y%m%d_%H%M%S")
         filename = f"citywalk_{session_tag}.json"
-        output_path = Path(output_dir) / filename
+        output_path = resolve_server_path(output_dir) / filename
         output_path.write_text(self.render(result), encoding="utf-8")
 
         places = [e.poi.name for e in result.events if e.poi and e.poi.name]
-        append_citywalk_history(self.history_file, city=result.city, places=places)
+        append_citywalk_history(self.history_file, city=result.city, places=places, province=result.province)
         return str(output_path)

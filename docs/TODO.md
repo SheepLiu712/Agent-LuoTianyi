@@ -9,10 +9,12 @@
     - [ ] CLI支持发送音频文件，并下载自己发送的音频文件（测试用 CLI 驱动已随 F1 交付，不计入本产品待办）；
     - [ ] 桌面端支持发送音频文件，并下载、重放自己发送的音频文件；
     - [ ] 桌面端支持录制并发送语音消息；
-  - [ ] Android 实时语音通话功能；
-    - [ ] 实现独立 `call_ws`、CallStage、实时语音适配器和 Android 通话界面；
-    - [ ] 实现聊天/通话严格互斥、三秒恢复、用户打断和通话记录结算；
-    - [ ] 将现有 Reflection 重构为压缩点与 Stage 销毁时触发的 Cognitive Maintenance；
+  - [ ] Android 实时语音通话功能（实现已由 PR #361 集成到 dev，剩余验收由 [#362](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/362) 跟踪）；
+    - [x] 实现独立 `call_ws`、CallStage、实时语音适配器和 Android 通话界面；
+    - [x] 实现聊天/通话严格互斥、三秒恢复、用户打断和通话记录结算；
+    - [x] 将现有 Reflection 重构为压缩点与 Stage 销毁时触发的 Cognitive Maintenance；
+    - [ ] 修复回复失败日志格式化 [#311](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/311)；
+    - [ ] 统一聊天与通话嘴型驱动、评估播放后端整合 [#360](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/360)；
     - [ ] 尽快调研 AgentJev-0.6B 等社区本地 Judge 作为快速决策模型的可行性，并以项目数据集验证中文能力、校准和延迟；
 - [ ] v0.6.0 更新tts模型，更新识图模型
   - [ ] 更新tts模型

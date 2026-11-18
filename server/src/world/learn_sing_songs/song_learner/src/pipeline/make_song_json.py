@@ -4,9 +4,15 @@
 import argparse
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
+
+SERVER_ROOT = Path(__file__).resolve().parents[6]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
+from src.infrastructure.media.song_asset_validation import audio_duration_seconds  # noqa: E402
 
 TIMESTAMP_LINE_RE = re.compile(r"^\[(\d{1,2}:\d{1,2}(?:\.\d{1,6})?)\](.*)$")
 OFFSET_LINE_RE = re.compile(r"^\[offset:([^\]]+)\]$", re.IGNORECASE)
@@ -38,9 +44,7 @@ def read_text_auto(path: Path) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="结合 <歌名>.llm.lrc 与原始 lrc，生成 <歌名>.json"
-    )
+    parser = argparse.ArgumentParser(description="结合 <歌名>.llm.lrc 与原始 lrc，生成 <歌名>.json")
     parser.add_argument(
         "--song_dir",
         required=True,
@@ -161,12 +165,23 @@ def round2(value: float) -> float:
     return round(value + 1e-8, 2)
 
 
+def _bounded_lyric_end(song_name: str, start: float, end: float, audio_duration: float | None) -> float:
+    if audio_duration is not None:
+        if start >= audio_duration:
+            raise ValueError(f"歌词起点超出音频: song={song_name}, start={start}, duration={audio_duration}")
+        end = min(end, audio_duration)
+    if start < 0 or end < start:
+        raise ValueError(f"歌词时间未递增: song={song_name}, start={start}, end={end}")
+    return end
+
+
 def build_segment_json(
     song_name: str,
     lrc_offset,
     all_timed_lines: List[TimedLine],
     candidates: List[TimedLine],
     llm_segments: List[List[str]],
+    audio_duration: float | None = None,
 ):
     all_times = [item.time_seconds for item in all_timed_lines]
 
@@ -179,17 +194,16 @@ def build_segment_json(
         for line in seg_lines:
             pos = find_next_match(candidates, line, cursor)
             if pos < 0:
-                raise ValueError(
-                    f"在原始lrc中未找到llm歌词（从第{cursor + 1}候选行开始搜索）: {line}"
-                )
+                raise ValueError(f"在原始lrc中未找到llm歌词（从第{cursor + 1}候选行开始搜索）: {line}")
 
             candidate = candidates[pos]
             all_index = candidate.index
             next_time = (
                 all_times[all_index + 1]
                 if all_index + 1 < len(all_times)
-                else all_times[all_index]
+                else (audio_duration if audio_duration is not None else all_times[all_index])
             )
+            next_time = _bounded_lyric_end(song_name, candidate.time_seconds, next_time, audio_duration)
             matched.append(
                 MatchedLyric(
                     all_index=all_index,
@@ -253,13 +267,19 @@ def generate_song_json(song_dir: Path) -> Path:
     for llm_segment in llm_segments:
         for line in llm_segment:
             print(line)
+    audio_path = song_dir / f"{song_name}.cleaned.mp3"
+    if not audio_path.exists():
+        audio_path = song_dir / f"{song_name}.mp3"
     payload = build_segment_json(
         song_name=song_name,
         lrc_offset=lrc_offset,
         all_timed_lines=all_timed_lines,
         candidates=candidates,
         llm_segments=llm_segments,
+        audio_duration=audio_duration_seconds(audio_path, exact=True),
     )
+
+    audio_duration_seconds(audio_path, exact=True, metadata=payload)
 
     out_json_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=4) + "\n",

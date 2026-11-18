@@ -25,6 +25,7 @@ from src.domain.music_type import WishEntry
 from src.infrastructure.media.song_asset_validation import playable_segments
 from src.utils.helpers import get_unified_song_name
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 
 _SONGLEARNER_PATH_ADDED = False
 
@@ -37,6 +38,8 @@ class SongLearningQueue(Protocol):
     def get_pending(self) -> list[WishEntry]: ...
 
     def mark_learned(self, safe_name: str) -> None: ...
+
+    def mark_abandoned(self, safe_name: str, reason: str = "") -> None: ...
 
     def mark_redirected(self, requested_name: str, redirected_to: str, **kwargs) -> None: ...
 
@@ -100,18 +103,24 @@ class AutoSongLearner:
         self._ensure_directories()
 
         # Songlearner integration
-        self.songlearner_dir = cwd / Path(config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner"))
-        self.songlearner_resource_dir = cwd / Path(config.get("songlearner_resource_dir", "res/song_learner"))
+        self.songlearner_dir = resolve_server_path(
+            config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner")
+        )
+        self.songlearner_resource_dir = resolve_server_path(config.get("songlearner_resource_dir", "res/song_learner"))
+        self.work_dir = resolve_server_path(config.get("work_dir", ".runtime/song_learner"))
+        self.prompt_file = resolve_server_path(
+            config.get("prompt_file", "res/agent/prompts/song_segmentation_prompt.json")
+        )
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
         else:
-            self.logger.error("Songlearner 模型未就绪（需下载 MSST 预训练权重），" "无法执行自动学歌")
+            self.logger.error("Songlearner 模型未就绪（需下载 MSST 预训练权重），无法执行自动学歌")
             raise RuntimeError("Songlearner 模型未就绪，无法执行自动学歌")
 
         # QQ 音乐凭证检测（启动时）
         credential_path = config.get("qq_credential_file", "config/qq_music_credential.json")
-        self._credential_file = self._resolve_path(cwd, credential_path)
+        self._credential_file = resolve_server_path(credential_path)
         self.qq_credential_refresh_before_seconds = max(
             0,
             int(config.get("qq_credential_refresh_before_seconds", 86400)),
@@ -121,7 +130,7 @@ class AutoSongLearner:
         if not self.qq_credential_valid:
             self.logger.warning("QQ 音乐凭证无效或不存在，正在生成登录二维码...")
             self._generate_login_qr()
-            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}")
+            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self._credential_file.parent / 'qq_login_qr.png'}")
 
     # -- directory setup -----------------------------------------------------
 
@@ -203,7 +212,7 @@ class AutoSongLearner:
         if not valid:
             self.logger.warning("QQ 音乐凭证仍然无效，重新生成登录二维码...")
             self._generate_login_qr()
-            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}")
+            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self._credential_file.parent / 'qq_login_qr.png'}")
         return valid
 
     # -- main entry ----------------------------------------------------------
@@ -295,7 +304,7 @@ class AutoSongLearner:
                 audio_path = song_dir / f"{song_name}.cleaned.mp3"
                 if not audio_path.is_file():
                     audio_path = song_dir / f"{song_name}.mp3"
-                if not playable_segments(song_data.get("segments"), audio_path):
+                if not playable_segments(song_data.get("segments"), audio_path, metadata=song_data):
                     continue
                 title = str(song_data.get("title") or "")
             except Exception:
@@ -334,6 +343,7 @@ class AutoSongLearner:
         env = self._build_songlearner_env()
 
         try:
+            self.work_dir.mkdir(parents=True, exist_ok=True)
             proc = subprocess.run(
                 [
                     sys.executable,
@@ -343,13 +353,15 @@ class AutoSongLearner:
                     str(self.songs_dir),
                     "--resource_root",
                     str(self.songlearner_resource_dir),
+                    "--prompt_json",
+                    str(self.prompt_file),
                     "--credential_file",
                     str(self._credential_file),
                     "--no_auto_login",
                     "--singer_name",
                     self.character_name,
                 ],
-                cwd=str(self.songlearner_dir),
+                cwd=str(self.work_dir),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -381,6 +393,13 @@ class AutoSongLearner:
                 self._handle_failure(safe_name, failure_reason)
             return None
 
+        for line in proc.stdout.splitlines():
+            if line.startswith("[SONGLEARNER_STOP] "):
+                reason = line.removeprefix("[SONGLEARNER_STOP] ")
+                self.wishlist.mark_abandoned(safe_name, reason)
+                self.logger.info(f"Stopped learning {safe_name}: {reason}")
+                return None
+
         # Locate the final output directory under the music library.
         learned_name = self._parse_songlearner_result(proc.stdout) or safe_name
         sl_output = self.songs_dir / learned_name
@@ -409,7 +428,7 @@ class AutoSongLearner:
         stderr = proc.stderr or ""
         parsed = self._parse_songlearner_error(stderr)
         if parsed:
-            return f"{parsed['code']} {parsed['step']}: {parsed['message']} " f"(exit_code={parsed['exit_code']})"
+            return f"{parsed['code']} {parsed['step']}: {parsed['message']} (exit_code={parsed['exit_code']})"
 
         stderr_tail = self._last_nonempty_line(stderr) or "无 stderr"
         return f"SL099 unexpected: Songlearner 流水线执行失败，退出码 {proc.returncode}: {stderr_tail}"
@@ -510,7 +529,7 @@ class AutoSongLearner:
                 f"SL093 finalize: 关键文件缺失: audio={has_audio}, json={has_json}, lyrics={has_lyrics}",
             )
             return None
-        if not playable_segments(data.get("segments"), cleaned_target):
+        if not playable_segments(data.get("segments"), cleaned_target, metadata=data):
             self._handle_failure(requested_name, "SL094 finalize: 没有可演唱的有效唱段")
             return None
 
@@ -564,8 +583,10 @@ class AutoSongLearner:
             "msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt",
             "msst/configs/model_mel_band_roformer_denoise.yaml",
             "msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt",
-            "re_segment_prompt.json",
         ]
+        if not self.prompt_file.is_file():
+            self.logger.warning(f"Songlearner Prompt 缺失: {self.prompt_file}")
+            return False
         for rel_path in required_models:
             if not (self.songlearner_resource_dir / rel_path).exists():
                 self.logger.warning(f"Songlearner 模型缺失: {rel_path}")

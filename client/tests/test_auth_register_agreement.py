@@ -22,7 +22,7 @@ def api(monkeypatch):
     monkeypatch.setattr(
         auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: "ciphertext"
     )
-    instance = AuthApi.__new__(AuthApi)
+    instance = AuthApi("https://example.invalid", session=SimpleNamespace())
     instance.base_url = "https://example.invalid"
     instance.verify_ssl = True
     sent: list[dict] = []
@@ -167,7 +167,7 @@ def test_encryption_failure_returns_outcome(monkeypatch):
     monkeypatch.setattr(
         auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: None
     )
-    instance = AuthApi.__new__(AuthApi)
+    instance = AuthApi("https://example.invalid", session=SimpleNamespace())
     instance.base_url = "https://example.invalid"
     instance.verify_ssl = True
     instance.session = SimpleNamespace(post=lambda *a, **k: pytest.fail("不应发起请求"))

@@ -83,6 +83,7 @@ def make_runtime(monkeypatch):
             agent_runtime=SimpleNamespace(
                 character_ids=("luotianyi", "miku"),
                 default_character_id="luotianyi",
+                vector_store=SimpleNamespace(enabled=True),
             ),
             database_manager=SimpleNamespace(event_store=event_store),
         )
@@ -194,12 +195,29 @@ def test_clock_config_overrides_reach_registration(make_runtime, world_config):
     )
 
 
-def test_unconditional_tasks_remain_registered_with_disabled_flag(make_runtime, world_config):
+def test_omitted_task_switches_keep_all_nine_families(make_runtime, world_config):
+    config = enable_all(world_config)
+    for section in config.values():
+        if isinstance(section, dict):
+            section.pop("enabled", None)
+    names = make_runtime(config).world_clock.actions
+    for _, prefix, per_character in TASKS.values():
+        assert any(name == prefix or name.startswith(prefix + ":") for name in names)
+
+
+def test_top_level_false_cannot_be_reenabled_by_character_override(make_runtime, world_config):
+    config = enable_all(world_config)
+    config["citywalk"].update(enabled=False, characters={"miku": {"enabled": True}})
+    names = make_runtime(config).world_clock.actions
+    assert not any(name.startswith("try_citywalk:") for name in names)
+
+
+def test_all_three_previously_unconditional_families_honor_disabled_flag(make_runtime, world_config):
     config = enable_all(world_config)
     for key in ("song_knowledge", "proactive_topic_check", "expired_event_cleanup"):
         config[key]["enabled"] = False
     names = make_runtime(config).world_clock.actions
-    assert {"sync_new_song_knowledge", "proactive_topic_check", "purge_expired_events"} <= names.keys()
+    assert not {"sync_new_song_knowledge", "proactive_topic_check", "purge_expired_events"} & names.keys()
 
 
 @pytest.mark.asyncio

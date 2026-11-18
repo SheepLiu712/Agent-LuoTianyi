@@ -45,7 +45,7 @@ class LLMService:
         if missing:
             raise RuntimeError(f"LLMService dependencies are missing: {', '.join(missing)}")
 
-    def register_llm_module(self, module_name: str, module_config: Dict) -> LLMModule:
+    def register_llm_module(self, module_name: str, module_config: Dict, *, stream: bool = False) -> LLMModule:
         if module_name in self.llm_modules:
             self.logger.warning(f"LLM模块已存在，覆盖注册: {module_name}")
 
@@ -65,6 +65,7 @@ class LLMService:
             prompt_template,
             llm_interface,
             client_llm_executor=self.client_llm_executor,
+            stream=stream,
         )
         self.llm_modules[module_name] = module
         return module

@@ -24,7 +24,7 @@ def load_citywalk_history(history_file: str) -> List[Dict[str, Any]]:
         if not isinstance(places, list):
             places = []
         cleaned_places = [str(p).strip() for p in places if str(p).strip()]
-        rows.append({"city": city, "places": cleaned_places})
+        rows.append({"province": str(item.get("province") or "").strip(), "city": city, "places": cleaned_places})
     return rows
 
 
@@ -35,12 +35,13 @@ def get_recent_citywalk_history(history_file: str, limit: int = 10) -> List[Dict
     return rows[-limit:]
 
 
-def append_citywalk_history(history_file: str, city: str, places: List[str]) -> None:
+def append_citywalk_history(history_file: str, city: str, places: List[str], province: str = "") -> None:
     path = Path(history_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = load_citywalk_history(history_file)
     rows.append(
         {
+            "province": province.strip(),
             "city": str(city or "").strip(),
             "places": [str(p).strip() for p in places if str(p).strip()],
         }

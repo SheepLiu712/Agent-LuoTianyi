@@ -4,7 +4,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from src.domain.call import CallContent
 from src.domain.memory_context import MemoryHit
+
+
+class ConversationMode(str, Enum):
+    """创建上下文时选择的窗口语义；不控制单次 append/compact。"""
+
+    CHAT = "chat"
+    CALL = "call"
 
 
 def _check_terms(values: tuple[str, ...]) -> None:
@@ -200,14 +208,14 @@ class ConversationEntry:
     entry_id: str
     timestamp: datetime
     source: str
-    content: TextContent | ImageContent | AudioContent | SongContent
+    content: TextContent | ImageContent | AudioContent | SongContent | CallContent
 
     def __post_init__(self) -> None:
         if not self.entry_id.strip() or not self.source.strip():
             raise ValueError("对话标识和来源不能为空")
         if not isinstance(self.timestamp, datetime) or self.timestamp.tzinfo is not None:
             raise ValueError("timestamp 应为不带时区的服务器本地时间")
-        if not isinstance(self.content, (TextContent, ImageContent, AudioContent, SongContent)):
+        if not isinstance(self.content, (TextContent, ImageContent, AudioContent, SongContent, CallContent)):
             raise TypeError("content 应为对话内容类型")
 
 

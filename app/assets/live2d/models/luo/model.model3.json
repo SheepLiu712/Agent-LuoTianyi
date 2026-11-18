@@ -50,6 +50,10 @@
 			{
 				"Name": "sing",
 				"File": "expressions/sing.exp3.json"
+			},
+			{
+				"Name": "yanndere",
+				"File": "expressions/yanndere.exp3.json"
 			}
 		],
 		"Motions": {

@@ -12,15 +12,15 @@ jest.mock('expo-file-system/legacy', () => ({
 }));
 
 import * as FileSystem from 'expo-file-system/legacy';
-import { AgentBinder } from '../utils/binder';
+import type { ChatFeedback } from '../features/chat/message_processor';
 import {
   canRetryDurableMessage,
   getSendRetryDelayMs,
   MAX_DURABLE_MESSAGE_AGE_MS,
   MAX_DURABLE_RETRY_ATTEMPTS,
   MessageProcessor,
-} from '../utils/message_processor';
-import { NetworkClient } from '../utils/network_client';
+} from '../features/chat/message_processor';
+import { NetworkClient } from '../features/chat/connection/network_client';
 
 
 function fakeBinder() {
@@ -28,7 +28,7 @@ function fakeBinder() {
     emitAgentMessage: jest.fn(),
     emitErrorText: jest.fn(),
     emitMessageStatus: jest.fn(),
-  } as unknown as jest.Mocked<AgentBinder>;
+  } as unknown as jest.Mocked<ChatFeedback>;
 }
 
 async function drainIncoming(processor: MessageProcessor) {

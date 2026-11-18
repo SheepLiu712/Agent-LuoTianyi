@@ -1,0 +1,723 @@
+import AgreementScreen from '../features/account/AgreementScreen';
+import { ChatScreen } from '../features/chat/ChatScreen';
+import { VoicePermissionNotice } from '../features/chat/VoicePermissionNotice';
+import { CallFailureBanner } from '../features/call/CallFailureBanner';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Asset } from 'expo-asset';
+import Constants from 'expo-constants';
+import * as Clipboard from 'expo-clipboard';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Image,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useColorScheme,
+  useWindowDimensions,
+  View,
+  Alert,
+  Platform,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
+import type { AccountSession } from '../features/account/credentials';
+import { usePageNotices } from './notices/AppNotices';
+import { useChatLogic } from '../features/chat/useChatLogic';
+import { useDynamicsUnread } from '../features/dynamics/useDynamicsUnread';
+import { addDebugTrace, clearDebugTrace, DebugTraceEntry, formatDebugTraceReport, subscribeDebugTrace } from '../utils/debug_trace';
+import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../shared/ui/theme';
+import DynamicsScreen from '../features/dynamics/DynamicsScreen';
+import PreferencesScreen from '../features/settings/PreferencesScreen';
+import LlmSettingsScreen from '../features/settings/ModelSettingsScreen';
+import { useCallFeature } from '../features/call/useCallFeature';
+import { CallScreen } from '../features/call/CallScreen';
+import { createCallMouthBridge } from '../features/call/call_audio/playback_progress';
+
+const THINKING_BUBBLE_FRAMES = [
+  require('../assets/images/thinking_bubble1.png'),
+  require('../assets/images/thinking_bubble2.png'),
+  require('../assets/images/thinking_bubble3.png'),
+];
+
+export default function MainScreen({ session, onLogout }: { session: AccountSession; onLogout: (closeCall: () => Promise<void>) => Promise<void> }) {
+  const { username, token: message_token } = session;
+  const insets = useSafeAreaInsets();
+  const systemScheme = useColorScheme();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const live2dHeight = screenHeight * 0.4;
+  const drawerWidth = useMemo(() => Math.round(screenWidth * 0.38), [screenWidth]);
+  const [thinkingFrame, setThinkingFrame] = useState(0);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
+  const [showAgreement, setShowAgreement] = useState(false);
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [showLlmSettings, setShowLlmSettings] = useState(false);
+  const [showDynamics, setShowDynamics] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [colorMode, setColorMode] = useState<ColorMode>('light');
+  const [live2dReady, setLive2dReady] = useState(false);
+  const { hasUnread: hasDynamicsUnread, count: dynamicsUnreadCount,
+    refresh: refreshDynamicsUnread, markRead } = useDynamicsUnread(session);
+  const webviewRef = useRef<WebView>(null);
+  const callMouthBridge = useMemo(() => createCallMouthBridge((code) => webviewRef.current?.injectJavaScript(code)), []);
+  const drawerProgress = useRef(new Animated.Value(0)).current;
+  const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
+  const callHangupRef = useRef<() => void>(() => {});
+  const handleBackConfirmation = useCallback(() => Alert.alert('结束通话？', '结束后会立即停止麦克风和播放。', [
+    { text: '继续通话', style: 'cancel' },
+    { text: '结束', style: 'destructive', onPress: () => callHangupRef.current() },
+  ]), []);
+  const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
+  const live2dAssetRoot = 'file:///android_asset/public/';
+  const live2dRoot = __DEV__ ? `http://${debuggerHost}/` : live2dAssetRoot;
+  const live2dUrl = `${live2dRoot}live2d/live2d.html`;
+
+  const isAllowedWebviewUrl = (url: string) => {
+    return __DEV__ ? url.startsWith(live2dRoot) : url.startsWith(live2dAssetRoot);
+  };
+
+  const chat = useChatLogic(webviewRef, username, message_token, 'luotianyi');
+  const { thinking, addLocalCallRecord, handleWebViewMessage, voiceInput, callSwitch, resumeChat } = chat;
+  const leaveAccount = () => {
+    voiceInput.leavePermissionPage();
+    void onLogout(call.close);
+  };
+
+  const call = useCallFeature({
+    username,
+    token: message_token,
+    characterId: 'luotianyi',
+    switchPort: callSwitch,
+    onAuthRequired: leaveAccount,
+    mouthBridge: callMouthBridge,
+    onBackConfirmation: handleBackConfirmation,
+    onReturnToChat: () => { void resumeChat(); },
+    onCallRecord: addLocalCallRecord,
+  });
+  callHangupRef.current = call.hangup;
+  const page = showAgreement ? 'agreement' : showPreferences ? 'preferences' : showLlmSettings ? 'models' : showDynamics ? 'dynamics'
+    : call.state.phase === 'IDLE' ? 'chat' : 'call';
+  const showNotice = usePageNotices(page);
+  const { failureNotice, dismissFailure } = call;
+  useEffect(() => {
+    if (failureNotice && page !== 'call' && page !== 'chat') dismissFailure();
+  }, [dismissFailure, failureNotice, page]);
+  const isCallPresentation = call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING';
+  useEffect(() => {
+    if (live2dReady) webviewRef.current?.injectJavaScript(`window.setPresentationMode('${isCallPresentation ? 'call' : 'chat'}'); true;`);
+  }, [isCallPresentation, live2dReady]);
+
+
+
+  const animateDrawer = useCallback((open: boolean) => {
+    setDrawerOpen(open);
+    Animated.timing(drawerProgress, {
+      toValue: open ? 1 : 0,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [drawerProgress]);
+
+  const openDrawer = useCallback(() => animateDrawer(true), [animateDrawer]);
+  const closeDrawer = useCallback(() => animateDrawer(false), [animateDrawer]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_event, gestureState) => {
+          const isHorizontal = Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
+          return isHorizontal && drawerOpen && gestureState.dx < 0;
+        },
+        onMoveShouldSetPanResponder: (_event, gestureState) => {
+          const isHorizontal = Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
+          return isHorizontal && drawerOpen && gestureState.dx < 0;
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const base = drawerOpen ? drawerWidth : 0;
+          const next = Math.max(0, Math.min(drawerWidth, base + gestureState.dx));
+          drawerProgress.setValue(next / drawerWidth);
+        },
+        onPanResponderRelease: (_event, gestureState) => {
+          const shouldOpen = gestureState.dx > -drawerWidth * 0.25;
+          animateDrawer(shouldOpen);
+        },
+        onPanResponderTerminate: () => {
+          animateDrawer(drawerOpen);
+        },
+      }),
+    [animateDrawer, drawerOpen, drawerProgress, drawerWidth],
+  );
+
+  useEffect(() => {
+    const unsubscribe = subscribeDebugTrace((entries) => {
+      setDebugEntries(entries);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(COLOR_MODE_STORAGE_KEY)
+      .then((storedMode) => {
+        if (!active) {
+          return;
+        }
+        if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
+          setColorMode(storedMode);
+        }
+      })
+      .catch((error) => {
+        addDebugTrace('theme', 'load color mode failed', { error: String(error) });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!thinking) {
+      setThinkingFrame(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setThinkingFrame((prev) => (prev + 1) % 3);
+    }, 500);
+    return () => clearInterval(timer);
+  }, [thinking]);
+
+  useEffect(() => {
+    Asset.loadAsync(THINKING_BUBBLE_FRAMES).catch((error) => {
+      addDebugTrace('asset', 'preload thinking bubbles failed', { error: String(error) });
+    });
+  }, []);
+
+  const handleLive2DMessage = useCallback(
+    (event: any) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+        if (data.type === 'mouthAnalysisWindow') {
+          callMouthBridge.configureAnalysisWindow(data.sampleRate, data.samples);
+        }
+        if (data.type === 'modelLoaded') {
+          setLive2dReady(Boolean(data.success));
+          addDebugTrace('live2d', data.success ? 'model loaded' : 'model load failed', data.error ? { error: data.error } : undefined);
+        }
+      } catch {
+        // useChatLogic also ignores malformed messages; keep the wrapper equally quiet.
+      }
+      handleWebViewMessage(event);
+    },
+    [callMouthBridge, handleWebViewMessage],
+  );
+
+  const visibleDebugEntries = debugEntries.slice(-200).reverse();
+  const copyDebugLogs = async () => {
+    const report = formatDebugTraceReport({
+      appVersion: Constants.expoConfig?.version,
+      versionCode: Constants.expoConfig?.android?.versionCode,
+      platform: Platform.OS,
+      systemVersion: Platform.Version,
+      ...(Platform.OS === 'android' ? {
+        model: Platform.constants.Model,
+        manufacturer: Platform.constants.Manufacturer,
+        androidRelease: Platform.constants.Release,
+      } : {}),
+    });
+    try {
+      if (!await Clipboard.setStringAsync(report)) throw new Error('clipboard_write_failed');
+      Alert.alert('已复制日志', '已复制全部保留日志及设备信息，可直接粘贴反馈。');
+    } catch (error) {
+      addDebugTrace('debug', 'copy logs failed', { error: String(error) });
+      Alert.alert('复制失败', '无法写入剪贴板，请重试。');
+    }
+  };
+
+  const formatDebugTs = (ts: number) => {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(
+      d.getSeconds(),
+    ).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  };
+
+  const drawerTranslateX = drawerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-drawerWidth, 0],
+  });
+  const dimOpacity = drawerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.45],
+  });
+
+  const handleToggleDebug = () => {
+    setDebugOpen((prev) => !prev);
+    closeDrawer();
+  };
+
+  const handleOpenPreferences = () => {
+    voiceInput.leavePermissionPage();
+    setShowPreferences(true);
+    closeDrawer();
+  };
+
+  const handleOpenLlmSettings = () => {
+    voiceInput.leavePermissionPage();
+    setShowLlmSettings(true);
+    closeDrawer();
+  };
+
+  const handleOpenDynamics = () => {
+    voiceInput.leavePermissionPage();
+    setShowDynamics(true);
+    closeDrawer();
+  };
+
+  const handleCloseDynamics = useCallback(() => {
+    setShowDynamics(false);
+    refreshDynamicsUnread();
+  }, [refreshDynamicsUnread]);
+
+  const handleLogout = () => {
+    closeDrawer();
+    leaveAccount();
+  };
+
+  const openCall = () => {
+    if (!call.canStart) return;
+    voiceInput.leavePermissionPage();
+    closeDrawer();
+    void call.start(true);
+  };
+
+  const handleColorMode = (mode: ColorMode) => {
+    setColorMode(mode);
+    AsyncStorage.setItem(COLOR_MODE_STORAGE_KEY, mode).catch((error) => {
+      addDebugTrace('theme', 'save color mode failed', { error: String(error) });
+    });
+  };
+
+  return (
+    <View style={[styles.root, { backgroundColor: theme.root }]}>
+      <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
+
+      {page === 'chat' && voiceInput.permissionNotice && <VoicePermissionNotice
+        notice={voiceInput.permissionNotice} theme={theme} show={showNotice}
+        onDismiss={voiceInput.dismissPermissionNotice} onOpenSettings={voiceInput.openPermissionSettings} />}
+      {page === 'chat' && failureNotice && <CallFailureBanner
+        notice={failureNotice} theme={theme} show={showNotice} onDismiss={dismissFailure} />}
+      {call.state.phase !== 'IDLE' ? <CallScreen state={call.state} theme={theme} onHangup={call.hangup} onBack={handleBackConfirmation} /> : null}
+      <View style={[styles.live2dFixedLayer, call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? styles.live2dCallLayer : null, { top: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? 0 : insets.top, height: call.state.phase === 'ACTIVE' || call.state.phase === 'RECONNECTING' ? screenHeight : live2dHeight }]}>
+        <Image
+          source={require('../assets/live2d/backgrounds/bg2.jpg')}
+          style={[StyleSheet.absoluteFillObject, styles.backgroundImage, isCallPresentation && styles.callBackgroundImage]}
+          resizeMode="cover"
+        />
+        <WebView
+          ref={webviewRef}
+          source={{ uri: live2dUrl }}
+          style={styles.webview}
+          originWhitelist={[live2dRoot]}
+          scrollEnabled={false}
+          bounces={false}
+          allowFileAccess={true}
+          allowFileAccessFromFileURLs={true}
+          allowUniversalAccessFromFileURLs={false}
+          allowsInlineMediaPlayback={true}
+          mediaPlaybackRequiresUserAction={false}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          startInLoadingState={true}
+          mixedContentMode="never"
+          onShouldStartLoadWithRequest={(request) => isAllowedWebviewUrl(request.url)}
+          onLoadStart={() => setLive2dReady(false)}
+          onMessage={handleLive2DMessage}
+          onError={(event) => {
+            addDebugTrace('webview', 'error', { detail: JSON.stringify(event.nativeEvent) });
+          }}
+          onHttpError={(event) => {
+            addDebugTrace('webview', 'http error', { detail: JSON.stringify(event.nativeEvent) });
+          }}
+        />
+
+        {!live2dReady ? (
+          <View pointerEvents="none" style={[styles.live2dLoadingOverlay, { backgroundColor: theme.live2dOverlay || 'rgba(0,0,0,0.16)' }]}>
+            <ActivityIndicator size="small" color={theme.accent} />
+            <Text style={[styles.live2dLoadingText, { color: theme.text }]}>天依正在过来...</Text>
+          </View>
+        ) : null}
+
+        {!isCallPresentation ? <TouchableOpacity style={[styles.menuButton, { backgroundColor: theme.menuButton }]} onPress={openDrawer} activeOpacity={0.75}>
+          <Image source={require('../assets/images/menu.png')} style={[styles.menuIcon, { tintColor: theme.text }]} />
+        </TouchableOpacity> : null}
+
+        {thinking ? (
+          <View style={styles.thinkingBubble}>
+            <Image source={THINKING_BUBBLE_FRAMES[thinkingFrame]} style={styles.thinkingBubbleImage} resizeMode="contain" />
+          </View>
+        ) : null}
+
+        <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.live2dThemeOverlay, { backgroundColor: theme.live2dOverlay }]} />
+
+        {debugOpen ? (
+          <View style={[styles.debugPanel, { backgroundColor: theme.debugBackground, borderColor: theme.debugBorder }]}>
+            <View style={styles.debugHeaderRow}>
+              <Text style={[styles.debugHeaderText, { color: theme.debugHeader }]}>日志 {visibleDebugEntries.length}/{debugEntries.length}</Text>
+              <TouchableOpacity accessibilityLabel="复制全部日志" onPress={() => { void copyDebugLogs(); }}>
+                <Text style={[styles.debugClearText, { color: theme.debugAction }]}>复制全部日志</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={clearDebugTrace}>
+                <Text style={[styles.debugClearText, { color: theme.debugAction }]}>清空</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.debugScroll} contentContainerStyle={styles.debugScrollContent}>
+              {visibleDebugEntries.map((entry) => (
+                <Text key={entry.id} style={[styles.debugLine, { color: theme.debugText }]}>
+                  [{formatDebugTs(entry.ts)}] [{entry.scope}] {entry.message}
+                  {entry.detail ? ` | ${entry.detail}` : ''}
+                </Text>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+      </View>
+
+      {showAgreement ? <AgreementScreen onClose={() => setShowAgreement(false)} theme={theme} /> : null}
+      {showPreferences ? <PreferencesScreen session={session} onClose={() => setShowPreferences(false)} theme={theme} /> : null}
+      {showLlmSettings ? <LlmSettingsScreen onClose={() => setShowLlmSettings(false)} theme={theme} /> : null}
+      {showDynamics ? (
+        <DynamicsScreen session={session}
+          onClose={handleCloseDynamics}
+          markRead={markRead}
+          theme={theme}
+        />
+      ) : null}
+
+      <ChatScreen chat={chat} session={session} theme={theme} topOffset={live2dHeight} />
+
+      <Animated.View
+        pointerEvents={drawerOpen ? 'auto' : 'none'}
+        style={[StyleSheet.absoluteFillObject, styles.dimLayer, { backgroundColor: theme.dim, opacity: dimOpacity }]}
+      >
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={closeDrawer} />
+      </Animated.View>
+
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={[
+          styles.drawer,
+          {
+            width: drawerWidth,
+            paddingTop: insets.top + 18,
+            paddingBottom: Math.max(insets.bottom, 16),
+            backgroundColor: theme.surface,
+            borderRightColor: theme.border,
+            shadowColor: theme.shadow,
+            transform: [{ translateX: drawerTranslateX }],
+          },
+        ]}
+      >
+        <Text style={[styles.drawerTitle, { color: theme.text }]}>菜单</Text>
+        <Text style={[styles.drawerSubtitle, { color: theme.textMuted }]}>洛天依 Agent</Text>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleToggleDebug} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>{debugOpen ? '收起调试界面' : '打开调试界面'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenLlmSettings} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>LLM 模型设置</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenDynamics} activeOpacity={0.78}>
+          <View style={styles.drawerItemRow}>
+            <Text style={[styles.drawerItemText, { color: theme.text }]}>动态</Text>
+            {hasDynamicsUnread ? (
+              <View style={[styles.drawerDotBadge, { backgroundColor: theme.accent }]}>
+                <Text style={[styles.drawerDotBadgeText, { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' }]}>
+                  {dynamicsUnreadCount > 99 ? '99+' : String(dynamicsUnreadCount)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={() => { setShowAgreement(true); closeDrawer(); }} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>用户协议</Text>
+        </TouchableOpacity>
+
+        {Platform.OS === 'android' ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="给天依打电话"
+            accessibilityState={{ disabled: !call.canStart }}
+            disabled={!call.canStart}
+            style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]}
+            onPress={call.canStart ? openCall : undefined}
+            activeOpacity={0.78}
+          >
+            <Text style={[styles.drawerItemText, { color: call.canStart ? theme.text : theme.textMuted }]}>语音通话</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
+          <Text style={[styles.drawerSectionLabel, { color: theme.textMuted }]}>颜色模式</Text>
+          {(Object.keys(COLOR_MODE_LABELS) as ColorMode[]).map((mode) => (
+            <TouchableOpacity
+              key={mode}
+              style={[
+                styles.colorModeItem,
+                { backgroundColor: theme.surface, borderColor: theme.border },
+                colorMode === mode && { backgroundColor: theme.accentSoft, borderColor: theme.accent },
+              ]}
+              onPress={() => handleColorMode(mode)}
+              activeOpacity={0.78}
+            >
+              <Text style={[styles.colorModeText, { color: theme.textSoft }, colorMode === mode && { color: theme.accentText, fontWeight: '700' }]}>
+                {COLOR_MODE_LABELS[mode]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.drawerSpacer} />
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.dangerSurface }]} onPress={handleLogout} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.dangerText }]}>登出</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: 'white',
+  },
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
+    transform: [{ scale: 1.1 }, { translateX: 0 }, { translateY: 0 }],
+  },
+  callBackgroundImage: {
+    transform: [{ scale: 1 }],
+  },
+  live2dFixedLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: 'transparent',
+    zIndex: 10,
+    overflow: 'hidden',
+  },
+  live2dCallLayer: {
+    zIndex: 20,
+  },
+  thinkingBubble: {
+    position: 'absolute',
+    right: '6%',
+    top: '25%',
+    width: 92,
+    aspectRatio: 1,
+  },
+  thinkingBubbleImage: {
+    width: '100%',
+    height: '100%',
+  },
+  live2dThemeOverlay: {
+    zIndex: 50,
+  },
+  live2dLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 55,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  live2dLoadingText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  menuButton: {
+    position: 'absolute',
+    left: 10,
+    top: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    zIndex: 60,
+    elevation: 12,
+  },
+  menuIcon: {
+    width: 22,
+    height: 22,
+    resizeMode: 'contain',
+  },
+  debugPanel: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    top: 54,
+    bottom: 8,
+    borderWidth: 1,
+    borderColor: '#203244',
+    borderRadius: 10,
+    backgroundColor: '#0f1720',
+    zIndex: 70,
+    elevation: 14,
+    overflow: 'hidden',
+  },
+  debugHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  debugHeaderText: {
+    color: '#b9d7ff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  debugClearText: {
+    color: '#79ffa8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  debugScroll: {
+    flex: 1,
+  },
+  debugScrollContent: {
+    paddingHorizontal: 10,
+    paddingBottom: 10,
+  },
+  debugLine: {
+    color: '#d9e4f0',
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: 2,
+  },
+  dimLayer: {
+    zIndex: 90,
+    backgroundColor: '#000',
+  },
+  drawer: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 100,
+    elevation: 18,
+    backgroundColor: '#ffffff',
+    borderRightWidth: 1,
+    borderRightColor: '#d9e1e8',
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 4, height: 0 },
+  },
+  drawerTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#243447',
+  },
+  drawerSubtitle: {
+    marginTop: 3,
+    marginBottom: 18,
+    fontSize: 12,
+    color: '#7b8794',
+  },
+  drawerItem: {
+    minHeight: 42,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    justifyContent: 'center',
+    backgroundColor: '#f4f8fb',
+    marginBottom: 10,
+  },
+  drawerItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#243447',
+  },
+  drawerItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  drawerDotBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerDotBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  drawerSection: {
+    marginTop: 2,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#edf1f5',
+  },
+  drawerSectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#778492',
+    marginBottom: 8,
+  },
+  colorModeItem: {
+    minHeight: 34,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    marginBottom: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e3e8ee',
+  },
+  colorModeItemSelected: {
+    backgroundColor: '#e8f6ff',
+    borderColor: '#66CCFF',
+  },
+  colorModeText: {
+    fontSize: 13,
+    color: '#4b5967',
+  },
+  colorModeTextSelected: {
+    color: '#1674a3',
+    fontWeight: '700',
+  },
+  drawerSpacer: {
+    flex: 1,
+  },
+  logoutItem: {
+    backgroundColor: '#fff1f1',
+  },
+  logoutItemText: {
+    color: '#c24141',
+  },
+});

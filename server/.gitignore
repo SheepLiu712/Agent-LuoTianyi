@@ -43,6 +43,7 @@ coverage.xml
 # 环境变量
 .env
 .venv
+.runtime/
 env/
 venv/
 ENV/
