@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, TypeVar
 from src.domain.call import CallState
 from src.domain.call.terminal import CallTerminated
 from src.domain.stage.lifecycle import StageEndReason
-from src.infrastructure.observability.call_latency import call_latency
+from src.infrastructure.observability.call_latency import call_latency, set_call_packet_diagnostics
 from src.stage.call.call_stage import (
     CallOutput,
     CallPCM,
@@ -181,7 +181,15 @@ class Session:
                 self._delivery.acknowledge_server(resume_cursor)
             for output in outputs + self._resume_pending:
                 self._enqueue(binding, output)
-            return self._publish_binding(binding, publish)
+            published = self._publish_binding(binding, publish)
+            if len(outputs) > 1:
+                call_latency(
+                    "audio.replay_resumed",
+                    self.call_id,
+                    ack_seq=self._delivery.server_ack_cursor,
+                    message_count=len(outputs) - 1,
+                )
+            return published
         except BaseException as original_error:
             binding.invalidate()
             if business_started:
@@ -364,7 +372,7 @@ class Session:
         binding.enqueue(output.text if output.text is not None else output.binary, on_sent=on_sent)
 
     def _audio_sent(self, response_id, seq):
-        call_latency("audio.sent", self.call_id, response_id=response_id, seq=seq)
+        self._delivery.packet_log.record("audio.sent", response_id, seq=seq)
         self._stage.audio_sent(response_id)
 
     def _preview_resume(self, cursor):
@@ -396,6 +404,7 @@ class Session:
         if self._closed:
             return
         self._closed = True
+        set_call_packet_diagnostics(self.call_id, False)
         if self._capacity_drain_task is not None and self._capacity_drain_task is not asyncio.current_task():
             self._capacity_drain_task.cancel()
         binding, self._binding = self._binding, None
