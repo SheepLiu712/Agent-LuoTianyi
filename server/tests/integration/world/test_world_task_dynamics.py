@@ -5,21 +5,20 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from support.dynamic_skill import make_dynamic
+from support.retrieval import song_material
+from support.users import seed_authenticated_user
 
 import src.domain.agent as d
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.stimulus.citywalk import CitywalkObservationHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.cognitive.learned_song_experience import (
-    LearnedSongExperienceSkill,
-)
 from src.agent.skills.contracts import CharacterNarrative
-from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
-from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
+from src.agent.skills.expression.song_learning import SongLearningTasks
+from src.agent.skills.memory_write import MemoryWriteResult, MemoryWriteStatus
 from src.infrastructure.persistence.database.database_service import DatabaseManager
-from src.infrastructure.persistence.database.sql_database import InviteCode
 from src.world.citywalk.task import CitywalkTask
 from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
@@ -41,7 +40,7 @@ NARRATIVES = {"luotianyi": CharacterNarrative(name="洛天依", persona="", spea
 
 
 def _publishing(dynamic_operations):
-    return DynamicPublishingSkill(dynamic_operations, NARRATIVES)
+    return make_dynamic(dynamic_operations, NARRATIVES)
 
 
 def _emitter(request, sink):
@@ -66,9 +65,10 @@ class FakeMemory:
     def __init__(self):
         self.calls = []
 
-    async def write_event_memory(self, *, user_id, content, commit=True):
+    async def commit_fact(self, invocation, *, fact):
+        user_id, content = None, fact.content
         self.calls.append((user_id, content))
-        return True
+        return MemoryWriteResult(MemoryWriteStatus.CREATED, ("memory-1",), fact.source_id)
 
 
 @pytest.fixture(scope="function")
@@ -86,25 +86,9 @@ def db_manager(tmp_path, monkeypatch):
         asyncio.run(manager.shutdown())
 
 
-def _add_invite_code(db_manager: DatabaseManager, code: str) -> None:
-    session = db_manager.open_sql_session()
-    session.add(InviteCode(code=code, is_used=False))
-    session.commit()
-    session.close()
-
-
-def _register_and_login(db_manager: DatabaseManager, username: str, invite_code: str) -> dict:
-    ok, message = db_manager.credential_service.register_user(username, "password123", invite_code)
-    assert ok is True, message
-    result = db_manager.credential_service.authenticate_password_login(username, "password123")
-    assert result is not None
-    return result
-
-
 def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManager, tmp_path: Path):
     """散步完成后由 Agent 侧决定并发布动态，world 只投递事实。"""
-    _add_invite_code(db_manager, "INVITE5")
-    user = _register_and_login(db_manager, "cityuser", "INVITE5")
+    user = seed_authenticated_user(db_manager, "cityuser")
 
     dynamic_operations = DynamicOperations()
     dynamic_operations.wire_dependencies(database_manager=db_manager)
@@ -226,8 +210,7 @@ def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManage
 
 def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     """学会新歌后由 Agent 侧写经验并发布动态，world 只投递学会事实。"""
-    _add_invite_code(db_manager, "INVITE6")
-    user = _register_and_login(db_manager, "songuser", "INVITE6")
+    user = seed_authenticated_user(db_manager, "songuser")
 
     dynamic_operations = DynamicOperations()
     dynamic_operations.wire_dependencies(database_manager=db_manager)
@@ -313,9 +296,9 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     handling = asyncio.run(
         SongLearnedHandler(
             "luotianyi",
-            LearnedSongExperienceSkill({"luotianyi": FakeMemory()}),
+            FakeMemory(),
             publishing,
-            SongLearningDispatchSkill(SimpleNamespace(singing_manager={"luotianyi": FakeSinging()})),
+            song_material(FakeSinging()),
         ).handle(request, _emitter(request, plan_sink))
     )
     plan = plan_sink.plans[0]
@@ -342,41 +325,20 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
 def test_learned_song_dynamic_is_idempotent_by_character_and_song(
     db_manager: DatabaseManager,
 ):
-    _add_invite_code(db_manager, "INVITE6B")
-    user = _register_and_login(db_manager, "songuser2", "INVITE6B")
+    user = seed_authenticated_user(db_manager, "songuser2")
     dynamic_operations = DynamicOperations()
     dynamic_operations.wire_dependencies(database_manager=db_manager)
-    compose_calls = []
+    from support.skill_support import invocation
 
-    async def fake_compose(**kwargs):
-        compose_calls.append(kwargs["song_name"])
-        return f"学会了《{kwargs['song_name']}》"
-
-    dynamic_operations.compose_learned_song_dynamic_content = fake_compose
-
-    first = asyncio.run(
-        dynamic_operations.publish_learned_song_dynamic(
-            character_id="luotianyi",
-            character_name="洛天依",
-            character_persona="",
-            speaking_style="",
-            song_name="告死鸟",
-        )
-    )
-    second = asyncio.run(
-        dynamic_operations.publish_learned_song_dynamic(
-            character_id="luotianyi",
-            character_name="洛天依",
-            character_persona="",
-            speaking_style="",
-            song_name="告死鸟",
-        )
-    )
-
-    assert first["dynamic_id"] == second["dynamic_id"]
-    assert first["created"] is True
-    assert second["created"] is False
-    assert compose_calls == ["告死鸟"]
+    from src.agent.skills.expression.dynamic import DynamicDraft, DynamicPublication
+    publishing = _publishing(dynamic_operations)
+    publication = DynamicPublication(d.DynamicSource(source_type="song_learned", source_id="告死鸟"),
+                                     d.Visibility.GLOBAL, None)
+    first = asyncio.run(publishing.publish(invocation(user_id=None), draft=DynamicDraft("学会了《告死鸟》"), publication=publication))
+    second = asyncio.run(publishing.publish(invocation(user_id=None), draft=DynamicDraft("相同来源的新草稿"), publication=publication))
+    assert first.identifier == second.identifier
+    assert first.created is True
+    assert second.created is False
     feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
     learned_items = [
         item for item in feed["items"] if item["source_type"] == "song_learned" and item["source_id"] == "告死鸟"
@@ -471,8 +433,7 @@ def test_dynamic_interaction_submits_one_observation_per_pending_target(
     db_manager: DatabaseManager,
 ):
     """world 只投递结构化事实：同一目标一轮只投递一次，且不依赖 CharacterRuntime。"""
-    _add_invite_code(db_manager, "INVITE7")
-    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    auth = seed_authenticated_user(db_manager, "replyuser")
     dynamic_id = _create_user_post(db_manager, auth, "今天其实有点紧张，不过也算坚持下来了。")
 
     sink = FakeFactSink()
@@ -498,8 +459,7 @@ def test_dynamic_interaction_submits_one_observation_per_pending_target(
 
 def test_dynamic_interaction_keeps_pending_until_settlement(db_manager: DatabaseManager):
     """未收到结算时世界侧不猜测状态：目标保持 pending，并计入本轮的未结算数。"""
-    _add_invite_code(db_manager, "INVITE7")
-    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    auth = seed_authenticated_user(db_manager, "replyuser")
     dynamic_id = _create_user_post(db_manager, auth, "刚刚把这段话写下来了。")
 
     sink = FakeFactSink()
@@ -516,8 +476,7 @@ def test_dynamic_interaction_keeps_pending_until_settlement(db_manager: Database
 
 def test_dynamic_interaction_writes_status_from_settlement_only(db_manager: DatabaseManager):
     """只有实际提交的评论效果才写 replied；处理完成即记忆方面已处理。"""
-    _add_invite_code(db_manager, "INVITE7")
-    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    auth = seed_authenticated_user(db_manager, "replyuser")
     dynamic_id = _create_user_post(db_manager, auth, "今天把该做的事都做完了。")
 
     sink = FakeFactSink()
@@ -569,8 +528,7 @@ def test_dynamic_interaction_writes_status_from_settlement_only(db_manager: Data
 
 def test_dynamic_interaction_records_explicit_ignore(db_manager: DatabaseManager):
     """明确不回复时由处理结算写 ignored，而不是把「计划被接受」当发布成功。"""
-    _add_invite_code(db_manager, "INVITE7")
-    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    auth = seed_authenticated_user(db_manager, "replyuser")
     dynamic_id = _create_user_post(db_manager, auth, "今天想在评论区安静一会儿。")
 
     sink = FakeFactSink()
@@ -589,8 +547,7 @@ def test_dynamic_interaction_records_explicit_ignore(db_manager: DatabaseManager
 
 def test_dynamic_interaction_failure_marks_both_aspects_failed(db_manager: DatabaseManager):
     """处理失败时回复与记忆两个方面都不得停留在 pending。"""
-    _add_invite_code(db_manager, "INVITE7")
-    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    auth = seed_authenticated_user(db_manager, "replyuser")
     dynamic_id = _create_user_post(db_manager, auth, "今天有点累。")
 
     sink = FakeFactSink()
@@ -616,8 +573,7 @@ def test_dynamic_interaction_failure_marks_both_aspects_failed(db_manager: Datab
 
 def test_dynamic_interaction_marks_memory_only_target_written(db_manager: DatabaseManager):
     """已回复的目标只承担记忆方面：结算后只写记忆列，不重复投递回复。"""
-    _add_invite_code(db_manager, "INVITE8")
-    auth = _register_and_login(db_manager, "memoryuser", "INVITE8")
+    auth = seed_authenticated_user(db_manager, "memoryuser")
     dynamic_id = _create_user_post(db_manager, auth, "我最近开始重新练吉他了。")
     assert (
         db_manager.dynamic_store.update_dynamic_post_reply_state(
@@ -648,8 +604,7 @@ def test_dynamic_interaction_marks_memory_only_target_written(db_manager: Databa
 
 def test_dynamic_interaction_limits_targets_per_pass(db_manager: DatabaseManager):
     """批量上限仍然由 world 决定：正文与评论各自按配置取件。"""
-    _add_invite_code(db_manager, "INVITE9")
-    auth = _register_and_login(db_manager, "limituser", "INVITE9")
+    auth = seed_authenticated_user(db_manager, "limituser")
     for index in range(3):
         _create_user_post(db_manager, auth, f"第 {index} 条动态正文。")
 

@@ -7,6 +7,8 @@ from contextlib import ExitStack
 server_root = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(server_root))
 
+from src.utils.server_paths import resolve_server_path
+
 try:
     from src.domain.music_type import SongSegment, OneLyricLine
 except ImportError:
@@ -24,7 +26,7 @@ except ImportError:
         end_time: float
         lyrics: List[OneLyricLine]
 
-work_dir = server_root / "res/sing_song/luotianyi/songs"  # 当前角色歌曲库
+work_dir = resolve_server_path("data/singing/luotianyi/songs")
 song_dir_name = "ILOVEU" # 歌曲文件夹的名称，不一定是歌曲标题
 title = "I Love U" # 歌曲标题
 description = "" # 歌曲描述，留空即可

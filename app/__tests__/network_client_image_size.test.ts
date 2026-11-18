@@ -1,5 +1,5 @@
-import { compressImageForUpload } from '../utils/image_compression';
-import { NetworkClient } from '../utils/network_client';
+import { compressImageForUpload } from '../features/chat/image_compression';
+import { NetworkClient } from '../features/chat/connection/network_client';
 
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -11,8 +11,8 @@ jest.mock('expo-file-system/legacy', () => ({
   getInfoAsync: jest.fn(),
   readAsStringAsync: jest.fn(),
 }));
-jest.mock('../utils/ws_transport', () => ({ WebSocketTransport: jest.fn() }));
-jest.mock('../utils/image_compression', () => ({
+jest.mock('../features/chat/connection/ws_transport', () => ({ WebSocketTransport: jest.fn() }));
+jest.mock('../features/chat/image_compression', () => ({
   MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024,
   compressImageForUpload: jest.fn().mockResolvedValue({ ok: false, reason: 'compressed image remains too large' }),
 }));

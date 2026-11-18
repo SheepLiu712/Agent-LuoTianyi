@@ -19,7 +19,12 @@ os.chdir(cwd)
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from PySide6.QtWidgets import QDialog  # noqa: E402
+if __name__ == "__main__" and "--diagnose-tls" in sys.argv:
+    from src.utils.tls_diagnostics import main as diagnose_tls
+
+    sys.exit(diagnose_tls())
+
+from PySide6.QtWidgets import QDialog
 
 from src.utils.helpers import load_config  # noqa: E402
 from src.gui import ui_init, MainWindow  # noqa: E402
@@ -72,6 +77,9 @@ if __name__ == "__main__":
         login_details_callback=network_client.login_with_details,
         auto_login_details_callback=network_client.auto_login_with_details,
         accept_agreement_callback=network_client.accept_agreement,
+        prepare_account_callback=network_client.prepare_account_request,
+        apply_account_callback=network_client.apply_account_result,
+        account_context_callback=network_client.account_context,
     )
     # 将Binder的信号传入消息处理器，以便消息处理器能通过信号与UI交互
     message_processor.set_signals(

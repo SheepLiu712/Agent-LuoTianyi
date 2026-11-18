@@ -1,0 +1,611 @@
+{
+  "schema_version": 1,
+  "asset_version": "production-baseline-20261110",
+  "files": [
+    {
+      "path": "song_learner/msst/configs/model_bs_roformer_ep_317_sdr_12.9755.yaml",
+      "size": 2006,
+      "sha256": "60bf02aa4a07b3bfd88db00352eedfa32185df84508cc55a401eabf1b8233e7c"
+    },
+    {
+      "path": "song_learner/msst/configs/model_mel_band_roformer_denoise.yaml",
+      "size": 1621,
+      "sha256": "4ed1e51a5af5013d705710b31d8d56a8c66d24f385a12155a1ab255c2d51cd5c"
+    },
+    {
+      "path": "song_learner/msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt",
+      "size": 913107578,
+      "sha256": "9262877b87e9ebb0fb808a456b0a411fa677f5df31c8383c1254af531c078970"
+    },
+    {
+      "path": "song_learner/msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt",
+      "size": 639331213,
+      "sha256": "5b84f37e8d444c8cb30c79d77f613a41c05868ff9c9ac6c7049c00aefae115aa"
+    },
+    {
+      "path": "tts/gsv/chinese-hubert-base/config.json",
+      "size": 1449,
+      "sha256": "c3e5060a1277e0f078cc6be9da4528a605dba6ece93018981fe2c820e5c7b103"
+    },
+    {
+      "path": "tts/gsv/chinese-hubert-base/preprocessor_config.json",
+      "size": 212,
+      "sha256": "dcd684124d06722947939d41ea6ae58dbf10968c60a11a29f23ddc602c64a29b"
+    },
+    {
+      "path": "tts/gsv/chinese-hubert-base/pytorch_model.bin",
+      "size": 188811417,
+      "sha256": "24164f129c66499d1346e2aa55f183250c223161ec2770c0da3d3b08cf432d3c"
+    },
+    {
+      "path": "tts/gsv/chinese-roberta-wwm-ext-large/config.json",
+      "size": 963,
+      "sha256": "3d57de2fd7e80d0e5c8ff194f0bbb6baa10df7e43fc262a0cc71298a78b0a3e5"
+    },
+    {
+      "path": "tts/gsv/chinese-roberta-wwm-ext-large/pytorch_model.bin",
+      "size": 651225145,
+      "sha256": "e53a693acc59ace251d143d068096ae0d7b79e4b1b503fa84c9dcf576448c1d8"
+    },
+    {
+      "path": "tts/gsv/chinese-roberta-wwm-ext-large/tokenizer.json",
+      "size": 268962,
+      "sha256": "173796956820ea27bd14f76bf28162607ff4254807e2948253eb5b46f5bb643b"
+    },
+    {
+      "path": "tts/gsv/g2p/en/cmudict-fast.rep",
+      "size": 3613898,
+      "sha256": "53bfef0f27d7dd74d1ba74563d1e076d3e0672ce3596cb2d6c0d52ac9ad01f6d"
+    },
+    {
+      "path": "tts/gsv/g2p/en/cmudict.rep",
+      "size": 3731285,
+      "sha256": "0e601d017d6e6f958443d41cd8922b4cd7598b3ba2056253a33f3e5a35f38494"
+    },
+    {
+      "path": "tts/gsv/g2p/en/engdict-hot.rep",
+      "size": 75,
+      "sha256": "1c80418fe6fe5d537302ae67afd3612478997b35f2cf37cff52f959ed4334a71"
+    },
+    {
+      "path": "tts/gsv/g2p/en/engdict_cache.pickle",
+      "size": 5965909,
+      "sha256": "9bff9393f4b192d873a11335efc8f124771087b6dc847d34fd240c2846889d2b"
+    },
+    {
+      "path": "tts/gsv/g2p/en/g2p_en/checkpoint20.npz",
+      "size": 3342298,
+      "sha256": "b8af35e4596d8dd5836dfd3fe9b2ba4f97b9c311efe8879544cbcfcbd566d8c6"
+    },
+    {
+      "path": "tts/gsv/g2p/en/g2p_en/homographs.en",
+      "size": 18711,
+      "sha256": "0403edcc6aefe8945f8987be398279fd98bf6b767e54b741331d3bc99a307071"
+    },
+    {
+      "path": "tts/gsv/g2p/en/namedict_cache.pickle",
+      "size": 760663,
+      "sha256": "559552094c4a6e995213e3fa586330e078ef8cb3a7a95a3109e945111cd2bfc1"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.classes.json",
+      "size": 285,
+      "sha256": "d152ffa69d45b8357276341a3d592c6c025911d52ec0d9068d4f382560dd48b6"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.tagdict.json",
+      "size": 25788,
+      "sha256": "4c713731cb06727736962bc8cd94ad919217a040e76691059af99bc0c2c9c246"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.weights.json",
+      "size": 5677744,
+      "sha256": "789e8e35f6fac656d9b7eccea29ba4e8a137cbb5b525dd31f39e4291a9e80832"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/README",
+      "size": 8574,
+      "sha256": "d3251cae66a9359bd68c039e3a46172a05ca9df0b27dcdfa23ae594d68d27ec4"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/czech/abbrev_types.txt",
+      "size": 462,
+      "sha256": "8eb1feb5a6a46f9bd8f6a5ae58e218428a65b459b5ebd61668d83fa80acfc329"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/czech/collocations.tab",
+      "size": 1390,
+      "sha256": "fd58f549658c8389be32577e232187be9376c79708f66c60388a84916c8f3f3d"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/czech/ortho_context.tab",
+      "size": 684150,
+      "sha256": "451cb1a68a03ba88ced1247e6bb48c442e87dce1c9f463104618fac509866cd4"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/czech/sent_starters.txt",
+      "size": 352,
+      "sha256": "42f1de18ab29f9842113b87ec020202c0c25316c97d37f968435a7c7ee3018ca"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/danish/abbrev_types.txt",
+      "size": 1130,
+      "sha256": "4a358b26b7ba372cab3cedeb43b4e99a76ae9d01150493964141eb42a62e4a6e"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/danish/collocations.tab",
+      "size": 1693,
+      "sha256": "b003d3b839afd47afa81d64620a1cf15b75b944212a7f3ee6a7571f041ae02ec"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/danish/ortho_context.tab",
+      "size": 743835,
+      "sha256": "59d7ccda7b1eef6cbcddb6d2f1930c255a5d43600e66e32eff28eab8190c0727"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/danish/sent_starters.txt",
+      "size": 415,
+      "sha256": "f8dd41bdb1bb633574b22d38205e1c073639a0b80cb9591964bf92d84317527f"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/dutch/abbrev_types.txt",
+      "size": 434,
+      "sha256": "dcd4af07101692c986049ba07abcd6b7c1a2464ef4e46a932cf92d6e220388dd"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/dutch/collocations.tab",
+      "size": 623,
+      "sha256": "9a013563bce4637595a6db9d2eeb0ab3f68685d704ae20d97ad718aa91afbe4a"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/dutch/ortho_context.tab",
+      "size": 428403,
+      "sha256": "e2077b5748564a9666e437c0a96ea9c5bed0fe3ab5c756535584785d3af20fc9"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/dutch/sent_starters.txt",
+      "size": 310,
+      "sha256": "734454acc5952d91a1dfaca8cdfdabb715d8cdd35789c749528639d80751f45c"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/english/abbrev_types.txt",
+      "size": 619,
+      "sha256": "92a3e070f43d9b4c5534758ca40ad7343b04e7e29bfe0c2eb658a39445a4f779"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/english/collocations.tab",
+      "size": 594,
+      "sha256": "8e2da1225e4dd2cc9dba261ee231ccb134859e21b46006e7f472c5ee269af0cf"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/english/ortho_context.tab",
+      "size": 236303,
+      "sha256": "4bbcca25ed3d3f06c02402abf8419b9f033b8adc06e7b482eca4e45f81a5dc4c"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/english/sent_starters.txt",
+      "size": 241,
+      "sha256": "f3f8535483e1dba487241b764945168123bca3209a9645e59acd1225dc76edac"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/estonian/abbrev_types.txt",
+      "size": 224,
+      "sha256": "0307878fb32af1e21d8f3ba0644e39c89602f2f8aa4e4304943f7e9e0fd081b2"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/estonian/collocations.tab",
+      "size": 1825,
+      "sha256": "f1400a7ebf3c82a3d5aac886eb5bf06a1a840946cf052bb1532da7c25094797f"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/estonian/ortho_context.tab",
+      "size": 936992,
+      "sha256": "768b7e6e2ba93ff096e244af175c343b1a73463c4a1b99beebe6a9aa57ea1d78"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/estonian/sent_starters.txt",
+      "size": 679,
+      "sha256": "7ade7bb8ca7c527aac09517a6efbdf4f749e9a9fc0e43d2856c58be847030c83"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/finnish/abbrev_types.txt",
+      "size": 484,
+      "sha256": "7829baabcb5d69e26232839a1f5b6bc6d12b0e59b7f0a65f6ab1c163acbeb800"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/finnish/collocations.tab",
+      "size": 3046,
+      "sha256": "4d717a1b4d1fb7108ca9c9ed2cc63f8b4813cfaf73819e96fce79495ddc48292"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/finnish/ortho_context.tab",
+      "size": 1189717,
+      "sha256": "43e55a8bfa977561337a09105c570036df11346c6f91e57d8631520eefb26167"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/finnish/sent_starters.txt",
+      "size": 810,
+      "sha256": "ab81cf3b774ef068ac98adb99fcb3b1a05caf0423bdfa302bdc285e15597567f"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/french/abbrev_types.txt",
+      "size": 245,
+      "sha256": "01747ecfed08830d582d8c94634b63a36da316c0a67feec2871cf03f0dd5c657"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/french/collocations.tab",
+      "size": 334,
+      "sha256": "8ddf150ef5a0d22694e7c4d807f80b6d55da731ca81ea139633f560b378af990"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/french/ortho_context.tab",
+      "size": 334275,
+      "sha256": "7090ef4292647d4fe137159bd768a5304015d0614d59fdcfc30b2389634365ac"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/french/sent_starters.txt",
+      "size": 233,
+      "sha256": "b45a1ebdae9cdf46cf2e8be016b4718bf4f825445fc783d445faf0cfb2d569f8"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/german/abbrev_types.txt",
+      "size": 246,
+      "sha256": "259e5d78bc9d61a12d55ba47552c4e9c5ca08364d78a4669e864fd6de86818e3"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/german/collocations.tab",
+      "size": 527,
+      "sha256": "f77bd513f42e8179f5c932111c312be353d5913387d0bfe90a95c109111bca25"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/german/ortho_context.tab",
+      "size": 943500,
+      "sha256": "023887e78cfb919f1a00f9a96a88f42131582748cf833fd469490ee66596307c"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/german/sent_starters.txt",
+      "size": 762,
+      "sha256": "fe4b63edbdd33f78ba0a755f035680a864948b145ae82fc99072440a62a77acd"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/greek/abbrev_types.txt",
+      "size": 570,
+      "sha256": "0d56253b7ebc83f0f2403479bcf2b8ea51ffdea89ee60e34018eb32e4750d683"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/greek/collocations.tab",
+      "size": 118,
+      "sha256": "0fd732534d56177c80874125ca894ae60aee7b052ee2865a405b454cfd737a6f"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/greek/ortho_context.tab",
+      "size": 632838,
+      "sha256": "a87e4467791f974f808c0d396f6c82cd3a014d4fb4458a2287e2fcbce7084e9c"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/greek/sent_starters.txt",
+      "size": 567,
+      "sha256": "1a450aec85164e3fbfeb814768c9f120abd7139726af5bb5e2a577096739ca8e"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/italian/abbrev_types.txt",
+      "size": 534,
+      "sha256": "5d406f6bfb35e55f6bea282bf148bdcc9e4677860eb01a8e67c34b894274ac50"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/italian/collocations.tab",
+      "size": 53,
+      "sha256": "8167b58a049bb04de8d692ed33d72963503a061717cd37cacb33bb2d00669caf"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/italian/ortho_context.tab",
+      "size": 369822,
+      "sha256": "462ffd48bc1c9b86efe66d04d826cd1e7a5745be871b8121759ed2920a967370"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/italian/sent_starters.txt",
+      "size": 208,
+      "sha256": "4dc2cdfda34d4f286e5875d6b62b148771a799a71f0d45b504da23cb61b59d51"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/malayalam/abbrev_types.txt",
+      "size": 4714,
+      "sha256": "1ea2cd01629c8cbeac0799d39383e10c4d6948734c255d37e3ceda550ba62464"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/malayalam/collocations.tab",
+      "size": 3422,
+      "sha256": "71bc38e42133f288c660a338169d8858944135282ad4166a2c5d23cc8a06ed73"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/malayalam/ortho_context.tab",
+      "size": 118161,
+      "sha256": "5289e43f46ef3679f4ebbed95ef1fad5b64dd7aa8957042adb2b661cc6ae4425"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/malayalam/sent_starters.txt",
+      "size": 106,
+      "sha256": "918c902aa9d0b72700410258274ae335da51148fee7fc27095ab4114b23a245c"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/norwegian/abbrev_types.txt",
+      "size": 496,
+      "sha256": "beced74076edabe64f45effb823012d1396db41f35fa1d8be2ac6b69bf7bc40f"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/norwegian/collocations.tab",
+      "size": 869,
+      "sha256": "9c815b01e2f7518552b53f09012644df1fa0d8c7642baff9dc5f61e85e0be422"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/norwegian/ortho_context.tab",
+      "size": 734070,
+      "sha256": "57ea2aa129de6ae414cd0cbecba8b2399c4fde775a2145776a7e8f1023f3f183"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/norwegian/sent_starters.txt",
+      "size": 378,
+      "sha256": "2b49ef0f0c2e1b4e8b06aee1172e4d88ce6ad01486fe4182cff6fc443a73ddeb"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/polish/abbrev_types.txt",
+      "size": 973,
+      "sha256": "426ea37ca486d0dcc3653653c613d853d0bb3929037f8ee6bf6c12ddae873aa1"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/polish/collocations.tab",
+      "size": 1101,
+      "sha256": "961653f0606d85ecb8a760cad4f69df123f010bc4b35de0253feb2d7869666b4"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/polish/ortho_context.tab",
+      "size": 1066577,
+      "sha256": "f770804067012ee5707ffc65d90523180e09bab09230a49251777be821a1a4f6"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/polish/sent_starters.txt",
+      "size": 518,
+      "sha256": "8564076ae22be3d549a3f097a18458ac2967d65bd28dad7cc223c53f5ce27d1b"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/portuguese/abbrev_types.txt",
+      "size": 301,
+      "sha256": "cd5c3cf9c4c8b766bc9edbc96444b0e2189b837b26c583aa2cce83a18e4285f5"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/portuguese/collocations.tab",
+      "size": 64,
+      "sha256": "a150d2ca3b8bd9d87cd25f2e1d2142607cdf9344efe914bd034af6017a16d841"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/portuguese/ortho_context.tab",
+      "size": 363124,
+      "sha256": "2d9c143f7b322fc74738a21e0b2b04feed1668245ac93e5a8e5399e6e0d8ed8a"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/portuguese/sent_starters.txt",
+      "size": 209,
+      "sha256": "7b7f4a1586b1df8592bf294c8dd0d19aaf90740d78ce3b40a31eff2b9669d15e"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/russian/abbrev_types.txt",
+      "size": 15363,
+      "sha256": "75191526be516a9918948fe3ad46f6c2c4dee14314359a899b8c2ebf496cb631"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/russian/collocations.tab",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/russian/ortho_context.tab",
+      "size": 10,
+      "sha256": "b296cba91006569d3ef79eb2cff2378bf5be5b75e9e83ea119b883d3c3ee69b6"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/russian/sent_starters.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/slovene/abbrev_types.txt",
+      "size": 280,
+      "sha256": "b1d6b16d1d2b3c0c4132c1528b9843d1557f7f544044db27f4e8d2d6985faf2b"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/slovene/collocations.tab",
+      "size": 1131,
+      "sha256": "4c10daafdff496e369f3a8809bebf187abc851df630457ae93c7ca4fda350651"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/slovene/ortho_context.tab",
+      "size": 445129,
+      "sha256": "3ba826bdd7e5543af7af8e317d4652ba8b47fd812157855a6274ec1387a46b3e"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/slovene/sent_starters.txt",
+      "size": 358,
+      "sha256": "85ae14dadef3c4c9f753491d84919abb10e09003adfe248794d4a597fabc5793"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/spanish/abbrev_types.txt",
+      "size": 234,
+      "sha256": "246a4b3efbad45b63eb9672b718574b535acef6d656f24dc17a46d13a38efba1"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/spanish/collocations.tab",
+      "size": 74,
+      "sha256": "fa5ea7dbf61f2b1c12180d660a3012c9faaf4962eb12549d77af95e2a40be65d"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/spanish/ortho_context.tab",
+      "size": 337707,
+      "sha256": "1346ecfc57b26174987ffa9bd4a2558a66f46592a513da3859648790351df370"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/spanish/sent_starters.txt",
+      "size": 289,
+      "sha256": "4d4f7380ba16380b6158e9e8ead6973c52f27e3c9c88af63f15a41c490998319"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/swedish/abbrev_types.txt",
+      "size": 208,
+      "sha256": "1e1a78bd5e7fd6e7eb4b15b751a23d441cda845d5fc0b631958177b2f504da00"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/swedish/collocations.tab",
+      "size": 136,
+      "sha256": "bd2260433c94617ba7cf6102e4c1035099a72e5a2f6b60734639252e41633c04"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/swedish/ortho_context.tab",
+      "size": 616904,
+      "sha256": "d48c5705d0570993628e539ca211f05cdb5aad7adfcc6ed7b24310941bfac9f8"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/swedish/sent_starters.txt",
+      "size": 295,
+      "sha256": "6f0f7a6773f7488a23bafc6c29e7d4554e792d89c6b7a89fbd6a83bec85ef767"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/turkish/abbrev_types.txt",
+      "size": 424,
+      "sha256": "de56078c5eeb3fe07e24eab67c4aaf44e2181cbe80edd976cb1622819599d6fd"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/turkish/collocations.tab",
+      "size": 273,
+      "sha256": "061ce2981776a8f875da4f24bebd7e138f8da1d9057b43d07f580148ec106a33"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/turkish/ortho_context.tab",
+      "size": 642682,
+      "sha256": "fc214227f99d5ea3ee70d208df16b1984eab375d1946ed379061c6cf5c1718be"
+    },
+    {
+      "path": "tts/gsv/g2p/en/nltk/tokenizers/punkt_tab/turkish/sent_starters.txt",
+      "size": 613,
+      "sha256": "93239fb55b5d2ae6d945a84a94e118ba8a816326b17cdc11ba8111bea0c97828"
+    },
+    {
+      "path": "tts/gsv/g2p/zh/opencpop-strict.txt",
+      "size": 4084,
+      "sha256": "d66bbb1380a8ebf17d7ace5bf4b459f3728a469eea2aaeae2aeb3969b88223ff"
+    },
+    {
+      "path": "tts/gsv/g2p/zh/polyphonic-fix.rep",
+      "size": 1660953,
+      "sha256": "6444b2ad4a1070dad9b16c7e47271910a69349ff079e8d8e236c8818209b65f4"
+    },
+    {
+      "path": "tts/gsv/g2p/zh/polyphonic.pickle",
+      "size": 1322387,
+      "sha256": "f425246160a32c578557cd3151cd0bb97f5f44c3aaf65e718dd2c3213c04fb4b"
+    },
+    {
+      "path": "tts/gsv/g2p/zh/polyphonic.rep",
+      "size": 1391,
+      "sha256": "a8f13e2004702cbbf01e2e3fe8436d9d620a0fe4d57176a844704619ffd5df5e"
+    },
+    {
+      "path": "tts/gsv/s1v3/config.json",
+      "size": 834,
+      "sha256": "5b9a94266e4518edb944f407b755a9c866af307ec95eef58320b549b0a79abb8"
+    },
+    {
+      "path": "tts/gsv/s1v3/model.safetensors",
+      "size": 155244332,
+      "sha256": "27b2481e12e35710d4e4406964fcadebeb856b1b9864d09dda46750b6632f66f"
+    },
+    {
+      "path": "tts/gsv/s2Gv2ProPlus/hps.json",
+      "size": 2187,
+      "sha256": "7ab93d45cd29af1a16008eef0dc281bbf7ccd537ee35217a5636ba7b34bf1b1d"
+    },
+    {
+      "path": "tts/gsv/s2Gv2ProPlus/model.safetensors",
+      "size": 172576690,
+      "sha256": "38fa842e2a1896c73dbeecbb41b69da38001a3866a1e1860e969707f37ae8308"
+    },
+    {
+      "path": "tts/gsv/sv/pretrained_eres2netv2w24s4ep4.ckpt",
+      "size": 107528697,
+      "sha256": "4f5a0bf73c61eb41b174e1bb54e7ee3c83233892be8e0af1f187024e8e581a35"
+    },
+    {
+      "path": "tts/luotianyi/custom_models/lty-tts_gpt_model.ckpt",
+      "size": 155312957,
+      "sha256": "f7f026940b569544ab1ef3ebbde7a2adadf2f33eb4fef25257649e6cc109c57c"
+    },
+    {
+      "path": "tts/luotianyi/custom_models/lty-tts_sovits_model.pth",
+      "size": 172765030,
+      "sha256": "3b9ba021fc692737f348bbb8df8926e0d63c09bdec80db78cae10e3a50667fa4"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/lrc.json",
+      "size": 1066,
+      "sha256": "362f674e681093b3ae913becdaf75f675525b17b99dc1feadfaefb8e438a6481"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/叙述的参考音频.wav",
+      "size": 1004650,
+      "sha256": "97b6d7e1d08cac646a046d54e78f65ce3bdace9dd77c7847a392264f62ac16eb"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/叙述的参考音频2.wav",
+      "size": 1349598,
+      "sha256": "24b3bf083116244d00f03093b5daad5b61d8decfb22e5e166741b29d19d40f52"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/可爱的参考音频.wav",
+      "size": 852500,
+      "sha256": "c4ee1eca8fc676c28ffd29462fb68bd20b033b476a6d006a33d87c412171f640"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/可爱的参考音频2.wav",
+      "size": 1284932,
+      "sha256": "071cd34f55aaf3a98b25716d50b7b48034d851e3fdbc6554ae66558fd19c3327"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/欢快的参考音频.wav",
+      "size": 1124770,
+      "sha256": "19d1e06335209291c302caf69c650bee5d81cf134af7251427a796b31bd451e4"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/欢快的参考音频2.wav",
+      "size": 1100748,
+      "sha256": "ac30f9a3e4b4a4a8c8a951af4af43943a569f197087cf7e8cfeb2dae81126e72"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/活力的参考音频.wav",
+      "size": 1100746,
+      "sha256": "3d1d416b5a5633203738f8d9c899a566bdf2148d8dc76b555b8f6d08ce85ba97"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/活力的参考音频2.wav",
+      "size": 1292938,
+      "sha256": "302673aba28de454723c632c00cb1cbcb52cd9e93a36247fa76349ac7c1bb42b"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/深情的参考音频.wav",
+      "size": 1164812,
+      "sha256": "b97de57ddf2b2c302c27d9ed26cdbe3269bd3691c314a2e47c7f9e43acd2c4bb"
+    },
+    {
+      "path": "tts/luotianyi/reference_audio/难过的参考音频.wav",
+      "size": 932580,
+      "sha256": "ee7de7bfbd9de879f8e7943426bca52b88a74fcea72c283e756c71cf935948fa"
+    },
+    {
+      "path": "tts/luotianyi/tts_infer.yaml",
+      "size": 375,
+      "sha256": "ec3437223bc26e8e6746687d6d0ae726f1f6c4603ad53889949ad982ebed41cd"
+    },
+    {
+      "path": "tts/luotianyi/tts_interface_config.json",
+      "size": 286,
+      "sha256": "a98ce0aa40d1da2e084024d67e726b1975e8c183e106689701291a17e9382c5f"
+    }
+  ]
+}

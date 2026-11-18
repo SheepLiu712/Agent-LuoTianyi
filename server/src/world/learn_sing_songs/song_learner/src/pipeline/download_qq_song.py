@@ -15,6 +15,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+SERVER_ROOT = Path(__file__).resolve().parents[6]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
+
+from src.utils.server_paths import resolve_server_path
+
+
+def default_credential_file() -> Path:
+    override = os.environ.get("SONGLEARNER_QQ_CREDENTIAL_FILE")
+    return Path(override) if override else resolve_server_path("config/qq_music_credential.json")
+
+
 def load_qq_sdk() -> Dict[str, Any]:
     try:
         qqmusic_api = importlib.import_module("qqmusic_api")
@@ -57,6 +69,10 @@ _REFRESH_PRESERVED_FIELDS = (
 )
 
 
+class SongNotFound(Exception):
+    """A successful search has no candidate matching the requested song."""
+
+
 class QQMusicCredentialError(RuntimeError):
     """Raised when QQ Music credential is missing, invalid, or rejected by SDK."""
 
@@ -78,7 +94,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=20, help="网络请求超时秒数（默认：20）。")
     parser.add_argument(
         "--credential_file",
-        default="config/qq_music_credential.json",
+        default=str(default_credential_file()),
         help="QQ 音乐登录凭证保存路径（默认：config/qq_music_credential.json）。",
     )
     parser.add_argument(
@@ -465,9 +481,16 @@ def qq_search_songs(song_name: str, timeout: int = 20) -> List[Dict]:
     )
     resp.raise_for_status()
     data = resp.json()
-    songs = data.get("request", {}).get("data", {}).get("body", {}).get("song", {}).get("list", [])
+    if data.get("code") != 0 or data.get("request", {}).get("code") != 0:
+        raise RuntimeError("QQ 音乐搜索接口返回失败状态")
+    try:
+        songs = data["request"]["data"]["body"]["song"]["list"]
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError("QQ 音乐搜索响应缺少歌曲列表") from exc
+    if not isinstance(songs, list):
+        raise RuntimeError("QQ 音乐搜索返回的歌曲列表格式无效")
     if not songs:
-        raise RuntimeError(f"未在 QQ 音乐搜索到歌曲: {song_name}")
+        raise SongNotFound(f"未在 QQ 音乐搜索到歌曲: {song_name}")
     return songs
 
 
@@ -635,7 +658,7 @@ def download_song_and_lyric(
     no_auto_login: bool = False,
 ) -> Tuple[str, Path, Path]:
     if credential_file is None:
-        credential_file = Path("res/song_learner/.qq_music_credential.json")
+        credential_file = default_credential_file()
 
     output_dir = Path(output_dir).expanduser().resolve()
     credential_file = Path(credential_file).expanduser().resolve()
@@ -643,7 +666,7 @@ def download_song_and_lyric(
     songs = qq_search_songs(song_name + " " + singer_name, timeout=timeout)
     singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
     if not singer_songs:
-        raise RuntimeError(
+        raise SongNotFound(
             f"搜索到 {singer_name} 的歌曲，但没有标题匹配请求: {song_name}"
         )
     matched_failures: List[str] = []

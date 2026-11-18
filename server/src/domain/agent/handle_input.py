@@ -31,11 +31,12 @@ class CancellationToken(metaclass=_HandleInputMeta):
     持有同一令牌的 Agent 可通过只读属性观察取消状态和原因。
     """
 
-    __slots__ = ("_reason",)
+    __slots__ = ("_reason", "_cleanup_error_type")
     _error_code = HandleInputErrorCode.CONTRACT_INVALID_CANCELLATION
 
     def __init__(self) -> None:
         self._reason: CancellationReason | None = None
+        self._cleanup_error_type: str | None = None
 
     @property
     def is_cancelled(self) -> bool:
@@ -46,6 +47,20 @@ class CancellationToken(metaclass=_HandleInputMeta):
     def reason(self) -> CancellationReason | None:
         """首次取消的原因；尚未取消时为 None。"""
         return self._reason
+
+    @property
+    def cleanup_error_type(self) -> str | None:
+        """本次任务取消清理的首个异常类型；不保存异常内容或改变取消原因。"""
+        return self._cleanup_error_type
+
+    @_checked_arguments(HandleInputErrorCode.CONTRACT_INVALID_CANCELLATION)
+    def record_cleanup_error(self, error_type: str) -> bool:
+        """由取消任务的拥有者记录收尾错误；首个类型保留，不能清除。"""
+        _require(isinstance(error_type, str) and error_type.isidentifier(), "cleanup error type", self._error_code)
+        if self._cleanup_error_type is not None:
+            return False
+        self._cleanup_error_type = error_type
+        return True
 
     @_checked_arguments(HandleInputErrorCode.CONTRACT_INVALID_CANCELLATION)
     def cancel(self, reason: CancellationReason) -> bool:
@@ -72,7 +87,7 @@ _CONTENT_TRIGGER_KINDS = frozenset(
 
 
 class HandlePurpose(str, Enum):
-    """调用用途：PROCESS 按刺激类别处理；认知维护通过 Reflection action 执行。"""
+    """调用用途：PROCESS 按刺激类别处理；认知维护通过 CognitiveMaintenance action 执行。"""
 
     PROCESS = "process"
 
@@ -87,6 +102,7 @@ class PreprocessedInput(metaclass=_HandleInputMeta):
     conversation_entry_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+
         _require(_nonblank(self.stimulus_id), "stimulus_id", self._error_code)
         _require(self.text is None or isinstance(self.text, str), "text", self._error_code)
         ids = self.conversation_entry_ids
@@ -116,10 +132,12 @@ class HandleStimulusRequest(metaclass=_HandleInputMeta):
     prepared_inputs: tuple[PreprocessedInput, ...] = ()
 
     def __post_init__(self) -> None:
+        from .call_contracts import CallInteractionSnapshot
+
         code = self._error_code
         _require(_nonblank(self.request_id), "request_id", code)
         _require(isinstance(self.stimulus, Stimulus), "stimulus", code)
-        _require(isinstance(self.interaction, InteractionSnapshot), "interaction", code)
+        _require(isinstance(self.interaction, (InteractionSnapshot, CallInteractionSnapshot)), "interaction", code)
         _require(isinstance(self.cancellation, CancellationToken), "cancellation", code)
         _require(isinstance(self.purpose, HandlePurpose), "purpose", code)
         _require(

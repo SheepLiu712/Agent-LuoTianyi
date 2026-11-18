@@ -1,7 +1,8 @@
+jest.mock('../shell/notices/AppNotices', () => ({ usePageNotices: () => jest.fn() }));
 import React, { ElementType } from 'react';
 import { act, create, ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import LoginScreen from '../app/login';
-import { THEMES } from '../utils/theme';
+import { THEMES } from '../shared/ui/theme';
 import { server_config } from '../config';
 
 const storage = new Map<string, string>();
@@ -18,8 +19,8 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn(), setItemAsync: jest.fn(), deleteItemAsync: jest.fn() }));
-jest.mock('../hooks/useAuth', () => ({ fetchCurrentAgreement: jest.fn(async () => ({ success: true, data: agreement })) }));
-jest.mock('../components/AgreementModal', () => ({
+jest.mock('../features/account/useAuth', () => ({ fetchCurrentAgreement: jest.fn(async () => ({ success: true, data: agreement })) }));
+jest.mock('../features/account/AgreementModal', () => ({
   AgreementModal: (props: any) => {
     latestModal = { props } as ReactTestInstance;
     return 'AgreementModalHost';
@@ -33,8 +34,8 @@ jest.mock('react-native', () => ({
   BackHandler: { exitApp: jest.fn() }, Keyboard: { dismiss: jest.fn() }, KeyboardAvoidingView: 'KeyboardAvoidingView', Modal: (props: any) => props.visible ? 'ModalHost' : null,
   Platform: { OS: 'android' }, ScrollView: 'ScrollView', StyleSheet: { create: (value: unknown) => value }, Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', useColorScheme: () => 'light', View: 'View',
 }));
-jest.mock('../utils/voice_playback_manager', () => ({ voicePlaybackManager: { clear: jest.fn() } }));
-jest.mock('../utils/crypto', () => ({ encryptPassword: jest.fn(), clearCachedPublicKey: jest.fn() }));
+jest.mock('../features/chat/voice_playback_manager', () => ({ voicePlaybackManager: { clear: jest.fn() } }));
+jest.mock('../features/account/crypto', () => ({ encryptPassword: jest.fn(), clearCachedPublicKey: jest.fn() }));
 jest.mock('../utils/auth_request', () => ({ authFetch: jest.fn() }));
 
 const TEXT = 'Text' as unknown as ElementType;
@@ -43,7 +44,7 @@ const BUTTON = 'TouchableOpacity' as unknown as ElementType;
 
 function renderPage(onRegister: jest.Mock, onLogin = jest.fn().mockResolvedValue({ success: true, message: 'ok' })) {
   let tree!: ReactTestRenderer;
-  act(() => { tree = create(<LoginScreen onLogin={onLogin} onRegister={onRegister} />); });
+  act(() => { tree = create(<LoginScreen onLogin={onLogin} onRegister={onRegister} resetAccount={jest.fn()} />); });
   return tree;
 }
 function text(tree: ReactTestRenderer, value: string) { return tree.root.findAllByType(TEXT).find((node) => node.props.children === value); }

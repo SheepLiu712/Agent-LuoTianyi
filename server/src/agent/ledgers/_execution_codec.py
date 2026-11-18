@@ -4,6 +4,8 @@ import json
 from dataclasses import asdict, dataclass, replace
 
 import src.domain.agent as d
+from src.domain.call import CallEndingResult, CallSummarySource
+from src.domain.call.omni import MemoryLookupHit, MemoryLookupResult
 
 COMPLETED = (d.ActionExecutionStatus.COMPLETED, d.ActionExecutionStatus.ALREADY_COMPLETED)
 
@@ -31,7 +33,11 @@ class ActionFact:
 
 
 def encode_facts(facts):
-    return json.dumps([asdict(item) for item in facts], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    values = [asdict(item) for item in facts]
+    for value in values:
+        if value["result"] is not None and value["result"]["value"] is None:
+            value["result"].pop("value")
+    return json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def decode_facts(payload, plan):
@@ -53,6 +59,7 @@ def decode_facts(payload, plan):
             if result["effect_ref"] is not None:
                 effect = result["effect_ref"]
                 result["effect_ref"] = d.EffectRef(kind=d.EffectKind(effect["kind"]), effect_id=effect["effect_id"])
+            _decode_value(result, action)
             result = d.ActionResult(**result)
             if result.action_id != action.action_id or result.status is d.ActionExecutionStatus.NOT_STARTED:
                 raise ValueError("invalid action settlement")
@@ -74,3 +81,17 @@ def completed_prefix(facts):
             break
         results.append(replace(fact.result, status=d.ActionExecutionStatus.ALREADY_COMPLETED))
     return results
+
+
+def _decode_value(result, action):
+    value = result.get("value")
+    if value is None:
+        return
+    if isinstance(action, d.FinalizeCall):
+        result["value"] = CallEndingResult(**{**value, "summary_source": CallSummarySource(value["summary_source"])})
+    elif isinstance(action, d.LookupCallMemory):
+        result["value"] = MemoryLookupResult(
+            **{**value, "hits": tuple(MemoryLookupHit(**hit) for hit in value["hits"])}
+        )
+    else:
+        raise ValueError("action does not support a return value")

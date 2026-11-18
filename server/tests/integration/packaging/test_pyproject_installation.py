@@ -44,7 +44,7 @@ def test_wheel_contains_regular_and_namespace_packages(tmp_path: Path) -> None:
         "server_main.py",
         "src/agent/facade.py",
         "src/agent/skills/adapters/memory/facade.py",
-        "src/agent/skills/cognitive/response_generation.py",
+        "src/agent/skills/cognitive/reply.py",
         "src/infrastructure/persistence/song_knowledge.py",
         "src/world/get_new_songs/task.py",
         "src/world/get_new_songs/vcpedia_templates.json",

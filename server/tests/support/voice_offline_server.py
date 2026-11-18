@@ -7,6 +7,7 @@ import socket
 import sys
 import wave
 from contextlib import asynccontextmanager
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,34 +15,32 @@ import uvicorn
 from fastapi import FastAPI
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent import Agent
 from src.agent.context import ContextFactory
-from src.agent.handlers.action.reflection import ReflectionActionHandler
+from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import (
-    AudioUnderstandingSkill,
-    CharacterReplyGenerator,
-    ResponseCompositionSkill,
-    TextPreprocessingSkill,
-    TopicExtractionSkill,
-)
-from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.cognitive import AudioUnderstandingSkill, JargonRecognitionSkill, TopicExtractionSkill
+from src.agent.skills.cognitive._reply_resources import ReplyResources
+from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking import SpeakingSkill
-from src.agent.skills.reflection import ReflectionSkill
+from src.application.user.agreement_service import init_agreements
 from src.domain import CharacterProfile
 from src.infrastructure.media import PermanentMediaStore, create_media_resolver
 from src.infrastructure.persistence.database import DatabaseManager, InviteCode
-from src.stage import StageManager
 from src.web.http import routes
 from src.web.http.user_interface import UserInterface
 from src.web.websocket import endpoint
 from src.web.websocket.service import WebSocketService
+from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
+from support.stage_manager import make_stage_manager
 
 
 class OfflineModels:
@@ -68,10 +67,13 @@ class OfflineModels:
 
 
 class OfflineMemory:
-    async def write_topic_memories(self, **kwargs):
-        return {}
+    async def extract_maintenance_candidates(self, **kwargs):
+        return ()
 
-    async def update_user_profile_by_context(self, **kwargs):
+    async def propose_user_profile(self, **kwargs):
+        return None
+
+    async def write_maintenance_candidates(self, **kwargs):
         return None
 
 
@@ -86,17 +88,23 @@ def make_agent(root, resolver, models):
     profile = CharacterProfile(
         "luotianyi", "天依", "offline", static_variables_file=str(persona), llm_tone_mapping_file=str(tones)
     )
-    text = TextPreprocessingSkill()
+    text = JargonRecognitionSkill()
     memory = {"luotianyi": OfflineMemory()}
-    composition = ResponseCompositionSkill(
-        {},
-        memories=memory,
-        singing=None,
-        generators={"luotianyi": CharacterReplyGenerator({}, models, profile)},
+    # TTS 的 stream 方法与文本模型的 stream 布尔配置属于不同接口。
+    reply_model = SimpleNamespace(
+        stream=False, prompt_template=models.prompt_template, generate_response=models.generate_response
+    )
+    composition = ReplySkills(
+        retrieval=stub_retrieval(memory),
+        singing=stub_singing(None),
+        reply=make_reply_skill({"luotianyi": ReplyResources({}, reply_model, profile)}),
         topic_extraction=TopicExtractionSkill({}, None, understanding=text),
     )
     preprocessing = ChatPreprocessingHandler(
-        text, audio_understanding=AudioUnderstandingSkill({}, resolver, audio_module=models)
+        text,
+        audio_understanding=AudioUnderstandingSkill(
+            {}, resolver, llm_service=SimpleNamespace(register_audio_model_module=lambda *args: models)
+        ),
     )
     return Agent(
         character_id="luotianyi",
@@ -114,9 +122,10 @@ def make_agent(root, resolver, models):
                     SayHandler("luotianyi", SpeakingSkill({}, tts_engine=models), PreparedSpeechCatalog({})),
                 ),
                 (
-                    d.ActionKind.REFLECTION,
-                    ReflectionActionHandler(
-                        "luotianyi", ReflectionSkill({}, memory), ConversationCompactionSkill({}, None)
+                    d.ActionKind.COGNITIVE_MAINTENANCE,
+                    CognitiveMaintenanceActionHandler(
+                        "luotianyi",
+                        CognitiveMaintenanceSkill({}, llm_service=None, memories=memory),
                     ),
                 ),
             )
@@ -136,17 +145,25 @@ def make_runtime(root):
         assert ok, message
         # Existing-user scenario avoids unrelated welcome/reminder plans.
         users[name] = database.credential_service.authenticate_password_login(name, "offline-password")["user_uuid"]
+    with database.open_sql_session() as session:
+        agreement_service = init_agreements(session, files("res.user_agreements"))
+        for user_uuid in users.values():
+            agreement_service.accept(
+                session, user_uuid=user_uuid, version=agreement_service.current_version, accepted=True
+            )
+        session.commit()
     config = {"media_store": {"root": str(root / "media")}}
     resolver = create_media_resolver(config["media_store"])
     models = OfflineModels()
     agent = make_agent(root, resolver, models)
     adapter = WebSocketAdapter(config)
     factory = ContextFactory(character_id="luotianyi", database=database.conversation_service)
-    manager = StageManager(get_agent=lambda _: agent, adapter=adapter, get_context_factory=lambda _: factory)
+    manager = make_stage_manager(get_agent=lambda _: agent, adapter=adapter, get_context_factory=lambda _: factory)
     interface = UserInterface(database, resolver)
     interface.generate_rsa_keys()
     return SimpleNamespace(
         database_manager=database,
+        agreement_service=agreement_service,
         user_interface=interface,
         stage_manager=manager,
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),

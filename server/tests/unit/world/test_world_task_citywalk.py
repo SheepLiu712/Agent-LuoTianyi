@@ -3,6 +3,8 @@ import json
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import src.domain.agent as d
 from src.world.citywalk.errors import AMapRequestError
 from src.world.citywalk.task import CitywalkTask
@@ -57,33 +59,72 @@ def write_report(tmp_path, **overrides):
 
 def execution_report(plan):
     return d.ExecutionReport(
-        execution_id="exec", plan_id=plan.plan_id, status=d.ExecutionStatus.COMPLETED,
-        action_results=(d.ActionResult(
-            action_id=plan.actions[0].action_id, status=d.ActionExecutionStatus.COMPLETED,
-            error_code=None, irreversible_effect_committed=True,
-            effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_POST, effect_id="dynamic-citywalk"),
-        ),),
-        output_started=False, error_code=None, retryable=False,
+        execution_id="exec",
+        plan_id=plan.plan_id,
+        status=d.ExecutionStatus.COMPLETED,
+        action_results=(
+            d.ActionResult(
+                action_id=plan.actions[0].action_id,
+                status=d.ActionExecutionStatus.COMPLETED,
+                error_code=None,
+                irreversible_effect_committed=True,
+                effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_POST, effect_id="dynamic-citywalk"),
+            ),
+        ),
+        output_started=False,
+        error_code=None,
+        retryable=False,
     )
 
 
 def dynamic_plan(fact, body="今天在武康路散步，风很舒服。"):
     return d.ActionPlan(
-        plan_id="plan-citywalk", origin_request_id="req", plan_ordinal=0,
-        target_character_id="luotianyi", interaction_id="wi", basis_interaction_revision=1,
+        plan_id="plan-citywalk",
+        origin_request_id="req",
+        plan_ordinal=0,
+        target_character_id="luotianyi",
+        interaction_id="wi",
+        basis_interaction_revision=1,
         source_stimulus_ids=(fact.stimulus_id,),
-        actions=(d.PublishDynamic(
-            action_id="action-citywalk", body=body, media_refs=(), visibility=d.Visibility.GLOBAL,
-            owner_user_id=None,
-            source=d.DynamicSource(source_type="citywalk", source_id=fact.fact.fact_id),
-            allow_comment=True,
-        ),),
+        actions=(
+            d.PublishDynamic(
+                action_id="action-citywalk",
+                body=body,
+                media_refs=(),
+                visibility=d.Visibility.GLOBAL,
+                owner_user_id=None,
+                source=d.DynamicSource(source_type="citywalk", source_id=fact.fact.fact_id),
+                allow_comment=True,
+            ),
+        ),
     )
 
 
-def test_citywalk_normalize_overview():
-    assert CitywalkTask._normalize_overview("report.md").endswith("report.md")
-    assert CitywalkTask._normalize_overview("plain summary") == "plain summary"
+def test_citywalk_normalize_overview_reads_markdown_and_json(tmp_path):
+    markdown = tmp_path / "report.md"
+    markdown.write_text("在武康路买了桂花糕。", encoding="utf-8")
+    assert CitywalkTask._normalize_overview(markdown) == "在武康路买了桂花糕。"
+    report = write_report(
+        tmp_path,
+        diary_text="",
+        event_cards=[{"time": "15:30", "poi": {"name": "安福路"}, "poi_activity": "买了桂花糕，香甜柔软。"}],
+    )
+    description = CitywalkTask._normalize_overview(report)
+    assert "武康路" in description and "安福路" in description and "桂花糕" in description
+    assert str(report) not in description
+
+
+@pytest.mark.parametrize("content", ["损坏的JSON", "[]"])
+def test_invalid_citywalk_report_fails_without_publishing_path(tmp_path, content):
+    report = tmp_path / "bad.json"
+    report.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError):
+        CitywalkTask._normalize_overview(report)
+
+
+def test_missing_citywalk_report_fails(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        CitywalkTask._normalize_overview(tmp_path / "missing.json")
 
 
 def test_citywalk_run_once_skips_without_service():
@@ -95,22 +136,27 @@ def test_citywalk_run_once_skips_without_service():
     assert result.skipped is True
 
 
-def test_citywalk_run_once_writes_travel_event():
+def test_citywalk_run_once_writes_travel_event(tmp_path):
     event_store = FakeEventStore()
     task = CitywalkTask({"daily_run_probability": 1.0})
     task.event_store = event_store
-    task.citywalk_service = SimpleNamespace(run_once=lambda: "data/citywalk_reports/today.md")
+    report = write_report(
+        tmp_path, diary_text="", event_cards=[{"poi": {"name": "武康路"}, "poi_activity": "看到了梧桐落叶。"}]
+    )
+    task.citywalk_service = SimpleNamespace(run_once=lambda: str(report))
 
     result = asyncio.run(task.run_once())
 
     assert result.ok is True
-    assert result.data["output_path"].endswith("today.md")
+    assert result.data["output_path"] == str(report)
     assert result.data["observation_submitted"] is False
     assert len(event_store.events) == 1
     event = event_store.events[0]
     assert event["event_type"] == "travel"
     assert event["source"] == "world_citywalk"
-    assert "today.md" in event["description"]
+    assert event["title"] == "武康路"
+    assert "梧桐落叶" in event["description"]
+    assert str(report) not in event["description"]
 
 
 def test_citywalk_run_once_submits_world_observation(tmp_path):
@@ -130,7 +176,7 @@ def test_citywalk_run_once_submits_world_observation(tmp_path):
     assert isinstance(fact, d.WorldObservation)
     assert fact.observation_kind.value == "citywalk_completed"
     assert fact.fact.fact_id == f"citywalk:{report_path}"
-    assert fact.fact.summary == "今天在武康路散步，风很舒服。"
+    assert "今天在武康路散步，风很舒服。" in fact.fact.summary
     assert fact.source is d.StimulusSource.WORLD
     assert fact.user_id is None
     assert fact.target_character_ids == ("luotianyi",)
@@ -153,21 +199,36 @@ def test_citywalk_dynamic_identity_is_written_back_from_settlement(tmp_path):
 
     router.on_handling_settled(
         d.HandleStimulusRequest(
-            request_id="req", stimulus=fact,
+            request_id="req",
+            stimulus=fact,
             interaction=d.WorldInteractionSnapshot(
-                interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
-                now=fact.occurred_at, timezone=ZoneInfo("UTC"),
-                supported_outputs=frozenset(), world_id="default", world_revision=fact.world_revision,
-                activity_id=None, activity_revision=None, planning_cycle_id=None, schedule_revision=0,
+                interaction_id="wi",
+                interaction_revision=1,
+                user_id=None,
+                pending_stimuli=(fact,),
+                now=fact.occurred_at,
+                timezone=ZoneInfo("UTC"),
+                supported_outputs=frozenset(),
+                world_id="default",
+                world_revision=fact.world_revision,
+                activity_id=None,
+                activity_revision=None,
+                planning_cycle_id=None,
+                schedule_revision=0,
             ),
             cancellation=d.CancellationToken(),
         ),
         d.HandlingReport(
-            request_id="req", trigger_stimulus_id=fact.stimulus_id, basis_interaction_revision=1,
+            request_id="req",
+            trigger_stimulus_id=fact.stimulus_id,
+            basis_interaction_revision=1,
             request_status=d.HandlingRequestStatus.COMPLETED,
             considered_pending_stimulus_ids=(fact.stimulus_id,),
-            consumed_pending_stimulus_ids=(fact.stimulus_id,), retained_pending_stimulus_ids=(),
-            emitted_plan_ids=(plan.plan_id,), error_code=None, retryable=False,
+            consumed_pending_stimulus_ids=(fact.stimulus_id,),
+            retained_pending_stimulus_ids=(),
+            emitted_plan_ids=(plan.plan_id,),
+            error_code=None,
+            retryable=False,
         ),
     )
     router.on_execution_finished(plan, execution_report(plan))
@@ -199,11 +260,14 @@ def test_citywalk_rejected_observation_is_reported_and_discarded(tmp_path):
 
 def test_citywalk_observation_summary_falls_back_without_narrative():
     summary = CitywalkTask.build_observation_summary(
-        {"overview": {"selected_destination": "武康路", "total_duration_minutes": 90},
-         "places": ["武康路", "安福路"], "diary_text": ""}
+        {
+            "overview": {"selected_destination": "武康路", "total_duration_minutes": 90},
+            "places": ["武康路", "安福路"],
+            "diary_text": "",
+        }
     )
 
-    assert "武康路" in summary and "安福路" in summary and "90分钟" in summary
+    assert "武康路" in summary and "安福路" in summary and "时长（分钟）：90" in summary
     assert CitywalkTask.build_observation_summary({}) == "完成了一次城市散步"
 
 

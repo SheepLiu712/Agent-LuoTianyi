@@ -6,12 +6,13 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.expression.diary_writing import DiaryWritingSkill
+from src.agent.skills.expression.diary import DiarySkill
+from src.agent.skills.expression.dynamic import DynamicGenerationError
 from src.agent.skills.invocation import handling_invocation
 
 
 class DiaryPlanningDueHandler:
-    def __init__(self, writing: DiaryWritingSkill) -> None:
+    def __init__(self, writing: DiarySkill) -> None:
         self._writing = writing
 
     async def handle(
@@ -22,10 +23,12 @@ class DiaryPlanningDueHandler:
         stimulus = request.stimulus
         if not isinstance(stimulus, d.DiaryPlanningDue):
             raise TypeError("DiaryPlanningDueHandler 只处理 DiaryPlanningDue")
-        if not self._writing.available():
-            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
         invocation = handling_invocation(request, plans.context, user_id=stimulus.owner_user_id)
-        body = (await self._writing.compose(invocation, stimulus.local_date)).strip()
+        try:
+            draft = await self._writing.generate(invocation, local_date=stimulus.local_date)
+        except DynamicGenerationError:
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
+        body = draft.body.strip()
         if not body:
             return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
         receipt = await plans.emit(

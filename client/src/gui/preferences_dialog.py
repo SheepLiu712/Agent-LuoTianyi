@@ -25,6 +25,7 @@ class PreferencesDialog(QDialog):
         self.setModal(True)
 
         self._preferences = {}
+        self._preferences_loaded = False
         self.init_ui()
         self.load_preferences()
 
@@ -90,11 +91,23 @@ class PreferencesDialog(QDialog):
 
         layout.addStretch()
 
+        # 加载状态提示：加载失败时禁用保存，避免用默认表单覆盖服务端已有偏好
+        self.load_status_label = QLabel("")
+        self.load_status_label.setWordWrap(True)
+        self.load_status_label.setStyleSheet("font-size: 13px; color: #C0392B;")
+        self.load_status_label.setVisible(False)
+        layout.addWidget(self.load_status_label)
+
         # 按钮区域
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(16)
 
         btn_layout.addStretch()
+
+        self.retry_btn = QPushButton("重新加载")
+        self.retry_btn.setVisible(False)
+        self.retry_btn.clicked.connect(self.load_preferences)
+        btn_layout.addWidget(self.retry_btn)
 
         self.save_btn = QPushButton("保存设置")
         self.save_btn.setStyleSheet("""
@@ -111,21 +124,44 @@ class PreferencesDialog(QDialog):
             }
         """)
         self.save_btn.clicked.connect(self.on_save)
+        self.save_btn.setEnabled(False)  # 加载成功前禁止保存，防止默认值覆盖服务端偏好
         btn_layout.addWidget(self.save_btn)
 
         layout.addLayout(btn_layout)
         self.setLayout(layout)
 
+    def _mark_load_failed(self, reason: str):
+        """加载失败：显式提示并提供重试，同时禁用保存以免覆盖服务端已有偏好。"""
+        self._preferences_loaded = False
+        self.save_btn.setEnabled(False)
+        self.retry_btn.setVisible(True)
+        self.load_status_label.setText(
+            f"无法从服务器加载偏好设置（{reason}）。为避免覆盖服务器上已保存的设置，保存已暂时禁用。"
+        )
+        self.load_status_label.setVisible(True)
+
+    def _mark_load_succeeded(self):
+        self._preferences_loaded = True
+        self.save_btn.setEnabled(True)
+        self.retry_btn.setVisible(False)
+        self.load_status_label.setVisible(False)
+
     def load_preferences(self):
-        """从服务器加载偏好设置并填充 UI。"""
+        """从服务器加载偏好设置并填充 UI；失败时禁用保存并提示重试。"""
         try:
             data = self.network_client.get_preferences()
-            if not data:
-                return
-            prefs = data if isinstance(data, dict) else {}
-            if not prefs:
-                return
+        except Exception as e:
+            self.logger.warning(f"从服务器加载偏好设置失败: {e}")
+            self._mark_load_failed(str(e) or type(e).__name__)
+            return
 
+        if not isinstance(data, dict):
+            self.logger.warning("从服务器加载偏好设置失败: 未返回数据")
+            self._mark_load_failed("服务器未返回数据")
+            return
+
+        prefs = data
+        try:
             rel = prefs.get("relationship", "")
             if rel:
                 idx = self.relationship_combo.findText(rel, Qt.MatchFlag.MatchFixedString)
@@ -151,13 +187,23 @@ class PreferencesDialog(QDialog):
                 self.custom_context_input.setPlainText(ctx)
 
             self.logger.info("偏好设置已从服务器加载")
+            self._mark_load_succeeded()
         except Exception as e:
-            self.logger.warning(f"从服务器加载偏好设置失败: {e}")
+            self.logger.warning(f"填充偏好设置表单失败: {e}")
+            self._mark_load_failed(f"解析失败: {type(e).__name__}")
 
     def get_preferences(self) -> dict:
         return self._preferences
 
     def on_save(self):
+        if not self._preferences_loaded:
+            QMessageBox.critical(
+                self,
+                "无法保存",
+                "偏好设置尚未成功加载，已阻止保存以避免覆盖服务器上的现有设置。请先点击“重新加载”。",
+            )
+            return
+
         relationship = self.relationship_combo.currentText().strip()
         speaking_style = self.style_combo.currentText().strip()
         personality_text = self.personality_input.text().strip()

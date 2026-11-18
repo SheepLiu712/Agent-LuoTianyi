@@ -12,7 +12,8 @@ def test_http_and_websocket_hosts_belong_to_web() -> None:
     assert (http / "project_plan.py").is_file()
     assert (http / "runtime_access.py").is_file()
     assert (websocket / "service.py").is_file()
-    assert (websocket / "messages.py").is_file()
+    assert (websocket / "_adapter_io.py").is_file()
+    assert not (websocket / "messages.py").exists()
 
 
 def test_admin_routes_and_use_cases_have_separate_owners() -> None:
@@ -26,9 +27,10 @@ def test_adapter_keeps_only_channel_translation_and_binding() -> None:
     adapter = SERVER_ROOT / "src" / "adapter"
     websocket = adapter / "websocket"
 
-    assert (websocket / "adapter.py").is_file()
-    assert (websocket / "_input.py").is_file()
-    assert (websocket / "_delivery.py").is_file()
+    assert (websocket / "chat" / "adapter.py").is_file()
+    assert (websocket / "chat" / "_input.py").is_file()
+    assert (websocket / "chat" / "_delivery.py").is_file()
+    assert (websocket / "connection.py").is_file()
     assert not (websocket / "service.py").exists()
     assert not tuple((adapter / "http").glob("*.py"))
     assert not tuple((adapter / "admin").glob("*.py"))

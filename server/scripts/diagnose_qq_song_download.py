@@ -174,8 +174,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=20, help="接口超时时间，默认 20 秒")
     parser.add_argument(
         "--credential-file",
-        default=str(SERVER_ROOT / "config" / "qq_music_credential.json"),
-        help="QQ 音乐 credential 文件，默认 server/config/qq_music_credential.json",
+        default=str(qq_song.default_credential_file()),
+        help="QQ 音乐凭证文件，默认与学歌下载器相同",
     )
     return parser.parse_args()
 

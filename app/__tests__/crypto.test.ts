@@ -3,7 +3,7 @@
  * 覆盖公钥获取的重试、超时、缓存，以及密码加密失败原因区分（Bug#1）。
  */
 import forge from 'node-forge';
-import { clearCachedPublicKey, encryptPassword, getPublicKey } from '../utils/crypto';
+import { clearCachedPublicKey, encryptPassword, getPublicKey } from '../features/account/crypto';
 import { server_config } from '../config';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -128,14 +128,25 @@ describe('encryptPassword', () => {
     expect(result).toEqual({ ok: false, reason: 'server' });
   });
 
-  it('公钥已缓存时加密不再发起网络请求', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ public_key: TEST_PUBLIC_KEY_PEM }));
-
-    await encryptPassword('secret123');
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+  it('服务重启后用新公钥加密，当前服务可以解密密码', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ public_key: TEST_PUBLIC_KEY_PEM }));
+    await getPublicKey();
+    const current = forge.pki.rsa.generateKeyPair(1024);
+    mockFetch.mockResolvedValue(jsonResponse({ public_key: forge.pki.publicKeyToPem(current.publicKey) }));
 
     const result = await encryptPassword('secret456');
     expect(result.ok).toBe(true);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    if (result.ok) {
+      expect(current.privateKey.decrypt(forge.util.decode64(result.encrypted), 'RSA-OAEP', {
+        md: forge.md.sha256.create(), mgf1: { md: forge.md.sha256.create() },
+      })).toBe('secret456');
+    }
+  });
+
+  it('旧公钥仍在缓存但无法取得当前公钥时不发送旧密钥密文', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ public_key: TEST_PUBLIC_KEY_PEM }));
+    await getPublicKey();
+    mockFetch.mockResolvedValue(jsonResponse({}, false, 503));
+    expect(await encryptPassword('secret456')).toEqual({ ok: false, reason: 'server' });
   });
 });

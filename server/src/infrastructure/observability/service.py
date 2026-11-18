@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable
 from uuid import uuid4
 
+from src.utils.server_paths import ServerPaths
+
+from .metric_writer import MetricWriter
+from .usage_metrics import UsageMetricsStore
+
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 
 
@@ -102,7 +107,7 @@ class SpanTimer:
             _current_topic_id.reset(self._topic_token)
 
 
-class ObservabilityService:
+class ObservabilityService(UsageMetricsStore):
     """SQLite-backed first-phase metrics store for the admin console."""
 
     def __init__(self, config: Dict[str, Any] | None = None, *, base_dir: str | Path | None = None) -> None:
@@ -110,17 +115,29 @@ class ObservabilityService:
         db_path = config.get("db_path") or os.path.join("data", "admin_metrics.sqlite3")
         self.db_path = Path(db_path)
         if not self.db_path.is_absolute():
-            self.db_path = (Path(base_dir) if base_dir is not None else Path.cwd()) / self.db_path
+            self.db_path = ServerPaths.from_environment(base_dir).resolve(self.db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.retention_days = int(config.get("retention_days", 30))
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._initialize_schema()
+        self.initialize_usage_schema()
+        self._metrics_writer = MetricWriter(self._metric_transaction)
 
     def close(self) -> None:
+        self._metrics_writer.close()
         with self._lock:
             self._conn.close()
+
+    @contextmanager
+    def _metric_transaction(self):
+        with self._lock:
+            yield
+            self._conn.commit()
+
+    def defer_metric_write(self, function, *args, **kwargs):
+        self._metrics_writer.submit(function, *args, **kwargs)
 
     @contextmanager
     def span(
@@ -286,7 +303,6 @@ class ObservabilityService:
             "pipeline": spans,
             "logs": logs,
             "recent_logs": self.get_recent_logs(limit=10, min_level="WARNING"),
-            "slow_spans": self.get_recent_pipeline_spans(limit=10, order_by_slow=True),
         }
 
     def get_llm_summary(
@@ -351,6 +367,17 @@ class ObservabilityService:
         for row in rows:
             grouped.setdefault(row["span_name"], []).append(float(row["duration_ms"] or 0.0))
         return {span_name: self._summarize_values(values) for span_name, values in grouped.items()}
+
+    def get_call_reply_latency(self, *, days: int = 7, limit: int = 100) -> Dict[str, Any]:
+        from .call_reply_summary import summarize_call_replies
+
+        rows = self._query_all(
+            """SELECT trace_id, span_name, start_ts, end_ts, duration_ms, status, metadata_json
+               FROM pipeline_spans WHERE start_ts >= ? AND span_name LIKE 'call.reply.%'
+               ORDER BY id""",
+            (self._since_iso(days),),
+        )
+        return {"window_days": days, **summarize_call_replies(rows, self._summarize_values, limit)}
 
     def _summarize_llm_metric_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         count = len(rows)
@@ -633,6 +660,9 @@ class ObservabilityService:
             ("llm_call_metrics", "ts"),
             ("pipeline_spans", "start_ts"),
             ("admin_log_events", "ts"),
+            ("stage_population_samples", "sampled_at"),
+            ("tts_requests", "requested_at"),
+            ("tts_queue_windows", "bucket_start"),
         ):
             self._execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
 
@@ -708,13 +738,16 @@ class ObservabilityService:
     def _execute(self, sql: str, params: Iterable[Any] = ()) -> None:
         with self._lock:
             self._conn.execute(sql, tuple(params))
-            self._conn.commit()
+            writer = getattr(self, "_metrics_writer", None)
+            if writer is None or not writer.is_writer():
+                self._conn.commit()
 
     def _query_one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any]:
         rows = self._query_all(sql, params)
         return rows[0] if rows else {}
 
     def _query_all(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
+        self._metrics_writer.flush()
         with self._lock:
             cur = self._conn.execute(sql, tuple(params))
             return [dict(row) for row in cur.fetchall()]

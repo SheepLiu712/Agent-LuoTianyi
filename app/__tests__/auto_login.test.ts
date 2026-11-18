@@ -6,7 +6,7 @@ import {
   AUTO_LOGIN_MAX_ATTEMPTS,
   classifyAutoLoginStatus,
   runAutoLoginWithRetry,
-} from '../utils/auto_login';
+} from '../features/account/auto_login';
 
 describe('classifyAutoLoginStatus', () => {
   it('2xx 视为成功', () => {

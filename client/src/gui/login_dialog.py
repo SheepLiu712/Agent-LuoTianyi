@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QCheckBox,
 )
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
 
 from .agreement_sign_dialog import AgreementSignDialog
 from .binder import AgentBinder
@@ -20,7 +20,7 @@ from ..network.auth import RegisterOutcome
 from ..safety import credential
 from ..utils import registration_resume
 from ..utils.logger import get_logger
-from ..utils.http_client import HttpClientFactory
+from .window_operation import WindowOperation
 
 
 class _RegisterSignals(QObject):
@@ -92,6 +92,16 @@ class LoginDialog(QDialog):
         layout.addWidget(self.tabs)
 
         self.setLayout(layout)
+        self._account_operation = WindowOperation(self)
+        self._account_operation.completed.connect(self._account_completed)
+        self._account_operation.settled.connect(self._account_settled)
+        self._account_child = None
+        self._account_button = None
+        self._account_button_text = None
+        self._account_closed = False
+
+        self.tabs.currentChanged.connect(self.update_default_button)
+        self.update_default_button(self.tabs.currentIndex())
 
         cred = credential.load_credentials()
         if cred:
@@ -103,6 +113,107 @@ class LoginDialog(QDialog):
             self.saved_token = token
             if saved_url:
                 self.custom_base_url = saved_url
+
+    def _start_account(self, action, button, child=None, **values):
+        if self._account_closed or self._account_operation.busy:
+            return
+        try:
+            request = self.binder.prepare_account_request(action, **values)
+        except Exception as exc:
+            QMessageBox.critical(child or self, "请求失败", str(exc))
+            return
+        self._account_child = child
+        self._account_button = button
+        self._account_button_text = button.text()
+        self.tabs.setEnabled(False)
+        button.setText("处理中…")
+        button.setEnabled(False)
+        cancelled = self._account_operation.start(request)
+        if child is not None:
+            child.finished.connect(lambda _result, token=cancelled: token.set())
+            child.destroyed.connect(lambda _obj=None, token=cancelled: token.set())
+            for field in child.findChildren(QLineEdit):
+                field.setEnabled(False)
+
+    def _account_settled(self):
+        if self._account_closed:
+            return
+        self.tabs.setEnabled(True)
+        try:
+            if self._account_child is None or self._account_child.isVisible():
+                self._account_button.setEnabled(True)
+                self._account_button.setText(self._account_button_text)
+                if self._account_child is not None:
+                    for field in self._account_child.findChildren(QLineEdit):
+                        field.setEnabled(True)
+        except RuntimeError:
+            pass  # 子窗口可能已实际删除；只恢复仍存活的父窗口。
+
+    def _account_completed(self, request, result):
+        child = self._account_child
+        if self._account_closed:
+            return
+        try:
+            if child is not None and not child.isVisible():
+                return
+        except RuntimeError:
+            return
+        if request.context != self.binder.account_context():
+            return
+        try:
+            success, message = self.binder.apply_account_result(request, result)
+        except Exception as exc:
+            success, message = False, str(exc)
+        if not success and request.action == "login" and result[2].get("code") == "AGREEMENT_REQUIRED":
+            outcome = self._sign_existing_user(
+                mode="password", username=request.username, password=request.password,
+                version=result[2].get("agreement_version", ""),
+            )
+            self.last_existing_agreement_result = outcome
+            if outcome is ExistingAgreementResult.LOGGED_IN:
+                self.accept()
+            elif outcome is ExistingAgreementResult.EXIT_CLIENT:
+                self.reject()
+            return
+        if not success:
+            QMessageBox.critical(child or self, "请求失败", message)
+        elif request.action == "login":
+            pending = registration_resume.load_pending()
+            if (pending and pending.get("confirmation_required") == "same_user_login"
+                    and pending.get("username") == request.username
+                    and pending.get("server_url") == registration_resume.normalize_server_url(request.base_url)):
+                registration_resume.clear_pending()
+                self._pending_login_confirmation_username = None
+            self.accept()
+        elif request.action == "register":
+            QMessageBox.information(self, "成功", "注册成功，请登录")
+            self.tabs.setCurrentIndex(0)
+        elif request.action == "reset":
+            QMessageBox.information(child, "成功", "账号重置成功，请使用新账号登录")
+            self.l_username.setText(request.username)
+            self.tabs.setCurrentIndex(0)
+            child.accept()
+        elif request.action == "server":
+            self.custom_base_url = request.base_url
+            QMessageBox.information(child, "成功", "服务器地址验证成功，地址已保存")
+            child.accept()
+
+    def done(self, result):
+        self._account_closed = True
+        self._account_operation.close()
+        super().done(result)
+
+    def update_default_button(self, index):
+        # Qt 的默认按钮属于整个对话框，切页时只保留当前页的主动作。
+        self.l_btn.setDefault(index == 0)
+        self.r_btn.setDefault(index == 1)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            # 取消登录会结束客户端启动，仅显式关闭窗口才走该路径。
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def try_auto_login(self) -> bool:
         try:
@@ -173,6 +284,7 @@ class LoginDialog(QDialog):
         self.l_auto_login.setStyleSheet("font-size: 16px; padding: 5px;")
 
         self.l_btn = QPushButton("登录")
+        self.l_btn.setAutoDefault(False)
         self.l_btn.clicked.connect(self.do_login)
         self.l_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 5px;"
@@ -181,6 +293,7 @@ class LoginDialog(QDialog):
         )
 
         self.reset_btn = QPushButton("重置账号")
+        self.reset_btn.setAutoDefault(False)
         self.reset_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
             " border: none; text-align: left; }"
@@ -189,6 +302,7 @@ class LoginDialog(QDialog):
         self.reset_btn.clicked.connect(self.open_reset_account_dialog)
 
         self.server_btn = QPushButton("服务器地址")
+        self.server_btn.setAutoDefault(False)
         self.server_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
             " border: none; text-align: left; }"
@@ -234,6 +348,7 @@ class LoginDialog(QDialog):
         self.r_invite.setStyleSheet(style)
 
         self.r_btn = QPushButton("注册")
+        self.r_btn.setAutoDefault(False)
         self.r_btn.clicked.connect(self.do_register)
         self.r_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 5px;"
@@ -254,6 +369,8 @@ class LoginDialog(QDialog):
         self.register_tab.setLayout(layout)
 
     def do_login(self):
+        if self._account_operation.busy:
+            return
         username = self.l_username.text()
         password = self.l_password.text()
         do_auto_login = self.l_auto_login.isChecked()
@@ -262,47 +379,7 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, "错误", "请输入用户名和密码")
             return
 
-        detailed = getattr(self.binder, "on_login_with_details", None)
-        if detailed:
-            success, msg, data = detailed(
-                username, password, do_auto_login=do_auto_login
-            )
-        else:
-            success, msg = self.binder.on_login(
-                username, password, do_auto_login=do_auto_login
-            )
-            data = {}
-        if not success and data.get("code") == "AGREEMENT_REQUIRED":
-            result = self._sign_existing_user(
-                mode="password",
-                username=username,
-                password=password,
-                version=data.get("agreement_version", ""),
-            )
-            self.last_existing_agreement_result = result
-            success = result is ExistingAgreementResult.LOGGED_IN
-            msg = "登录成功" if success else "登录失败"
-            if result is ExistingAgreementResult.EXIT_CLIENT:
-                self.reject()
-                return
-        if success:
-            pending = registration_resume.load_pending()
-            identity = getattr(self.binder, "on_registration_server_identity", None)
-            current_server = registration_resume.normalize_server_url(
-                identity() if identity else ""
-            )
-            if (
-                pending
-                and pending.get("confirmation_required") == "same_user_login"
-                and pending.get("username") == username
-                and pending.get("server_url") == current_server
-                and bool(current_server)
-            ):
-                registration_resume.clear_pending()
-                self._pending_login_confirmation_username = None
-            self.accept()
-        else:
-            QMessageBox.critical(self, "登录失败", msg)
+        self._start_account("login", self.l_btn, username=username, password=password, remember=do_auto_login)
 
     def _sign_existing_user(
         self,
@@ -417,7 +494,9 @@ class LoginDialog(QDialog):
         return ExistingAgreementResult.EXIT_CLIENT
 
     def do_register(self):
-        username = self.r_username.text().strip()
+        if self._account_operation.busy:
+            return
+        username = self.r_username.text()
         password = self.r_password.text()
         confirm_password = self.r_confirm_password.text()
         invite = self.r_invite.text().strip()
@@ -687,6 +766,8 @@ class LoginDialog(QDialog):
 
     def open_reset_account_dialog(self):
         """打开重置账号对话框"""
+        if self._account_operation.busy:
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle("重置账号")
         dialog.setFixedSize(380, 280)
@@ -729,6 +810,8 @@ class LoginDialog(QDialog):
         layout.addWidget(btn)
 
         def do_reset():
+            if self._account_operation.busy:
+                return
             invite = invite_input.text().strip()
             new_username = username_input.text().strip()
             new_password = password_input.text().strip()
@@ -741,24 +824,15 @@ class LoginDialog(QDialog):
                 QMessageBox.warning(dialog, "错误", "两次输入的密码不一致")
                 return
 
-            success, msg = self.binder.on_reset_account(
-                invite, new_username, new_password
-            )
-            if success:
-                QMessageBox.information(
-                    dialog, "成功", "账号重置成功，请使用新账号登录"
-                )
-                self.l_username.setText(new_username)
-                self.tabs.setCurrentIndex(0)
-                dialog.accept()
-            else:
-                QMessageBox.critical(dialog, "重置失败", msg)
+            self._start_account("reset", btn, child=dialog, username=new_username, password=new_password, invite=invite)
 
         btn.clicked.connect(do_reset)
         dialog.exec()
 
     def open_server_settings_dialog(self):
         """打开服务器地址设置对话框"""
+        if self._account_operation.busy:
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle("服务器地址设置")
         dialog.setFixedSize(400, 200)
@@ -785,6 +859,8 @@ class LoginDialog(QDialog):
         layout.addWidget(btn)
 
         def do_verify():
+            if self._account_operation.busy:
+                return
             url = url_input.text().strip().rstrip("/")
             if not url:
                 QMessageBox.warning(dialog, "错误", "请输入服务器地址")
@@ -794,25 +870,7 @@ class LoginDialog(QDialog):
             if not url.startswith("http://") and not url.startswith("https://"):
                 url = "https://" + url
 
-            # 尝试获取 public key 来验证服务器
-            try:
-                session = HttpClientFactory.get_session(verify_ssl=True)
-                resp = session.get(f"{url}/auth/public_key", timeout=10)
-                if resp.status_code == 200:
-                    self.custom_base_url = url
-                    credential.save_server_url(url, verify_ssl=True)
-                    # 同步更新 NetworkClient（AuthApi + WsTransport）
-                    self.binder.on_set_base_url(url, verify_ssl=True)
-                    QMessageBox.information(
-                        dialog, "成功", "服务器地址验证成功，地址已保存"
-                    )
-                    dialog.accept()
-                else:
-                    QMessageBox.critical(
-                        dialog, "验证失败", f"服务器返回状态码: {resp.status_code}"
-                    )
-            except Exception as e:
-                QMessageBox.critical(dialog, "验证失败", f"无法连接到服务器: {e}")
+            self._start_account("server", btn, child=dialog, server_url=url)
 
         btn.clicked.connect(do_verify)
         dialog.exec()

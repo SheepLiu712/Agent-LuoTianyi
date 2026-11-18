@@ -91,7 +91,7 @@ async def main() -> None:
     config = load_config("config/config.json", default_config={})
     init_sql_db(config.get("database", {}).get("sql_db_folder", "data/database"), config.get("database", {}).get("sql_db_file", "luotianyi.db"))
 
-    profile_config = config.get("agent_runtime", {}).get("agent", {}).get("memory", {}).get("user_profile", {})
+    profile_config = config.get("agent_runtime", {}).get("skills", {}).get("cognitive_maintenance", {}).get("user_profile", {})
     llm_service = LLMService(config.get("llm_service", {}))
     llm_module = llm_service.register_llm_module("batch_user_profile_update", profile_config.get("llm_module", {}))
     updater = UserProfileUpdater(profile_config, llm_module)

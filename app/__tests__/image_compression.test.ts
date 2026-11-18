@@ -4,7 +4,7 @@ import {
   compressImageForUpload,
   IMAGE_COMPRESSION_TARGET_BYTES,
   MAX_IMAGE_FILE_SIZE_BYTES,
-} from '../utils/image_compression';
+} from '../features/chat/image_compression';
 
 jest.mock('expo-file-system/legacy', () => ({
   getInfoAsync: jest.fn(),

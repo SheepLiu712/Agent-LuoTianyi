@@ -1,18 +1,19 @@
 """The authenticated WebSocket ingress acknowledges the three CLI signals."""
 
 import base64
+import json
 from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
 from PIL import Image
+from support.adapter_connection import receive_events as _receive_events
+from support.chat_connection import StubChatConnection
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
-from src.web.websocket import WSEventType
-from src.web.websocket.endpoint import _receive_events
-from src.web.websocket.service import WebSocketConnection, WebSocketService
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.web.websocket.service import WebSocketService
 
 
 class Socket:
@@ -30,6 +31,12 @@ class Socket:
 
 
 class Stage:
+    input_suspended = False
+    connection_generation = 0
+
+    async def start(self):
+        pass
+
     def __init__(self):
         self.interaction_id = "interaction"
         self.user_id = "user-1"
@@ -44,8 +51,9 @@ class Stage:
         self.stimuli.append(stimulus)
         return True
 
-    async def connection_changed(self, state):
-        pass
+    async def connection_changed(self, available, generation):
+        self.connection_generation = generation
+        return True
 
 
 def event(event_type, payload, client_msg_id="chat-1"):
@@ -54,12 +62,12 @@ def event(event_type, payload, client_msg_id="chat-1"):
 
 async def run_ingress(events, *, negative_ack=True, adapter_config=None):
     socket = Socket(events)
-    connection = WebSocketConnection(socket, "user-1", "alice")
+    connection = StubChatConnection(socket, "user-1", "alice")
     if negative_ack:
         connection.capabilities.add("negative_ack_v1")
     adapter = WebSocketAdapter(adapter_config)
     stage = Stage()
-    await adapter.bind(stage, connection)
+    await adapter._bind(stage, connection)
     runtime = SimpleNamespace(
         websocket_service=WebSocketService(),
         chat_adapter=adapter,
@@ -70,14 +78,14 @@ async def run_ingress(events, *, negative_ack=True, adapter_config=None):
             await _receive_events(runtime, connection)
         return socket.sent, stage.stimuli
     finally:
-        await adapter.disconnect(stage)
+        await adapter.detach_stage_binding(stage)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("event_type", "payload", "stimulus_type"),
     [
-        ("user_touch", {"touchArea": ["head"]}, d.TouchInteraction),
+        ("user_touch", {"touchArea": ["头"]}, d.TouchInteraction),
         ("user_image_selecting", {}, d.ImageSelectionOpened),
         ("user_image_selecting_cancel", {}, d.ImageSelectionClosed),
     ],
@@ -111,7 +119,7 @@ async def test_invalid_cli_signal_reports_bad_message(event_type, payload, negat
 
     assert stimuli == []
     assert len(sent) == 1
-    assert sent[0]["type"] == (WSEventType.SERVER_ACK.value if negative_ack else WSEventType.SERVER_ERROR.value)
+    assert sent[0]["type"] == ("server_ack" if negative_ack else "error")
     assert sent[0]["reply_to"] == "chat-1"
     assert sent[0]["payload"]["code"] == "BAD_MESSAGE"
     assert sent[0]["payload"]["received_event_type"] == event_type
@@ -156,7 +164,7 @@ async def test_oversized_image_reports_stable_media_code(tmp_path):
 @pytest.mark.parametrize(
     ("image_format", "mime_type", "code", "message"),
     [
-        ("TIFF", "image/tiff", "MEDIA_UNSUPPORTED_TYPE", "不支持的图片格式"),
+        ("PPM", "image/x-portable-pixmap", "MEDIA_UNSUPPORTED_TYPE", "不支持的图片格式"),
     ],
 )
 async def test_unsupported_image_format_is_rejected(tmp_path, negative_ack, image_format, mime_type, code, message):
@@ -175,11 +183,40 @@ async def test_unsupported_image_format_is_rejected(tmp_path, negative_ack, imag
 
     assert stimuli == []
     assert len(sent) == 1
-    assert sent[0]["type"] == (WSEventType.SERVER_ACK.value if negative_ack else WSEventType.SERVER_ERROR.value)
+    assert sent[0]["type"] == ("server_ack" if negative_ack else "error")
     assert sent[0]["payload"]["code"] == code
     assert sent[0]["payload"]["message"] == message
     assert sent[0]["payload"]["retryable"] is False
     assert not list((tmp_path / "media").iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frames", [1, 2])
+async def test_tiff_is_accepted_through_ingress_and_persisted_as_jpeg(tmp_path, frames):
+    """TIFF 属于受支持的输入：单帧与多帧都规范化成一张 JPEG 落盘。"""
+    image = BytesIO()
+    if frames == 2:
+        Image.new("RGB", (2, 2), "red").save(
+            image, format="TIFF", save_all=True, append_images=[Image.new("RGB", (2, 2), "blue")]
+        )
+    else:
+        Image.new("RGB", (2, 2), "red").save(image, format="TIFF")
+    sent, stimuli = await run_ingress(
+        [
+            event(
+                "user_image",
+                {"image_base64": base64.b64encode(image.getvalue()).decode("ascii"), "mime_type": "image/tiff"},
+            )
+        ],
+        adapter_config={"media_store": {"root": str(tmp_path / "media")}},
+    )
+
+    assert len(stimuli) == 1
+    assert sent[0]["payload"]["ok"] is True
+    metadata_files = list((tmp_path / "media").rglob("metadata.json"))
+    assert len(metadata_files) == 1
+    metadata = json.loads(metadata_files[0].read_text(encoding="utf-8"))
+    assert metadata["mime_type"] == "image/jpeg"
 
 
 @pytest.mark.asyncio
@@ -193,3 +230,29 @@ async def test_valid_image_is_acknowledged_regardless_of_mime_declaration(tmp_pa
     )
     assert len(stimuli) == 1
     assert sent[0]["payload"]["ok"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,regions,expected", [
+    ("touchArea", ["头", "身体", "腿", "手"], ["头", "身体", "腿", "手"]),
+    ("touchArea", ["左腿", "右腿", "腿", "右手", "左手", "手"], ["腿", "手"]),
+    ("touch_area", " 左腿 ", ["腿"]),
+])
+async def test_touch_ingress_normalizes_sides_without_duplicate_regions(field, regions, expected):
+    sent, stimuli = await run_ingress([event("user_touch", {
+        field: regions, "click_frequency": {"count_10s": 10, "count_30s": 30},
+    })])
+    assert sent[0]["payload"]["ok"] is True
+    assert [r.value for r in stimuli[0].body_regions] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [
+    {"touchArea": ["head"]}, {"touchArea": ["辫子"]}, {"touchArea": ["身体", "unknown"]},
+    {"touchArea": []}, {"touchArea": [42]},
+    {"touchArea": ["头"], "click_frequency": {"count_10s": -1, "count_30s": 3}},
+])
+async def test_nonstandard_or_malformed_touch_is_rejected_before_stage(payload):
+    sent, stimuli = await run_ingress([event("user_touch", payload)])
+    assert not stimuli
+    assert sent[0]["payload"]["code"] == "BAD_MESSAGE"

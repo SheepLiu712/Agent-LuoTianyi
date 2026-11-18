@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import src.domain.agent as d
 from src.agent.processing.output_emitter import OutputEmitter
-from src.agent.skills.expression.diary_writing import DiaryWritingSkill
+from src.agent.skills.expression.diary import DiaryDraft, DiarySkill
+from src.agent.skills.expression.dynamic import (
+    DynamicPublicationError,
+)
 from src.agent.skills.invocation import execution_invocation
 from src.utils.logger import get_logger
 
 
 class WriteDiaryHandler:
-    def __init__(self, character_id: str, writing: DiaryWritingSkill) -> None:
+    def __init__(self, character_id: str, writing: DiarySkill) -> None:
         self._character_id = character_id
         self._writing = writing
         self._logger = get_logger(__name__)
@@ -26,11 +29,14 @@ class WriteDiaryHandler:
             raise TypeError("WriteDiaryHandler 只处理 WriteDiary")
         if execution_context.cancellation.is_cancelled:
             return self._failed(action, d.ExecutionErrorCode.CANCELLED)
-        result = self._writing.publish(
-            execution_invocation(self._character_id, execution_context, user_id=action.owner_user_id),
-            action,
-        )
-        if result.ok and result.dynamic_id:
+        try:
+            result = await self._writing.publish(
+                execution_invocation(self._character_id, execution_context, user_id=action.owner_user_id),
+                draft=DiaryDraft(action.body, action.local_date, action.owner_user_id),
+            )
+        except DynamicPublicationError:
+            return self._failed(action, d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)
+        if result.identifier:
             return d.ActionResult(
                 action_id=action.action_id,
                 status=d.ActionExecutionStatus.COMPLETED,
@@ -38,7 +44,7 @@ class WriteDiaryHandler:
                 irreversible_effect_committed=True,
                 effect_ref=d.EffectRef(
                     kind=d.EffectKind.DYNAMIC_POST,
-                    effect_id=result.dynamic_id,
+                    effect_id=result.identifier,
                 ),
             )
         self._logger.error(

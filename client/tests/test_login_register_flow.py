@@ -1,12 +1,14 @@
 """登录窗口的注册流程：校验→协议门禁→异步提交→成功回登录页并预填用户名。"""
 
 from types import SimpleNamespace
+from time import monotonic
 
 import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Signal  # noqa: E402
+from PySide6.QtCore import Signal
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from src.gui import login_dialog as login_module  # noqa: E402
@@ -64,6 +66,21 @@ class FakeBinder:
         self.detail_login_result = None
         self.agreement_result = (False, "协议签署失败", {})
         self.detail_login_calls = 0
+
+    def account_context(self):
+        return (self.server_url,)
+
+    def prepare_account_request(self, action, **values):
+        return SimpleNamespace(
+            context=self.account_context(), action=action, base_url=self.server_url,
+            **values,
+            execute=lambda _cancelled: self.on_login_with_details(
+                values['username'], values['password'], values.get('remember', False)
+            ),
+        )
+
+    def apply_account_result(self, request, result):
+        return result[:2]
 
     def on_registration_server_identity(self):
         return self.server_url
@@ -515,19 +532,19 @@ def test_unverifiable_can_be_cleared_only_by_successful_same_username_login(dial
 
     dialog.widget.l_username.setText("other")
     dialog.widget.l_password.setText("pw")
-    dialog.widget.do_login()
+    login_and_wait(dialog.widget)
     assert registration_resume.load_pending()["registration_request_id"] == request_id
 
     dialog.binder.login_result = (False, "登录失败")
     dialog.widget.l_username.setText("newbie")
     dialog.widget.l_password.setText("wrong")
-    dialog.widget.do_login()
+    login_and_wait(dialog.widget)
     assert registration_resume.load_pending()["registration_request_id"] == request_id
 
     dialog.binder.login_result = (True, "登录成功")
     dialog.widget.l_username.setText("newbie")
     dialog.widget.l_password.setText("pw")
-    dialog.widget.do_login()
+    login_and_wait(dialog.widget)
     assert registration_resume.load_pending() is None
 
 
@@ -555,7 +572,7 @@ def test_unverifiable_confirmation_survives_recreated_dialog(dialog):
     dialog.binder.detail_login_result = (True, "登录成功", {"user_id": "newbie"})
     dialog.widget.l_username.setText("newbie")
     dialog.widget.l_password.setText("pw")
-    dialog.widget.do_login()
+    login_and_wait(dialog.widget)
     assert registration_resume.load_pending() is None
 
 
@@ -581,7 +598,7 @@ def test_unverifiable_confirmation_rejects_wrong_user_server_or_failed_login(
     dialog.binder.login_result = login_result
     dialog.widget.l_username.setText(username)
     dialog.widget.l_password.setText("pw")
-    dialog.widget.do_login()
+    login_and_wait(dialog.widget)
     assert registration_resume.load_pending()["registration_request_id"] == "req-keep"
 
 
@@ -594,7 +611,7 @@ def test_unverifiable_login_on_other_server_does_not_clear_pending(dialog):
     dialog.binder.login_result = (True, "登录成功")
     dialog.widget.l_username.setText("newbie")
     dialog.widget.l_password.setText("pw")
-    dialog.widget.do_login()
+    login_and_wait(dialog.widget)
 
     assert (
         registration_resume.load_pending()["registration_request_id"]
@@ -640,7 +657,7 @@ def test_password_agreement_required_signs_then_logs_in_separately(dialog, monke
     monkeypatch.setattr(login_module, "AgreementSignDialog", Sign)
     dialog.widget.l_username.setText("newbie")
     dialog.widget.l_password.setText("pw")
-    dialog.widget.do_login()
+    login_and_wait(dialog.widget)
 
     assert dialog.binder.agreement_call[2] == {"password": "pw", "token": None}
     assert dialog.binder.detail_login_result[2]["code"] == "AGREEMENT_REQUIRED"
@@ -935,3 +952,11 @@ def test_agreement_loader_uses_binder_and_reports_missing_wiring(dialog):
     finally:
         unwired.close()
         unwired.deleteLater()
+
+
+def login_and_wait(dialog):
+    dialog.do_login()
+    deadline = monotonic() + 5
+    while dialog._account_operation.busy and monotonic() < deadline:
+        QTest.qWait(25)
+    assert not dialog._account_operation.busy

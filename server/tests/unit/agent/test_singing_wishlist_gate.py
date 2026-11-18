@@ -19,7 +19,7 @@ class _Manager:
 
 
 @pytest.mark.asyncio
-async def test_unknown_song_wishlist_requires_confirmed_intent():
+async def test_song_selection_never_submits_a_learning_task():
     manager = _Manager()
     backend = object.__new__(SingingBackend)
     backend.default_character_id = "luotianyi"
@@ -33,4 +33,4 @@ async def test_unknown_song_wishlist_requires_confirmed_intent():
         "未知歌曲",
         None,
     )
-    assert manager.wished_songs == ["未知歌曲"]
+    assert manager.wished_songs == []

@@ -1,0 +1,3 @@
+interface:
+  display_name: "代码双轴审查"
+  short_description: "分别核查改动的规范符合性与需求符合性"

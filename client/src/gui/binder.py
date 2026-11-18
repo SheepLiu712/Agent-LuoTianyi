@@ -46,6 +46,9 @@ class AgentBinder(QObject):
         login_details_callback: Callable[..., tuple] | None = None,
         auto_login_details_callback: Callable[..., tuple] | None = None,
         accept_agreement_callback: Callable[..., tuple] | None = None,
+        prepare_account_callback: Callable | None = None,
+        apply_account_callback: Callable | None = None,
+        account_context_callback: Callable | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -73,6 +76,9 @@ class AgentBinder(QObject):
         self.login_details_callback = login_details_callback
         self.auto_login_details_callback = auto_login_details_callback
         self.accept_agreement_callback = accept_agreement_callback
+        self.prepare_account_callback = prepare_account_callback
+        self.apply_account_callback = apply_account_callback
+        self.account_context_callback = account_context_callback
 
         self.msg_to_bubble: Dict[str, ChatBubble] = (
             {}
@@ -145,9 +151,22 @@ class AgentBinder(QObject):
             return self.auto_login_details_callback(username, token)
         return self.on_auto_login(username, token), "登录失败", {}
 
-    def on_login(
-        self, username: str, password: str, do_auto_login: bool = False
-    ) -> Tuple[bool, str]:
+    def prepare_account_request(self, action: str, **values):
+        if self.prepare_account_callback is None:
+            raise RuntimeError("Account request preparation is not configured")
+        return self.prepare_account_callback(action, **values)
+
+    def apply_account_result(self, request, result):
+        if self.apply_account_callback is None:
+            raise RuntimeError("Account result application is not configured")
+        return self.apply_account_callback(request, result)
+
+    def account_context(self):
+        if self.account_context_callback is None:
+            raise RuntimeError("Account context is not configured")
+        return self.account_context_callback()
+
+    def on_login(self, username: str, password: str, do_auto_login: bool = False) -> Tuple[bool, str]:
         if self.login_callback:
             return self.login_callback(username, password, do_auto_login)
         self.logger.error("Login callback not set")

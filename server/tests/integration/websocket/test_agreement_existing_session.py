@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.adapter.websocket.chat import WebSocketAdapter
 from src.application.user.agreement_service import AgreementService
 from src.infrastructure.media import create_media_resolver
 from src.infrastructure.persistence.database.database_service import DatabaseManager
@@ -16,6 +17,7 @@ from src.web.http import user_interface as user_interface_module
 from src.web.http.user_interface import UserInterface
 from src.web.websocket import endpoint
 from src.web.websocket.service import WebSocketService
+from tests.integration.websocket.test_websocket_adapter import Endpoint
 
 V1 = "terms-ws-v1"
 V2 = "terms-ws-v2"
@@ -55,20 +57,25 @@ def agreement_ws(tmp_path, monkeypatch):
     connected = []
     disconnected = []
 
-    async def connect(connection, character_id):
-        connected.append((connection.user_uuid, character_id))
+    async def connect(*, connection, character_id, user_id):
+        connected.append((user_id, character_id))
+        return Endpoint("agreement-test", user_id, character_id)
 
     async def disconnect(connection):
-        disconnected.append(connection.user_uuid)
+        disconnected.append(connection)
 
     def record_login(*_args, **_kwargs):
         return True
 
+    stages = SimpleNamespace(try_to_get_stage=connect, disconnect=disconnect, record_login=record_login)
+    adapter = WebSocketAdapter()
+    adapter.initialize(stages)
     runtime = SimpleNamespace(
         database_manager=manager,
         agreement_service=AgreementService(V1, {}),
         websocket_service=WebSocketService(),
-        stage_manager=SimpleNamespace(connect=connect, disconnect=disconnect, record_login=record_login),
+        stage_manager=stages,
+        chat_adapter=adapter,
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         client_llm_executor=SimpleNamespace(clear_user=lambda *_args: None),
         user_interface=interface,
@@ -115,6 +122,7 @@ def test_established_websocket_remains_authenticated_after_policy_changes_but_ne
             }
         )
         assert websocket.receive_json()["type"] == "auth_ok"
+        assert websocket.receive_json()["type"] == "chat.ready"
         assert agreement_ws.connected == [("ws-user", "luotianyi")]
 
         agreement_ws.runtime.agreement_service = (

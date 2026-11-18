@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Event
 from typing import Optional, Tuple
 
 import requests
@@ -78,11 +79,46 @@ def _error_detail(response: requests.Response, fallback: str) -> str:
     return fallback
 
 
+@dataclass(frozen=True)
+class AccountRequest:
+    """窗口调度时的纯网络输入，不持有客户端、Binder 或 Qt 对象。"""
+
+    context: tuple = field(repr=False)
+    action: str
+    base_url: str
+    username: str = ""
+    password: str = field(default="", repr=False)
+    invite: str = field(default="", repr=False)
+    remember: bool = False
+
+    def execute(self, cancelled: Event) -> tuple[bool, str, dict]:
+        if cancelled.is_set():
+            return False, "Request cancelled", {}
+        with HttpClientFactory.create_session() as session:
+            api = AuthApi(self.base_url, session=session, cancelled=cancelled)
+            if self.action == "login":
+                return api.login(self.username, self.password, self.remember)
+            if self.action == "register":
+                ok, message = api.register(self.username, self.password, self.invite)
+                return ok, message, {}
+            if self.action == "reset":
+                ok, message = api.reset_account(self.invite, self.username, self.password)
+                return ok, message, {}
+            if self.action == "server":
+                response = session.get(f"{self.base_url}/auth/public_key", verify=True, timeout=10)
+                return response.status_code == 200, f"服务器返回状态码: {response.status_code}", {}
+            raise ValueError("Unknown account operation")
+
+
 class AuthApi:
-    def __init__(self, base_url: str, verify_ssl: bool = True):
+    def __init__(self, base_url: str, verify_ssl: bool = True, session=None, cancelled: Event | None = None):
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = verify_ssl
-        self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
+        self.session = session if session is not None else HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
+        self.cancelled = cancelled
+
+    def _cancelled(self) -> bool:
+        return self.cancelled is not None and self.cancelled.is_set()
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
         """更新服务器地址，同时重新创建 HTTP 会话。"""
@@ -97,10 +133,13 @@ class AuthApi:
             password,
             base_url=self.base_url,
             verify_ssl=self.verify_ssl,
+            session=self.session,
         )
         if not encrypted_password:
             return False, "Failed to encrypt password. Check server connection.", {}
 
+        if self._cancelled():
+            return False, "Request cancelled", {}
         resp = self.session.post(
             f"{self.base_url}/auth/login",
             json={
@@ -223,6 +262,7 @@ class AuthApi:
             password,
             base_url=self.base_url,
             verify_ssl=self.verify_ssl,
+            session=self.session,
         )
         if not encrypted_password:
             return RegisterOutcome(
@@ -243,6 +283,8 @@ class AuthApi:
         if accepted is not None:
             payload["accepted"] = accepted
 
+        if self._cancelled():
+            return RegisterOutcome(False, "Request cancelled", code="REGISTRATION_NOT_SENT")
         resp = self.session.post(
             f"{self.base_url}/auth/register",
             json=payload,
@@ -269,10 +311,13 @@ class AuthApi:
             new_password,
             base_url=self.base_url,
             verify_ssl=self.verify_ssl,
+            session=self.session,
         )
         if not encrypted_password:
             return False, "Failed to encrypt password. Check server connection."
 
+        if self._cancelled():
+            return False, "Request cancelled"
         resp = self.session.post(
             f"{self.base_url}/auth/reset_account",
             json={

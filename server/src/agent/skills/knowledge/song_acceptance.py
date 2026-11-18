@@ -1,7 +1,7 @@
 """幂等接纳歌曲知识候选，在同一幂等边界内写入歌曲知识与关键词索引。
 
-写入对象是既有歌曲知识库（`res/knowledge/knowledge_db.db`）与既有关键词文件
-（`res/knowledge/song_name_keywords.txt`、`song_lyric_keywords.txt`），不新建第二份知识库。
+写入对象是既有歌曲知识库（`data/knowledge/knowledge_db.db`）与既有关键词文件
+（`data/knowledge/song_name_keywords.txt`、`song_lyric_keywords.txt`），不新建第二份知识库。
 
 现有 `Song` 表没有来源与修订列，因此幂等门以名称与 safe name 的既有项为准
 （与工单 #81 的「名称/safe name 已有项跳过」一致）；来源、外部标识与修订随结果返回，
@@ -26,6 +26,7 @@ from src.infrastructure.persistence import (
     get_song_session,
     init_song_db,
 )
+from src.utils.server_paths import resolve_server_path
 
 
 class SongAcceptanceStatus(str, Enum):
@@ -54,7 +55,7 @@ def safe_song_name(name: str) -> str:
     return "".join(c for c in name if c.isalnum() or c in (" ", "-", "_")).strip()
 
 
-class SongKnowledgeAcceptanceSkill:
+class SongKnowledgeStore:
     """把已规范化的歌曲候选写入歌曲知识与关键词索引，不产生任何外部效果。"""
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -64,17 +65,57 @@ class SongKnowledgeAcceptanceSkill:
         song_database = config.get("song_database")
         if song_database is not None and not isinstance(song_database, dict):
             raise TypeError("song_knowledge.song_database 必须是字典")
-        server_root = Path(__file__).resolve().parents[4]
         configured = dict(song_database or {})
         self._song_database = {
-            "db_folder": configured.get("db_folder") or str(server_root / "res" / "knowledge"),
+            "db_folder": configured.get("db_folder") or str(resolve_server_path("data/knowledge")),
             "db_file": configured.get("db_file") or "knowledge_db.db",
         }
-        knowledge_dir = Path(config.get("knowledge_dir") or server_root / "res" / "knowledge")
+        knowledge_dir = Path(
+            config.get("knowledge_dir") or configured.get("db_folder") or resolve_server_path("data/knowledge")
+        )
         self._song_name_file = knowledge_dir / "song_name_keywords.txt"
         self._lyric_file = knowledge_dir / "song_lyric_keywords.txt"
         self._database_lock = threading.Lock()
         self._database_ready = False
+
+    async def song_names(self) -> tuple[str, ...]:
+        def read():
+            self._ensure_database()
+            with get_song_session() as session:
+                return tuple(row.name for row in session.query(Song).order_by(Song.name).all())
+
+        return await asyncio.to_thread(read)
+
+    async def search(self, clues: tuple[str, ...], *, limit: int) -> tuple[tuple[str, str], ...]:
+        def read():
+            self._ensure_database()
+            found = {}
+            with get_song_session() as session:
+                for clue in clues:
+                    rows = (
+                        session.query(Song)
+                        .filter(Song.name.contains(clue) | Song.introduction.contains(clue))
+                        .order_by(Song.uuid)
+                        .limit(limit)
+                        .all()
+                    )
+                    found.update((row.uuid, row.introduction) for row in rows)
+            return tuple(found.items())[:limit]
+
+        return await asyncio.to_thread(read)
+
+    async def get_song(self, song_id: str) -> tuple[str, str, str] | None:
+        def read():
+            self._ensure_database()
+            with get_song_session() as session:
+                row = (
+                    session.query(Song)
+                    .filter((Song.name == song_id) | (Song.uuid == song_id) | (Song.safe_name == song_id))
+                    .first()
+                )
+                return (row.uuid, row.introduction, row.lyrics) if row else None
+
+        return await asyncio.to_thread(read)
 
     async def accept(
         self,

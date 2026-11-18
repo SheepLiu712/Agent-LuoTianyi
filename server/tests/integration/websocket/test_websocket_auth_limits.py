@@ -3,14 +3,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.web.websocket import WSEventType, WSMessage
 from src.web.websocket.service import WebSocketConnection, WebSocketService
 
 
 class FakeWebSocket:
-    def __init__(self):
+    def __init__(self, messages=()):
         self.sent = []
         self.close_codes = []
+        self.messages = iter(messages)
+
+    async def receive_json(self):
+        event = next(self.messages)
+        if isinstance(event, Exception):
+            raise event
+        return event
 
     async def send_json(self, event):
         self.sent.append(event)
@@ -31,7 +37,7 @@ async def test_websocket_auth_times_out_and_closes_connection(monkeypatch):
     async def never_receive(_connection):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(service, "try_recv_client_msg", never_receive)
+    monkeypatch.setattr(service, "_receive_auth_message", never_receive)
 
     result = await connection.auth(service, object(), timeout_seconds=0.01)
 
@@ -50,9 +56,9 @@ async def test_websocket_auth_counts_non_auth_frames(monkeypatch):
     async def receive_non_auth(_connection):
         nonlocal attempts
         attempts += 1
-        return WSMessage(event_type=WSEventType.HB_PING.value, payload={})
+        return dict(type="hb_ping", payload={})
 
-    monkeypatch.setattr(service, "try_recv_client_msg", receive_non_auth)
+    monkeypatch.setattr(service, "_receive_auth_message", receive_non_auth)
 
     result = await connection.auth(service, object(), timeout_seconds=1, max_attempts=3)
 
@@ -67,8 +73,8 @@ async def test_websocket_auth_succeeds_within_attempt_limit(monkeypatch):
     service = WebSocketService()
     websocket = FakeWebSocket()
     connection = WebSocketConnection(websocket, user_uuid=None, user_name=None)
-    auth_event = WSMessage(
-        event_type=WSEventType.USER_AUTH.value,
+    auth_event = dict(
+        type="user_auth",
         payload={"username": "alice", "token": "valid-token"},
     )
 
@@ -79,8 +85,8 @@ async def test_websocket_auth_succeeds_within_attempt_limit(monkeypatch):
         connection.set_user("user-1", "alice")
         return True
 
-    monkeypatch.setattr(service, "try_recv_client_msg", receive_auth)
-    monkeypatch.setattr(service, "handle_auth_event", accept_auth)
+    monkeypatch.setattr(service, "_receive_auth_message", receive_auth)
+    monkeypatch.setattr(service, "_authenticate_message", accept_auth)
 
     result = await connection.auth(service, object(), timeout_seconds=1, max_attempts=2)
 
@@ -99,8 +105,8 @@ async def test_auth_negotiates_negative_ack_capability():
             check_message_token=lambda _username, _token: (True, "user-1"),
         ),
     )
-    event = WSMessage(
-        event_type=WSEventType.USER_AUTH.value,
+    event = dict(
+        type="user_auth",
         payload={
             "username": "alice",
             "token": "valid-token",
@@ -109,9 +115,67 @@ async def test_auth_negotiates_negative_ack_capability():
         client_msg_id="auth-1",
     )
 
-    assert await service.handle_auth_event(connection, database, event) is True
+    assert await service._authenticate_message(connection, database, event) is True
     assert connection.capabilities == {"negative_ack_v1"}
     assert websocket.sent[-1]["payload"]["capabilities"] == ["negative_ack_v1"]
+
+
+@pytest.mark.asyncio
+async def test_auth_retries_invalid_token_then_returns_identity_and_capabilities():
+    websocket = FakeWebSocket(
+        [
+            {"type": "user_auth", "client_msg_id": "bad", "payload": {"username": "alice", "token": "invalid"}},
+            {
+                "type": "user_auth",
+                "client_msg_id": "good",
+                "payload": {
+                    "username": "alice",
+                    "token": "valid",
+                    "capabilities": ["negative_ack_v1", "unknown"],
+                },
+            },
+        ]
+    )
+    connection = WebSocketConnection(websocket, None, None)
+    database = SimpleNamespace(
+        credential_service=SimpleNamespace(
+            check_message_token=lambda _username, token: (token == "valid", "user-1"),
+        )
+    )
+    service = WebSocketService()
+
+    await service.send_system_ready_event(websocket)
+    assert await connection.auth(service, database) is True
+    assert (connection.user_uuid, connection.user_name) == ("user-1", "alice")
+    assert connection.capabilities == {"negative_ack_v1"}
+    assert [event["type"] for event in websocket.sent] == ["system_ready", "auth_error", "auth_ok"]
+    assert websocket.sent[1]["payload"]["code"] == "INVALID_TOKEN"
+    assert websocket.sent[1]["reply_to"] == "bad"
+    assert websocket.sent[2]["reply_to"] == "good"
+    assert websocket.close_codes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message, code",
+    [
+        (ValueError("invalid JSON"), "BAD_JSON"),
+        ([], "BAD_MESSAGE"),
+        ({"payload": {}}, "BAD_MESSAGE"),
+        ({"type": "user_auth", "payload": {"token": "x" * 200}}, "BAD_MESSAGE"),
+        ({"type": "user_auth", "payload": {}}, "MISSING_AUTH_FIELDS"),
+    ],
+)
+async def test_auth_rejects_malformed_or_oversized_messages(message, code):
+    websocket = FakeWebSocket([message])
+    connection = WebSocketConnection(websocket, None, None)
+    service = WebSocketService(max_inbound_frame_bytes=128)
+
+    assert await connection.auth(service, object(), max_attempts=1) is False
+    assert websocket.sent[0]["payload"]["code"] == code
+    assert websocket.sent[-1]["payload"]["code"] == "AUTH_ATTEMPTS_EXCEEDED"
+    assert websocket.close_codes == [1008]
+    assert connection.user_uuid is None
 
 
 @pytest.mark.asyncio

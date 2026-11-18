@@ -1,6 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { compressImageForUpload, MAX_IMAGE_FILE_SIZE_BYTES } from '../utils/image_compression';
-import { NetworkClient } from '../utils/network_client';
+import { compressImageForUpload, MAX_IMAGE_FILE_SIZE_BYTES } from '../features/chat/image_compression';
+import { NetworkClient } from '../features/chat/connection/network_client';
 
 jest.mock('expo-file-system/legacy', () => ({
   EncodingType: { Base64: 'base64' },
@@ -9,11 +9,11 @@ jest.mock('expo-file-system/legacy', () => ({
 }));
 
 jest.mock('../utils/debug_trace', () => ({ addDebugTrace: jest.fn() }));
-jest.mock('../utils/image_compression', () => ({
+jest.mock('../features/chat/image_compression', () => ({
   MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024,
   compressImageForUpload: jest.fn(),
 }));
-jest.mock('../utils/ws_transport', () => ({ WebSocketTransport: jest.fn() }));
+jest.mock('../features/chat/connection/ws_transport', () => ({ WebSocketTransport: jest.fn() }));
 
 const getInfoAsync = FileSystem.getInfoAsync as jest.Mock;
 const readAsStringAsync = FileSystem.readAsStringAsync as jest.Mock;

@@ -9,6 +9,7 @@ from src.infrastructure.config.store import ConfigStore
 from src.infrastructure.config.validation import RuntimeConfigValidator
 from src.infrastructure.observability import ObservabilityService, set_observability_service
 from src.utils.logger import install_observability_log_handler, uninstall_observability_log_handler
+from src.utils.server_paths import ServerPaths
 
 from .auth import AdminAuthService
 from .qq_music_credential_refresh import QQMusicCredentialRefreshService
@@ -27,19 +28,26 @@ class AdminShell:
     observability: ObservabilityService
 
     @classmethod
-    async def initialize(cls, *, root_dir: str | Path, config_path: str | Path = "config/config.json") -> "AdminShell":
+    async def initialize(
+        cls,
+        *,
+        root_dir: str | Path,
+        config_path: str | Path = "config/config.json",
+        secret_store: SecretStore | None = None,
+    ) -> "AdminShell":
         root = Path(root_dir)
-        config_store = ConfigStore(root / config_path, root_dir=root)
-        secret_store = SecretStore(root / "config" / "secrets.local.env")
+        paths = ServerPaths.from_environment(root)
+        config_store = ConfigStore(paths.resolve(config_path), root_dir=root)
+        secret_store = secret_store or SecretStore(paths.config_dir / "secrets.local.env")
         secret_store.load_into_environment()
         try:
             raw_config = config_store.read_raw()
         except (json.JSONDecodeError, OSError):
             raw_config = {}
-        observability = ObservabilityService(raw_config.get("observability", {}), base_dir=root)
+        observability = ObservabilityService(paths.resolve_config(raw_config).get("observability", {}), base_dir=root)
         set_observability_service(observability)
         install_observability_log_handler(observability)
-        auth = AdminAuthService(root / "config" / "admin_auth.json", root / "config" / "admin_setup_token.txt")
+        auth = AdminAuthService(paths.config_dir / "admin_auth.json", paths.config_dir / "admin_setup_token.txt")
         validator = RuntimeConfigValidator(root_dir=root, secret_store=secret_store)
         runtime_supervisor = RuntimeSupervisor(
             config_store=config_store,
@@ -76,9 +84,14 @@ class AdminShell:
 _admin_shell: AdminShell | None = None
 
 
-async def init_admin_shell(*, root_dir: str | Path, config_path: str | Path = "config/config.json") -> AdminShell:
+async def init_admin_shell(
+    *,
+    root_dir: str | Path,
+    config_path: str | Path = "config/config.json",
+    secret_store: SecretStore | None = None,
+) -> AdminShell:
     global _admin_shell
-    _admin_shell = await AdminShell.initialize(root_dir=root_dir, config_path=config_path)
+    _admin_shell = await AdminShell.initialize(root_dir=root_dir, config_path=config_path, secret_store=secret_store)
     return _admin_shell
 
 

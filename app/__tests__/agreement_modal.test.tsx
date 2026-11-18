@@ -1,7 +1,7 @@
 import React, { ElementType } from 'react';
 import { act, create, ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
-import { AgreementModal } from '../components/AgreementModal';
-import { THEMES } from '../utils/theme';
+import { AgreementModal } from '../features/account/AgreementModal';
+import { THEMES } from '../shared/ui/theme';
 
 let appStateListener: ((state: string) => void) | undefined;
 
@@ -9,7 +9,7 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }),
 }));
 
-jest.mock('../components/RichAgreement', () => ({
+jest.mock('../features/account/RichAgreement', () => ({
   RichAgreement: () => 'AgreementBody',
 }));
 
