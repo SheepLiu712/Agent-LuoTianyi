@@ -27,6 +27,8 @@ NOW = datetime(2026, 11, 3, 12)
 
 
 class Vectors:
+    enabled = True
+
     async def embed_query(self, query):
         return [1.0]
 

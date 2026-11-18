@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
@@ -74,6 +75,11 @@ class Document(BaseDocument):
 class VectorStore(ABC):
     """向量存储基类"""
 
+    @property
+    def enabled(self) -> bool:
+        """默认真实向量实现处于启用状态。"""
+        return True
+
     @abstractmethod
     def add_documents(self, documents: List[BaseDocument]) -> List[str]:
         """添加文档到向量库"""
@@ -119,6 +125,74 @@ class VectorStore(ABC):
     def delete_user_records_strict(self, user_id: str) -> int:
         """Delete one user's vectors and surface storage failures."""
         return self.delete_user_records(user_id)
+
+
+class VectorStoreDisabledError(RuntimeError):
+    """配置主动关闭向量投影，不能伪造索引成功。"""
+
+
+class VectorDeletionUnavailable(RuntimeError):
+    """向量关闭期间无法确认既有索引已被清除。"""
+
+
+class DisabledVectorStore(VectorStore):
+    """无 Chroma、embedding 或线程池的禁用实现；旧资料只作保守存在性检查。"""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.persist_directory = resolve_server_path(config.get("vector_store_path", "./data/vector_store"))
+
+    @property
+    def enabled(self) -> bool:
+        return False
+
+    def add_documents(self, documents: List[BaseDocument]) -> List[str]:
+        raise VectorStoreDisabledError("vector store is disabled")
+
+    def upsert_documents(self, documents: List[BaseDocument], ids: List[str], *, embeddings=None) -> List[str]:
+        raise VectorStoreDisabledError("vector store is disabled")
+
+    async def prepare_embeddings(self, texts: list[str]) -> list[list[float]]:
+        raise VectorStoreDisabledError("vector store is disabled")
+
+    async def embed_query(self, query: str) -> list[float]:
+        raise VectorStoreDisabledError("vector store is disabled")
+
+    async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
+        return []
+
+    def get_document_by_id(self, doc_ids: List[str]) -> List[BaseDocument]:
+        return []
+
+    def update_document(self, doc_id: str, document: BaseDocument) -> bool:
+        raise VectorStoreDisabledError("vector store is disabled")
+
+    def delete_documents(self, doc_ids: List[str]) -> bool:
+        self._require_no_persisted_vectors()
+        return True
+
+    def delete_user_records(self, user_id: str) -> int:
+        return self.delete_user_records_strict(user_id)
+
+    def delete_user_records_strict(self, user_id: str) -> int:
+        self._require_no_persisted_vectors()
+        return 0
+
+    def _require_no_persisted_vectors(self) -> None:
+        try:
+            path = Path(self.persist_directory)
+            if path.is_symlink():
+                raise VectorDeletionUnavailable("disabled vector path is not a known empty directory")
+            try:
+                path.stat()
+            except FileNotFoundError:
+                return
+            if not path.is_dir() or next(path.iterdir(), None) is not None:
+                raise VectorDeletionUnavailable("enable vector store before deleting existing index data")
+        except OSError as error:
+            raise VectorDeletionUnavailable("cannot inspect disabled vector index") from error
+
+    def close(self) -> None:
+        """没有持有的外部资源；可重复关闭。"""
 
 
 class ChromaVectorStore(VectorStore):
@@ -457,6 +531,11 @@ class VectorStoreFactory:
         Returns:
             向量存储实例
         """
+        enabled = config.get("enabled", True)
+        if type(enabled) is not bool:
+            raise TypeError("agent_runtime.vector_store.enabled 必须是布尔值")
+        if not enabled:
+            return DisabledVectorStore(config)
         if store_type.lower() == "chroma":
             return ChromaVectorStore(config)
         else:

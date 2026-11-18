@@ -10,6 +10,8 @@ class LLM:
 
 
 class VectorStore:
+    enabled = True
+
     def __init__(self):
         self.documents = {}
 

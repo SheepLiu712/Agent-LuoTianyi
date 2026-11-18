@@ -2,19 +2,19 @@
   "schema_version": 1,
   "files": [
     {
-      "path": "res/admin_ui/admin_static/assets/index-BUblm2wq.js",
-      "size": 243936,
-      "sha256": "ed15f72493eaeb7bb2b1e0bfa025878267104453dd49713150ffc08030a1b815"
-    },
-    {
       "path": "res/admin_ui/admin_static/assets/index-BMqOEGMF.css",
       "size": 15119,
       "sha256": "0fad411ffff2dfe448a6b3b7d70e21e90a213ff5801c435d672419df6a2f3c16"
     },
     {
+      "path": "res/admin_ui/admin_static/assets/index-D_JwhSXV.js",
+      "size": 245867,
+      "sha256": "17cdfcd66ce267e1278c0dac90556ddf80a24933455942ec5d80ed93a90117a3"
+    },
+    {
       "path": "res/admin_ui/admin_static/index.html",
-      "size": 423,
-      "sha256": "282cec880bde7c0767ba3e84257296d457031a48fd7e733bc5b6ee2d2dbbc185"
+      "size": 435,
+      "sha256": "853c4c0f51a9501eebe50ad0d961a98c18fb634dc33b6d74cd400a538f7f12b2"
     },
     {
       "path": "res/agent/persona/llm_tones_mapping.json",

@@ -6,6 +6,8 @@ import src.domain.agent as d
 
 
 class Speech:
+    enabled = True
+
     def __init__(self, *, failures=0):
         self.failures = failures
         self.calls = Counter()

@@ -11,7 +11,11 @@ from fastapi.responses import FileResponse
 
 from src.application.admin import get_admin_shell, publish_system_dynamic
 from src.application.admin.auth import AdminAuthError
-from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
+from src.infrastructure.config.model_editor import (
+    ComponentStartupDraftError,
+    apply_llm_config_draft,
+    build_llm_config_view,
+)
 from src.utils.helpers import apply_env_variables
 from src.web.http.rate_limits import enforce_rate_limit
 
@@ -49,9 +53,6 @@ def config_read_http_error(exc: Exception) -> HTTPException:
     else:
         detail = {"code": "CONFIG_READ_FAILED", "message": f"config.json 读取失败: {exc}"}
     return HTTPException(status_code=400, detail=detail)
-
-
-REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
 
 
 def _extract_env_name(value: Any) -> str | None:
@@ -250,13 +251,14 @@ async def secrets_status() -> dict[str, Any]:
         config = {}
     referenced_llm_keys = _collect_llm_api_key_names(config)
     stored_keys = set(shell.secret_store.read().keys())
-    keys = _ordered_secret_names(REQUIRED_SECRET_KEYS, referenced_llm_keys, stored_keys)
+    required_keys = shell.validator.required_secret_keys(config)
+    keys = _ordered_secret_names(required_keys, referenced_llm_keys, stored_keys)
     status = shell.secret_store.status(keys)
     for key, item in status.items():
-        item["required"] = key in REQUIRED_SECRET_KEYS
+        item["required"] = key in required_keys
         item["referenced"] = key in referenced_llm_keys
         item["category"] = (
-            "required" if key in REQUIRED_SECRET_KEYS else "llm_api_key" if key in referenced_llm_keys else "custom"
+            "required" if key in required_keys else "llm_api_key" if key in referenced_llm_keys else "custom"
         )
     return status
 
@@ -309,7 +311,10 @@ async def apply_llm_config(payload: dict[str, Any] = Body(default_factory=dict))
         raw_config = shell.config_store.read_raw()
     except (json.JSONDecodeError, OSError) as exc:
         raise config_read_http_error(exc) from exc
-    next_raw_config = apply_llm_config_draft(raw_config, payload)
+    try:
+        next_raw_config = apply_llm_config_draft(raw_config, payload)
+    except ComponentStartupDraftError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     shell.secret_store.load_into_environment()
     validation = shell.validator.validate(apply_env_variables(copy.deepcopy(next_raw_config)))
     if not validation.get("core_ok"):

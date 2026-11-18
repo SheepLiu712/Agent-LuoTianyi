@@ -26,6 +26,8 @@ class Stream:
 
 
 class Speaking:
+    enabled = True
+
     def speak(self, invocation, *, text, tone, output_format=None):
         del invocation, text, tone
         assert output_format == d.CALL_PCM_FORMAT

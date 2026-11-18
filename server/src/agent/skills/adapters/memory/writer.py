@@ -261,18 +261,21 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
         """Prepare all vectors before writing canonical records and stable projections."""
         if not candidates:
             return MemoryWriteResult.EMPTY
-        try:
-            vectors = await vector_store.prepare_embeddings([candidate.content for candidate in candidates])
-        except EmbeddingUnavailable as exc:
-            logger.warning(
-                "Maintenance memory skipped maintenance_id=%s candidates=%s reason=%s attempts=%s status=%s",
-                maintenance_id,
-                len(candidates),
-                exc.reason,
-                exc.attempts,
-                exc.status_code,
-            )
-            return MemoryWriteResult.SKIPPED_EMBEDDING
+        projection_enabled = vector_store.enabled
+        vectors = None
+        if projection_enabled:
+            try:
+                vectors = await vector_store.prepare_embeddings([candidate.content for candidate in candidates])
+            except EmbeddingUnavailable as exc:
+                logger.warning(
+                    "Maintenance memory skipped maintenance_id=%s candidates=%s reason=%s attempts=%s status=%s",
+                    maintenance_id,
+                    len(candidates),
+                    exc.reason,
+                    exc.attempts,
+                    exc.status_code,
+                )
+                return MemoryWriteResult.SKIPPED_EMBEDDING
         for index, candidate in enumerate(candidates):
             identity = f"{maintenance_id}:{index}"
             record_id = str(uuid5(_MAINTENANCE_MEMORY_NAMESPACE, identity))
@@ -293,6 +296,8 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
                 metadata={"maintenance_id": maintenance_id, "candidate_index": index},
             )
             await complete_owned(asyncio.to_thread(memory_store.write_agent_memory_record_if_absent, record))
+            if not projection_enabled:
+                continue
             document = Document(
                 candidate.content,
                 {
@@ -316,4 +321,7 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
                 )
             )
 
+        if not projection_enabled:
+            logger.info("Maintenance canonical memories saved maintenance_id=%s index=disabled", maintenance_id)
+            return MemoryWriteResult.CANONICAL_ONLY
         return MemoryWriteResult.WRITTEN

@@ -10,7 +10,7 @@ import pytest
 
 import src.domain.agent as d
 from src.agent_runtime.agent_runtime import AgentRuntime
-from src.agent.skills.expression.speaking import SpeakingSkill, EmptySpeechError
+from src.agent.skills.expression.speaking import EmptySpeechError, SpeakingDisabledError, SpeakingSkill
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
 from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from support.routing_support import Sink, plan_and_context
@@ -492,3 +492,57 @@ async def test_call_worker_timing_survives_thread_handoff_and_ignores_stale_requ
     assert [row[0] for row in events] == ["tts.requested", "tts.started", "tts.synthesized", "tts.finished"]
     assert [row[2]["monotonic_ns"] for row in events[1:]] == [100, 200, 300]
     assert all(row[1] == "call" and row[2]["response_id"] == "segment" for row in events)
+
+
+@pytest.mark.asyncio
+async def test_disabled_speaking_creates_no_backend_and_closes_idempotently(monkeypatch):
+    from src.agent.skills.expression.speaking import skill as speaking_module
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("disabled speaking must not construct TTS resources")
+
+    monkeypatch.setattr(speaking_module, "SpeechBackend", forbidden)
+    monkeypatch.setattr(speaking_module, "AsyncTTS", forbidden)
+
+    skill = SpeakingSkill({"enabled": False})
+
+    assert skill.enabled is False
+    assert not skill.supports_call_audio("luotianyi")
+    assert not skill.supports_call_audio("unknown")
+    await skill.stop()
+    await skill.stop()
+    skill.abort_initialization()
+    skill.abort_initialization()
+
+
+@pytest.mark.asyncio
+async def test_disabled_speaking_rejects_direct_calls_instead_of_returning_empty_audio():
+    skill = SpeakingSkill({"enabled": False})
+
+    with pytest.raises(SpeakingDisabledError, match="speaking is disabled"):
+        await anext(skill.speak(invocation(), text="不要朗读", tone=d.Tone(value="normal")))
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_speaking_rejects_non_boolean_enabled_before_engine_use(value):
+    with pytest.raises(TypeError, match=r"agent_runtime.skills.speaking.enabled"):
+        SpeakingSkill({"enabled": value}, tts_engine=object())
+
+
+def test_speaking_is_enabled_by_default_with_an_injected_engine():
+    skill = speaking(Module())
+
+    assert skill.enabled is True
+    assert skill.supports_call_audio("luotianyi")
+
+
+@pytest.mark.asyncio
+async def test_disabled_speaking_does_not_use_an_injected_engine():
+    module = Module()
+    skill = SpeakingSkill({"enabled": False}, tts_engine=AsyncTTS(SimpleNamespace(tts_module={"luotianyi": module})))
+
+    assert not skill.supports_call_audio("luotianyi")
+    with pytest.raises(SpeakingDisabledError):
+        await anext(skill.speak(invocation(), text="不会发音", tone=d.Tone(value="normal")))
+    assert module.calls == []
+    await skill.stop()

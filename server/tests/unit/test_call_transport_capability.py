@@ -4,7 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from src.adapter.websocket.call_v1 import CallWebSocketAdapter, parse_call_transport_enabled
+from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent_runtime.agent_runtime import AgentRuntime
+from src.application.user.call_capability import get_call_capability
 from src.stage import StageManager
 
 
@@ -137,3 +139,29 @@ def test_call_transport_rejects_non_boolean_enabled_values(value):
 def test_call_transport_rejects_non_object_section():
     with pytest.raises(ValueError, match="call_transport must be an object"):
         parse_call_transport_enabled({"call_transport": False})
+
+
+def test_disabled_speaking_reports_call_tts_unavailable():
+    runtime = object.__new__(AgentRuntime)
+    runtime.character_ids = ("luotianyi",)
+    runtime.skills = SimpleNamespace(speaking=SpeakingSkill({"enabled": False}))
+    adapter = CallWebSocketAdapter(
+        manager=SimpleNamespace(call_business_ready=True, is_closed=lambda: False),
+        enabled=True,
+        trusted_host=True,
+        provider_ready=True,
+        call_tts_character_ids=lambda: runtime.call_tts_character_ids,
+        call_summary_character_ids=lambda: ("luotianyi",),
+    )
+    view = get_call_capability(
+        SimpleNamespace(
+            call_capability_status=adapter.capability_status,
+            supports_call_character=adapter.supports_call_character,
+        ),
+        "luotianyi",
+    )
+
+    assert runtime.call_tts_character_ids == ()
+    assert view.available is False
+    assert view.reason == "call_tts_unavailable"
+    assert not adapter.supports_call_character("luotianyi")

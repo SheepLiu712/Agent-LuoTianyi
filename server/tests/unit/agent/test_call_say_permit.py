@@ -19,6 +19,8 @@ class Permit:
 
 
 class Speaking:
+    enabled = True
+
     def __init__(self, permit, chunks=(b"one!", b"two!"), block_before_second=None):
         self.permit = permit
         self.chunks = chunks

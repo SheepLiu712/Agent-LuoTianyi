@@ -121,6 +121,8 @@ def generator(provider):
 
 
 class Speaking:
+    enabled = True
+
     def __init__(self):
         self.spoken = []
         self.first = asyncio.Event()

@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
+from src.agent.skills.adapters.memory._canonical import find_matching_record
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.domain.memory_type import MemoryUpdateCommand
@@ -72,6 +73,14 @@ class IntentionalMemoryCommitMixin:
             source="chat",
             content=text,
         )
+        if not vector_store.enabled:
+            if not commit:
+                existing = await find_matching_record(memory_store, record)
+                if existing is None:
+                    return "", False
+                return record_id, False
+            created = await run_sync_owned(memory_store.write_agent_memory_record_if_absent, record)
+            return record_id, created
         created = await self._write_canonical_record(memory_store, record, commit)
         if not created:
             return record_id, False

@@ -575,7 +575,7 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
                 (
                     d.ActionKind.SAY,
                     SayHandler(
-                        "luotianyi", object(), PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
+                        "luotianyi", SimpleNamespace(enabled=True), PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
                     ),
                 )
             ]

@@ -36,6 +36,14 @@ class SayHandler:
             outputs.ensure_call_allowed()
             if action.prepared_audio_ref is None and (action.sound_content is None or not action.sound_content.strip()):
                 return self._result(action, d.ExecutionErrorCode.UNSUPPORTED_ACTION)
+        if self._speaking.enabled is False:
+            if action.call_delivery.audio_route is d.CallAudioRoute.CALL:
+                return self._result(action, d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)
+            await self._emit_presentation(action, outputs)
+            await outputs.emit(
+                MessageEndDraft(delivery=action.delivery, status=d.MessageEndStatus.COMPLETED, error_code=None)
+            )
+            return self._result(action)
         if action.prepared_audio_ref is not None:
             return await self._realize_prepared(action, execution_context, outputs)
         if action.sound_content is not None:

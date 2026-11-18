@@ -169,6 +169,27 @@ async def test_memory_acknowledgement_uses_composition_hint_after_commit():
 
 
 @pytest.mark.asyncio
+async def test_disabled_retrieval_acknowledgement_explains_saved_sql_without_promising_recall():
+    events = []
+    composer = _Composer(events)
+
+    class CanonicalOnlyCommit(_Commit):
+        async def commit_fact(self, skill_invocation, *, fact):
+            result = await super().commit_fact(skill_invocation, fact=fact)
+            return replace(result, retrieval_enabled=False)
+
+    report = await _agent(CanonicalOnlyCommit(events), composer=composer).handle_stimulus(
+        _deadline(), Sink(), context=_Context()
+    )
+
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    topic = composer.calls[0]["reply_topic"]
+    assert "已保存正文" in topic
+    assert "长期检索关闭" in topic
+    assert "不自动建索引" in topic
+
+
+@pytest.mark.asyncio
 async def test_write_failure_emits_no_promise_and_retains_pending():
     events = []
     sink = Sink()

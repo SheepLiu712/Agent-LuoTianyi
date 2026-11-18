@@ -3,6 +3,7 @@
 import asyncio
 import json
 import wave
+from types import SimpleNamespace
 
 import pytest
 from support.stage_support import cleanup, setup
@@ -74,7 +75,7 @@ async def test_touch_audio_end_precedes_restore_and_never_becomes_chat_record(tm
         ),
         action_router=ActionRouter(
             [
-                (d.ActionKind.SAY, SayHandler("luotianyi", None, prepared)),
+                (d.ActionKind.SAY, SayHandler("luotianyi", SimpleNamespace(enabled=True), prepared)),
                 (d.ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
             ]
         ),
