@@ -1,6 +1,6 @@
 # AgentLuo · Godot Windows 客户端
 
-当前源码版本：`0.2.0.0`（以 `release.json` 为准）。这是独立 Windows 客户端工程；现行行为与阅读入口见 [客户端说明](docs/README.md)，历次整改记录见 [PR #186 归档](../archive/worklog/pr-186/)。尚未替换旧端，不读取旧端凭据。
+当前源码版本：`0.2.0.0`（以 `release.json` 为准）。这是独立 Windows 客户端工程；客户端说明由本地个人文档维护，不随仓库分发。历次整改记录见 [PR #186 归档](../archive/worklog/pr-186/)。尚未替换旧端，不读取旧端凭据。
 
 现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；脚本清单与覆盖迁移以该入口和测试契约为准。
 
@@ -8,7 +8,7 @@
 
 使用 Godot **4.7.1 standard / Windows x64**。通过 Godot 的 Manage Export Templates 安装同版本模板，或将锁定模板包中的 Windows x64 文件和 version.txt 放入 `%APPDATA%/Godot/export_templates/4.7.1.stable/`。依赖来源和 SHA-256 见 `dependencies.lock.json`。
 
-目录版、ZIP 与单文件自解压 EXE 的完整规范、版本字段、图标要求和发布验证见 [打包规范](docs/packaging.md)。
+目录版、ZIP 与单文件自解压 EXE 的完整规范、版本字段、图标要求和发布验证由本地个人文档维护，不随仓库分发。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File client-godot/scripts/build.ps1
@@ -77,7 +77,7 @@ python client-godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 正式聊天自动播放服务端 WAV/PCM 分片；同 UUID 聚合，后续回复等前一句实际播完再呈现。支持口型、音量保存、停止当前语音、错误及断线清理；完整语音以临时文件接收、成功终止及原生验证后提交，提供消息重放/暂停/继续/停止，波形来自原生 RMS，进度来自混音器消耗帧。在线语音抢占重放；停止在线声音不取消后续接收和缓存。原生 `PcmStreamDecoder` 与 `WindowsSecurity` 共用 DLL，按上面的 `build_security.py` 命令重建，需分发完整目录。
 
-登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据（`schema_version=3`，旧 v2 归档不再显示并随保留策略自然淘汰），单次默认 8 MiB / 5 万条，保留最近 50 次并保护仍运行实例。日志按业务流（`business`）、网络通信（`network`）、存储持久化（`storage`）、系统诊断（`system`）四领域划分并与严重级别（`DEBUG/INFO/WARN/ERROR`）解耦，窗口支持按类别/级别/模块/归属筛选与搜索，单次最多渲染 1000 条匹配记录，可复制或导出完整诊断 ZIP（不上传）。通过哈希 `reply_id`、网络 `trace_id` 与存储 `transaction_id` 关联链路；保留脱敏错误原文与堆栈，不写入正文、token、Authorization、密钥或 Base64。`DEBUG` 级别日志默认关闭，由 `--debug-log` 按级别开启。完整规范见 [日志规范](docs/logging.md)。
+登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据（`schema_version=3`，旧 v2 归档不再显示并随保留策略自然淘汰），单次默认 8 MiB / 5 万条，保留最近 50 次并保护仍运行实例。日志按业务流（`business`）、网络通信（`network`）、存储持久化（`storage`）、系统诊断（`system`）四领域划分并与严重级别（`DEBUG/INFO/WARN/ERROR`）解耦，窗口支持按类别/级别/模块/归属筛选与搜索，单次最多渲染 1000 条匹配记录，可复制或导出完整诊断 ZIP（不上传）。通过哈希 `reply_id`、网络 `trace_id` 与存储 `transaction_id` 关联链路；保留脱敏错误原文与堆栈，不写入正文、token、Authorization、密钥或 Base64。`DEBUG` 级别日志默认关闭，由 `--debug-log` 按级别开启。完整规范由本地个人文档维护，不随仓库分发。
 
 `check.ps1` 增量解码及真实混音测试默认使用合成音频；`check_network.ps1` 还验证 loopback WebSocket 到播放器链路、顺序、隐藏音频、停止及断线。Windows 输出驱动验证可运行：
 
@@ -108,7 +108,7 @@ release.json 是版本单一来源，界面/诊断/目录/ZIP 使用同一版本
 
 所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括确认按钮和24段语音波形；登录后桌面窗框与三键使用系统原生实现，未登录采用透明窗口与Godot淡蓝圆角面板。左侧仅聊天、动态、设置、日志四个居中入口；退出登录位于设置底部左侧，右侧关闭/保存全部修改，失败项留稿。退出应用使用主窗系统关闭按钮，统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
 
-现行窗口行为见 [客户端说明](docs/README.md)，验证入口见 [测试说明](docs/testing.md)。桌面恢复系统标题栏、拖拽/缩放；内部下拉使用 Godot 圆角控件，正文保持清晰。系统文件选择器继续使用原生控件。
+现行窗口行为与验证入口由本地个人文档维护，不随仓库分发。桌面恢复系统标题栏、拖拽/缩放；内部下拉使用 Godot 圆角控件，正文保持清晰。系统文件选择器继续使用原生控件。
 
 原生鼠标/键盘验收（会操作其创建的测试窗口）：
 
@@ -125,9 +125,9 @@ $env:GODOT_TEST_PYTHON = 'python'
 
 GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及既有本地API测试依赖；Pillow仅用于测试，不进入客户端运行依赖。磁盘查询的Windows实现已实测，移动端需复用StorageService接口并在目标构建注册容量适配，当前不宣称完成Android/iOS移植。
 
-界面精简与状态修正见 [客户端说明](docs/README.md)。读取/保存中的设置输入框保持浅色只读；API/JSON/thinking开关采用浅蓝选中底、深色文字和深蓝焦点。可运行`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`复验延迟/失败加载与100/125/150/200%内容缩放，证据保存在`artifacts/ui-refinement/`。
+界面精简与状态修正说明由本地个人文档维护，不随仓库分发。读取/保存中的设置输入框保持浅色只读；API/JSON/thinking开关采用浅蓝选中底、深色文字和深蓝焦点。可运行`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`复验延迟/失败加载与100/125/150/200%内容缩放，证据保存在`artifacts/ui-refinement/`。
 
-登录与气泡的当前说明见 [客户端说明](docs/README.md)，实际验收范围见 [测试说明](docs/testing.md)。登录 GPU 验收使用 `run_feature_tests.py --godot <exe> --script res://tests/ui/test_login_presentation.gd --gpu`；气泡使用 `--script res://tests/ui/test_bubble_sizing.gd` 与 `test_image_bubble_sizing.gd`，可独立 headless/GPU 运行。
+登录与气泡的当前说明与实际验收范围由本地个人文档维护，不随仓库分发。登录 GPU 验收使用 `run_feature_tests.py --godot <exe> --script res://tests/ui/test_login_presentation.gd --gpu`；气泡使用 `--script res://tests/ui/test_bubble_sizing.gd` 与 `test_image_bubble_sizing.gd`，可独立 headless/GPU 运行。
 
 ## 聊天审阅图落地
 
@@ -137,6 +137,6 @@ GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及�
 
 ## 平台隔离与扩展
 
-[客户端说明](docs/README.md) 说明当前行为边界。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
+客户端说明由本地个人文档维护，不随仓库分发。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
 
 三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.2.0.0，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。0.2.0.0 发布包尚未重新构建；历史包仅作回退。验证边界见 [整改归档](../archive/worklog/pr-186/)。
