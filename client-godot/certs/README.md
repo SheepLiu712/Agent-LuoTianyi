@@ -34,6 +34,8 @@ WebSocket 与连通性探测的 HTTPS 请求都使用这份证书包，不再读
 诊断包中该事件为 `bundle_override` 且 `bundle_loaded=true` 时，说明请求没有使用
 Windows 根库；此时再出现 `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`，应检查本 CA 包
 是否过期、服务端证书链是否完整、主机名与系统时间是否正确，而不是执行系统根证书同步。
+固定 CA 生效时，客户端会把这类证书校验失败提示为用户版本过低，要求更新最新版本；
+原始 mbedTLS 错误仍保留在 `system_tls_trust` 和引擎日志中供排查。
 
 ## 边界
 

@@ -141,6 +141,8 @@ python .\tests\run_security_interop.py --godot <Godot.exe>
 
 证书包的来源、快照日期、SHA-256 和刷新步骤见 [certs/README.md](certs/README.md)。
 
+固定 CA 生效时，证书校验失败会在登录页提示“当前版本过低，请更新最新版本”；原始 mbedTLS 错误仍写入日志。
+
 发布版只允许 HTTPS。`localhost`、`127.0.0.0/8` 和 `[::1]` 保留明文 HTTP，供本地测试使用；其他明文地址会在发送账号信息前返回 `INSECURE_SERVER`。
 
 ## 测试

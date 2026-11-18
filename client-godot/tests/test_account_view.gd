@@ -141,20 +141,30 @@ func _check_probe_controls(view: Control) -> void:
 
 func _check_tls_messages() -> void:
 	var tls := AccountView._error_text("NETWORK_ERROR", 0, "RESULT_TLS_HANDSHAKE_ERROR")
-	check(tls.contains("证书校验失败") and tls.contains("代理"), "tls certificate failure has a specific message")
+	check(tls == "当前版本过低，请更新最新版本", "tls certificate failure asks for a client update")
 	check(AccountView._error_text("PUBLIC_KEY_ERROR", 0, "RESULT_TLS_HANDSHAKE_ERROR") == tls,
 		"tls detail overrides public key generic text")
-	check(AccountView._is_tls_failure("TLS handshake error: -9984 (MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)"),
+	var engine_detail := "TLS handshake error: -9984 (MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)"
+	check(AccountView._is_tls_failure(engine_detail),
 		"engine certificate detail is recognized")
+	check(AccountView._error_text("NETWORK_ERROR", 0, engine_detail) == tls,
+		"engine certificate detail asks for a client update")
 	check(not AccountView._is_tls_failure("RESULT_CANT_CONNECT"), "non-tls transport failure is not misclassified")
 	check(AccountView._error_text("NETWORK_ERROR", 0, "RESULT_CANT_CONNECT") == "无法连接服务器，请检查地址和网络。",
 		"non-tls network message is unchanged")
-	var result := {"ok":false, "baseline":{"ok":true, "stage":"HTTP"}, "target":{"ok":false, "stage":"TLS"}}
+	var original := str(ProjectSettings.get_setting("network/tls/certificate_bundle_override", ""))
+	ProjectSettings.set_setting("network/tls/certificate_bundle_override", "")
+	check(AccountView._error_text("NETWORK_ERROR", 0, "RESULT_TLS_HANDSHAKE_ERROR").contains("证书校验失败"),
+		"system trust source keeps the generic certificate message")
+	ProjectSettings.set_setting("network/tls/certificate_bundle_override", original)
+	var result := {"ok":false, "baseline":{"ok":true, "stage":"HTTP"},
+		"target":{"ok":false, "stage":"TLS", "detail":"RESULT_TLS_HANDSHAKE_ERROR"}}
 	var hint := AccountView._probe_status_text(result, "fallback")
-	check(hint.contains("公网正常") and hint.contains("TLS"), "probe result refines the tls hint")
-	var both := {"ok":false, "baseline":{"ok":false, "stage":"DNS"}, "target":{"ok":false, "stage":"TLS"}}
-	check(AccountView._probe_status_text(both, "fallback").contains("TLS 证书校验失败"),
-		"tls hint without baseline is still specific")
+	check(hint == "当前版本过低，请更新最新版本", "probe result asks for a client update")
+	var both := {"ok":false, "baseline":{"ok":false, "stage":"DNS"},
+		"target":{"ok":false, "stage":"TLS", "detail":"RESULT_TLS_HANDSHAKE_ERROR"}}
+	check(AccountView._probe_status_text(both, "fallback") == "当前版本过低，请更新最新版本",
+		"tls hint without baseline still asks for a client update")
 	check(AccountView._probe_text({"stage":"TLS", "duration_ms":533}) == "TLS 证书校验失败 533ms",
 		"probe line names the tls stage")
 

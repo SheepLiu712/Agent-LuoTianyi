@@ -9,6 +9,7 @@ const LoginStyle = preload("res://src/ui/login_style.gd")
 const ModalStack = preload("res://src/ui/modal_stack.gd")
 const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
 const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
+const STALE_CA_MESSAGE := "当前版本过低，请更新最新版本"
 @export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _password_drafts := {"password":"", "confirm":""}
 var _password_carets := {"password":0, "confirm":0}
@@ -455,6 +456,8 @@ static func _ascii_password(value: String) -> bool:
 	return true
 
 static func _error_text(code: String, status: int = 0, detail: String = "") -> String:
+	if _is_ca_expiry_failure(detail):
+		return STALE_CA_MESSAGE
 	if _is_tls_failure(detail):
 		return "服务器证书校验失败，连接已到达服务器但证书未被信任。请检查系统时间、代理或安全软件；可在“设置服务器”中测试连通性，或稍后重试。"
 	return {"OK":"登录成功。", "LOGGED_OUT":"已退出登录。", "PENDING":"正在处理…", "CANCELLED":"请求已取消。",
@@ -469,6 +472,13 @@ static func _is_tls_failure(detail: String) -> bool:
 	return detail == "RESULT_TLS_HANDSHAKE_ERROR" \
 		or detail.contains("MBEDTLS_ERR_X509_CERT_VERIFY_FAILED")
 
+## mbedTLS 只暴露 -9984，不区分根缺失、根过期和主机名错误；固定 CA 生效时，
+## 证书链被拒说明本机客户端的 CA 快照已经落后于服务器证书链。
+static func _is_ca_expiry_failure(detail: String) -> bool:
+	if not _is_tls_failure(detail):
+		return false
+	return not str(ProjectSettings.get_setting("network/tls/certificate_bundle_override", "")).strip_edges().is_empty()
+
 ## 探测结果比单次登录失败更能说明失败发生在链路哪一段。
 static func _probe_status_text(result: Dictionary, fallback: String) -> String:
 	var target: Dictionary = result.get("target", {})
@@ -476,6 +486,8 @@ static func _probe_status_text(result: Dictionary, fallback: String) -> String:
 		return "服务器地址必须使用 HTTPS；仅本机回环地址允许明文 HTTP。"
 	if str(target.get("stage", "")) != "TLS":
 		return fallback
+	if _is_ca_expiry_failure(str(target.get("detail", ""))):
+		return STALE_CA_MESSAGE
 	if bool(result.get("baseline", {}).get("ok", false)):
 		return "服务器证书校验失败：公网正常，目标服务器 TLS 握手未通过。请检查系统时间、代理/安全软件或服务器证书。"
 	return "目标服务器 TLS 证书校验失败。请检查系统时间、代理/安全软件或服务器证书。"
