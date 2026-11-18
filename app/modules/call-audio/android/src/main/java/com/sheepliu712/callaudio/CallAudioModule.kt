@@ -17,6 +17,8 @@ import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import android.media.AudioRouting
+import android.os.SystemClock
 import android.os.Bundle
 import android.os.Build
 import android.util.Base64
@@ -65,6 +67,15 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private var legacyAudioFocusListener: AudioManager.OnAudioFocusChangeListener? = null
   private var audioFocusGranted = false
   private var originalAudioMode: Int? = null
+  private var mediaHeadset: AudioDeviceInfo? = null
+  @Volatile private var requestedHeadset: AudioDeviceInfo? = null
+  @Volatile private var activeAudioAtMs = 0L
+  private val streamRoutes = AudioRouting.OnRoutingChangedListener { stream ->
+    when (stream) {
+      audioTrack -> traceRingtone("playback_route_changed output=${actualDevices(stream)}")
+      audioRecord -> traceRingtone("capture_route_changed input=${actualDevices(stream)}")
+    }
+  }
   private var routeCallback: AudioDeviceCallback? = null
   private var removeCommunicationRouteTrace: (() -> Unit)? = null
   private val playbackCommandLock = java.lang.Object()
@@ -83,6 +94,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       "onPlaybackProgress",
       "onAudioFailure",
       "onLifecycle",
+      "onRouteDiagnostic",
       "onRouteChanged",
     )
 
@@ -109,6 +121,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     AsyncFunction("tombstone") { responseId: String, streamId: Int, promise: Promise ->
       stopPlayback(responseId, streamId, promise)
     }
+    Function("traceChatAudioMode") { stage: String -> routeSnapshot("chat_audio_mode_$stage") }
     Function("traceRingtonePhase") { event: String, phase: String -> traceRingtone("$event phase=$phase") }
     Function("startRingtone") { startRingtone() }
     Function("stopRingtone") { stopRingtone() }
@@ -159,6 +172,9 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   @Synchronized
   private fun stopRingtone(reason: String = "ringing_effect") {
     ringtone?.let { player ->
+      if (Build.VERSION.SDK_INT >= 28) {
+        player.routedDevice?.takeIf(::isHeadset)?.let { mediaHeadset = it }
+      }
       runCatching { player.stop() }
       traceRingtone("play_stopped reason=$reason")
       player.release()
@@ -178,10 +194,12 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
         return capability(false, "permission_denied")
       }
+      val manager = context.getSystemService(AudioManager::class.java)
+      mediaHeadset = currentMediaHeadset(manager)
+      routeSnapshot("dial_start")
       val captureInitializationError = initializeCaptureDevice()
       if (captureInitializationError != null) throw SessionInitializationException(captureInitializationError)
       registerLifecycle(context)
-      val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
       val focusError = requestAudioFocus(manager, currentSessionGeneration)
       if (focusError != null) throw SessionInitializationException(focusError)
       registerRouteCallback(manager, currentSessionGeneration)
@@ -237,11 +255,20 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     }
     if (captureRunning.get()) return capability(true, null)
     if (originalAudioMode == null) {
+      activeAudioAtMs = SystemClock.elapsedRealtime()
       stopRingtone("call_active")
       val manager = context.getSystemService(AudioManager::class.java)
       originalAudioMode = manager.mode
       traceRingtone("communication_mode_requested")
+      routeSnapshot("before_mode_change")
       manager.mode = AudioManager.MODE_IN_COMMUNICATION
+      routeSnapshot("after_mode_change")
+      try {
+        selectHeadset(manager)
+      } catch (error: IllegalStateException) {
+        traceRingtone("route_selection_failed reason=${error.message}")
+        return capability(false, error.message)
+      }
       abandonAudioFocus()
       val focusError = requestAudioFocus(manager, sessionGeneration.get())
       if (focusError != null) return capability(false, focusError)
@@ -268,6 +295,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       releaseCapture()
       return capability(false, "capture_start_failed")
     }
+    traceRingtone("capture_started input=${actualDevices(record)}")
     startPlayback()
     captureRunning.set(true)
     val eventSessionGeneration = sessionGeneration.get()
@@ -303,6 +331,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       return "capture_initialization_failed"
     }
     audioRecord = record
+    record.addOnRoutingChangedListener(streamRoutes, null)
     aecStatus = enableAec(record.audioSessionId)
     noiseSuppressorStatus = enableNoiseSuppressor(record.audioSessionId)
     return null
@@ -361,6 +390,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     noiseSuppressor = null
     aecStatus = false to "aec_not_initialized"
     noiseSuppressorStatus = false to "noise_suppressor_not_initialized"
+    audioRecord?.removeOnRoutingChangedListener(streamRoutes)
     audioRecord?.release()
     audioRecord = null
   }
@@ -396,7 +426,9 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       throw IllegalStateException("playback_initialization_failed")
     }
     audioTrack = track
+    track.addOnRoutingChangedListener(streamRoutes, null)
     track.play()
+    traceRingtone("playback_started output=${actualDevices(track)}")
     playbackRunning.set(true)
     val eventSessionGeneration = sessionGeneration.get()
     playbackThread = Thread(
@@ -453,9 +485,12 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun playbackLoop(track: AudioTrack, eventSessionGeneration: Long) {
+    if (!awaitHeadsetRoute(track, eventSessionGeneration)) return
     val accounting = PlaybackLoopAccounting(track.playbackHeadPosition.toLong() and 0xffffffffL)
     val commandProcessor = PlaybackCommandProcessor(playbackState, accounting)
     val visualIdleGate = PlaybackVisualIdleGate()
+    var firstWrite = true
+    var firstProgress = true
     var lastProgressNanos = 0L
     fun observeProgress(active: StreamKey?) {
       val previousPlayedFrames = accounting.playedFrames
@@ -465,6 +500,10 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
         streamGenerations.containsKey(active) && !tombstonedStreams.contains(active) &&
         nowNanos - lastProgressNanos >= 16_666_667L
       ) {
+        if (firstProgress && !isReplyFailureTone(active)) {
+          firstProgress = false
+          traceRingtone("first_remote_progress stream=$active output=${actualDevices(track)}", eventSessionGeneration)
+        }
         emitPlaybackProgress(active, accounting.rmsAtPlayedFrames(playbackAnalysisFrames), eventSessionGeneration)
         lastProgressNanos = nowNanos
       }
@@ -497,7 +536,21 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
         var offset = 0
         while (offset < chunk.payload.size && playbackRunning.get() && isCurrent(chunk)) {
           val writeBytes = minOf(960, chunk.payload.size - offset)
+          if (!headsetRouteReady(track)) {
+            traceRingtone("headset_route_lost output=${actualDevices(track)}", eventSessionGeneration)
+            playbackRunning.set(false)
+            track.pause()
+            track.flush()
+            failure("headset_route_lost", "playback", eventSessionGeneration)
+            return
+          }
+          val traceFirst = firstWrite && !isReplyFailureTone(chunk.key)
+          if (traceFirst) {
+            firstWrite = false
+            traceRingtone("first_remote_write_begin stream=${chunk.key} output=${actualDevices(track)}", eventSessionGeneration)
+          }
           val written = track.write(chunk.payload, offset, writeBytes, AudioTrack.WRITE_BLOCKING)
+          if (traceFirst) traceRingtone("first_remote_write_return bytes=$written output=${actualDevices(track)}", eventSessionGeneration)
           if (written <= 0) {
             if (isReplyFailureTone(chunk.key)) {
               replyFailureTonePending.set(false)
@@ -622,6 +675,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun closeSession() {
+    if (sessionReady) routeSnapshot("hangup")
     stopRingtone("session_closed")
     stopCapture()
     if (captureThread?.isAlive == true) {
@@ -643,6 +697,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     } catch (_: RuntimeException) {
       // Track is released only after its worker has terminated.
     }
+    audioTrack?.removeOnRoutingChangedListener(streamRoutes)
     audioTrack?.release()
     audioTrack = null
     cleanupSessionSideEffects()
@@ -703,7 +758,9 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
 
   private fun requestAudioFocus(manager: AudioManager, eventSessionGeneration: Long): String? {
     val inCall = originalAudioMode != null
+    traceRingtone("focus_requested inCall=$inCall", eventSessionGeneration)
     val listener = AudioManager.OnAudioFocusChangeListener { change ->
+      traceRingtone("focus_changed value=$change", eventSessionGeneration)
       if (change < 0) {
         failure("audio_focus_lost", "session", eventSessionGeneration)
       }
@@ -771,6 +828,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     } catch (_: RuntimeException) {
       // Track is released only after its worker has terminated.
     }
+    audioTrack?.removeOnRoutingChangedListener(streamRoutes)
     audioTrack?.release()
     audioTrack = null
     releaseCapture()
@@ -888,12 +946,107 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun emitRoutes(manager: AudioManager, eventSessionGeneration: Long) {
+    traceRingtone("devices_changed", eventSessionGeneration)
     val outputs = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { deviceType(it.type) }
     sendEvent("onRouteChanged", mapOf("outputs" to outputs, "sessionGeneration" to eventSessionGeneration))
   }
 
   private fun traceRingtone(message: String, session: Long = sessionGeneration.get()) {
-    Log.i("CallRingtone", "session=$session $message")
+    val elapsed = SystemClock.elapsedRealtime()
+    val sinceActive = if (activeAudioAtMs > 0) (elapsed - activeAudioAtMs).toString() else "n/a"
+    val line = "session=$session elapsedRealtimeMs=$elapsed sinceActiveAudioMs=$sinceActive $message"
+    Log.i("CallRingtone", line)
+    sendEvent("onRouteDiagnostic", mapOf("message" to line))
+  }
+
+  private fun actualDevices(stream: AudioRouting): String =
+    routedDevices(stream).joinToString { deviceLabel(it) }.ifEmpty { "unknown" }
+
+  private fun routedDevices(stream: AudioRouting): List<AudioDeviceInfo> =
+    if (Build.VERSION.SDK_INT >= 36) stream.routedDevices else listOfNotNull(stream.routedDevice)
+
+  private fun isHeadset(device: AudioDeviceInfo): Boolean = device.type in setOf(
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+    AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID,
+    AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_USB_HEADSET,
+  )
+
+  private fun currentMediaHeadset(manager: AudioManager): AudioDeviceInfo? {
+    if (Build.VERSION.SDK_INT >= 33) {
+      val usage = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build()
+      return manager.getAudioDevicesForAttributes(usage).filter(::isHeadset).singleOrNull()
+    }
+    return null
+  }
+
+  private fun selectHeadset(manager: AudioManager) {
+    // 响铃播放器已实际出声时，以它的设备作为拨号快照的补充。
+    val media = mediaHeadset ?: return
+    val devices = if (Build.VERSION.SDK_INT >= 31) manager.availableCommunicationDevices
+      else manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+    val candidates = devices.filter(::isHeadset).filter { it.type != AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
+    val targetId = HeadsetRouteSelection.select(
+      RouteDevice(media.id, if (Build.VERSION.SDK_INT >= 28) media.address else "", media.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP),
+      candidates.map { RouteDevice(it.id, if (Build.VERSION.SDK_INT >= 28) it.address else "", it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) },
+    )
+    val target = candidates.single { it.id == targetId }
+    traceRingtone("communication_device_requested media=${deviceLabel(media)} target=${deviceLabel(target)}")
+    if (Build.VERSION.SDK_INT >= 31) {
+      check(manager.setCommunicationDevice(target)) { "headset_route_request_rejected" }
+    } else if (target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+      @Suppress("DEPRECATION")
+      manager.startBluetoothSco()
+    }
+    requestedHeadset = target
+    traceRingtone("communication_device_accepted target=${deviceLabel(target)}")
+  }
+
+  private fun headsetRouteReady(track: AudioTrack): Boolean {
+    val target = requestedHeadset ?: return true
+    val manager = requireContext().getSystemService(AudioManager::class.java)
+    val selected = Build.VERSION.SDK_INT < 31 || manager.communicationDevice?.id == target.id
+    return selected && HeadsetRouteSelection.ready(target.id, routedDevices(track).map { it.id })
+  }
+
+  private fun awaitHeadsetRoute(track: AudioTrack, session: Long): Boolean {
+    if (requestedHeadset == null) return true
+    val deadline = SystemClock.elapsedRealtime() + 10_000
+    val silence = ByteArray(960)
+    val initialHead = track.playbackHeadPosition.toLong() and 0xffffffffL
+    var silentFrames = 0L
+    traceRingtone("headset_route_wait", session)
+    while (playbackRunning.get() && session == sessionGeneration.get()) {
+      val ready = headsetRouteReady(track)
+      val played = PlaybackAccounting.unsignedDelta(initialHead, track.playbackHeadPosition.toLong() and 0xffffffffL)
+      if (ready && played >= silentFrames) {
+        traceRingtone("headset_route_confirmed output=${actualDevices(track)}", session)
+        return true
+      }
+      if (SystemClock.elapsedRealtime() >= deadline) {
+        traceRingtone("headset_route_timeout output=${actualDevices(track)}", session)
+        playbackRunning.set(false)
+        failure("headset_route_timeout", "playback", session)
+        return false
+      }
+      // 静音启动输出路由，确认设备前不向音轨写入远端语音。
+      val written = if (ready) 0 else track.write(silence, 0, silence.size, AudioTrack.WRITE_NON_BLOCKING)
+      silentFrames += written.coerceAtLeast(0) / 2
+      if (written < 0) {
+        traceRingtone("headset_route_probe_failed code=$written", session)
+        playbackRunning.set(false)
+        failure("headset_route_probe_failed", "playback", session)
+        return false
+      }
+      Thread.sleep(10)
+    }
+    return false
+  }
+
+  private fun routeSnapshot(event: String) {
+    val manager = requireContext().getSystemService(AudioManager::class.java)
+    val selected = if (Build.VERSION.SDK_INT >= 31) deviceLabel(manager.communicationDevice) else "unsupported"
+    val available = if (Build.VERSION.SDK_INT >= 31) manager.availableCommunicationDevices.joinToString { deviceLabel(it) } else "unsupported"
+    traceRingtone("$event mode=${manager.mode} media=${deviceLabel(mediaHeadset)} selected=$selected available=[$available]")
   }
 
   private fun deviceLabel(device: AudioDeviceInfo?): String =
@@ -910,9 +1063,22 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
 
   private fun restoreAudioMode() {
     val context = appContext.reactContext ?: return
+    val manager = context.getSystemService(AudioManager::class.java)
+    if (Build.VERSION.SDK_INT >= 31 && requestedHeadset != null) {
+      manager.clearCommunicationDevice()
+      traceRingtone("communication_device_cleared")
+    }
+    if (Build.VERSION.SDK_INT < 31 && requestedHeadset?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+      @Suppress("DEPRECATION")
+      manager.stopBluetoothSco()
+    }
+    requestedHeadset = null
     val previous = originalAudioMode ?: return
     (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode = previous
     originalAudioMode = null
+    routeSnapshot("mode_restored")
+    activeAudioAtMs = 0L
+    mediaHeadset = null
   }
 
   override fun onActivityResumed(activity: Activity) { resumedActivities += 1 }

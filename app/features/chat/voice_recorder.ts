@@ -1,4 +1,5 @@
 import { Audio } from 'expo-av';
+import callAudio from '../../modules/call-audio/src/CallAudioModule';
 import { randomUUID } from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -64,7 +65,9 @@ export class VoiceRecorder implements VoiceRecorderApi {
       }
     });
     try {
+      callAudio?.traceChatAudioMode?.('before');
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      callAudio?.traceChatAudioMode?.('after');
       check();
       await recording.prepareToRecordAsync({
         android: { extension: '.m4a', outputFormat: Audio.AndroidOutputFormat.MPEG_4, audioEncoder: Audio.AndroidAudioEncoder.AAC, sampleRate: 44100, numberOfChannels: 1, bitRate: 128000 },

@@ -1,4 +1,5 @@
 import { ChatScreen } from '../features/chat/ChatScreen';
+import callAudio from '../modules/call-audio/src/CallAudioModule';
 import { VoicePermissionNotice } from '../features/chat/VoicePermissionNotice';
 import { CallFailureBanner } from '../features/call/CallFailureBanner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -53,6 +54,10 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
   const drawerWidth = useMemo(() => Math.round(screenWidth * 0.38), [screenWidth]);
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
+  useEffect(() => {
+    const subscription = callAudio?.addListener('onRouteDiagnostic', ({ message }) => addDebugTrace('call-route', message));
+    return () => subscription?.remove();
+  }, []);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showLlmSettings, setShowLlmSettings] = useState(false);
