@@ -142,6 +142,11 @@ async def wait_opening_ready(stage, socket):
     answer = stage._realize_task
     if answer is None:
         raise AssertionError("ACTIVE call has no answer realization task")
+    done, _ = await asyncio.wait({answer}, timeout=10)
+    if not done:
+        raise AssertionError(
+            f"answer pipeline did not finish: state={stage.state}, terminating={stage.termination_requested}"
+        )
     await asyncio.shield(answer)
     if stage.state is not CallState.ACTIVE or stage.termination_requested:
         raise AssertionError("call ended before opening became ready")

@@ -18,7 +18,7 @@ from support.call_coherent_runtime import (
 )
 from support.call_output import output_sink
 from support.call_protocol import ProtocolDriver, StageOutputDriver
-from support.call_omni import factory, send_reply
+from support.call_omni import factory, send_reply, wait_opening_ready
 from support.aliyun_realtime_speech import FakeAliyunWebSocket
 from support.stage_lifecycle import wait_call_finished
 from support.stage_manager import make_stage_manager
@@ -165,7 +165,7 @@ async def test_real_runtime_stage_binding_transport_sql_and_settlement_form_one_
     try:
         await stage.start()
         await _eventually(lambda: stage.state is CallState.ACTIVE)
-        await _eventually(lambda: any(e["type"] == "response.create" for e in socket.sent))
+        await wait_opening_ready(stage, socket)
         await send_reply(socket, response_id="opening", text="你好，我在这里。", item_id=None)
         await _eventually(lambda: any(item["type"] == "audio.stream_started" for item in _controls(delivered)))
         opening = _latest_stream(delivered)
