@@ -371,30 +371,160 @@ async def test_wrong_request_or_source_does_not_retire_chat():
 
 
 @pytest.mark.asyncio
-async def test_termination_maintenance_failure_marks_ledger_failed_and_releases_ownership():
+async def test_termination_maintenance_failure_does_not_fail_safely_released_call():
     async def failed_realize(_plan, _context, _sink):
         return SimpleNamespace(
             status=d.ExecutionStatus.FAILED,
             error_code=d.ExecutionErrorCode.INTERNAL_ERROR,
         )
 
-    stage_manager, repository, _ = manager(agent=RecordingAgent(realize=failed_realize))
-    connection, stage = await connected(stage_manager)
-    await stage_manager.prepare_call_transition(connection, character_id="luotianyi", client_request_id="request-1")
+    stages, repository, _ = manager(agent=RecordingAgent(realize=failed_realize))
+    connection, chat = await connected(stages)
+    try:
+        call = await preparing_call(stages, chat, connection)
+        await call.start()
 
-    with pytest.raises(RuntimeError, match="initialization failed"):
-        await start_claim(
-            stage_manager,
-            user_id="user",
-            character_id="luotianyi",
-            source_interaction_id=stage.interaction_id,
-            client_request_id="request-1",
-        )
+        result = await chat.terminate(StageEndReason.SWITCH)
+        assert result.finalization_error == "interaction ending maintenance failed"
+        assert result.cleanup_error is None and result.resources_released
+        assert chat.context.closed and chat.state.value == "terminated"
+        assert call.state is CallState.RINGING
+        record = repository.find_by_request("request-1")
+        assert record.state is CallState.RINGING and record.end_reason is None
+        assert stages._lease_registry.current("user", "luotianyi").source is InteractionSource.CALL
+    finally:
+        await stages.close()
 
-    assert stage.context.closed is True
-    record = repository.find_by_request("request-1")
-    assert record.state is CallState.FAILED
-    assert record.end_reason is CallEndReason.SYSTEM_FAILURE
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("work_kind", ["foreground", "threshold"])
+async def test_switch_waits_owned_work_cleanup_before_failed_maintenance(work_kind):
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from .test_chat_stage import ending_plan, plan, report
+
+    entered, cancelling, release = (asyncio.Event() for _ in range(3))
+    ending = []
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            ending.append(True)
+            return await ending_plan(request, sink)
+        value = plan(request)
+        if work_kind == "threshold":
+            value = replace(
+                value,
+                actions=(
+                    d.CognitiveMaintenance(action_id=str(uuid4()), reason=d.MaintenanceReason.COMPACTION_THRESHOLD),
+                ),
+            )
+        await sink.emit(value)
+        return report(request, plans=(value.plan_id,))
+
+    async def realize(value, context, sink):
+        if isinstance(value.actions[0], d.CognitiveMaintenance) and (
+            value.actions[0].reason is d.MaintenanceReason.INTERACTION_ENDING
+        ):
+            return SimpleNamespace(status=d.ExecutionStatus.FAILED, error_code=d.ExecutionErrorCode.INTERNAL_ERROR)
+        try:
+            entered.set()
+            await asyncio.Event().wait()
+        finally:
+            assert context.cancellation.is_cancelled
+            cancelling.set()
+            await release.wait()
+
+    stages, repository, _ = manager(agent=RecordingAgent(handle, realize))
+    connection, chat = await connected(stages)
+    assert chat.stimulus_input_sink.submit(stimulus())
+    await asyncio.wait_for(entered.wait(), 1)
+    call = await preparing_call(stages, chat, connection)
+    try:
+        await asyncio.wait_for(cancelling.wait(), 1)
+        assert not ending and not chat.context.closed and call.state is CallState.PREPARING
+        assert stages._lease_registry.current("user", "luotianyi").source is InteractionSource.CALL_TRANSITION
+        with pytest.raises((RuntimeError, ValueError)):
+            await connected(stages)
+        release.set()
+        await call.start()
+        assert ending == [True] and chat.context.closed
+        assert repository.find_by_request("request-1").state is CallState.RINGING
+    finally:
+        release.set()
+        await stages.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during", ["switch", "disconnect"])
+async def test_switch_keeps_unsafe_owner_when_cancel_cleanup_output_fails(monkeypatch, during):
+    from src.domain.stage import CancelDelivery
+    from src.domain.stage.lifecycle import StageShutdownFailed
+
+    from .test_chat_stage import ending_plan, plan, report
+
+    entered, cleanup_failed = asyncio.Event(), asyncio.Event()
+    ending = []
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            ending.append(True)
+            return await ending_plan(request, sink)
+        value = plan(request)
+        await sink.emit(value)
+        return report(request, plans=(value.plan_id,))
+
+    async def realize(value, context, sink):
+        if isinstance(value.actions[0], d.CognitiveMaintenance):
+            return SimpleNamespace(status=d.ExecutionStatus.FAILED, error_code=d.ExecutionErrorCode.INTERNAL_ERROR)
+        entered.set()
+        await asyncio.Event().wait()
+
+    stages, repository, _ = manager(agent=RecordingAgent(handle, realize))
+    connection, chat = await connected(stages)
+    original_submit = stages._test_chat_adapter.output_sink.submit_output
+
+    def submit(output):
+        if isinstance(output, CancelDelivery):
+            cleanup_failed.set()
+            raise OSError("cancel delivery cleanup unavailable")
+        return original_submit(output)
+
+    monkeypatch.setattr(stages._test_chat_adapter.output_sink, "submit_output", submit)
+    assert chat.stimulus_input_sink.submit(stimulus())
+    await asyncio.wait_for(entered.wait(), 1)
+    if during == "disconnect":
+        try:
+            await stages._test_chat_adapter._close_connection(connection)
+            assert cleanup_failed.is_set() and chat.state.value == "offline" and not chat.context.closed
+            assert stages._lease_registry.current("user", "luotianyi").source is InteractionSource.CHAT
+            _, resumed = await connected(stages)
+            assert resumed is chat and chat.state.value == "online"
+        finally:
+            await stages.close()
+        return
+    call = await preparing_call(stages, chat, connection)
+    try:
+        await asyncio.wait_for(cleanup_failed.wait(), 1)
+        result = await chat.terminate(StageEndReason.SWITCH)
+        assert not result.resources_released and result.cleanup_error is not None
+        assert not chat.context.closed and not ending
+        assert chat.lifecycle_state.value == "terminating"
+        assert await chat.terminate(StageEndReason.SHUTDOWN) is result
+        with pytest.raises(RuntimeError, match="initialization failed"):
+            await call.start()
+        await call.terminate(StageEndReason.INITIALIZATION_FAILED)
+        assert repository.find_by_request("request-1").end_reason is CallEndReason.SYSTEM_FAILURE
+        assert stages._lease_registry.current("user", "luotianyi").source is InteractionSource.CALL_TRANSITION
+        with pytest.raises(RuntimeError, match="USER_INTERACTION_BUSY"):
+            await stages.begin_user_data_reset("user")
+        with pytest.raises((RuntimeError, ValueError)):
+            await connected(stages)
+        for _ in range(2):
+            with pytest.raises(StageShutdownFailed):
+                await stages.close()
+    finally:
+        await asyncio.gather(stages.close(), return_exceptions=True)
 
 
 @pytest.mark.asyncio

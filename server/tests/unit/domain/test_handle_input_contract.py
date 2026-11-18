@@ -466,6 +466,27 @@ def test_repeated_cancellation_preserves_first_reason():
     assert (token.is_cancelled, token.reason) == (True, reasons.SUPERSEDED)
 
 
+def test_cleanup_error_fact_is_readonly_first_write_and_does_not_change_cancellation():
+    token, reasons = _public("CancellationToken")(), _public("CancellationReason")
+    assert token.cleanup_error_type is None
+    assert token.record_cleanup_error("OSError") is True
+    assert token.record_cleanup_error("RuntimeError") is False
+    assert token.cleanup_error_type == "OSError"
+    assert (token.is_cancelled, token.reason) == (False, None)
+    token.cancel(reasons.SUPERSEDED)
+    assert token.record_cleanup_error("ValueError") is False
+    assert token.reason is reasons.SUPERSEDED and token.cleanup_error_type == "OSError"
+    _readonly(token, "cleanup_error_type", None)
+    assert _public("CancellationToken")().cleanup_error_type is None
+
+
+@pytest.mark.parametrize("invalid_type", [None, "", "error with content", 1])
+def test_cleanup_error_fact_rejects_non_type_names(invalid_type):
+    token = _public("CancellationToken")()
+    _invalid("CONTRACT_INVALID_CANCELLATION", lambda: token.record_cleanup_error(invalid_type))
+    assert token.cleanup_error_type is None and not token.is_cancelled
+
+
 def test_cancelled_token_is_valid_request_input_and_new_tokens_are_independent():
     """预取消请求可以构造；新请求的新令牌不受旧取消影响，旧令牌不被重置。"""
     old_token = _public("CancellationToken")()

@@ -142,14 +142,12 @@ jobs:
           PySide6==6.9.2 live2d-py==0.6.0 PyOpenGL==3.1.10
           pytest==9.0.3 pytest-asyncio==1.4.0
       - name: 运行全部桌面端离线测试
-        # login、communication、ws_concurrent 连接真实服务器；audio_base64 播放真实音频。
-        # 保留这些手动脚本，不将其计入离线验收。
+        # login、communication、ws_concurrent 连接真实服务器，保留为手动脚本，不计入离线验收。
         run: >-
           python -m pytest tests
           --ignore=tests/test_login.py
           --ignore=tests/test_communication.py
           --ignore=tests/test_ws_concurrent.py
-          --ignore=tests/test_audio_base64.py
           -q --tb=short --junitxml=test-results.xml
       - name: 确认选定测试没有被跳过
         run: python ../.github/scripts/check_pytest_results.py test-results.xml
