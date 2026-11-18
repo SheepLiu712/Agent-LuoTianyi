@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-CLI_ROOT = Path(__file__).resolve().parents[1]
+CLI_ROOT = Path(__file__).resolve().parents[4] / "cli-client"
 SERVER_ROOT = CLI_ROOT.parent / "server"
 for root in (CLI_ROOT, SERVER_ROOT):
     if str(root) not in sys.path:
@@ -19,6 +19,7 @@ for root in (CLI_ROOT, SERVER_ROOT):
 
 from cli_client.network.network_client import NetworkClient
 from cli_client.safety import encrypt_pwd
+
 from src.application.user.agreement_service import AgreementService
 from src.infrastructure.media import create_media_resolver
 from src.infrastructure.persistence.database.database_service import DatabaseManager
@@ -47,9 +48,7 @@ class InProcessHttpSession:
 @pytest.fixture
 def cli_agreement_server(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "cli-agreement-test-secret")
-    monkeypatch.setattr(
-        credential_service, "_hash_password", lambda value: f"hash:{value}"
-    )
+    monkeypatch.setattr(credential_service, "_hash_password", lambda value: f"hash:{value}")
     monkeypatch.setattr(
         credential_service,
         "_is_bcrypt_hash",
@@ -60,12 +59,8 @@ def cli_agreement_server(tmp_path, monkeypatch):
         "_verify_password",
         lambda value, stored: stored == f"hash:{value}",
     )
-    monkeypatch.setattr(
-        user_interface_module, "enforce_rate_limit", lambda *args, **kwargs: None
-    )
-    manager = DatabaseManager(
-        {"sql_db_folder": str(tmp_path / "db"), "sql_db_file": "cli-agreement.db"}
-    )
+    monkeypatch.setattr(user_interface_module, "enforce_rate_limit", lambda *args, **kwargs: None)
+    manager = DatabaseManager({"sql_db_folder": str(tmp_path / "db"), "sql_db_file": "cli-agreement.db"})
     session = manager.open_sql_session()
     try:
         session.add(
@@ -78,12 +73,8 @@ def cli_agreement_server(tmp_path, monkeypatch):
                 created_at="2026-10-10T14:30:25+08:00",
             )
         )
-        session.add(
-            User(uuid="cli-exempt", username="exempt", password="hash:password")
-        )
-        session.add(
-            User(uuid="cli-ordinary", username="ordinary", password="hash:password")
-        )
+        session.add(User(uuid="cli-exempt", username="exempt", password="hash:password"))
+        session.add(User(uuid="cli-ordinary", username="ordinary", password="hash:password"))
         session.commit()
     finally:
         session.close()
@@ -116,18 +107,14 @@ def clear_cli_public_key_cache():
 
 def _cli_client(monkeypatch, server_client):
     session = InProcessHttpSession(server_client)
-    monkeypatch.setattr(
-        encrypt_pwd.HttpClientFactory, "get_session", lambda **_kwargs: session
-    )
+    monkeypatch.setattr(encrypt_pwd.HttpClientFactory, "get_session", lambda **_kwargs: session)
     client = NetworkClient("http://cli-agreement.test")
     client.auth_api.session = session
     monkeypatch.setattr(client.ws_transport, "start", lambda: None)
     return client
 
 
-def test_cli_exempt_user_uses_real_auth_api_and_network_session_path(
-    cli_agreement_server, monkeypatch
-):
+def test_cli_exempt_user_uses_real_auth_api_and_network_session_path(cli_agreement_server, monkeypatch):
     client = _cli_client(monkeypatch, cli_agreement_server)
 
     success, message = client.login("exempt", "password")
@@ -138,9 +125,7 @@ def test_cli_exempt_user_uses_real_auth_api_and_network_session_path(
     assert client.message_token
 
 
-def test_cli_unsigned_ordinary_user_receives_upgrade_text_from_real_auth_path(
-    cli_agreement_server, monkeypatch
-):
+def test_cli_unsigned_ordinary_user_receives_upgrade_text_from_real_auth_path(cli_agreement_server, monkeypatch):
     client = _cli_client(monkeypatch, cli_agreement_server)
 
     success, message = client.login("ordinary", "password")

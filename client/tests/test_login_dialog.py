@@ -1,13 +1,15 @@
 import os
 from dataclasses import dataclass
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import pytest
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QMessageBox
 from src.gui import login_dialog as dialog_module
 from src.gui.login_dialog import LoginDialog
+from src.network.auth import RegisterOutcome
+from src.utils import registration_resume
 
 
 @pytest.fixture(scope="module")
@@ -39,11 +41,36 @@ def wait_for(predicate):
 
 
 @pytest.fixture
-def dialog(qapp, monkeypatch):
+def dialog(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(dialog_module.credential, "load_credentials", lambda: None)
+    monkeypatch.setattr(registration_resume.storage, "temp_path", lambda name: str(tmp_path / name))
+
+    class ReadAgreement(QDialog):
+        # Keyboard tests assume reading is complete; the actual reading gate has separate UI tests.
+        submit_requested = Signal(str)
+
+        def __init__(self, parent=None, **kwargs):
+            super().__init__(parent)
+
+        def set_reject_text(self, text):
+            pass
+
+        def exec(self):
+            QTimer.singleShot(0, lambda: self.submit_requested.emit("keyboard-test-v1"))
+            QTimer.singleShot(5000, self.reject)
+            return super().exec()
+
+        def finish_submit(self, success, message=""):
+            if success:
+                self.accept()
+            else:
+                self.reject()
+
+    monkeypatch.setattr(dialog_module, "AgreementSignDialog", ReadAgreement)
     binder = Mock(spec=dialog_module.AgentBinder)
     binder.on_login.return_value = (True, "ok")
-    binder.on_register.return_value = (True, "ok")
+    binder.on_register_with_agreement.return_value = RegisterOutcome(True, "ok")
+    binder.on_registration_server_identity.return_value = "https://keyboard-test.invalid"
     binder.prepare_account_request.side_effect = lambda action, **values: _AccountResultRequest(action, **values)
     binder.account_context.return_value = ()
 
@@ -95,7 +122,7 @@ def test_escape_keeps_login_and_registration_open(dialog, qapp, tab, focus_name)
     assert dialog.tabs.currentIndex() == tab
     assert [field.text() for field in fields] == values
     dialog.binder.on_login.assert_not_called()
-    dialog.binder.on_register.assert_not_called()
+    dialog.binder.on_register_with_agreement.assert_not_called()
 
 
 @pytest.mark.parametrize("tab", [0, 1])
@@ -145,9 +172,9 @@ def test_successful_registration_still_returns_to_login(dialog, qapp, monkeypatc
     finished = QSignalSpy(dialog.finished)
 
     QTest.mouseClick(dialog.r_btn, Qt.MouseButton.LeftButton)
-    wait_for(lambda: dialog.binder.on_register.call_count == 1)
+    wait_for(lambda: dialog.binder.on_register_with_agreement.call_count == 1)
 
-    dialog.binder.on_register.assert_called_once()
+    dialog.binder.on_register_with_agreement.assert_called_once()
     assert dialog.isVisible()
     assert dialog.tabs.currentIndex() == 0
     assert finished.count() == 0
@@ -205,7 +232,7 @@ def test_enter_in_login_fields_submits_login(dialog, qapp, focus_name, key):
     }
     wait_for(lambda: accepted.count() == 1)
     dialog.binder.on_login.assert_called_once_with("test-user", "test-password", do_auto_login=False)
-    dialog.binder.on_register.assert_not_called()
+    dialog.binder.on_register_with_agreement.assert_not_called()
     assert accepted.count() == 1
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert not dialog.isVisible()
@@ -280,7 +307,10 @@ def test_enter_tracks_registration_then_login_after_tab_switch(
     assert register_clicked.count() == 1
     assert login_clicked.count() == 0
     wait_for(lambda: dialog.tabs.currentIndex() == 0)
-    dialog.binder.on_register.assert_called_once_with("register-user", "register-password", "test-invite")
+    dialog.binder.on_register_with_agreement.assert_called_once_with(
+        username="register-user", password="register-password", invite_code="test-invite",
+        registration_request_id=ANY, agreement_version="keyboard-test-v1", accepted=True,
+    )
     dialog.binder.on_login.assert_not_called()
     assert dialog.tabs.currentIndex() == 0
     assert dialog.isVisible()
@@ -293,7 +323,7 @@ def test_enter_tracks_registration_then_login_after_tab_switch(
     assert register_clicked.count() == 1
     assert login_clicked.count() == 1
     wait_for(lambda: accepted.count() == 1)
-    dialog.binder.on_login.assert_called_once_with("login-user", "login-password", do_auto_login=False)
+    dialog.binder.on_login.assert_called_once_with("register-user", "login-password", do_auto_login=False)
     assert accepted.count() == 1
 
 
@@ -340,7 +370,7 @@ def test_enter_in_empty_fields_shows_active_form_validation(dialog, qapp, tab, f
     assert reset_clicked.count() == 0
     assert server_clicked.count() == 0
     dialog.binder.on_login.assert_not_called()
-    dialog.binder.on_register.assert_not_called()
+    dialog.binder.on_register_with_agreement.assert_not_called()
     assert dialog.isVisible()
     assert dialog.tabs.currentIndex() == tab
     assert finished.count() == 0
@@ -384,7 +414,7 @@ def test_secondary_actions_still_open_then_return_to_login(
     assert login_clicked.count() == 0
     assert register_clicked.count() == 0
     dialog.binder.on_login.assert_not_called()
-    dialog.binder.on_register.assert_not_called()
+    dialog.binder.on_register_with_agreement.assert_not_called()
     assert accepted.count() == 0
     assert dialog.isVisible()
 

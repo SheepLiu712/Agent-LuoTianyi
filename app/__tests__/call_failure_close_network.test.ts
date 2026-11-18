@@ -5,7 +5,7 @@ import { server_config } from '../config';
 import type { CallAudioFormat, CallPlaybackChunk, CapturedAudioFrame, PlaybackConsumptionReceipt } from '../features/call/call_audio_contracts';
 import { ProductionCallResolver } from '../features/call/call_session/production_resolver';
 import { NetworkClient, type ConnectCallbacks } from '../features/chat/connection/network_client';
-import { launchCallServer, resolveCallServerSource, waitUntil } from './support/call_network_server';
+import { registrationAgreement, launchCallServer, resolveCallServerSource, waitUntil } from './support/call_network_server';
 
 jest.mock('expo-file-system/legacy', () => ({}));
 jest.mock('../features/chat/image_compression', () => ({ compressImageForUpload: jest.fn(), MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024 }));
@@ -127,7 +127,7 @@ async function registerAndLogin(url: string): Promise<string> {
   const password = 'offline-password';
   const register = await fetch(`${url}/auth/register`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'alice', password: await encryptedPassword(url, password), invite_code: 'invite' }),
+    body: JSON.stringify({ username: 'alice', password: await encryptedPassword(url, password), invite_code: 'invite', ...await registrationAgreement(url) }),
   });
   expect(register.ok).toBe(true);
   const login = await fetch(`${url}/auth/login`, {
