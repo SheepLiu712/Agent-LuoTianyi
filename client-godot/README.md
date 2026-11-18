@@ -1,142 +1,243 @@
-# AgentLuo · Godot Windows 客户端
+# AgentLuo Godot Windows 客户端
 
-当前源码版本：`0.2.0.0`（以 `release.json` 为准）。这是独立 Windows 客户端工程；客户端说明与历次整改记录由本地个人文档维护，不随仓库分发。尚未替换旧端，不读取旧端凭据。
+AgentLuo 的独立 Windows x64 桌面客户端，使用 Godot 4.7.1 构建。当前源码版本为 `0.2.0.0`，版本号以 `release.json` 为准。
 
-现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；脚本清单与覆盖迁移以该入口和测试契约为准。
+客户端包含 Live2D 角色、WebSocket 文字聊天、流式语音播放、本地聊天历史、私人动态、设置和日志。它尚未替换旧 Python 客户端，也不会导入旧客户端的凭据或聊天记录。
 
-## 构建
+作者的个人笔记位于仓库根目录下的 `docs-godot/`、`client-godot/docs/` 和 `archive/`。这些目录已写入根 `.gitignore`，不随仓库分发。
 
-使用 Godot **4.7.1 standard / Windows x64**。通过 Godot 的 Manage Export Templates 安装同版本模板，或将锁定模板包中的 Windows x64 文件和 version.txt 放入 `%APPDATA%/Godot/export_templates/4.7.1.stable/`。依赖来源和 SHA-256 见 `dependencies.lock.json`。
+## 环境要求
 
-目录版、ZIP 与单文件自解压 EXE 的完整规范、版本字段、图标要求和发布验证由本地个人文档维护，不随仓库分发。
+| 用途 | 要求 |
+| --- | --- |
+| 运行 | Windows x64 |
+| 打开工程 | Godot 4.7.1 standard，版本输出必须为 `4.7.1.stable.official.a13da4feb` |
+| 导出 | Godot 4.7.1 导出模板 |
+| 运行构建脚本 | PowerShell 5.1 或更高版本 |
+| 重建 Live2D 插件或原生扩展 | Visual Studio 2022 C++ Build Tools、Python 3.11.9、SCons 4.7.0 |
+| 运行测试 | Python 3.12，并按 `tests/requirements-*.txt` 安装依赖 |
+| 生成单文件 EXE | .NET Framework 4.x 的 `csc.exe` |
+
+`dependencies.lock.json` 记录了 Godot 可执行文件、导出模板、CA 证书包、Live2D 插件、原生扩展和 SQLite 插件的版本与 SHA-256。`scripts/common.ps1` 在 PowerShell 脚本执行前会校验 Godot 的版本输出和可执行文件哈希，不匹配时直接退出。
+
+## 打开工程
+
+1. 安装 Godot 4.7.1 standard。
+2. 在 Godot 项目管理器中导入 `client-godot/project.godot`。
+3. 首次打开时等待资源导入完成，再运行主场景。
+
+客户端数据写入 `%APPDATA%\AgentLuo-Godot`，不写入安装目录。旧 Python 客户端的数据目录保持不变，两者不共享凭据和聊天数据库；新客户端可以按用户选择只读导入旧客户端的语音和图片缓存。
+
+## 构建 Windows 发布包
+
+在 `client-godot` 目录运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File client-godot/scripts/build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ```
 
-运行后输入版本号，回车沿用 `release.json` 的当前版本。支持 `0.1.5`、`0.1.4.2`，每段数字范围为 0–65535；输入错误会重新提示。脚本会同步 `release.json`、`project.godot` 的显示版本和 `export_presets.cfg` 的 EXE 版本（三段版本补 `.0`）。没有传入 `-Godot` 或设置 `GODOT_BIN` 时，会提示输入 Godot 可执行文件路径。
+脚本参数：
 
-默认输出完整程序目录及 ZIP。同版本产物已存在时，新目录和 ZIP 自动添加时间戳及随机后缀，旧包保持不变。自动化调用请显式使用 `-Version 0.1.5 -Godot '<exe>'` 跳过交互；只导出目录可在 PowerShell 中使用 `-Package:$false`。版本写入成功后，即使后续导出失败也保留选择的版本，便于修复后重试；失败不会发布临时输出目录。
+| 参数 | 说明 |
+| --- | --- |
+| `-Version <版本>` | 指定版本号；不传时交互输入，直接回车沿用 `release.json` |
+| `-Godot <exe>` | 指定 Godot 可执行文件；不传时读取 `GODOT_BIN`，仍为空则交互输入 |
+| `-OutputDirectory <目录>` | 发布目录的父目录，默认 `dist` |
+| `-Package:$false` | 只导出目录，不生成 ZIP |
 
-打包编排回归：`python client-godot/tests/test_build_prompt.py`，使用隔离临时工程和模拟导出器，覆盖输入重试、三段/四段版本同步、重复打包保留旧包及错误配置不部分写入；不代替真实 Godot 导出验收。
+版本号必须为三段或四段数字，每段范围 `0..65535`，不带前导零。脚本会把版本同步到以下位置：
 
-也可以显式传入 `-Godot <exe>`。构建脚本不下载依赖、不连接服务端；失败返回非零并保留 `artifacts/` 中的日志。输出 `dist/agentluo-<version>/` 整个目录（EXE、PCK、插件 DLL 和 licenses）必须一起分发。headless 启动检查不代表视觉、GPU 或真机验收。
+- `release.json` 的 `version`
+- `project.godot` 的 `config/version`
+- `export_presets.cfg` 的 `application/file_version` 和 `application/product_version`；三段版本补 `.0`
 
-开发时在 Godot 中导入 `project.godot`。本地数据使用独立的 `%APPDATA%/AgentLuo-Godot`，不写入安装目录。
+默认产物：
 
-## Live2D 构建
+- 目录：`dist/agentluo-<版本>/`
+- ZIP：`artifacts/agentluo-<版本>.zip`
 
-工程附带锁定的 Windows x64 插件二进制和 shader。重建时检出 lock 中的 gd_cubism commit 及其 godot-cpp submodule，按上游文档将 Cubism SDK 5-r.1 放入插件源码 `thirdparty/`，使用 VS2022 C++ Build Tools、Python 3.11.9 和 SCons 4.7.0：
+同版本产物已存在时，新目录和 ZIP 会追加时间戳与随机后缀，旧产物保持不变。导出先写入临时目录，全部检查通过后才移动到最终位置；失败时不会留下半成品目录。版本字段写入后，即使导出失败也会保留新版本号，便于修复后重试。
+
+发布目录必须完整分发，包含 `agentluo.exe`、`agentluo.pck`、`release.json`、`PREVIEW.md`、`licenses/`、`windows_security.dll`、`libgd_cubism.windows.release.x86_64.dll` 和 `libgdsqlite.windows.template_release.x86_64.dll`。构建脚本会检查 `agentluo.exe`、`agentluo.pck`，并要求 `licenses/`、`PREVIEW.md`、`release.json` 存在；`verify_release_archive.py` 还会检查完整文件清单和三份 DLL。
+
+导出完成后可以单独校验：
 
 ```powershell
-python client-godot/scripts/build_cubism.py --source '<gd_cubism源码目录>'
+python .\tests\verify_release_archive.py .\artifacts\agentluo-0.2.0.0.zip .\dist\agentluo-0.2.0.0
 ```
 
-脚本检查源码版本，在当前进程处理 Windows OEM 编码兼容问题，输出二进制 SHA-256；重建工具链变化时应复验并更新 lock，不能无声替换。许可和素材来源见 `licenses/`。
+该命令检查 ZIP 条目、CRC、版本、许可文件和三份 DLL 的 SHA-256。构建脚本中的 `--headless --quit-after 3` 只验证程序能启动，不代表界面、GPU 或实机运行正常。
 
-独立模型场景：`res://scenes/avatar/avatar_preview.tscn`。当前主入口显示真实账户表单；传入 `-- --preview` 才加载独立离线样板 `res://scenes/preview/chat_preview.tscn`。Godot 4.7.1 官方 release 模板禁止命令行覆盖主场景，验证不得依赖该能力。
+## 生成单文件 EXE
 
-## 体验离线样板
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_single.ps1 -Version 0.2.0.0
+```
 
-运行 `dist/agentluo-<version>/agentluo.exe -- --preview`。角色区滚轮缩放、右键拖动，底部按钮重置；中间分隔条调整宽度，以上设置会保存。左上切换真实模型表情；右上切换日常聊天、空白、断网、加载失败和思考状态。
+脚本读取已有的 `dist/agentluo-<版本>`，用 .NET Framework 的 `csc.exe` 把整个目录压缩进一个自解压 EXE，默认输出到桌面。首次启动时解压到 `%LOCALAPPDATA%\AgentLuo-Single\<启动器版本>`，然后运行其中的 `agentluo.exe`；用户数据仍写入 `%APPDATA%\AgentLuo-Godot`。
 
-聊天文本可选择复制；Enter 本地模拟发送，Shift+Enter 换行。图片按钮或 Ctrl+V 粘贴图片先打开预览，点击发送才追加演示消息；缩略图可再次打开。查看旧消息时发送不会强制滚到底部，使用“回到最新”。模拟口型按钮没有声音；样板不连接真实账户、消息或音频服务。
+常用参数：
 
-`check.ps1` 覆盖角色、构图、离线消息控制器和主场景键盘输入回归。真实 Windows IME、剪贴板、多档 DPI、拖动手感和集显性能尚需人工验收。此导出目录是视觉检查产物，不是最终安装程序。
+- `-Build`：先调用 `build.ps1` 生成目录。
+- `-BuildDirectory <目录>`：使用指定目录，不按版本查找 `dist`。
+- `-OutputDirectory <目录>`：指定输出目录。
+- `-SkipRunCheck`：跳过启动检查。
 
-截取账户页：`agentluo.exe -- --capture=<绝对PNG路径>`；截取样板增加 `--preview`，可再增加 `--scenario=empty/disconnected/error/thinking`。截图和 headless 检查不会自动登录真实账户。
+## 重建 Live2D 插件
+
+仓库已包含锁定版本的 Windows x64 插件二进制和 shader，正常构建不需要重新编译。需要重建时：
+
+1. 检出 `dependencies.lock.json` 中 `gd_cubism.commit` 对应的源码，并初始化其 `godot-cpp` 子模块到 `gd_cubism.godot_cpp_commit`。
+2. 按 gd_cubism 的说明，把 Cubism SDK 5-r.1 放入源码的 `thirdparty/`。
+3. 安装 Visual Studio 2022 C++ Build Tools、Python 3.11.9 和 SCons 4.7.0。
+4. 运行：
+
+```powershell
+python .\scripts\build_cubism.py --source '<gd_cubism 源码目录>'
+```
+
+脚本会拒绝有未提交改动的源码，校验两个 Git 提交号、SCons 版本和生成的 DLL 的 SHA-256。输出复制到 `addons/gd_cubism/bin/`。工具链变化后必须重新验证并更新 lock，不能直接替换二进制。
+
+常用参数：`--jobs <数量>` 指定并行任务数，默认 8；`--console-encoding utf-8|gbk` 处理 Windows 控制台编码。
+
+## 重建原生扩展
+
+`native/` 下包含四个 C++ 模块，统一编译为 `addons/windows_security/bin/windows_security.dll`：
+
+| 模块 | 作用 |
+| --- | --- |
+| `WindowsSecurity` | 使用 CNG RSA-OAEP/SHA256 加密密码，使用当前用户 DPAPI 保护本机密钥 |
+| `WindowsInputMethod` | 查询和切换 Windows 输入法状态 |
+| `PcmStreamDecoder` | 解码流式 PCM 音频，并提供波形幅度 |
+| `StorageVolume` | 查询磁盘容量 |
+
+重建步骤：
+
+```powershell
+python .\scripts\build_security.py --godot-cpp '<锁定版本的 godot-cpp 目录>'
+```
+
+`godot-cpp` 的提交号必须等于 `dependencies.lock.json` 的 `gd_cubism.godot_cpp_commit`，工作区必须干净，SCons 版本必须为 4.7.0。脚本会校验生成 DLL 的 SHA-256。
+
+如果 MSVC 无法解析包含中文的源码路径，可以建立目录联接：
+
+```powershell
+New-Item -ItemType Junction -Path .\native\godot-cpp -Value '<真实 godot-cpp 目录>'
+```
+
+联接和编译产物不会进入 Git 或发布包。
+
+原生加密互操作测试：
+
+```powershell
+python .\tests\run_security_interop.py --godot <Godot.exe>
+```
+
+测试需要 `cryptography` 和 `fastapi`，只在本机运行，不连接外部服务。
 
 ## TLS 信任源
 
-客户端不再依赖 Windows 当前用户根证书库：`project.godot` 通过
-`network/tls/certificate_bundle_override` 固定使用 `certs/ca-bundle.pem`
-（完整 Mozilla CA 包），覆盖账号、历史、图片、WebSocket 与连通性探测的全部
-HTTPS 请求。`export_presets.cfg` 的 `include_filter` 必须保留 `*.pem`。
-来源、快照哈希与刷新步骤见 [CA 信任源](certs/README.md)。
+客户端固定使用 `certs/ca-bundle.pem` 作为唯一的 TLS 信任源，不读取 Windows 当前用户根证书库。`project.godot` 中的 `network/tls/certificate_bundle_override` 指向该文件，`export_presets.cfg` 的 `include_filter` 必须保留 `*.pem`。
 
-## Windows 凭据扩展
+证书包的来源、快照日期、SHA-256 和刷新步骤见 [certs/README.md](certs/README.md)。
 
-`WindowsSecurity` 使用 CNG RSA-OAEP/SHA256 和当前用户 DPAPI。源码位于 `native/`，不需要额外运行时 DLL；编译使用上述锁定 godot-cpp 和 VS2022 工具链。
+发布版只允许 HTTPS。`localhost`、`127.0.0.0/8` 和 `[::1]` 保留明文 HTTP，供本地测试使用；其他明文地址会在发送账号信息前返回 `INSECURE_SERVER`。
 
-```powershell
-python client-godot/scripts/build_security.py --godot-cpp '<锁定的godot-cpp目录>'
-python client-godot/tests/run_security_interop.py --godot $env:GODOT_BIN
-```
+## 测试
 
-互操作测试 Python 需 `cryptography` 和 `fastapi`，仅测试时需要；测试隔离执行仓库服务端 account.py 中原样的密钥生成/解密函数，避免其数据库及供应商导入副作用。它不验证整个 HTTP 服务。
-
-若 MSVC 响应文件不能解析源码目录中的中文，可以 `New-Item -ItemType Junction -Path client-godot/native/godot-cpp -Value '<真实目录>'` 建立本地目录联接，然后以该联接路径传入 `--godot-cpp`。构建仍检查源码 commit；联接和对象文件不进入 Git 或导出包。
-
-账户模块的本地 HTTP/凭据回归：在独立 Python 环境安装 `tests/requirements-auth.txt`，运行 `scripts/check_accounts.ps1 -Godot <exe> -Python <python.exe>`。测试只监听 127.0.0.1 随机端口，使用合成账户；客户端运行不依赖 Python。
-
-聊天传输与界面回归：测试 Python 安装 `tests/requirements-websocket.txt`，运行 `scripts/check_network.ps1 -Godot <exe> -Python <python.exe>`。真实 Godot WebSocketPeer 连接随机端口的本地 fixture，覆盖认证、心跳、断线和稳定 ID 重试、真实输入框收发和退出清理；不连接真实账户服务器。`tests/fixtures/chat/reply_events.json` 由 Godot 收包链路与旧 Python 客户端实际解析器共同消费。
-
-默认入口登录后进入真实文字聊天，图片、历史、语音等以现行说明与对应测试证据为准；离线样板中的模拟能力不代表正式功能已经接入。
-
-## 回复语音与诊断
-
-正式聊天自动播放服务端 WAV/PCM 分片；同 UUID 聚合，后续回复等前一句实际播完再呈现。支持口型、音量保存、停止当前语音、错误及断线清理；完整语音以临时文件接收、成功终止及原生验证后提交，提供消息重放/暂停/继续/停止，波形来自原生 RMS，进度来自混音器消耗帧。在线语音抢占重放；停止在线声音不取消后续接收和缓存。原生 `PcmStreamDecoder` 与 `WindowsSecurity` 共用 DLL，按上面的 `build_security.py` 命令重建，需分发完整目录。
-
-登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据（`schema_version=3`，旧 v2 归档不再显示并随保留策略自然淘汰），单次默认 8 MiB / 5 万条，保留最近 50 次并保护仍运行实例。日志按业务流（`business`）、网络通信（`network`）、存储持久化（`storage`）、系统诊断（`system`）四领域划分并与严重级别（`DEBUG/INFO/WARN/ERROR`）解耦，窗口支持按类别/级别/模块/归属筛选与搜索，单次最多渲染 1000 条匹配记录，可复制或导出完整诊断 ZIP（不上传）。通过哈希 `reply_id`、网络 `trace_id` 与存储 `transaction_id` 关联链路；保留脱敏错误原文与堆栈，不写入正文、token、Authorization、密钥或 Base64。`DEBUG` 级别日志默认关闭，由 `--debug-log` 按级别开启。完整规范由本地个人文档维护，不随仓库分发。
-
-`check.ps1` 增量解码及真实混音测试默认使用合成音频；`check_network.ps1` 还验证 loopback WebSocket 到播放器链路、顺序、隐藏音频、停止及断线。Windows 输出驱动验证可运行：
+四组默认回归：
 
 ```powershell
-& $env:GODOT_BIN --headless --audio-driver WASAPI --verbose --path client-godot --script res://tests/media/test_reply_audio.gd
+$engine = '<Godot 4.7.1 可执行文件>'
+$python = '<已安装测试依赖的 python.exe>'
+
+.\scripts\check.ps1 -Godot $engine -Python $python
+.\scripts\check_accounts.ps1 -Godot $engine -Python $python
+.\scripts\check_network.ps1 -Godot $engine -Python $python
+.\scripts\check_features.ps1 -Godot $engine -Python $python
 ```
 
-该命令会向本机默认音频设备播放短合成音；AudioEffectCapture 检查非零混音输出及静音，不等同人工听感或真实服务验收。
+| 分组 | 内容 |
+| --- | --- |
+| `check` | 首次资源导入、圈复杂度检查、启动、界面与模块测试 |
+| `accounts` | 原生加密互操作、账号协议、登录状态、账户页、窗口切换、依赖边界 |
+| `network` | WebSocket 传输、真实聊天、语音聊天、角色触摸上报 |
+| `features` | 历史、图片、设置、模型、动态和扩展接口 |
 
-未登录时显示480×690淡蓝圆角账户窗口，登录成功后展开角色和聊天，退出再收起。登录页使用备份客户端的淡蓝底与天依蓝头像光晕，登录菜单、服务器框和错误框采用登录专用圆角；日志窗和登录后界面保持原主题。默认服务器沿用旧端 release_config.base_url；已保存的自定义地址优先。账户回归含窗口切换测试，原生窗口验证可运行 `run_feature_tests.py --godot <exe> --script res://tests/test_application_window.gd --gpu`，仍仅连接本地 HTTP fixture。
-
-语音缓存在 user://audio、历史图片在 user://images 按规范化服务器、账户与 UUID 隔离，退出及重启保留，只能手动清理，无自动容量/时间淘汰。设置中的“缓存与导入”页有清理确认窗口；清理同时取消在途流的缓存写入，保留正在输出的声音与聊天文字。登录后全量同步历史，按 UUID 恢复本账号完整缓存。用户可在同页选择 Python 客户端 exe，只读定位 temp/tts_output 与 temp/images，把 UUID 对齐的语音与历史图片复制进当前账号；源文件不改动、已有条目不覆盖，聊天正文仍从服务器读取（Python 端没有本地消息库）。日志记录 cache_committed/cache_error、replay_started/paused/resumed/stopped/finished/preempted 与 python_media_import 事务，不写音频原文或 Python 凭据。
-
-重放回归：`--headless --audio-driver WASAPI --path client-godot --script res://tests/test_voice_replay.gd`。真实 UI/角色截图：`tests/run_websocket_tests.py --godot <exe> --script res://tests/capture_voice_ui.gd --gpu`，只连接 loopback、使用合成语音，输出默认/最小/暂停/125%及150%内容缩放截图到 artifacts。内容缩放检查不能替代操作系统 DPI 切换与跨显示器验收。
-
-## agentluo 版本化交付与功能验证
-
-release.json 是版本单一来源，界面/诊断/目录/ZIP 使用同一版本。`scripts/build.ps1` 提示输入版本后导出 `dist/agentluo-<version>/agentluo.exe` 并生成 `artifacts/agentluo-<version>.zip`；同版本重复打包自动使用带时间戳的新名称。重建不自动升级版本，回车沿用当前版本。保留旧包作为回退，数据仍在 AgentLuo-Godot。
-
-历史、相处模式、模型配置/委托及动态回归：`scripts/check_features.ps1 -Godot <exe> -Python <python.exe>`。测试依赖另包括 aiohttp；所有默认 fixture 仅监听 loopback，无公共服务写入或收费供应商。新增界面 GPU 截图：`tests/run_feature_tests.py --godot <exe> --script res://tests/capture_release_ui.gd --gpu`。
-
-应用持有聊天/模型/动态控制器，Window 仅展示和编辑；未来页面切换不重连。角色入口 `assets/live2d/character.json` 分离身份与模型资源，加载失败保留原模型；实际平台能力仍是 Windows。详细使用说明见 [PREVIEW](PREVIEW.md)，实际验收记录由本地个人归档维护，不随仓库分发；不将预留移动端/换装/箱庭视为已交付。
-
-当前开发版的动态为独立任务栏窗口，35:65列表/详情分区，完整正文、平铺私人评论、行内回复和内嵌发布浮层；关闭聚合检查所有草稿。正式下拉共享稳定ID组件。原生验收：`tests/run_dynamics_tests.py --godot <exe> --gpu --script res://tests/capture_dynamics_ui.gd`；菜单GPU验收：Godot `--path client-godot --script res://tests/capture_dropdown_ui.gd`。这些测试验证真实HWND、缩放截图和本地接口，不验证公共服务或系统DPI切换。
-
-
-## 窗口重设计（当前开发分支）
-
-所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括确认按钮和24段语音波形；登录后桌面窗框与三键使用系统原生实现，未登录采用透明窗口与Godot淡蓝圆角面板。左侧仅聊天、动态、设置、日志四个居中入口；退出登录位于设置底部左侧，右侧关闭/保存全部修改，失败项留稿。退出应用使用主窗系统关闭按钮，统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
-
-现行窗口行为与验证入口由本地个人文档维护，不随仓库分发。桌面恢复系统标题栏、拖拽/缩放；内部下拉使用 Godot 圆角控件，正文保持清晰。系统文件选择器继续使用原生控件。
-
-原生鼠标/键盘验收（会操作其创建的测试窗口）：
+Python 静态自检：
 
 ```powershell
-$env:GODOT_TEST_PYTHON = 'python'
-& $env:GODOT_BIN --path client-godot --script res://tests/ui/test_native_window_controls.gd
+python .\tests\test_dependency_boundaries.py
+python .\tests\test_review_documentation.py
+python .\tests\test_check_gate.py
+python .\tests\test_build_prompt.py
+python .\tests\test_complexity_check.py
+python .\scripts\check_complexity.py
 ```
 
-`capture_release_ui.gd` 另生成主界面、最小尺寸、125/150/200%内容缩放、设置与日志截图，比较磨砂/实底的短时帧间隔，并用真实HWND核查动态/日志独立、设置跟随主窗。结果在artifacts，不等同系统DPI、多屏、Windows10或集显认证。版本仍由release.json决定，本轮源代码变更不自动覆盖已有发布包。
+完整命令、单脚本入口、GPU 验收和测试约定见 [tests/README.md](tests/README.md)。
 
-设置最小尺寸的可见滚动验收已并入`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`：验证720×640及四档内容缩放下表单底部可滚动到达且不覆盖固定操作栏。headless分支只检查状态，不能代替该GPU布局验收。
+CI 中的 `godot-static` 作业只运行上述 Python 静态检查，不启动 Godot，也不执行导出或 GPU 测试。
 
-历史反馈已体现在现行行为说明与测试中。桌面使用系统窗框，内部下拉为嵌入式 Godot 圆角控件；缓存与导入页提供 StorageService 占用圆环、按用户天数清理与 Python 媒体导入，容量只在用户点击“开始扫描/重新扫描”时读取并保存上次扫描时间与快照，未知容量显示“--%”。PNG/JPEG/WebP/BMP 文件及 Ctrl+V 已接入正式图片预览/发送，未提交附件仅本次运行保留。
+## 目录结构
 
-GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及既有本地API测试依赖；Pillow仅用于测试，不进入客户端运行依赖。磁盘查询的Windows实现已实测，移动端需复用StorageService接口并在目标构建注册容量适配，当前不宣称完成Android/iOS移植。
+| 路径 | 内容 |
+| --- | --- |
+| `src/application.gd` | 应用入口、页面切换、日志和窗口生命周期 |
+| `src/application/` | 账号生命周期、窗口协调、界面风格 |
+| `src/composition/` | 服务创建与组装 |
+| `src/domain/` | 账号作用域、消息 ID、时间和服务地址等纯规则 |
+| `src/network/` | HTTP、WebSocket、TLS、连通性探测和可靠发送队列 |
+| `src/session/` | 账号、聊天、历史、动态、模型和设置控制器 |
+| `src/storage/` | SQLite、音频与图片缓存、日志、凭据和设置 |
+| `src/media/` | 图片附件、音频播放和原生解码器 |
+| `src/avatar/` | Live2D 角色驱动、构图、表情和触摸反馈 |
+| `src/platform/` | Windows 窗口、文件、输入、加密和运行时适配 |
+| `src/ui/` | 页面、窗口、气泡、下拉框、对话框和共享控件 |
+| `src/preview/` | 离线预览场景和演示数据 |
+| `src/extensions/` | 预留的外观、世界和设备接口 |
+| `scenes/` | Godot 场景 |
+| `tests/` | Godot 测试、Python runner、依赖清单和模拟数据 |
+| `scripts/` | 构建、打包、检查和复杂度脚本 |
+| `native/` | C++ 原生扩展源码 |
+| `addons/` | Live2D、SQLite 和原生扩展插件 |
+| `assets/` | 图片、模型、图标和 shader |
+| `theme/` | Godot 主题资源 |
+| `certs/` | TLS CA 证书包 |
+| `licenses/` | 第三方许可和素材来源 |
 
-界面精简与状态修正说明由本地个人文档维护，不随仓库分发。读取/保存中的设置输入框保持浅色只读；API/JSON/thinking开关采用浅蓝选中底、深色文字和深蓝焦点。可运行`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`复验延迟/失败加载与100/125/150/200%内容缩放，证据保存在`artifacts/ui-refinement/`。
+## 本地数据
 
-登录与气泡的当前说明与实际验收范围由本地个人文档维护，不随仓库分发。登录 GPU 验收使用 `run_feature_tests.py --godot <exe> --script res://tests/ui/test_login_presentation.gd --gpu`；气泡使用 `--script res://tests/ui/test_bubble_sizing.gd` 与 `test_image_bubble_sizing.gd`，可独立 headless/GPU 运行。
+默认根目录为 `%APPDATA%\AgentLuo-Godot`，主要子目录：
 
-## 聊天审阅图落地
+| 路径 | 内容 |
+| --- | --- |
+| `accounts/`、`account.cfg` | 本机账号记录和受保护凭据 |
+| `history/` | 聊天与动态的 SQLite 数据 |
+| `audio/` | 语音缓存 |
+| `images/` | 历史图片缓存 |
+| `models/` | 模型配置和受保护的 API Key |
+| `reading/` | 阅读位置 |
+| `logs/` | 每次启动的 JSONL 日志和元数据 |
+| `window_layout.cfg` | 设置与主窗口布局 |
+| `window-geometry.cfg`、`dynamics-window.cfg` | 窗口位置和尺寸 |
 
-聊天页按已审阅的 HTML 方案落地到真实 Godot 场景：80px 导航栏，聊天/动态/设置为 64×64 的方形按钮，图标在上、文字在下；移除导航栏上下头像。内容区 16px 外边距及可拖动分栏，角色区取消底栏与常驻手势提示，重置位置改为右下角悬浮按钮。输入区上方保留图片和音量图标，移除停止语音按钮；音量点击展开滑条，48px 起始输入框右侧是方形发送图标，快捷键提示在下方靠右。正常发送、排队与发送中不展示状态或保留占位；失败与无法确认送达时保留异常提醒，避免重复发送。角色顶部卡片只显示最新一条未读动态，评论未读不触发；读取卡片不标记已读。默认展开画布为 1280×800，保留既有窗口几何与分栏比例设置。角色仍是实际 Live2D；原型“静态占位”说明不进入产品。扁平默认、清透独立，继续复用原 SVG/emoji 与聊天头像；不增加清空输入或业务功能。真实节点截图与定向回归入口见 `tests/README.md` 的聊天审阅图专项验收。当前源码版本为 0.2.0.0；0.2.0.0 发布包需重新构建。
+聊天历史由本地 SQLite 保存，用于离线显示和分页；服务端仍是历史数据的来源。语音和图片缓存按服务器和账号分别限制在 256 MiB；语音单条最多 16 MiB，图片单条最多 16 MiB。超过上限时按修改时间从旧到新删除。缓存没有按时间自动过期，仍可在“缓存与导入”页手动清理语音，并导入旧 Python 客户端中按消息 UUID 匹配的语音和图片。
 
-当前源码包含的后续审阅调整：Gemini 重绘版本重构并规范化全部 35 个场景，统一窗口、弹窗、Snackbar 与 Actionbar 的共享样式，收敛设计令牌（Design Tokens）并调整 Toast 弹出位置。动态列表删除“加载更多动态”，滚动到底加载下一页，失败后可继续滚动重试；点击卡片（包括当前选中项）自动刷新最新完整评论，刷新期间保留草稿和当前阅读位置，不自动清未读。发布弹层删除标题右侧关闭按钮，保留底部取消及草稿确认；聊天标题删除“此刻，慢慢来就好”。聊天、动态正文和各类输入框的文字选区统一为系统蓝底白字，扁平/清透一致。0.2.0.0 发布包尚未重新构建；历史包仅作回退。
+## 平台边界
 
-## 平台隔离与扩展
+- 当前只实现 Windows x64。Android 和 iOS 仍缺少安全、模型、音频、窗口宿主和权限适配，桌面测试不能代替移动端验证。
+- `src/extensions/` 中的外观、世界和设备接口默认返回 `NOT_IMPLEMENTED`，界面没有对应入口，不代表已经支持换装、虚拟世界或设备互联。
+- 旧 Python 客户端仍可继续使用。新客户端不导入旧客户端的凭据和聊天记录，但可以只读导入其语音和图片缓存。
+- 公共服务器、真实 TTS、系统 DPI、多显示器、Windows 10、集成显卡和长时间运行需要单独验收。
 
-客户端说明由本地个人文档维护，不随仓库分发。普通 UI/业务只使用能力接口，composition 负责构造，application 负责账号/窗口生命周期；平台实现位于 platform 及各存储实现中。共享输入框和气泡位于 src/ui，两个预览入口保留。
+## 版本与发布状态
 
-三个 extensions 接口默认 NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android 仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。当前源码版本为 0.2.0.0，构建时通过 `scripts/build.ps1 -Package` 生成 Windows x64 便携目录与 ZIP；版本同步到 release.json、项目配置与 EXE 原生字段。0.2.0.0 发布包尚未重新构建；历史包仅作回退。验证边界由本地个人归档维护，不随仓库分发。
+`release.json` 是版本的唯一来源，当前为 `0.2.0.0`。`dist/` 中存在 2026-11-17 构建的 `agentluo-0.2.0.0` 目录，`artifacts/` 中有对应的 ZIP；两者都早于 2026-11-18 的源码修改，不能作为当前源码的发布证据。发布前需要重新运行 `scripts/build.ps1`。
+
+## 相关文档
+
+- [使用说明](PREVIEW.md)
+- [测试入口](tests/README.md)
+- [CA 信任源](certs/README.md)
+- [第三方许可与素材来源](licenses/RESOURCES.md)
