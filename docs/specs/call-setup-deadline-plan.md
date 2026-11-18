@@ -1,5 +1,7 @@
 # #410 单一通话建立截止时间设计（待非作者审核）
 
+> 维护说明（2026-11-18）：本文保留原设计与验证历史。Fun-ASR 独立诊断脚本及其专用测试已按维护者要求移除，历史 U2 条目不再代表可用入口；底层适配器保持不变。
+
 > 状态：core、U1配置控制台、U2独立诊断均经独立gate及lead许可分别提交 `f3e2cb8d`、`8ab238c4`、`f5846ff6`，未push。U3安全诊断字段验证中，未完整CI/真实供应商验收。基线 `ee718b21536e410ce5e4073b068f03b9bfcd68dc`；工作树分支 `bugfix/call-setup-deadline`。
 > 需求依据：[维护者评论 6910783940](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/410#issuecomment-6910783940)。设计作者 issue-scout；未获实施gate与lead提交许可前不commit/push。本文为设计及证据记录，不代表整个工单已交付。
 
@@ -129,15 +131,6 @@
 - 接收明确 provider error 的 `_ready` 事件会结束等待并 `_check_open` 抛错误，不把“_ready 被唤醒”误认为“成功就绪”。诊断原因只记录供应商 code/type、HTTP status 等安全字段，不保存带 Key 的 URL/header。
 - #411 owner 已反馈拟复用 `StageTerminationResult`，ChatStage 分 tasks_stopped / maintenance / context_closed，只有已确认安全清理时 `resources_released=true`；Manager 阻断 cleanup_error 或未释放，保留维护失败日志。该方案仍待其独立 gate，**#410 不修改这个结果契约或其判断条件**。
 - 本项不后台化维护、不调整其 90 秒期限、不改变建立顺序；源维护耗时仍从同一个建立总预算扣除，不保证每次维护失败都能在预算内继续接通。
-
-## Fun-ASR 独立诊断路径
-
-[diagnose_fun_asr.py](<../../server/scripts/diagnose_fun_asr.py>) 的U2改动仅脚本与入口测试，生产配置/adapter实现不改：
-
-- 脚本明确提供 `--connect-timeout-seconds` 与 `--session-timeout-seconds`，缺省各 10，正有限数字；这是**诊断操作参数**而非管理员生产配置。
-- 直连将第一项交库 `open_timeout`，第二项约束 run-task/等待 task-started；`--adapter` 使用完全相同的脚本参数显式构造 Fun-ASR 的诊断限时，再调用现有厂商 session。
-- provider 的 endpoint/model/key 等连接材料仍从既有配置解析，不记录 Key；不从 Manager 获得 deadline，不创建呼叫账本，不自动重放采集写入。
-- 验证不触发线上 ASR：参数解析/adapter 装配回归用公开脚本main入口及假外部 socket；有效红灯为旧非法配置在factory解析阻断（1failed/.65s），脚本覆盖后1passed/.08s；最终两路径连接/就绪限时、取消清理、CLI/main非法值及既有Fun-ASR定向回归见U2gate归档。真实供应商诊断保留为明确external/手动证据，不能用offline passed代表线上识别通过。
 
 ## 验证计划、预算与实施顺序
 

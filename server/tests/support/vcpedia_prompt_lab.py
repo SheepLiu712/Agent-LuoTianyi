@@ -1,8 +1,8 @@
 """Offline-first extraction prompt experiments, not full production coverage.
 
-    python scripts/vcpedia_prompt_lab.py --material title:Foxy
-    python scripts/vcpedia_prompt_lab.py --material title:疑神疑鬼 --drop lyrics
-    python scripts/vcpedia_prompt_lab.py --prompt a.json --prompt-b b.json --live
+    python tests/support/vcpedia_prompt_lab.py --material title:Foxy
+    python tests/support/vcpedia_prompt_lab.py --material title:疑神疑鬼 --drop lyrics
+    python tests/support/vcpedia_prompt_lab.py --prompt a.json --prompt-b b.json --live
 
 Only --live authorizes configured OpenAI-compatible model calls (api_type=openai).
 --dry-run is an offline compatibility alias. Neither mode renders remote fragments
@@ -26,7 +26,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
+SERVER = Path(__file__).resolve().parents[2]
 if str(SERVER) not in sys.path:
     sys.path.insert(0, str(SERVER))
 
