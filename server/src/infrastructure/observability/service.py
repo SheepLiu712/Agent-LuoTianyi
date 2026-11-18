@@ -121,6 +121,14 @@ class ObservabilityService(UsageMetricsStore):
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        try:
+            journal_mode = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            if journal_mode != "wal":
+                raise RuntimeError(f"Cannot enable WAL for observability database {self.db_path}: {journal_mode}")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+        except (sqlite3.Error, RuntimeError):
+            self._conn.close()
+            raise
         self._initialize_schema()
         self.initialize_usage_schema()
         self._metrics_writer = MetricWriter(self._metric_transaction)

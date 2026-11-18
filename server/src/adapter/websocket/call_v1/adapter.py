@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from src.domain.stage.lifecycle import StageEndReason
+from src.infrastructure.observability.call_latency import set_call_packet_diagnostics
 from src.stage import CallStartFailed, InteractionFinalizing, StageManager
 from src.stage.call.call_stage import CallStageOutput
 from src.utils.owned_operation import complete_owned
@@ -285,6 +286,13 @@ class CallWebSocketAdapter:
                 return
             raise CallTransportError("CALL_SESSION_UNAVAILABLE", close_code=1013)
         await session.submit_output(output)
+
+    def set_packet_diagnostics(self, call_id: str, enabled: bool) -> bool:
+        """只为当前仍由适配器持有的通话开启逐包诊断。"""
+        if call_id not in self._sessions:
+            return False
+        set_call_packet_diagnostics(call_id, enabled)
+        return True
 
     def _binding(self, handle):
         binding = self._bindings.get(handle)
