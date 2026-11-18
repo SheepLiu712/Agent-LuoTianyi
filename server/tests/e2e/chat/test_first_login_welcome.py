@@ -106,7 +106,7 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
             (
                 (
                     d.ActionKind.SAY,
-                    SayHandler("luotianyi", SimpleNamespace(), resources),
+                    SayHandler("luotianyi", SimpleNamespace(enabled=True), resources),
                 ),
             )
         ),
