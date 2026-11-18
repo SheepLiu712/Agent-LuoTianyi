@@ -1,5 +1,6 @@
 """协议换版或豁免移除不追溯拦截已建立的真实 WebSocket 会话。"""
 
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -90,8 +91,23 @@ def agreement_ws(tmp_path, monkeypatch):
         "get_admin_shell",
         lambda: SimpleNamespace(runtime_supervisor=SimpleNamespace(runtime=runtime)),
     )
-    with TestClient(app) as client:
-        yield SimpleNamespace(client=client, runtime=runtime, connected=connected, disconnected=disconnected)
+    connection_finished = Event()
+
+    async def observed_app(scope, receive, send):
+        try:
+            await app(scope, receive, send)
+        finally:
+            if scope["type"] == "websocket":
+                connection_finished.set()
+
+    with TestClient(observed_app) as client:
+        yield SimpleNamespace(
+            client=client,
+            runtime=runtime,
+            connected=connected,
+            disconnected=disconnected,
+            connection_finished=connection_finished,
+        )
 
 
 def _login(client):
@@ -136,6 +152,12 @@ def test_established_websocket_remains_authenticated_after_policy_changes_but_ne
             }
         )
         assert websocket.receive_json()["type"] == "hb_pong"
+
+        # Let the endpoint finish normal disconnect cleanup before TestClient
+        # cancels its session task on context exit.
+        websocket.close()
+        assert agreement_ws.connection_finished.wait(timeout=5)
+        assert len(agreement_ws.disconnected) == 1
 
     blocked = _login(agreement_ws.client)
     assert blocked.status_code == 403
