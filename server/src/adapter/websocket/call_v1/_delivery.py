@@ -11,7 +11,7 @@ from uuid import UUID
 import src.domain.agent as d
 from src.domain.call import CallEndReason
 from src.domain.call.terminal import CallTerminated
-from src.infrastructure.observability.call_latency import call_latency
+from src.infrastructure.observability.call_latency import CallPacketLogger, call_latency
 from src.infrastructure.observability.call_metrics import CallMetric, CallMetricName, CallMetricResult, CallMetricStatus
 
 from ._audio_codec import CALL_ROUTE, FINAL_FLAG, HEADER_SIZE, VERSION, WireAudioFrame
@@ -75,6 +75,7 @@ class Delivery:
         self._on_audio_ack = on_audio_ack
         self._config = config or TransportConfig()
         self._call_metrics = call_metrics
+        self.packet_log = CallPacketLogger(call_id)
         self._server_next_seq = 1
         self._server_ack_cursor = 0
         self._replay = OrderedDict()
@@ -181,22 +182,17 @@ class Delivery:
             stream_id=registration.stream_id,
             audio_payload_bytes=len(frame.payload),
         )
-        call_latency(
-            "audio.enqueued",
-            self.call_id,
-            response_id=registration.response_id,
-            stream_id=frame.stream_id,
-            seq=frame.seq,
-            bytes=len(frame.payload),
-        )
+        if frame.payload:
+            self.packet_log.record(
+                "audio.enqueued",
+                registration.response_id,
+                stream_id=frame.stream_id,
+                seq=frame.seq,
+                bytes=len(frame.payload),
+            )
         registration.contiguous = registration.contiguous and frame.seq == registration.last_seq + 1
         registration.last_seq = frame.seq
         self._response_audio_bytes[registration.response_id] += len(frame.payload)
-        self._record_metric(
-            CallMetricName.BUFFER,
-            numeric={"buffered_bytes": self._replay_bytes},
-            labels={"result": CallMetricResult.SUCCEEDED.value},
-        )
         if frame.flags & FINAL_FLAG:
             registration.final_seen = True
         self._server_next_seq += 1
@@ -255,11 +251,22 @@ class Delivery:
         maximum_audio = self._response_audio_limit(response_id)
         if payload_bytes <= 0 or payload_bytes > maximum_audio:
             raise ValueError("payload_bytes can never fit the response audio budget")
+        waiting = False
         while not self._closed:
             global_full = self._replay_bytes + wire_bytes > self._config.max_replay_bytes
             response_full = self._response_audio_bytes.get(response_id, 0) + payload_bytes > maximum_audio
             if not global_full and not response_full:
                 return
+            if not waiting:
+                waiting = True
+                call_latency(
+                    "audio.capacity_wait",
+                    self.call_id,
+                    response_id=response_id,
+                    buffered_bytes=self._replay_bytes,
+                    replay_full=global_full,
+                    response_full=response_full,
+                )
             self._replay_capacity_event.clear()
             await self._replay_capacity_event.wait()
         self._require_open()
@@ -366,10 +373,9 @@ class Delivery:
         while self._replay and next(iter(self._replay)) <= ack_seq:
             _, entry = self._replay.popitem(last=False)
             if entry.audio_payload_bytes and entry.retired_by is None:
-                call_latency(
+                self.packet_log.record(
                     "audio.ack",
-                    self.call_id,
-                    response_id=entry.response_id,
+                    entry.response_id,
                     stream_id=entry.stream_id,
                     seq=entry.seq,
                     ack_seq=ack_seq,
@@ -391,6 +397,7 @@ class Delivery:
     def replay_missing(self, missing_seq: int) -> list[WireOutput]:
         """重放指定缺口起的有效报文，已撤回音频以停止消息替代。"""
         self._require_open()
+        call_latency("audio.replay_requested", self.call_id, missing_seq=missing_seq)
         self._ack_retry_count += 1
         self._record_metric(
             CallMetricName.PLAYBACK_ACK_RETRY,

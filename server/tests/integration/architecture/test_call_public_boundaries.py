@@ -109,7 +109,7 @@ def test_chat_and_call_have_the_same_network_operations_and_keep_protocol_intern
     network = {"open", "receive", "next_output", "complete_output", "disconnect", "close"}
     assert network <= chat & call
     assert chat - network == {"initialize", "output_sink", "detach_stage_binding"}
-    assert call - network == {"capability_status", "supports_call_character", "submit_output"}
+    assert call - network == {"capability_status", "supports_call_character", "submit_output", "set_packet_diagnostics"}
     for name in ("adapter.py", "_delivery.py", "_input.py", "_voice_upload_helper.py"):
         assert "src.web" not in (SERVER_ROOT / "src/adapter/websocket/chat" / name).read_text(encoding="utf-8")
     for name in ("session", "binding", "delivery", "protocol_translate", "input", "control", "audio_codec"):
