@@ -126,7 +126,7 @@ async def run_handler(composition, mode="chat"):
             composition,
             memory_intent=SimpleNamespace(detect=lambda text: text if text.startswith("请记住") else None),
             memory_commit=SimpleNamespace(
-                commit_fact=AsyncMock(return_value=SimpleNamespace(memory_ids=("revision",)))
+                commit_fact=AsyncMock(return_value=SimpleNamespace(memory_ids=("revision",), retrieval_enabled=True))
             ),
         )
     if mode == "proactive":

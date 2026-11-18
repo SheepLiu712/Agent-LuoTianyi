@@ -25,6 +25,8 @@ async def test_cancelled_maintenance_waits_for_started_write_and_does_not_start_
             raise AssertionError("cancelled operation must not start embedding link")
 
     class Vector:
+        enabled = True
+
         async def prepare_embeddings(self, texts):
             return [[1.0] for text in texts]
 
@@ -64,6 +66,8 @@ async def test_cancelled_embedding_stops_preparation_without_writes_or_degradati
     started, stopped = asyncio.Event(), asyncio.Event()
 
     class Vector:
+        enabled = True
+
         async def prepare_embeddings(self, texts):
             started.set()
             try:

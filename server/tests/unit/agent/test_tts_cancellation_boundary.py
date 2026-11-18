@@ -87,6 +87,8 @@ async def test_say_does_not_emit_chunk_when_stream_yield_observes_cancellation()
     cancellation = d.CancellationToken()
 
     class CancellingSpeaking:
+        enabled = True
+
         async def speak(self, *_args, **_kwargs):
             cancellation.cancel(d.CancellationReason.NO_LONGER_NEEDED)
             yield SimpleNamespace(data=b"audio", framing=d.AudioFraming.FILE_FRAGMENT)

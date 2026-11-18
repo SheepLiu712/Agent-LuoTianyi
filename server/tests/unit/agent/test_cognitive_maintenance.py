@@ -447,7 +447,7 @@ async def test_embedding_outage_skips_memory_but_commits_profile_summary_and_pro
         async def write_maintenance_candidates(self, **kwargs):
             return await MemoryWriter({}, None).write_maintenance_candidates(
                 **kwargs, owner_character_id="luotianyi",
-                vector_store=SimpleNamespace(prepare_embeddings=unavailable),
+                vector_store=SimpleNamespace(enabled=True, prepare_embeddings=unavailable),
                 memory_store=SimpleNamespace(),  # any canonical write would fail
             )
 
