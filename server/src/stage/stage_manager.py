@@ -458,8 +458,8 @@ class StageManager:
                 source.begin_termination(StageEndReason.SWITCH)
         if source is not None:
             result = await source.terminate(StageEndReason.SWITCH)
-            if result.finalization_error or result.cleanup_error or not result.resources_released:
-                raise StageHandoffFailed("source stage did not finalize successfully")
+            if result.cleanup_error or not result.resources_released:
+                raise StageHandoffFailed("source stage did not finalize safely")
         if call.termination_requested:
             raise StageHandoffFailed("call ended during source finalization")
         self._finish_transition(handoff.ownership, call_id=call.call_id)

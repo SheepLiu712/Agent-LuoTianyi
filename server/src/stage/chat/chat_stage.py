@@ -30,6 +30,7 @@ from src.domain.stage.lifecycle import (
     StageLifecycleState,
     StageRetentionChanged,
     StageShutdownFailed,
+    StageStartAborted,
     StageTerminationOwner,
 )
 from src.domain.stage.transport import StageOutputSink
@@ -982,7 +983,7 @@ class ChatStage:
             if attempt.timing is not None:
                 attempt.timing.finish("cancelled")
 
-    async def _stop_work(self) -> None:
+    async def _stop_work(self, *, require_safe_cleanup: bool = False) -> None:
         self._scheduling = False
         self._invalidate_deadline()
         if self._first_login_timer is not None:
@@ -992,6 +993,7 @@ class ChatStage:
             self._login_reminder_timer.cancel()
             self._login_reminder_timer = None
         self._plans.clear()
+        cleanup_tokens = self._active_work_tokens()
         for context in (*self._requests.values(), self._execution):
             if context is not None:
                 context.cancellation.cancel(d.CancellationReason.NO_LONGER_NEEDED)
@@ -1001,10 +1003,9 @@ class ChatStage:
             for task in (*self._handles.values(), self._realizing, self._login_reminder_dispatch, maintenance_task)
             if task is not None and not task.done()
         ]
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await self._cancel_work_tasks(tasks, require_safe_cleanup=require_safe_cleanup)
+        if require_safe_cleanup:
+            self._require_clean_cancellation(cleanup_tokens)
         for request_id in tuple(self._proactive_claims):
             self._release_proactive_claims(request_id)
         self._requests.clear()
@@ -1017,6 +1018,36 @@ class ChatStage:
             if entry.status is _InputStatus.REPLYING:
                 entry.status = _InputStatus.READY
         self._pending = {sid: e for sid, e in self._pending.items() if e.status is _InputStatus.READY}
+
+    def _active_work_tokens(self) -> tuple[d.CancellationToken, ...]:
+        tokens = [
+            request.cancellation
+            for request_id, request in self._requests.items()
+            if (task := self._handles.get(request_id)) is not None and not task.done()
+        ]
+        for task, execution in (
+            (self._realizing, self._execution),
+            (self._maintenance.task, self._maintenance.execution),
+        ):
+            if task is not None and not task.done() and execution is not None:
+                tokens.append(execution.cancellation)
+        return tuple(tokens)
+
+    @staticmethod
+    def _require_clean_cancellation(tokens: tuple[d.CancellationToken, ...]) -> None:
+        for token in tokens:
+            if token.cleanup_error_type is not None:
+                raise StageShutdownFailed(f"cancelled task cleanup failed: {token.cleanup_error_type}")
+
+    @staticmethod
+    async def _cancel_work_tasks(tasks: list[asyncio.Task], *, require_safe_cleanup: bool) -> None:
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        if require_safe_cleanup:
+            for result in results:
+                if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                    raise result
 
     async def _terminate(self, reason: StageEndReason) -> StageTerminationResult:
         with stage_timing(
@@ -1031,29 +1062,76 @@ class ChatStage:
             )
             return result
 
+    async def _stop_termination_work(self) -> None:
+        task = self._lifetime.initialization
+        active = task is not None and task is not asyncio.current_task() and not task.done()
+        try:
+            await self._lifetime.stop_initialization()
+            if active and not task.cancelled():
+                error = task.exception()
+                if error is not None and not (
+                    isinstance(error, StageStartAborted) and isinstance(error.__cause__, asyncio.CancelledError)
+                ):
+                    raise error
+        finally:
+            await self._stop_work(require_safe_cleanup=True)
+
     async def _terminate_measured(self, reason: StageEndReason) -> StageTerminationResult:
         error = cleanup_error = None
+        tasks_stopped = False
         try:
             with stage_timing(self.interaction_id, "stage.termination.stop_tasks", stage_kind="chat"):
-                await self._lifetime.stop_initialization()
-                await self._stop_work()
-            self._lifetime.interaction_ended = True
-            if self._context is not None:
-                business_reason = {
-                    StageEndReason.SWITCH: d.InteractionEndingReason.SWITCH_TO_CALL,
-                    StageEndReason.SHUTDOWN: d.InteractionEndingReason.SHUTDOWN,
-                }.get(reason, d.InteractionEndingReason.USER_LEFT)
-                with stage_timing(
-                    self.interaction_id,
-                    "stage.termination.maintenance",
-                    stage_kind="chat",
-                    timeout_seconds=self._config.termination_timeout,
-                ) as timing:
-                    _, error = await asyncio.wait_for(
-                        self._run_termination_maintenance(business_reason), timeout=self._config.termination_timeout
-                    )
-                    if error:
-                        timing.update(status="error", finalization_error=error)
+                await self._stop_termination_work()
+            tasks_stopped = True
+        except Exception as failure:
+            cleanup_error = type(failure).__name__
+            self._logger.exception("Stage task cleanup failed interaction=%s reason=%s", self.interaction_id, reason)
+        self._lifetime.interaction_ended = True
+        if tasks_stopped:
+            try:
+                error, cleanup_error = await self._finish_maintenance(reason)
+            finally:
+                try:
+                    if cleanup_error is None and self._context is not None:
+                        with stage_timing(self.interaction_id, "stage.termination.close_context", stage_kind="chat"):
+                            await self._context.close()
+                except Exception as failure:
+                    cleanup_error = type(failure).__name__
+                    self._logger.exception("Stage context cleanup failed interaction=%s", self.interaction_id)
+                self._pending.clear()
+        resources_released = tasks_stopped and cleanup_error is None
+        if resources_released:
+            self._state = StageState.TERMINATED
+        return StageTerminationResult(
+            interaction_id=self.interaction_id,
+            reason=reason,
+            finalization_error=error,
+            cleanup_error=cleanup_error,
+            resources_released=resources_released,
+        )
+
+    async def _finish_maintenance(self, reason: StageEndReason) -> tuple[str | None, str | None]:
+        if self._context is None:
+            return None, None
+        business_reason = {
+            StageEndReason.SWITCH: d.InteractionEndingReason.SWITCH_TO_CALL,
+            StageEndReason.SHUTDOWN: d.InteractionEndingReason.SHUTDOWN,
+        }.get(reason, d.InteractionEndingReason.USER_LEFT)
+        cleanup_tokens: list[d.CancellationToken] = []
+        error = None
+        try:
+            with stage_timing(
+                self.interaction_id,
+                "stage.termination.maintenance",
+                stage_kind="chat",
+                timeout_seconds=self._config.termination_timeout,
+            ) as timing:
+                _, error = await asyncio.wait_for(
+                    self._run_termination_maintenance(business_reason, cleanup_tokens),
+                    timeout=self._config.termination_timeout,
+                )
+                if error:
+                    timing.update(status="error", finalization_error=error)
         except Exception as failure:
             self._logger.exception(
                 "Stage termination failed interaction=%s reason=%s timeout_seconds=%s",
@@ -1064,33 +1142,18 @@ class ChatStage:
             error = (
                 "interaction ending timed out" if isinstance(failure, asyncio.TimeoutError) else type(failure).__name__
             )
-        finally:
-            try:
-                if self._context is not None:
-                    with stage_timing(self.interaction_id, "stage.termination.close_context", stage_kind="chat"):
-                        await self._context.close()
-            except Exception as failure:
-                cleanup_error = type(failure).__name__
-            self._pending.clear()
-            self._lifetime.interaction_ended = True
-            if cleanup_error is None:
-                self._state = StageState.TERMINATED
-        return StageTerminationResult(
-            interaction_id=self.interaction_id,
-            reason=reason,
-            finalization_error=error,
-            cleanup_error=cleanup_error,
-            resources_released=cleanup_error is None,
-        )
+        cleanup_error = next((token.cleanup_error_type for token in cleanup_tokens if token.cleanup_error_type), None)
+        return error, cleanup_error
 
     async def _run_termination_maintenance(
-        self, reason: d.InteractionEndingReason
+        self, reason: d.InteractionEndingReason, cleanup_tokens: list[d.CancellationToken]
     ) -> tuple[d.HandlingReport | None, str | None]:
         request = self._make_request(
             d.InteractionEnding(reason=reason, **self._stage_stimulus_fields()),
             tuple(e.stimulus for e in self._pending.values()),
             tuple(e.prepared for e in self._pending.values()),
         )
+        cleanup_tokens.append(request.cancellation)
         sink = _TerminationPlanSink(self, request)
         try:
             report = await self._agent.handle_stimulus(request, sink, context=self.context)
@@ -1112,6 +1175,7 @@ class ChatStage:
             cancellation=d.CancellationToken(),
             interaction_context=self.context,
         )
+        cleanup_tokens.append(execution.cancellation)
         try:
             realized = await self._agent.realize_action_plan(sink.plan, execution, _NoOutputSink())
         except asyncio.CancelledError:

@@ -261,6 +261,7 @@ class CognitiveMaintenanceSkill:
                     },
                     current_profile=context.user.read().profile.description,
                 ),
+                cancellation=invocation.cancellation,
             )
             self._check_cancelled(invocation)
             if compaction is not None and compaction.covered_entry_ids != tuple(item.entry_id for item in covered):
