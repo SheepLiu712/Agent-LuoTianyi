@@ -11,7 +11,7 @@ from support.call_coherent_runtime import (
     NoopMediaResolver,
     runtime_config,
 )
-from support.call_omni import factory, send_reply
+from support.call_omni import factory, send_reply, wait_opening_ready
 from support.aliyun_realtime_speech import FakeAliyunWebSocket
 from support.stage_lifecycle import wait_call_finished
 from support.stage_manager import make_call_adapter, make_stage_manager
@@ -124,7 +124,7 @@ async def test_public_config_warning_audio_playback_ack_and_complete_deadline_se
         pumping = asyncio.create_task(pump(connection))
         await _eventually(lambda: stage.state is CallState.ACTIVE, timeout=5)
         assert stage._time_limit_seconds == 20 and stage._time_limit_warning_seconds == 8
-        await _eventually(lambda: any(e["type"] == "response.create" for e in socket.sent))
+        await wait_opening_ready(stage, socket)
         await send_reply(socket, response_id="opening", text="你好。", item_id=None)
         await confirm(connection, stage, "opening", 2)
         clock.advance(12)
