@@ -10,7 +10,9 @@ $groups = @{
 foreach ($runner in $groups.Keys) {
     foreach ($test in $groups[$runner]) {
         $timeoutArgs = @()
-        if ($TimeoutSeconds -gt 0) { $timeoutArgs = @('--timeout', "$TimeoutSeconds") }
+        if ($TimeoutSeconds -gt 0 -and $runner -eq 'run_feature_tests.py') {
+            $timeoutArgs = @('--timeout', "$TimeoutSeconds")
+        }
         & $Python (Join-Path $ProjectRoot "tests/$runner") --godot $engine --script "res://tests/$test" @timeoutArgs
         if ($LASTEXITCODE -ne 0) { throw "$test failed." }
     }
