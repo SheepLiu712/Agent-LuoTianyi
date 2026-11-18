@@ -24,7 +24,7 @@
 
 ```text
 python tests/support/vcpedia_corpus/oracle_support.py --manifest tests/support/vcpedia_corpus/manifest.json --output data/test_outputs/effect-UNIQUE.json
-python scripts/vcpedia_perf_baseline.py --manifest tests/support/vcpedia_corpus/manifest.json --output data/test_outputs/performance-UNIQUE.json --check
+python tests/support/vcpedia_perf_baseline.py --manifest tests/support/vcpedia_corpus/manifest.json --output data/test_outputs/performance-UNIQUE.json --check
 python -m pytest tests/unit/world/test_vcpedia_corpus_baseline.py tests/unit/world/test_vcpedia_perf_baseline.py -q -p no:cacheprovider --basetemp=data/test_outputs/pytest-corpus-UNIQUE
 ```
 

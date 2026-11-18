@@ -19,15 +19,14 @@ import time
 from importlib.metadata import version
 from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
+SERVER = Path(__file__).resolve().parents[2]
 for root in (SERVER, SERVER / "tests"):
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
+from src.world.get_new_songs.wikitext_parser import parse_details  # noqa: E402
 from support.vcpedia_legacy_html import parse_html  # noqa: E402
 from support.vcpedia_samples import load_samples  # noqa: E402
-
-from src.world.get_new_songs.wikitext_parser import parse_details  # noqa: E402
 
 FIELDS = {"name", "type", "infobox", "summary", "lyrics", "spaced_lyrics"}
 WARMUPS = 2
@@ -69,7 +68,7 @@ def prepare(manifest_path):
 def environment(manifest_path):
     """Hash the explicit local implementation/dependency set before timing, without Git or output files."""
     files = {
-        "benchmark_script": SERVER / "scripts/vcpedia_perf_baseline.py",
+        "benchmark_script": SERVER / "tests/support/vcpedia_perf_baseline.py",
         "sample_reader": SERVER / "tests/support/vcpedia_samples.py",
         "legacy_adapter": SERVER / "tests/support/vcpedia_legacy_html.py",
         "new_parser": SERVER / "src/world/get_new_songs/wikitext_parser.py",

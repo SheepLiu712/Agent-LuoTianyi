@@ -8,12 +8,11 @@ import shutil
 from pathlib import Path
 
 import pytest
-
-from scripts import vcpedia_perf_baseline as perf
+from support import vcpedia_perf_baseline as perf
 
 CORPUS = Path(__file__).resolve().parents[2] / "support" / "vcpedia_corpus"
 IMPLEMENTATION_FILES = {
-    "benchmark_script": "scripts/vcpedia_perf_baseline.py",
+    "benchmark_script": "tests/support/vcpedia_perf_baseline.py",
     "sample_reader": "tests/support/vcpedia_samples.py",
     "legacy_adapter": "tests/support/vcpedia_legacy_html.py",
     "new_parser": "src/world/get_new_songs/wikitext_parser.py",
