@@ -19,16 +19,15 @@ os.chdir(cwd)
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog  # noqa: E402
 
-from src.utils.helpers import load_config
-from src.gui import ui_init, MainWindow
-from src.gui.binder import AgentBinder
-from src.live2d import live2d
-from src.network.network_client import NetworkClient
-from src.message_process import MessageProcessor
-from src.gui.login_dialog import LoginDialog
-
+from src.utils.helpers import load_config  # noqa: E402
+from src.gui import ui_init, MainWindow  # noqa: E402
+from src.gui.binder import AgentBinder  # noqa: E402
+from src.live2d import live2d  # noqa: E402
+from src.network.network_client import NetworkClient  # noqa: E402
+from src.message_process import MessageProcessor  # noqa: E402
+from src.gui.login_dialog import ExistingAgreementResult, LoginDialog  # noqa: E402
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
@@ -41,35 +40,39 @@ if __name__ == "__main__":
 
     app = ui_init()
 
-    
     # 创建网络客户端实例
     network_client = NetworkClient(
         base_url=config.get("base_url"),
         verify_ssl=bool(config.get("verify_ssl", True)),
-    ) 
+    )
     # 创建消息处理器实例，并将网络客户端的消息监听器设置方法传入，以便消息处理器能接收网络消息
-    message_processor = MessageProcessor(network_client) 
+    message_processor = MessageProcessor(network_client)
     # 创建Binder实例，用于连接UI和网络层，传入网络客户端的相关回调方法
     binder = AgentBinder(
-        send_text_callback = message_processor.send_text,
-        send_image_callback = message_processor.send_image,
-        send_typing_callback = message_processor.send_typing_event,
-        send_touch_callback = message_processor.send_touch,
-        play_local_tts_callback = message_processor.play_local_tts_by_uuid,
-        stop_local_tts_callback = message_processor.stop_local_tts,
-        set_volume_callback = message_processor.set_playback_volume,
-        fetch_history_callback = network_client.get_history,
-        set_model_callback = message_processor.set_model,
-        auto_login_callback = network_client.auto_login,
-        login_callback = network_client.login,
-        register_callback = network_client.register,
-        reset_account_callback = network_client.reset_account,
-        send_proactive_text_callback = message_processor.send_proactive_text,
-        set_base_url_callback = network_client.set_base_url,
-        send_image_selecting_callback = message_processor.send_image_selecting_start,
-        send_image_selecting_cancel_callback = message_processor.send_image_selecting_cancel,
-        is_server_audio_active_callback = message_processor.is_server_audio_active,
-    ) 
+        send_text_callback=message_processor.send_text,
+        send_image_callback=message_processor.send_image,
+        send_typing_callback=message_processor.send_typing_event,
+        send_touch_callback=message_processor.send_touch,
+        play_local_tts_callback=message_processor.play_local_tts_by_uuid,
+        stop_local_tts_callback=message_processor.stop_local_tts,
+        set_volume_callback=message_processor.set_playback_volume,
+        fetch_history_callback=network_client.get_history,
+        set_model_callback=message_processor.set_model,
+        auto_login_callback=network_client.auto_login,
+        login_callback=network_client.login,
+        register_callback=network_client.register,
+        reset_account_callback=network_client.reset_account,
+        send_proactive_text_callback=message_processor.send_proactive_text,
+        set_base_url_callback=network_client.set_base_url,
+        send_image_selecting_callback=message_processor.send_image_selecting_start,
+        send_image_selecting_cancel_callback=message_processor.send_image_selecting_cancel,
+        is_server_audio_active_callback=message_processor.is_server_audio_active,
+        register_with_agreement_callback=network_client.register_with_agreement,
+        fetch_agreement_callback=network_client.auth_api.fetch_current_agreement,
+        login_details_callback=network_client.login_with_details,
+        auto_login_details_callback=network_client.auto_login_with_details,
+        accept_agreement_callback=network_client.accept_agreement,
+    )
     # 将Binder的信号传入消息处理器，以便消息处理器能通过信号与UI交互
     message_processor.set_signals(
         response_signal=binder.emit_response_signal,
@@ -78,18 +81,25 @@ if __name__ == "__main__":
         local_tts_state_signal=binder.emit_local_tts_state_signal,
         expression_signal=binder.emit_expression_signal,
         system_message_signal=binder.emit_system_message_signal,
-    ) 
+    )
 
-    
     # 主运行逻辑
     ret = 0
     try:
         login_dialog = LoginDialog(binder)
-        if not login_dialog.try_auto_login():
+        auto_login_result = login_dialog.try_auto_login()
+        if not auto_login_result:
+            if (
+                getattr(login_dialog, "last_existing_agreement_result", None)
+                is ExistingAgreementResult.EXIT_CLIENT
+            ):
+                raise SystemExit("Login cancelled")
             if login_dialog.exec() != QDialog.DialogCode.Accepted:
                 raise SystemExit("Login cancelled")
         print(f"Logged in as {network_client.user_id}")
-        window = MainWindow(config["gui"], config["live2d"], binder, network_client=network_client)
+        window = MainWindow(
+            config["gui"], config["live2d"], binder, network_client=network_client
+        )
         window.show()
         ret = app.exec()
     except SystemExit as e:
@@ -98,6 +108,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         live2d.dispose()

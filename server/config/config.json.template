@@ -111,6 +111,9 @@
             }
         }
     },
+    "user_agreements": {
+        "exempt_user_uuids": []
+    },
     "infrastructure": {
         "media_resolution": {
             "root": "data/media",

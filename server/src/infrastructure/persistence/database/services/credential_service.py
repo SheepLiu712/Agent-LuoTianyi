@@ -67,6 +67,10 @@ class CredentialService:
         """创建一个新的 SQL 会话；调用者负责关闭。"""
         return self._sql_session_factory()
 
+    def new_session(self) -> Any:
+        """公开的会话工厂：注册用例需要在同一会话里组合多个写入。"""
+        return self._new_session()
+
     def _ensure_redis(self) -> RedisBuffer:
         return self._redis
 
@@ -257,58 +261,15 @@ class CredentialService:
         注册新用户。邀请码必须存在、未禁用且未使用；成功后只标记为已使用，不自动禁用。
         成功返回 (True, "注册成功")，失败返回 (False, "失败原因")。
         """
-        db = self._new_session()
+        db = self.new_session()
         try:
-            available_code = (
-                db.query(InviteCode.code)
-                .filter(
-                    InviteCode.code == invite_code_str,
-                    InviteCode.is_used.is_(False),
-                    InviteCode.disabled.is_(False),
-                )
-                .first()
-            )
-            if not available_code:
-                logger.info(f"Register failed: invalid invite code for username={username}")
-                return False, "注册失败，请检查邀请码或用户名"
-
-            existing_user = db.query(User).filter_by(username=username).first()
-            if existing_user:
-                logger.info(f"Register failed: username already exists: {username}")
-                return False, "注册失败，请检查邀请码或用户名"
-
-            user_uuid = str(uuid.uuid4())
-            new_user = User(
-                uuid=user_uuid,
-                username=username,
-                password=_hash_password(password),
-            )
-            db.add(new_user)
-            db.flush()
-
-            claimed = (
-                db.query(InviteCode)
-                .filter(
-                    InviteCode.code == invite_code_str,
-                    InviteCode.is_used.is_(False),
-                    InviteCode.disabled.is_(False),
-                )
-                .update(
-                    {
-                        InviteCode.is_used: True,
-                        InviteCode.used_at: datetime.now(tz=None),
-                        InviteCode.user_id: user_uuid,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            if claimed != 1:
+            ok, message, user_uuid = self.create_account_with_invite(db, username, password, invite_code_str)
+            if not ok:
                 db.rollback()
-                logger.info("Register failed: invite code unavailable for username=%s", username)
-                return False, "注册失败，请检查邀请码或用户名"
+                return False, message
 
             db.commit()
-            self._cache_user_uuid(username, user_uuid)
+            self.cache_user_uuid(username, user_uuid)
             return True, "注册成功"
         except Exception as e:
             logger.error("Error registering user %s (%s)", username, type(e).__name__)
@@ -316,6 +277,71 @@ class CredentialService:
             return False, "注册失败，请检查邀请码或用户名"
         finally:
             db.close()
+
+    def create_account_with_invite(
+        self, db, username: str, password: str, invite_code_str: str
+    ) -> Tuple[bool, str, Optional[str]]:
+        """在调用者给定的事务里创建账号并占用邀请码；不提交、不回滚、不关闭会话。
+
+        供注册用例把账号、协议签署与注册请求结果放进同一次提交（UA-2）。
+        失败返回 (False, "失败原因", None)，成功返回 (True, "注册成功", user_uuid)。
+        """
+        available_code = (
+            db.query(InviteCode.code)
+            .filter(
+                InviteCode.code == invite_code_str,
+                InviteCode.is_used.is_(False),
+                InviteCode.disabled.is_(False),
+            )
+            .first()
+        )
+        if not available_code:
+            logger.info(f"Register failed: invalid invite code for username={username}")
+            return False, "注册失败，请检查邀请码或用户名", None
+
+        existing_user = db.query(User).filter_by(username=username).first()
+        if existing_user:
+            logger.info(f"Register failed: username already exists: {username}")
+            return False, "注册失败，请检查邀请码或用户名", None
+
+        user_uuid = str(uuid.uuid4())
+        new_user = User(
+            uuid=user_uuid,
+            username=username,
+            password=_hash_password(password),
+        )
+        db.add(new_user)
+        db.flush()
+
+        claimed = (
+            db.query(InviteCode)
+            .filter(
+                InviteCode.code == invite_code_str,
+                InviteCode.is_used.is_(False),
+                InviteCode.disabled.is_(False),
+            )
+            .update(
+                {
+                    InviteCode.is_used: True,
+                    InviteCode.used_at: datetime.now(tz=None),
+                    InviteCode.user_id: user_uuid,
+                },
+                synchronize_session=False,
+            )
+        )
+        if claimed != 1:
+            logger.info("Register failed: invite code unavailable for username=%s", username)
+            return False, "注册失败，请检查邀请码或用户名", None
+
+        return True, "注册成功", user_uuid
+
+    def cache_user_uuid(self, username: str, user_uuid: str) -> None:
+        """把用户名到 uuid 的映射写入缓存；注册与登录共用。"""
+        self._cache_user_uuid(username, user_uuid)
+
+    def verify_password(self, password: str, stored_hash: str) -> bool:
+        """校验明文密码与已存 bcrypt 哈希是否相符。"""
+        return _verify_password(password, stored_hash)
 
     def verify_user(self, username: str, password: str) -> bool:
         """
@@ -642,8 +668,22 @@ class CredentialService:
         }
 
     def authenticate_password_login(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+        state = self.authenticate_password_identity(username, password)
+        if state is None:
+            return None
+        return self._rotate_authenticated_session(
+            username=username,
+            state=state[0],
+            expected_password=state[1],
+            replacement_password=state[2],
+        )
+
+    def authenticate_password_identity(
+        self, username: str, password: str
+    ) -> Optional[tuple[Dict[str, Any], str, Optional[str]]]:
+        """只验证密码身份，不轮换会话或更新登录时间。"""
         if not self.jwt_secret:
-            logger.error("JWT_SECRET is not set. Cannot authenticate password login.")
+            logger.error("JWT_SECRET is not set. Cannot authenticate password identity.")
             return None
         try:
             state = self._load_login_state(username)
@@ -660,12 +700,7 @@ class CredentialService:
                     return None
                 replacement_password = _hash_password(password)
 
-            return self._rotate_authenticated_session(
-                username=username,
-                state=state,
-                expected_password=stored_password,
-                replacement_password=replacement_password,
-            )
+            return state, stored_password, replacement_password
         except Exception as exc:
             logger.error(
                 "Password authentication failed for %s (%s)",
@@ -675,6 +710,11 @@ class CredentialService:
             return None
 
     def authenticate_auto_login(self, username: str, token: str) -> Optional[Dict[str, Any]]:
+        state = self.authenticate_auto_login_identity(username, token)
+        return self._rotate_authenticated_session(username=username, state=state) if state else None
+
+    def authenticate_auto_login_identity(self, username: str, token: str) -> Optional[Dict[str, Any]]:
+        """只验证自动登录凭据，不轮换令牌或更新登录时间。"""
         if not self.jwt_secret:
             logger.error("JWT_SECRET is not set. Cannot authenticate automatic login.")
             return None
@@ -688,7 +728,7 @@ class CredentialService:
                 or not hmac.compare_digest(str(stored_auth_token), token)
             ):
                 return None
-            return self._rotate_authenticated_session(username=username, state=state)
+            return state
         except Exception as exc:
             logger.error(
                 "Automatic authentication failed for %s (%s)",
@@ -696,6 +736,41 @@ class CredentialService:
                 type(exc).__name__,
             )
             return None
+
+    def lock_current_agreement_identity(
+        self,
+        db,
+        *,
+        username: str,
+        identity: Dict[str, Any],
+        credential_kind: str,
+        expected_password: Optional[str] = None,
+    ) -> bool:
+        """在签署事务中条件写入认证快照，避免重置后旧凭据仍可签署。
+
+        SQLite 没有行级 ``SELECT FOR UPDATE``。条件 ``UPDATE`` 是事务的首个
+        写操作，因此会在检查凭据仍有效的同时取得写锁；调用方必须在同一事务
+        中立即写入签署记录并提交。
+        """
+        user_uuid = str(identity["user_uuid"])
+        filters = [User.uuid == user_uuid, User.username == username]
+        if credential_kind == "password":
+            stored_password = expected_password if expected_password is not None else identity.get("password")
+            if not stored_password:
+                return False
+            filters.append(User.password == stored_password)
+        elif credential_kind == "auto_login":
+            auth_token = identity.get("auth_token")
+            if not auth_token:
+                return False
+            filters.append(User.auth_token == auth_token)
+        else:
+            return False
+
+        # The self-assignment has no observable account effect, but serializes this
+        # credential check with reset_account before agreement state is written.
+        matched = db.query(User).filter(*filters).update({User.auth_token: User.auth_token}, synchronize_session=False)
+        return matched == 1
 
     def update_login_time(self, user_id: str) -> Optional[float]:
         """
