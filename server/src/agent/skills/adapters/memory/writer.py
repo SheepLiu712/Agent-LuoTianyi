@@ -261,7 +261,7 @@ class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
         """Prepare all vectors before writing canonical records and stable projections."""
         if not candidates:
             return MemoryWriteResult.EMPTY
-        projection_enabled = getattr(vector_store, "enabled", True)
+        projection_enabled = vector_store.enabled
         vectors = None
         if projection_enabled:
             try:

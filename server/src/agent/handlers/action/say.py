@@ -36,7 +36,7 @@ class SayHandler:
             outputs.ensure_call_allowed()
             if action.prepared_audio_ref is None and (action.sound_content is None or not action.sound_content.strip()):
                 return self._result(action, d.ExecutionErrorCode.UNSUPPORTED_ACTION)
-        if getattr(self._speaking, "enabled", True) is False:
+        if self._speaking.enabled is False:
             if action.call_delivery.audio_route is d.CallAudioRoute.CALL:
                 return self._result(action, d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)
             await self._emit_presentation(action, outputs)

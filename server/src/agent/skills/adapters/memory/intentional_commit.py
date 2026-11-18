@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
+from src.agent.skills.adapters.memory._canonical import find_matching_record
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.domain.memory_type import MemoryUpdateCommand
@@ -72,20 +73,11 @@ class IntentionalMemoryCommitMixin:
             source="chat",
             content=text,
         )
-        if not getattr(vector_store, "enabled", True):
+        if not vector_store.enabled:
             if not commit:
-                existing = await run_sync_owned(memory_store.get_agent_memory_record, record_id)
+                existing = await find_matching_record(memory_store, record)
                 if existing is None:
                     return "", False
-                if (
-                    existing.owner_character_id != record.owner_character_id
-                    or existing.subject_user_id != record.subject_user_id
-                    or existing.memory_type != record.memory_type
-                    or existing.visibility != record.visibility
-                    or existing.source != record.source
-                    or existing.content != record.content
-                ):
-                    raise ValueError("memory identity conflicts with persisted content")
                 return record_id, False
             created = await run_sync_owned(memory_store.write_agent_memory_record_if_absent, record)
             return record_id, created

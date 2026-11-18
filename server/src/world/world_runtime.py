@@ -124,12 +124,10 @@ class WorldRuntime:
             if hasattr(task, "ensure_dependencies"):
                 task.ensure_dependencies()
 
-        vectors = getattr(getattr(self.server_runtime, "agent_runtime", None), "vector_store", None)
-        if getattr(vectors, "enabled", True) is False:
+        if self.citywalk_tasks and not self.server_runtime.agent_runtime.vector_store.enabled:
             for task in self.citywalk_tasks:
                 task.citywalk_service = None
-            if self.citywalk_tasks:
-                self.logger.warning("Citywalk requested but skipped: vector projection is disabled")
+            self.logger.warning("Citywalk requested but skipped: vector projection is disabled")
         self._register_clock_actions()
         self._modules_initialized = True
 

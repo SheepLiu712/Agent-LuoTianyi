@@ -83,6 +83,7 @@ def make_runtime(monkeypatch):
             agent_runtime=SimpleNamespace(
                 character_ids=("luotianyi", "miku"),
                 default_character_id="luotianyi",
+                vector_store=SimpleNamespace(enabled=True),
             ),
             database_manager=SimpleNamespace(event_store=event_store),
         )

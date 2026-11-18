@@ -208,7 +208,11 @@ def retrieval_for(state, tmp_path):
 
 
 async def test_disabled_retrieval_is_empty_without_embedding_after_identity_validation(memory_state, tmp_path):
-    retrieval, _ = retrieval_for(memory_state, tmp_path)
+    retrieval, memory = retrieval_for(memory_state, tmp_path)
+
+    # 适配器的两类长期召回共享禁用语义，调用方无需先读取能力开关。
+    assert (await memory.search_memory_context_for_topic("user-1", ["测试编号412"])).hits == ()
+    assert (await memory.citywalk_memory_on(datetime(2026, 11, 17).date())).hits == ()
 
     result = await retrieval.search(invocation(), query=MemoryQuery(("测试编号412",)))
 

@@ -66,15 +66,14 @@ class MemoryRetrievalSkill:
         include_character = RetrievalScope.CHARACTER in query.scopes
         user_id = invocation.require_user_id() if include_user else None
         memory = self._memories[invocation.character_id]
-        retrieval_enabled = getattr(memory, "retrieval_enabled", True)
         clues = tuple(dict.fromkeys(clue.strip() for clue in query.clues if clue.strip()))
         hits = []
         if "/YesterdayCityWalk" in clues:
-            if include_character and retrieval_enabled:
+            if include_character:
                 day = datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1)
                 hits.extend((await memory.citywalk_memory_on(day)).hits)
             clues = tuple(clue for clue in clues if clue != "/YesterdayCityWalk")
-        if retrieval_enabled and clues and (include_user or include_character):
+        if clues and (include_user or include_character):
             context = await memory.search_memory_context_for_topic(
                 user_id,
                 list(clues),

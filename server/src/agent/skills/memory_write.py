@@ -127,7 +127,7 @@ class MemoryWriteSkill:
     async def _commit(self, invocation, value, identity, candidates) -> MemoryWriteResult:
         identifiers = []
         created = False
-        retrieval_enabled = getattr(self._vectors, "enabled", True)
+        retrieval_enabled = self._vectors.enabled
         for index, (kind, content) in enumerate(candidates):
             record_id = str(uuid5(NAMESPACE_URL, f"memory:{identity}:{index}"))
             vector_id = str(uuid5(NAMESPACE_URL, f"memory-vector:{identity}:{index}"))

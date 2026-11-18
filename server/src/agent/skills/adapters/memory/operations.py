@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
+from src.agent.skills.adapters.memory._canonical import find_matching_record
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.domain.memory_type import MemoryUpdateCommand
@@ -39,7 +40,7 @@ class MemoryOperationsMixin:
         if not text:
             return False
 
-        if not getattr(vector_store, "enabled", True):
+        if not vector_store.enabled:
             return await self._write_canonical_only(memory_store, user_id, text, owner_character_id, commit=commit)
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
         is_dup = await self._has_similar_user_memory(vector_store, user_id, text, threshold)
@@ -104,7 +105,7 @@ class MemoryOperationsMixin:
             return False
 
         today = time.strftime("%Y-%m-%d")
-        if not getattr(vector_store, "enabled", True):
+        if not vector_store.enabled:
             return await self._write_canonical_only(
                 memory_store, user_id, text, owner_character_id, commit=commit, event_date=today
             )
@@ -165,16 +166,7 @@ class MemoryOperationsMixin:
             metadata={"event_date": event_date} if event_date else {},
         )
         if not commit:
-            existing = await run_sync_owned(memory_store.get_agent_memory_record, record_id)
-            if existing is not None and (
-                existing.owner_character_id != record.owner_character_id
-                or existing.subject_user_id != record.subject_user_id
-                or existing.memory_type != record.memory_type
-                or existing.visibility != record.visibility
-                or existing.source != record.source
-                or existing.content != record.content
-            ):
-                raise ValueError("memory identity conflicts with persisted content")
+            await find_matching_record(memory_store, record)
             return False
         return await run_sync_owned(memory_store.write_agent_memory_record_if_absent, record)
 

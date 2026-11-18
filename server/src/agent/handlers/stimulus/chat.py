@@ -367,7 +367,7 @@ class ChatReplyHandler:
             if not revision.memory_ids or any(not value.strip() for value in revision.memory_ids):
                 return _failed_memory_report(request)
             committed_contents.append(memory_content)
-            retrieval_enabled = retrieval_enabled and getattr(revision, "retrieval_enabled", True)
+            retrieval_enabled = retrieval_enabled and revision.retrieval_enabled
         reply_topic = f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{'；'.join(committed_contents)}"
         if not retrieval_enabled:
             reply_topic += "。已保存正文；当前长期检索关闭，恢复时不自动建索引，不要承诺下次可召回"
