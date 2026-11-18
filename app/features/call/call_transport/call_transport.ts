@@ -582,6 +582,12 @@ export class CallTransportSession {
       this.playReplyFailureTone();
       return;
     }
+    if (message.retryable && message.code === 'OVERLOADED' && this.snapshot.status === 'connected') {
+      if (message.call_id !== undefined) this.validateCallIdentity({ call_id: message.call_id });
+      // OVERLOADED 等可重试错误：上行帧仍留在 outbox，等服务端 nack 后重放。
+      // 这里若 throw，上层会按致命错误结束整通电话，与服务端的退避重发意图相反。
+      return;
+    }
     throw new Error(message.code || 'SERVER_PROTOCOL_ERROR');
   }
 

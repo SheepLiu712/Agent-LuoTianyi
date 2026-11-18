@@ -69,6 +69,7 @@ class Session:
         self._generation = 0
         self._resume_pending = None
         self._resume_bytes = 0
+        self._capacity_drain_task: asyncio.Task | None = None
 
     @property
     def terminal_received(self) -> bool:
@@ -150,7 +151,10 @@ class Session:
     def _publish_binding(self, binding, publish):
         self._require_current(binding)
         binding.activate()
-        return publish(binding)
+        published = publish(binding)
+        if self._client_cursor + 1 in self._pending:
+            self._schedule_capacity_drain()
+        return published
 
     async def _resume_binding(self, binding, resume_cursor, *, validate_admission, publish):
         outputs = (
@@ -392,6 +396,8 @@ class Session:
         if self._closed:
             return
         self._closed = True
+        if self._capacity_drain_task is not None and self._capacity_drain_task is not asyncio.current_task():
+            self._capacity_drain_task.cancel()
         binding, self._binding = self._binding, None
         try:
             self._delivery.close()
@@ -440,18 +446,64 @@ class Session:
         elif pending is None:
             self._add_pending(frame)
         if frame.seq > self._client_cursor + 1:
-            return [make_nack(self.call_id, self._client_cursor + 1)]
+            if self._client_cursor + 1 not in self._pending:
+                return [make_nack(self.call_id, self._client_cursor + 1)]
+        return await self._drain_pending()
+
+    async def _drain_pending(self) -> list[WireOutput]:
         outputs: list[WireOutput] = []
+        before = self._client_cursor
         while (next_seq := self._client_cursor + 1) in self._pending:
             candidate = self._pending[next_seq]
             if len(self._client_fingerprints) >= self._config.max_received_fingerprints:
                 raise CallTransportError("RECEIVE_HISTORY_FULL", close_code=CALL_CLOSE_TRY_AGAIN_LATER)
             accepted = await complete_owned(self._accept_and_commit(candidate))
             if not accepted:
+                if self._client_cursor != before:
+                    outputs.append(make_ack(self.call_id, self._client_cursor))
                 outputs.append(self._error_output("OVERLOADED", request_seq=next_seq, retryable=True))
+                self._schedule_capacity_drain()
                 return outputs
         outputs.append(make_ack(self.call_id, self._client_cursor))
+        if self._pending:
+            outputs.append(make_nack(self.call_id, self._client_cursor + 1))
         return outputs
+
+    def _schedule_capacity_drain(self) -> None:
+        if not hasattr(self._stage, "wait_pcm_capacity"):
+            return
+        if self._capacity_drain_task is None or self._capacity_drain_task.done():
+            self._capacity_drain_task = asyncio.create_task(self._drain_on_capacity(), name="call-input-capacity")
+
+    async def _drain_on_capacity(self) -> None:
+        try:
+            while not self._closed and self._client_cursor + 1 in self._pending:
+                await self._stage.wait_pcm_capacity()
+                async with self._input_lock:
+                    if self._closed or self.terminal_received:
+                        return
+                    before = self._client_cursor
+                    outputs = await self._drain_pending()
+                    for output in outputs:
+                        await self._emit(output)
+                    if self._client_cursor == before and not self._waiting_for_pcm_capacity():
+                        return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            get_logger(__name__).exception("通话输入容量恢复失败 call=%s", self.call_id)
+            await self.close()
+
+    def _waiting_for_pcm_capacity(self) -> bool:
+        candidate = self._pending.get(self._client_cursor + 1)
+        # The parser validates PCM and this Session exclusively owns Stage receipts.
+        # A new, valid PCM frame can only be rejected by an ACTIVE Stage when full.
+        return (
+            candidate is not None
+            and candidate.audio is not None
+            and self._stage.state is CallState.ACTIVE
+            and not self._stage.termination_requested
+        )
 
     async def _accept_and_commit(self, frame: InboundFrame) -> bool:
         digest = self._fingerprint(frame)
@@ -478,7 +530,8 @@ class Session:
         if self._fingerprint(pending) != digest:
             raise CallTransportError("SEQ_CONFLICT")
         if frame.seq > self._client_cursor + 1:
-            return [make_nack(self.call_id, self._client_cursor + 1)]
+            if self._client_cursor + 1 not in self._pending:
+                return [make_nack(self.call_id, self._client_cursor + 1)]
         return None
 
     def _add_pending(self, frame: InboundFrame) -> None:
