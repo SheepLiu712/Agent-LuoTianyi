@@ -148,3 +148,12 @@ describe('LoginScreen 注册恢复真实消费者', () => {
     expect(storage.has('registration_resume:v1:https%3A%2F%2Fserver.example')).toBe(true);
   });
 });
+
+it('空注册表单先提示错误，不打开协议', async () => {
+  storage.clear();
+  const tree = renderPage(jest.fn());
+  await enterRegistration(tree);
+  await act(async () => registerSubmitButton(tree).props.onPress());
+  expect(latestModal?.props.visible).toBe(false);
+  act(() => tree.unmount());
+});

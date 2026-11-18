@@ -104,6 +104,10 @@ export default function LoginScreen({ onLogin, onRegister, pendingAgreement, onA
 
   const handleRegister = async () => {
     Keyboard.dismiss();
+    if (!regUsername.trim() || !regPassword.trim() || !inviteCode.trim()) {
+      Alert.alert('注册失败', '请填写用户名、密码和邀请码');
+      return;
+    }
     if (regPassword !== regConfirmPassword) {
       Alert.alert('注册失败', '两次输入的密码不一致');
       return;

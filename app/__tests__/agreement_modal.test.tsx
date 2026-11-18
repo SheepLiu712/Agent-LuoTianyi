@@ -174,3 +174,38 @@ describe('AgreementModal 真实组件行为', () => {
     expect(tree.root.findByType(SCROLL)).toBeDefined();
   });
 });
+
+describe('协议加载期间的前后台切换', () => {
+  beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(0); });
+  afterEach(() => jest.useRealTimers());
+
+  it('后台收到正文后，回到前台仍需阅读完整五秒', async () => {
+    let tree!: ReactTestRenderer;
+    const props = { visible: true, theme: THEMES.light, onRetry: jest.fn(), onSubmit: jest.fn(), onCancel: jest.fn() };
+    act(() => { tree = create(<AgreementModal {...props} agreement={null} loading />); });
+    act(() => appStateListener?.('background'));
+    act(() => { tree.update(<AgreementModal {...props} agreement={agreement} loading={false} />); });
+    markShortDocument(tree);
+    await advance(5250);
+    act(() => appStateListener?.('active'));
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(true);
+    await advance(4750);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(true);
+    await advance(250);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('系统时间向前跳变不能跳过阅读倒计时', async () => {
+    let tree!: ReactTestRenderer;
+    act(() => { tree = renderModal(); });
+    markShortDocument(tree);
+    await advance(2000);
+    jest.setSystemTime(3600000);
+    await advance(250);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(true);
+    await advance(2750);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(false);
+    act(() => tree.unmount());
+  });
+});

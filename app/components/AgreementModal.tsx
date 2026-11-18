@@ -30,12 +30,13 @@ export function AgreementModal({
   const elapsedRef = useRef(0);
   const activeSince = useRef<number | null>(null);
   const submittingRef = useRef(false);
+  const appState = useRef(AppState.currentState);
   const [contentHeight, setContentHeight] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
 
   const settleActiveInterval = useCallback((updateState = true) => {
     if (activeSince.current === null) return;
-    const now = Date.now();
+    const now = performance.now();
     elapsedRef.current = Math.min(REQUIRED_SECONDS, elapsedRef.current + Math.max(0, now - activeSince.current) / 1000);
     activeSince.current = null;
     if (updateState) setElapsed(elapsedRef.current);
@@ -54,11 +55,11 @@ export function AgreementModal({
   }, []);
 
   useEffect(() => {
-    if (!visible || loading || !agreement) return;
-    activeSince.current = Date.now();
+    if (!visible || loading || error || !agreement) return;
+    if (appState.current === 'active') activeSince.current = performance.now();
     const timer = setInterval(() => {
       if (activeSince.current === null) return;
-      const now = Date.now();
+      const now = performance.now();
       elapsedRef.current = Math.min(REQUIRED_SECONDS, elapsedRef.current + Math.max(0, now - activeSince.current) / 1000);
       activeSince.current = now;
       setElapsed(elapsedRef.current);
@@ -67,26 +68,26 @@ export function AgreementModal({
       clearInterval(timer);
       settleActiveInterval(false);
     };
-  }, [visible, loading, agreement, settleActiveInterval]);
+  }, [visible, loading, error, agreement, settleActiveInterval]);
 
   useEffect(() => {
-    if (!visible) return;
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') {
-        if (activeSince.current === null) activeSince.current = Date.now();
+      appState.current = next;
+      if (next === 'active' && visible && !loading && !error && agreement) {
+        if (activeSince.current === null) activeSince.current = performance.now();
       } else {
         settleActiveInterval();
       }
     });
     return () => sub.remove();
-  }, [visible, settleActiveInterval]);
+  }, [visible, loading, error, agreement, settleActiveInterval]);
 
   const handleScroll = useCallback((event: any) => {
     const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
     if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 2) setAtBottom(true);
   }, []);
   const shortDocument = contentHeight > 0 && viewportHeight > 0 && contentHeight <= viewportHeight + 2;
-  const ready = Boolean(agreement) && (atBottom || shortDocument) && elapsed >= REQUIRED_SECONDS && !submitting;
+  const ready = visible && !loading && !error && Boolean(agreement) && (atBottom || shortDocument) && elapsed >= REQUIRED_SECONDS && !submitting;
   const remaining = Math.max(0, Math.ceil(REQUIRED_SECONDS - elapsed));
   const helper = elapsed < REQUIRED_SECONDS
     ? `请继续阅读，还需 ${remaining} 秒`
