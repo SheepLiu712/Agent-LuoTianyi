@@ -3,8 +3,9 @@ import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text, tuple_, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
 from src.domain import ConversationItem
 from src.domain.conversation_type import ContextInfo
@@ -13,6 +14,7 @@ from src.infrastructure.persistence.cognitive_maintenance import (
     CognitiveMaintenanceBatch,
     CognitiveMaintenanceBatchDraft,
 )
+from src.infrastructure.persistence.conversation_order import conversation_order_columns, conversation_row_key
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer, WatchError
 from src.infrastructure.persistence.database.sql_database import (
     CognitiveMaintenanceBatch as CognitiveMaintenanceBatchRecord,
@@ -32,6 +34,10 @@ if TYPE_CHECKING:
 
 
 logger = get_logger("database.conversation")
+# 外部归档只用于历史展示；提取必须走用户显式选择的迁移用例。
+_CONTEXT_ELIGIBLE = (func.coalesce(func.json_extract(Conversation.meta_data, "$._transfer_external"), 0) != 1) & (
+    func.coalesce(func.json_extract(Conversation.meta_data, "$._transfer_history_only"), 0) != 1
+)
 
 
 class ConversationIdentityConflict(RuntimeError):
@@ -142,6 +148,7 @@ class ConversationService:
             db.query(Conversation.timestamp)
             .filter(Conversation.user_id == user_id)
             .filter(Conversation.character_id == character_id)
+            .filter(_CONTEXT_ELIGIBLE)
             .order_by(Conversation.timestamp.desc())
             .first()
         )
@@ -283,7 +290,8 @@ class ConversationService:
                     db.query(Conversation)
                     .filter(Conversation.user_id == user_id)
                     .filter(Conversation.character_id == character_id)
-                    .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+                    .filter(_CONTEXT_ELIGIBLE)
+                    .order_by(*(column.desc() for column in conversation_order_columns()))
                     .limit(context_memory_count)
                     .all()
                 )
@@ -490,49 +498,28 @@ class ConversationService:
         try:
 
             def _write() -> bool:
-                result = db.execute(
-                    text("""
-                    UPDATE conversation_contexts
-                    SET maintenance_entry_id = :new_entry_id
-                    WHERE user_id = :user_id
-                      AND character_id = :character_id
-                      AND (
-                          (:expected_entry_id IS NULL AND maintenance_entry_id IS NULL)
-                          OR maintenance_entry_id = :expected_entry_id
-                      )
-                      AND EXISTS (
-                          SELECT 1
-                          FROM conversations AS target
-                          WHERE target.uuid = :new_entry_id
-                            AND target.user_id = :user_id
-                            AND target.character_id = :character_id
-                      )
-                      AND (
-                          :expected_entry_id IS NULL
-                          OR EXISTS (
-                              SELECT 1
-                              FROM conversations AS current
-                              JOIN conversations AS target
-                                ON target.uuid = :new_entry_id
-                               AND target.user_id = :user_id
-                               AND target.character_id = :character_id
-                              WHERE current.uuid = :expected_entry_id
-                                AND current.user_id = :user_id
-                                AND current.character_id = :character_id
-                                AND (
-                                    target.timestamp > current.timestamp
-                                    OR (target.timestamp = current.timestamp AND target.uuid > current.uuid)
-                                )
-                          )
-                      )
-                        """),
-                    {
-                        "user_id": user_id,
-                        "character_id": character_id,
-                        "expected_entry_id": expected_entry_id,
-                        "new_entry_id": new_entry_id,
-                    },
+                target, current = aliased(Conversation), aliased(Conversation)
+                eligible_target = select(target.uuid).where(
+                    target.uuid == new_entry_id, target.user_id == user_id, target.character_id == character_id
                 )
+                if expected_entry_id is not None:
+                    eligible_target = eligible_target.where(
+                        current.uuid == expected_entry_id,
+                        current.user_id == user_id,
+                        current.character_id == character_id,
+                        tuple_(*conversation_order_columns(target)) > tuple_(*conversation_order_columns(current)),
+                    )
+                statement = (
+                    update(ConversationContext)
+                    .where(
+                        ConversationContext.user_id == user_id,
+                        ConversationContext.character_id == character_id,
+                        ConversationContext.maintenance_entry_id == expected_entry_id,
+                        eligible_target.exists(),
+                    )
+                    .values(maintenance_entry_id=new_entry_id)
+                )
+                result = db.execute(statement.execution_options(synchronize_session=False))
                 if result.rowcount != 1:
                     return False
                 db.commit()
@@ -781,17 +768,17 @@ class ConversationService:
     def _validate_draft_entry_order(by_id, previous_progress, draft) -> None:
         target = by_id[draft.target_entry_id]
         previous = by_id.get(previous_progress) if previous_progress is not None else None
-        if previous is not None and (target.timestamp, target.uuid) <= (previous.timestamp, previous.uuid):
+        if previous is not None and conversation_row_key(target) <= conversation_row_key(previous):
             raise ValueError("认知维护目标不能倒退")
         for entry_id in draft.covered_entry_ids:
             entry = by_id[entry_id]
-            if (entry.timestamp, entry.uuid) > (target.timestamp, target.uuid):
+            if conversation_row_key(entry) > conversation_row_key(target):
                 raise ValueError("认知维护记录不能超过目标记录")
         for entry_id in draft.maintained_entry_ids:
             entry = by_id[entry_id]
-            if previous is not None and (entry.timestamp, entry.uuid) <= (previous.timestamp, previous.uuid):
+            if previous is not None and conversation_row_key(entry) <= conversation_row_key(previous):
                 raise ValueError("认知维护记录必须位于 predecessor 之后")
-            if (entry.timestamp, entry.uuid) > (target.timestamp, target.uuid):
+            if conversation_row_key(entry) > conversation_row_key(target):
                 raise ValueError("认知维护记录不能超过目标记录")
 
     @staticmethod
@@ -818,7 +805,8 @@ class ConversationService:
         rows = (
             db.query(Conversation)
             .filter(Conversation.user_id == user_id, Conversation.character_id == character_id)
-            .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+            .filter(_CONTEXT_ELIGIBLE)
+            .order_by(*(column.desc() for column in conversation_order_columns()))
             .limit(context.context_memory_count)
             .all()
         )
@@ -850,7 +838,7 @@ class ConversationService:
             )
             .first()
         )
-        return previous is not None and (target.timestamp, target.uuid) > (previous.timestamp, previous.uuid)
+        return previous is not None and conversation_row_key(target) > conversation_row_key(previous)
 
     def _apply_maintenance_compaction(self, db, context, user, character_id, compaction) -> bool:
         if not all(hasattr(compaction, name) for name in ("previous_summary", "covered_entry_ids", "summary")):
@@ -866,7 +854,8 @@ class ConversationService:
         rows = (
             db.query(Conversation)
             .filter(Conversation.user_id == user.uuid, Conversation.character_id == character_id)
-            .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+            .filter(_CONTEXT_ELIGIBLE)
+            .order_by(*(column.desc() for column in conversation_order_columns()))
             .limit(count)
             .all()
         )
@@ -1065,7 +1054,7 @@ class ConversationService:
                     updated = ContextInfo(
                         summary=data.summary,
                         conversations=sorted(
-                            [*data.conversations, *rows], key=lambda row: (row["timestamp"], row["uuid"])
+                            [*data.conversations, *rows], key=lambda row: conversation_row_key(row, user_id)
                         ),
                         context_count=(data.context_count or 0) + len(rows),
                     )
@@ -1233,9 +1222,15 @@ class ConversationService:
                 db.execute(
                     text("""
                     WITH scoped_conversations AS (
-                        SELECT uuid, timestamp, source, content, type, meta_data
+                        SELECT uuid, timestamp, source, content, type, meta_data,
+                            COALESCE(json_extract(meta_data, '$._transfer_order.id'), uuid) AS order_id,
+                            COALESCE(json_extract(meta_data, '$._transfer_order.user_id'), user_id) AS order_owner,
+                            COALESCE(json_extract(meta_data, '$._transfer_origin.user_id'), user_id) AS origin_owner,
+                            COALESCE(json_extract(meta_data, '$._transfer_origin.id'), uuid) AS origin_id
                         FROM conversations
                         WHERE user_id = :user_id AND character_id = :character_id
+                          AND COALESCE(json_extract(meta_data, '$._transfer_external'), 0) != 1
+                          AND COALESCE(json_extract(meta_data, '$._transfer_history_only'), 0) != 1
                     ),
                     metadata AS (
                         SELECT
@@ -1258,7 +1253,10 @@ class ConversationService:
                             content,
                             type,
                             meta_data,
-                            ROW_NUMBER() OVER (ORDER BY timestamp DESC, uuid DESC) AS recency_rank
+                            ROW_NUMBER() OVER (
+                                ORDER BY timestamp DESC, order_id DESC, order_owner DESC,
+                                    origin_owner DESC, origin_id DESC
+                            ) AS recency_rank
                         FROM scoped_conversations
                         WHERE timestamp <= :requested_at
                     )
@@ -1278,7 +1276,7 @@ class ConversationService:
                         ranked_eligible.recency_rank
                     FROM metadata
                     LEFT JOIN ranked_eligible ON ranked_eligible.recency_rank <= 30
-                    ORDER BY ranked_eligible.timestamp ASC, ranked_eligible.uuid ASC
+                    ORDER BY ranked_eligible.recency_rank DESC
                     """),
                     {
                         "user_id": user_id,
@@ -1381,9 +1379,7 @@ class ConversationService:
             query = db.query(Conversation).filter(Conversation.user_id == user_id)
             if character_id is not None:
                 query = query.filter(Conversation.character_id == character_id)
-            conversations = (
-                query.order_by(Conversation.timestamp.asc(), Conversation.uuid.asc()).offset(start).limit(limit).all()
-            )
+            conversations = query.order_by(*conversation_order_columns()).offset(start).limit(limit).all()
             result = []
             for conv in conversations:
                 result.append(

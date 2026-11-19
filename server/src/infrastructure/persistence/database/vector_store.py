@@ -126,6 +126,10 @@ class VectorStore(ABC):
         """Delete one user's vectors and surface storage failures."""
         return self.delete_user_records(user_id)
 
+    def list_user_documents(self, user_id: str) -> list[dict]:
+        """仅供内部迁移恢复：完整分页列出本人 id/content/metadata/embedding。"""
+        raise NotImplementedError("vector store does not support complete user snapshots")
+
 
 class VectorStoreDisabledError(RuntimeError):
     """配置主动关闭向量投影，不能伪造索引成功。"""
@@ -176,6 +180,10 @@ class DisabledVectorStore(VectorStore):
     def delete_user_records_strict(self, user_id: str) -> int:
         self._require_no_persisted_vectors()
         return 0
+
+    def list_user_documents(self, user_id: str) -> list[dict]:
+        self._require_no_persisted_vectors()
+        return []
 
     def _require_no_persisted_vectors(self) -> None:
         try:
@@ -459,12 +467,42 @@ class ChromaVectorStore(VectorStore):
         self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
         return deleted_count
 
+    def list_user_documents(self, user_id: str) -> list[dict]:
+        """完整分页的内部恢复快照；embedding 数值不进入可移植归档。"""
+        documents = []
+        seen = set()
+        offset = 0
+        while True:
+            result = self.collection.get(
+                where={"user_id": user_id},
+                limit=_USER_RECORD_PAGE_SIZE,
+                offset=offset,
+                include=["documents", "metadatas", "embeddings"],
+            )
+            ids = result.get("ids") or []
+            if not ids:
+                return documents
+            columns = [result.get(key) for key in ("documents", "metadatas", "embeddings")]
+            if any(values is None or len(values) != len(ids) for values in columns):
+                raise ValueError("incomplete vector recovery snapshot")
+            for identity, content, metadata, embedding in zip(ids, *columns):
+                if identity in seen or not isinstance(metadata, dict) or metadata.get("user_id") != user_id:
+                    raise ValueError("invalid vector recovery identity")
+                if embedding is None:
+                    raise ValueError("missing vector recovery embedding")
+                documents.append(
+                    {
+                        "id": identity,
+                        "content": content,
+                        "metadata": dict(metadata),
+                        "embedding": [float(value) for value in embedding],
+                    }
+                )
+                seen.add(identity)
+            offset += len(ids)
+
     def delete_user_records_strict(self, user_id: str) -> int:
-        results = self.collection.get(where={"user_id": user_id}, include=[])
-        doc_ids = list(results.get("ids") or [])
-        if doc_ids:
-            self.collection.delete(ids=doc_ids)
-        return len(doc_ids)
+        return self.delete_user_records(user_id)
 
     def update_document(self, doc_id: str, document: Document) -> bool:
         """更新文档

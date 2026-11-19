@@ -11,15 +11,19 @@ from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.application.host_context import ServerHostContext
 from src.application.user import UserResetFence, UserResetService
+from src.application.user.data_transfer import TransferWorkspace, UserDataTransferService
 from src.domain.stage import StageState
 from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
+from src.infrastructure.media.legacy_image import LegacyImageReader
 from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
 from src.infrastructure.observability.population import PopulationSampler
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
+from src.infrastructure.persistence.transfer_projections import TransferProjections
+from src.infrastructure.persistence.user_data_transfer import UserDataRepository
 from src.stage import StageManager, WorldStage
 from src.utils.logger import (
     get_logger,
@@ -27,6 +31,7 @@ from src.utils.logger import (
     uninstall_observability_log_handler,
 )
 from src.utils.owned_operation import complete_owned
+from src.utils.server_paths import resolve_server_path
 from src.web.http import UserInterface
 from src.web.websocket import WebSocketService
 from src.world import WorldRuntime
@@ -57,6 +62,7 @@ class ServerRuntime:
     user_reset_fence: UserResetFence | None = None
     realtime_speech_factory: QwenOmniSessionFactory | None = None
     user_reset_service: UserResetService | None = None
+    user_data_transfer_service: UserDataTransferService | None = None
     _call_transport_requested: bool = field(default=False, repr=False)
     _host_context: ServerHostContext = field(default_factory=ServerHostContext, repr=False)
     default_world_id: str = DEFAULT_WORLD_ID
@@ -218,6 +224,27 @@ class ServerRuntime:
                 media_store=media_store,
                 call_sessions=database_manager.call_sessions,
                 call_maintenance_batches=database_manager.call_maintenance_batches,
+            )
+            transfer_repository = UserDataRepository(database_manager.open_sql_session)
+            runtime.user_data_transfer_service = UserDataTransferService(
+                repository=transfer_repository,
+                projections=TransferProjections(
+                    agent_runtime.vector_store,
+                    media_store,
+                    runtime.media_resolver,
+                    legacy_image_reader=LegacyImageReader(
+                        database_manager.conversation_service, resolve_server_path("data/images"), media_store.max_bytes
+                    ),
+                    link_legacy_image=transfer_repository.link_legacy_image,
+                ),
+                vectors=agent_runtime.vector_store,
+                interactions=runtime.stage_manager,
+                redis=database_manager.redis,
+                workspace=TransferWorkspace(
+                    resolve_server_path(config.get("database", {}).get("sql_db_folder", "data/database")) / "transfers"
+                ),
+                characters=agent_runtime.character_ids,
+                extract=agent_runtime.extract_imported_memories,
             )
             runtime._wire_dependencies()
             # No new call admission until all previous-runtime candidates converge.

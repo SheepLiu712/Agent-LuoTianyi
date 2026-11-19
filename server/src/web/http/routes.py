@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from src.application.admin import get_admin_shell
 from src.utils.logger import get_logger
 
+from .data_transfer_routes import register_data_transfer_routes
 from .runtime_access import require_bearer_token, runtime_not_ready_detail
 from .types import (
     AutoLoginRequest,
@@ -43,6 +44,9 @@ def get_runtime() -> "ServerRuntime":
     if runtime is None:
         raise HTTPException(status_code=503, detail=runtime_not_ready_detail())
     return runtime
+
+
+register_data_transfer_routes(router, get_runtime)
 
 
 @router.get("/auth/public_key")
