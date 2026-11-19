@@ -278,13 +278,21 @@ class DataTransferRequest:
         try:
             if response.status_code != 200:
                 detail = f"HTTP {response.status_code}"
+                data = {}
                 try:
                     server_detail = response.json().get("detail")
+                    if isinstance(server_detail, dict):
+                        data = {
+                            key: server_detail[key]
+                            for key in ("backup_id", "committed", "failed_phase", "code", "rollback_error")
+                            if key in server_detail
+                        }
+                        server_detail = data.get("code")
                     if isinstance(server_detail, str):
                         detail += f"：{server_detail}"
                 except (ValueError, AttributeError):
                     pass
-                return False, detail, {}
+                return False, detail, data
             if self.action in ("export", "backup"):
                 path = _save_download(response, self.destination, self.directory, cancelled)
                 return True, "已保存", {"path": path}

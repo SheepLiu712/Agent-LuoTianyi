@@ -254,6 +254,39 @@ def test_http_failure_never_writes_download(network, tmp_path, monkeypatch, stat
     assert not target.exists()
 
 
+def test_http_error_preserves_only_known_receipt_fields_and_never_reports_success(network, monkeypatch):
+    receipt = {
+        "backup_id": "recovery-500",
+        "committed": False,
+        "failed_phase": "commit",
+        "code": "TRANSFER_RECEIPT_UNAVAILABLE",
+        "rollback_error": None,
+    }
+    monkeypatch.setattr(
+        requests.Session,
+        "send",
+        lambda _s, req, **kw: response_for(
+            req, {"detail": {**receipt, "success": True, "unexpected": "must-not-be-forwarded"}}, 500
+        ),
+    )
+    ok, message, data = network.prepare_data_transfer_request("commit", preview_id="preview-1").execute(
+        threading.Event()
+    )
+    assert ok is False
+    assert message == "HTTP 500：TRANSFER_RECEIPT_UNAVAILABLE"
+    assert data == receipt
+
+
+@pytest.mark.parametrize("payload", [{"success": True, "backup_id": "unexpected"}, {"detail": ["unexpected"]}, []])
+def test_http_error_does_not_promote_unstructured_payload_to_receipt(network, monkeypatch, payload):
+    monkeypatch.setattr(requests.Session, "send", lambda _s, req, **kw: response_for(req, payload, 500))
+    assert network.prepare_data_transfer_request("commit", preview_id="preview-1").execute(threading.Event()) == (
+        False,
+        "HTTP 500",
+        {},
+    )
+
+
 @pytest.fixture(scope="module")
 def qapp():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -455,6 +488,52 @@ def test_http_200_commit_failure_shows_errors_and_keeps_backup_download(window, 
     dialog.backup_button.click()
     wait_for(lambda: not dialog.operation.busy)
     assert target.read_bytes() == archive_bytes()
+
+
+def test_http_500_commit_receipt_enables_backup_and_downloads_same_id(window, tmp_path, monkeypatch):
+    dialog, _state = preview(window)
+    dialog.mode_combo.setCurrentIndex(1)
+    monkeypatch.setattr(dialog_module.QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    calls = []
+    receipt = {
+        "code": "TRANSFER_RECEIPT_UNAVAILABLE",
+        "backup_id": "recovery-500",
+        "committed": False,
+        "failed_phase": "commit",
+        "rollback_error": None,
+    }
+    package = archive_bytes()
+
+    def send(_session, request, **options):
+        calls.append((request, options, threading.get_ident()))
+        if urlparse(request.url).path.endswith("/commit"):
+            return response_for(request, {"detail": receipt}, 500)
+        return response_for(request, package)
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    ui_thread = threading.get_ident()
+    dialog.commit_button.click()
+    wait_for(lambda: not dialog.operation.busy)
+    assert "操作失败：HTTP 500：TRANSFER_RECEIPT_UNAVAILABLE" in dialog.status_label.text()
+    assert "数据导入完成" not in dialog.status_label.text()
+    assert not dialog.commit_button.isEnabled()
+    assert dialog.backup_button.isEnabled()
+    assert dialog.refresh_button.isEnabled()
+    assert "替换前恢复备份已生成" in dialog.details.toPlainText()
+
+    target = tmp_path / "failed-commit-recovery.zip"
+    monkeypatch.setattr(dialog_module.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
+    dialog.backup_button.click()
+    wait_for(lambda: not dialog.operation.busy)
+    assert target.read_bytes() == package
+    assert [(request.method, urlparse(request.url).path) for request, _options, _thread in calls] == [
+        ("POST", "/user/data/import/commit"),
+        ("GET", "/user/data/backups/recovery-500"),
+    ]
+    for request, options, thread in calls:
+        assert request.headers["Authorization"] == "Bearer synthetic-token"
+        assert options["verify"] is True
+        assert thread != ui_thread
 
 
 def test_failed_extraction_retries_same_preview_without_reupload(window):
