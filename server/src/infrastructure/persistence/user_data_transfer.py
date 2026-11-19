@@ -274,7 +274,7 @@ class UserDataRepository:
     def apply(self, user_id, payload, *, mode, vector_ids=None, publish=None, receipt=None):
         """单事务接纳已重绑定的归档；投影发布失败或 SQL commit 失败均向上传播。
 
-        相同正本会消费并移除 vector_ids 的对应映射，避免发布无人引用的重复投影。
+        已有关联的相同分块会消费 vector_ids；缺失关联则在本事务补齐后发布投影。
         调用者须在本方法失败时 rollback 投影，成功后 finish。
         """
         scope = payload["scope"]
@@ -380,8 +380,7 @@ class UserDataRepository:
             persisted = persisted or [{"chunk_text": existing.content, "chunk_type": "content"}]
             if _chunk_values(persisted) != _chunk_values(_chunks(row)):
                 raise TransferConflict("MEMORY_CHUNK_CONFLICT")
-            for index, _ in enumerate(_chunks(row)):
-                vector_ids.pop((row["id"], index), None)
+            self._link_missing_memory_embeddings(db, existing, _chunks(row), vector_ids)
             return False
         db.add(AgentMemoryRecord(**values))
         db.flush()
@@ -397,6 +396,32 @@ class UserDataRepository:
             )
         db.flush()
         return True
+
+    @staticmethod
+    def _link_missing_memory_embeddings(db, record, chunks, vector_ids):
+        # 包内分块顺序可能不同；同文分块优先消费已有链接，避免重复发布。
+        available = defaultdict(list)
+        for chunk in sorted(record.chunks, key=lambda item: (item.embedding_id is not None, item.id)):
+            available[(chunk.chunk_text, chunk.chunk_type)].append(chunk)
+        linked = {chunk.embedding_id for chunk in record.chunks if chunk.embedding_id is not None}
+        # 先消费本次身份已存在的同文投影，避免重复分块的待补身份被旧链接占用。
+        ordered = sorted(enumerate(chunks), key=lambda item: vector_ids.get((record.id, item[0])) not in linked)
+        for index, values in ordered:
+            key = (record.id, index)
+            matches = available[(values["chunk_text"], values.get("chunk_type", "content"))]
+            chunk = matches.pop() if matches else None
+            if chunk is not None and chunk.embedding_id is not None:
+                vector_ids.pop(key, None)
+            elif vector_ids.get(key) is not None:
+                if chunk is None:
+                    chunk = MemoryChunkRecord(
+                        id=str(uuid5(NAMESPACE_URL, dump_json(["transfer-chunk", record.id, index]))),
+                        memory_record_id=record.id,
+                        chunk_text=values["chunk_text"],
+                        chunk_type=values.get("chunk_type", "content"),
+                    )
+                    db.add(chunk)
+                chunk.embedding_id = vector_ids[key]
 
     @staticmethod
     def _apply_edges(db, user_id, edges):

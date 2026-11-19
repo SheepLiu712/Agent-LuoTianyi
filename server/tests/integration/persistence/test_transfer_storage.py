@@ -5,7 +5,7 @@ from datetime import datetime
 from hashlib import sha256
 from io import BytesIO
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from PIL import Image
@@ -524,6 +524,47 @@ async def test_identical_memory_merge_does_not_publish_unlinked_duplicate_vector
     with state.sessions() as db:
         assert db.query(AgentMemoryRecord).count() == 1 and db.query(MemoryChunkRecord).count() == 1
         assert db.query(MemoryChunkRecord).one().embedding_id in state.vectors.rows
+
+
+@pytest.mark.parametrize(
+    "existing_id", ["existing-projection", str(uuid5(NAMESPACE_URL, "agentluo-transfer-vector:a:memory:0")), None]
+)
+async def test_merge_links_only_missing_matching_chunks_when_archive_reorders_duplicates(state, existing_id):
+    chunks = [
+        {"chunk_text": "喜欢音乐", "chunk_type": "content"},
+        {"chunk_text": "住在北京", "chunk_type": "content"},
+        {"chunk_text": "喜欢音乐", "chunk_type": "content"},
+    ]
+    payload = _payload(scope="memory", memories=[_memory(chunks=chunks)])
+    state.repo.apply("a", payload, mode="merge")
+    if existing_id is None:
+        prepared = await state.projection.prepare("a", payload, "merge")
+        existing_id = prepared.vector_ids[("memory", 2)]
+    with state.sessions.begin() as db:
+        chunk = db.query(MemoryChunkRecord).filter_by(chunk_text="喜欢音乐").first()
+        chunk.embedding_id = existing_id
+    state.vectors.rows[existing_id] = {
+        "id": existing_id,
+        "content": "喜欢音乐",
+        "metadata": {"user_id": "a"},
+        "embedding": [0.25, 0.75],
+    }
+    payload["memories"][0]["chunks"] = [chunks[1], chunks[2], chunks[0]]
+    plan = await state.projection.prepare("a", payload, "merge")
+    state.repo.apply("a", payload, mode="merge", vector_ids=plan.vector_ids, publish=plan.publish)
+    plan.finish()
+    assert len(state.vectors.rows) == 3 and len(state.vectors.published) == 2
+    assert state.vectors.rows[existing_id]["embedding"] == [0.25, 0.75]
+    with state.sessions() as db:
+        assert db.query(AgentMemoryRecord).count() == 1 and db.query(MemoryChunkRecord).count() == 3
+        for chunk in db.query(MemoryChunkRecord):
+            assert chunk.embedding_id is not None
+            assert state.vectors.rows[chunk.embedding_id]["content"] == chunk.chunk_text
+    before = deepcopy(state.vectors.rows)
+    repeated = await state.projection.prepare("a", payload, "merge")
+    state.repo.apply("a", payload, mode="merge", vector_ids=repeated.vector_ids, publish=repeated.publish)
+    repeated.finish()
+    assert state.vectors.rows == before and len(state.vectors.published) == 2
 
 
 async def test_chat_replace_never_touches_vectors(state):

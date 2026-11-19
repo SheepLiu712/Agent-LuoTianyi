@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from copy import deepcopy
@@ -54,8 +55,25 @@ def _references(payload):
     return references
 
 
-def _vector_document(user_id, row, index, chunk):
-    identity = str(uuid5(NAMESPACE_URL, f"agentluo-transfer-vector:{user_id}:{row['id']}:{index}"))
+def _vector_document(user_id, row, index, chunk, occurrence):
+    # 分块重排不能把待补投影绑到旧下标对应的另一段内容。
+    identity = str(
+        uuid5(
+            NAMESPACE_URL,
+            json.dumps(
+                [
+                    "agentluo-transfer-vector-chunk",
+                    user_id,
+                    row["id"],
+                    chunk.get("chunk_type", "content"),
+                    chunk["chunk_text"],
+                    occurrence,
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
+    )
     metadata = {
         "user_id": user_id,
         "owner_character_id": row["owner_character_id"],
@@ -191,8 +209,12 @@ class TransferProjections:
             if row["subject_user_id"] != user_id:
                 raise ValueError("TRANSFER_MEMORY_OWNER_MISMATCH")
             chunks = row.get("chunks") or [{"chunk_text": row["content"], "chunk_type": "content"}]
+            occurrences = {}
             for index, chunk in enumerate(chunks):
-                document = _vector_document(user_id, row, index, chunk)
+                key = (chunk["chunk_text"], chunk.get("chunk_type", "content"))
+                occurrence = occurrences.get(key, 0)
+                occurrences[key] = occurrence + 1
+                document = _vector_document(user_id, row, index, chunk, occurrence)
                 vector_ids[(row["id"], index)] = document.id
                 documents.append(document)
         return documents, vector_ids
