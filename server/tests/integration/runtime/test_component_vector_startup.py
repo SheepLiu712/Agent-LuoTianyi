@@ -38,7 +38,9 @@ async def test_agent_runtime_disabled_vector_store_constructs_no_vector_resource
     engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine)
-    database = SimpleNamespace(memory_store=MemoryStore({}, sessions, RedisBuffer()), conversation_service=object())
+    database = SimpleNamespace(
+        memory_store=MemoryStore({}, sessions, RedisBuffer()), conversation_service=object(), open_sql_session=sessions
+    )
     models = SimpleNamespace(
         register_llm_module=lambda *args, **kwargs: SimpleNamespace(
             prompt_template=SimpleNamespace(get_variables=list)
