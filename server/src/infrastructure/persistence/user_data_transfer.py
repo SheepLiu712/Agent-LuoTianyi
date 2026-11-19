@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import or_
 
+from src.infrastructure.persistence.conversation_order import conversation_order_columns, conversation_row_key
 from src.infrastructure.persistence.database.sql_database import (
     AgentMemoryRecord,
     CallMaintenanceBatch,
@@ -25,6 +26,7 @@ from src.infrastructure.persistence.database.sql_database import (
 _SCOPES = {"chat", "memory", "all"}
 _LOCAL_METADATA = {
     "_transfer_origin",
+    "_transfer_order",
     "_transfer_media_origin",
     "_transfer_call_origin",
     "_transfer_history_only",
@@ -122,9 +124,7 @@ class UserDataRepository:
             if scope in {"chat", "all"}:
                 payload["conversations"] = [
                     _row_dict(row)
-                    for row in db.query(Conversation)
-                    .filter_by(user_id=user_id)
-                    .order_by(Conversation.timestamp, Conversation.uuid)
+                    for row in db.query(Conversation).filter_by(user_id=user_id).order_by(*conversation_order_columns())
                 ]
                 payload["contexts"] = list(self._context_states(db, user).values())
             if scope in {"memory", "all"}:
@@ -332,6 +332,9 @@ class UserDataRepository:
                 raise TransferConflict("CONVERSATION_IDENTITY_CONFLICT")
             if _metadata(existing.meta_data) != _metadata(row["meta_data"]):
                 raise TransferConflict("CONVERSATION_METADATA_CONFLICT")
+            # 重放不改写已存来源注释；只有主排序身份改变才是试图改序。
+            if conversation_row_key(existing)[1:3] != conversation_row_key(row, user_id)[1:3]:
+                raise TransferConflict("CONVERSATION_ORDER_CONFLICT")
             return False
         # 缓存路径不接受包内提供的服务器路径，也不成为未来历史查询的直接文件入口。
         values["meta_data"] = dump_json(
@@ -463,9 +466,7 @@ class UserDataRepository:
     def _eligible_rows(db, user_id):
         return [
             _row_dict(row)
-            for row in db.query(Conversation)
-            .filter_by(user_id=user_id)
-            .order_by(Conversation.timestamp, Conversation.uuid)
+            for row in db.query(Conversation).filter_by(user_id=user_id).order_by(*conversation_order_columns())
             if not any(
                 as_json(row.meta_data).get(key, False) for key in ("_transfer_external", "_transfer_history_only")
             )

@@ -209,6 +209,12 @@ class ConversationEntry:
     timestamp: datetime
     source: str
     content: TextContent | ImageContent | AudioContent | SongContent | CallContent
+    order_key: tuple[str, str, str, str] | None = field(default=None, compare=False)
+
+    @property
+    def sort_key(self):
+        """使用持久化顺序，普通新消息保持既有 UUID 顺序。"""
+        return self.timestamp, *(self.order_key or (self.entry_id, "", "", self.entry_id))
 
     def __post_init__(self) -> None:
         if not self.entry_id.strip() or not self.source.strip():
@@ -217,6 +223,12 @@ class ConversationEntry:
             raise ValueError("timestamp 应为不带时区的服务器本地时间")
         if not isinstance(self.content, (TextContent, ImageContent, AudioContent, SongContent, CallContent)):
             raise TypeError("content 应为对话内容类型")
+        if self.order_key is not None and (
+            not isinstance(self.order_key, tuple)
+            or len(self.order_key) != 4
+            or any(not isinstance(value, str) for value in self.order_key)
+        ):
+            raise TypeError("order_key 应为四项字符串元组")
 
 
 @dataclass(frozen=True)

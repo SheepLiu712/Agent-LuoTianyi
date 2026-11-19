@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from src.domain.call import CallContent, CallEndReason, CallOutcome
+from src.domain.conversation_order import TRANSFER_ORDER_KEY, conversation_order
 from src.domain.conversation_type import ConversationItem
 
 from .models import (
@@ -81,8 +82,8 @@ class _Storage:
         )
         entries = tuple(
             sorted(
-                (_decode_entry(item) for item in data["conversations"]),
-                key=lambda entry: (entry.timestamp, entry.entry_id),
+                (_decode_entry(item, self.identity.user_id) for item in data["conversations"]),
+                key=lambda entry: entry.sort_key,
             )
         )
         return ConversationSnapshot(ConversationSummary(data["summary"]), entries), data["context_count"]
@@ -101,8 +102,8 @@ class _Storage:
         try:
             entries = tuple(
                 sorted(
-                    (_decode_entry(item) for item in conversations),
-                    key=lambda entry: (entry.timestamp, entry.entry_id),
+                    (_decode_entry(item, self.identity.user_id) for item in conversations),
+                    key=lambda entry: entry.sort_key,
                 )
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -130,7 +131,7 @@ class _Storage:
             raise RuntimeError("对话总结保存失败或上下文已经改变")
 
 
-def _decode_entry(item: dict) -> ConversationEntry:
+def _decode_entry(item: dict, user_id: str = "") -> ConversationEntry:
     data = item.get("meta_data") or {}
     if isinstance(data, str):
         data = json.loads(data)
@@ -170,7 +171,13 @@ def _decode_entry(item: dict) -> ConversationEntry:
         content = _decode_call_content(data, text)
     else:
         raise ValueError(f"不支持的历史对话类型：{kind}")
-    return ConversationEntry(item["uuid"], datetime.fromisoformat(item["timestamp"]), item["source"], content)
+    return ConversationEntry(
+        item["uuid"],
+        datetime.fromisoformat(item["timestamp"]),
+        item["source"],
+        content,
+        conversation_order(item["uuid"], user_id, data) if user_id or TRANSFER_ORDER_KEY in data else None,
+    )
 
 
 def _decode_call_content(data: dict, text: str) -> CallContent:
@@ -201,6 +208,10 @@ def _encode_entry(entry: ConversationEntry) -> ConversationItem:
         data["understanding_status"] = content.understanding_status.value
     elif isinstance(content, CallContent):
         data.update(call_id=str(content.call_id), outcome=content.outcome.value, end_reason=content.end_reason.value)
+    if entry.order_key is not None:
+        order_id, order_owner, origin_owner, origin_id = entry.order_key
+        data[TRANSFER_ORDER_KEY] = {"id": order_id, "user_id": order_owner}
+        data["_transfer_origin"] = {"id": origin_id, "user_id": origin_owner}
     return ConversationItem(
         entry.entry_id,
         entry.timestamp.isoformat(sep=" ", timespec="microseconds"),

@@ -10,6 +10,7 @@ from uuid import UUID
 
 from src.agent.context import AudioContent, AudioUnderstandingStatus, ImageContent, TextContent, UserPreferences
 from src.domain.call import CallContent, CallEndReason, CallOutcome
+from src.domain.conversation_order import TRANSFER_ORDER_KEY, conversation_order
 from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.infrastructure.persistence.user_data_transfer import as_json, parse_time, stable_id
 
@@ -41,7 +42,7 @@ def _map_metadata(value, maps):
         elif key in {"media_id", "memory_record_id", "call_id"} and isinstance(item, str):
             kind = {"media_id": "media", "memory_record_id": "memory", "call_id": "call"}[key]
             result[key] = maps[kind].get(item, item)
-        elif key in {"_transfer_origin", "_transfer_media_origin", "_transfer_call_origin"}:
+        elif key in {"_transfer_origin", "_transfer_media_origin", "_transfer_call_origin", TRANSFER_ORDER_KEY}:
             result[key] = item
         else:
             result[key] = _map_metadata(item, maps)
@@ -178,6 +179,8 @@ def _bind_rows(payload, source_user, user_id, maps):
     external = payload.get("source_format", "native") != "native"
     for row in payload["conversations"]:
         metadata = row["meta_data"]
+        order_id, order_owner, _, _ = conversation_order(row["uuid"], source_user, metadata)
+        metadata[TRANSFER_ORDER_KEY] = {"id": order_id, "user_id": order_owner}
         owner, identity = _origin(metadata, source_user, row["uuid"])
         metadata["_transfer_origin"] = {"user_id": owner, "id": identity}
         if metadata.get("media_id"):
