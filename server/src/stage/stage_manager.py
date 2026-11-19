@@ -464,6 +464,58 @@ class StageManager:
             raise StageHandoffFailed("call ended during source finalization")
         self._finish_transition(handoff.ownership, call_id=call.call_id)
 
+    async def begin_user_data_transfer(self, user_id: str) -> object:
+        """暂停本人聊天并等待维护收尾；通话或未完成生命周期始终拒绝迁移。"""
+        async with self._lock:
+            self._require_transfer_idle(user_id)
+            if self._user_reset_fence is None:
+                raise RuntimeError("user reset fence is not configured")
+            token = await self._user_reset_fence.begin(user_id)
+            stages = tuple(stage for (owner, _), stage in self._stages.items() if owner == user_id)
+            for stage in stages:
+                stage.set_input_suspended(True)
+                stage.begin_termination(StageEndReason.USER_REQUESTED)
+        try:
+            results = await asyncio.gather(
+                *(stage.terminate(StageEndReason.USER_REQUESTED) for stage in stages), return_exceptions=True
+            )
+            if any(
+                isinstance(result, BaseException)
+                or result.finalization_error
+                or result.cleanup_error
+                or not result.resources_released
+                for result in results
+            ):
+                raise RuntimeError("USER_DATA_TRANSFER_FINALIZATION_FAILED")
+            return token
+        except BaseException:
+            await self._user_reset_fence.end(user_id, token)
+            raise
+
+    def _require_transfer_idle(self, user_id: str) -> None:
+        if self._closed:
+            raise RuntimeError("STAGE_MANAGER_CLOSED")
+        if self._finalizations.has_user(user_id):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner == user_id for owner, _ in self._chat_creations):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(entry.user_id == user_id and not isinstance(entry.stage, ChatStage) for entry in self._managed.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner.user_id == user_id for owner in self._call_ownerships.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(claim.prepared.user_id == user_id for claim in self._call_claims.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner[0] == user_id for owner in self._call_start_operations.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner == user_id and not task.done() for task, owner in self._call_stage_creations.items()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(
+            stage.lifecycle_state is not StageLifecycleState.RUNNING
+            for (owner, _), stage in self._stages.items()
+            if owner == user_id
+        ):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+
     async def begin_user_data_reset(self, user_id: str) -> object:
         async with self._lock:
             if self._closed:

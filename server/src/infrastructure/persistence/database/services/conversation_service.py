@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 
 from src.domain import ConversationItem
@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 
 
 logger = get_logger("database.conversation")
+# 外部归档只用于历史展示；提取必须走用户显式选择的迁移用例。
+_CONTEXT_ELIGIBLE = (func.coalesce(func.json_extract(Conversation.meta_data, "$._transfer_external"), 0) != 1) & (
+    func.coalesce(func.json_extract(Conversation.meta_data, "$._transfer_history_only"), 0) != 1
+)
 
 
 class ConversationIdentityConflict(RuntimeError):
@@ -142,6 +146,7 @@ class ConversationService:
             db.query(Conversation.timestamp)
             .filter(Conversation.user_id == user_id)
             .filter(Conversation.character_id == character_id)
+            .filter(_CONTEXT_ELIGIBLE)
             .order_by(Conversation.timestamp.desc())
             .first()
         )
@@ -283,6 +288,7 @@ class ConversationService:
                     db.query(Conversation)
                     .filter(Conversation.user_id == user_id)
                     .filter(Conversation.character_id == character_id)
+                    .filter(_CONTEXT_ELIGIBLE)
                     .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
                     .limit(context_memory_count)
                     .all()
@@ -818,6 +824,7 @@ class ConversationService:
         rows = (
             db.query(Conversation)
             .filter(Conversation.user_id == user_id, Conversation.character_id == character_id)
+            .filter(_CONTEXT_ELIGIBLE)
             .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
             .limit(context.context_memory_count)
             .all()
@@ -866,6 +873,7 @@ class ConversationService:
         rows = (
             db.query(Conversation)
             .filter(Conversation.user_id == user.uuid, Conversation.character_id == character_id)
+            .filter(_CONTEXT_ELIGIBLE)
             .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
             .limit(count)
             .all()
@@ -1236,6 +1244,8 @@ class ConversationService:
                         SELECT uuid, timestamp, source, content, type, meta_data
                         FROM conversations
                         WHERE user_id = :user_id AND character_id = :character_id
+                          AND COALESCE(json_extract(meta_data, '$._transfer_external'), 0) != 1
+                          AND COALESCE(json_extract(meta_data, '$._transfer_history_only'), 0) != 1
                     ),
                     metadata AS (
                         SELECT

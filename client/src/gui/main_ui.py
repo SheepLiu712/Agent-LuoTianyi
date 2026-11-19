@@ -25,6 +25,7 @@ from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMess
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
 from .llm_settings_dialog import LLMSettingsDialog
+from .data_transfer_dialog import DataTransferDialog
 from .async_request import start_dynamic_unread_request
 
 DYNAMIC_ICON_PATH = "res/gui/dynamic.png"
@@ -722,6 +723,7 @@ class ChatWidget(QWidget):
         menu = QMenu(self)
         prefs_action = menu.addAction("相处模式设置")
         llm_action = menu.addAction("LLM 模型设置")
+        transfer_action = menu.addAction("聊天与记忆迁移")
         chosen = menu.exec(
             self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft())
         )
@@ -729,6 +731,28 @@ class ChatWidget(QWidget):
             PreferencesDialog(self.network_client, self).exec()
         elif chosen == llm_action:
             LLMSettingsDialog(self.network_client, self).exec()
+        elif chosen == transfer_action:
+            dialog = DataTransferDialog(self.network_client, self)
+            dialog.refresh_requested.connect(self.refresh_transferred_history)
+            dialog.exec()
+            dialog.deleteLater()
+
+    def refresh_transferred_history(self):
+        """迁移后显式重新取最新历史；沿用现有异步历史和 WS 自动重连入口。"""
+        self.network_client.ws_transport.request_reconnect()
+        if self.is_loading_history:
+            self.on_system_message("历史正在加载，请稍后再点击刷新历史。")
+            return
+        self.agent.on_stop_local_tts()
+        for index in range(self.history_layout.count() - 1, -1, -1):
+            item = self.history_layout.itemAt(index)
+            if item.widget() is not None:
+                self.history_layout.takeAt(index).widget().deleteLater()
+        self.agent_bubbles.clear()
+        self.current_history_index = -1
+        self.first_load = True
+        self.is_loading_history = True
+        self.agent.on_load_history(self.load_history_num, -1)
 
     def open_dynamics(self):
         if self.network_client:

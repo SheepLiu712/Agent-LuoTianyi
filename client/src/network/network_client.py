@@ -6,6 +6,7 @@ from typing import Callable, List, Tuple
 from . import AuthApi, WsTransport
 from .auth import AccountRequest
 from .dynamics import DynamicRequest
+from .data_transfer import DataTransferRequest
 from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
@@ -371,6 +372,10 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"History Error: {exc}")
             return [], -1
+
+    def prepare_data_transfer_request(self, action: str, **values) -> DataTransferRequest:
+        """冻结当前账号；文件与 HTTP 操作由窗口后台任务执行。"""
+        return DataTransferRequest(self.account_context(), action, self.base_url, self.message_token, **values)
 
     def prepare_dynamic_request(self, action: str, **values) -> DynamicRequest:
         return DynamicRequest(self.account_context(), action, self.base_url, self.user_id, self.message_token, **values)
