@@ -88,13 +88,21 @@ def _vector_document(user_id, row, index, chunk, occurrence):
 
 
 class TransferProjections:
-    def __init__(self, vector_store, media_store, media_resolver):
+    def __init__(self, vector_store, media_store, media_resolver, *, legacy_image_reader=None, link_legacy_image=None):
         self.vector_store = vector_store
         self.media_store = media_store
         self.media_resolver = media_resolver
+        self._legacy_image_reader = legacy_image_reader
+        self._link_legacy_image = link_legacy_image
 
     def export_media(self, user_id, payload):
         """按本人受控引用导出已校验媒体；缺失项明确保留 descriptor 和 warning。"""
+        self._backfill_legacy_images(user_id, payload)
+        for row in payload.get("conversations", []):
+            metadata = row.get("meta_data") or {}
+            metadata.pop("image_server_path", None)
+            metadata.pop("image_client_path", None)
+            row["meta_data"] = metadata
         files, media, total = {}, [], 0
         for identity, descriptor in _references(payload).items():
             try:
@@ -130,6 +138,40 @@ class TransferProjections:
             media.append(descriptor)
         payload["media"] = media
         return files
+
+    def _backfill_legacy_images(self, user_id, payload):
+        if self._legacy_image_reader is None or self._link_legacy_image is None:
+            return
+        for row in payload.get("conversations", []):
+            metadata = row.get("meta_data") or {}
+            if row["type"] != "image" or row["source"] != "user" or metadata.get("media_id"):
+                continue
+            if row.get("user_id") != user_id:
+                raise ValueError("LEGACY_IMAGE_OWNER_MISMATCH")
+            # reader 只接收本机记录身份，自行查本人 SQL 并限定旧图片根目录。
+            resolved = self._legacy_image_reader(user_id, row["uuid"])
+            if resolved is None:
+                continue
+            media_ref = self.media_store.mint_ref(user_id=user_id, client_msg_id=row["uuid"])
+            prepared = self.media_store.prepare_transfer(
+                media_ref=media_ref,
+                owner_user_id=user_id,
+                data=resolved.data,
+                kind="image",
+                mime_type=resolved.mime_type,
+            )
+            created = self.media_store.publish_transfer(prepared)
+            try:
+                self._link_legacy_image(user_id, row["uuid"], media_ref.media_id, resolved.mime_type)
+            except BaseException:
+                if created:
+                    self.media_store.rollback_transfer(prepared)
+                raise
+            # 同步本机正本后再更新导出快照，返回原账号 merge 时仍是相同媒体。
+            metadata.update(media_id=media_ref.media_id, mime_type=resolved.mime_type)
+            metadata.pop("image_server_path", None)
+            metadata.pop("image_client_path", None)
+            row["meta_data"] = metadata
 
     async def prepare(self, user_id, payload, mode):
         """先完成所有内容校验和 embedding；本方法不会发布文件、向量或 SQL。"""

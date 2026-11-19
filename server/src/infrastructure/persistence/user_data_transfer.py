@@ -132,6 +132,19 @@ class UserDataRepository:
                 payload["profile"] = {"description": user.description or "", "preferences": as_json(user.preferences)}
             return payload
 
+    def link_legacy_image(self, user_id, conversation_id, media_id, mime_type):
+        """只为本人现存图片接纳已校验的受控媒体身份，不接收文件路径。"""
+        with self._sessions() as db, db.begin():
+            row = db.get(Conversation, conversation_id)
+            if row is None or row.user_id != user_id or row.type != "image":
+                raise TransferConflict("LEGACY_IMAGE_OWNER_MISMATCH")
+            metadata = as_json(row.meta_data)
+            previous = metadata.get("media_id")
+            if previous and previous != media_id:
+                raise TransferConflict("LEGACY_IMAGE_REFERENCE_CHANGED")
+            metadata.update(media_id=media_id, mime_type=mime_type)
+            row.meta_data = dump_json(metadata)
+
     @staticmethod
     def _snapshot_memory(db, user_id, payload):
         records = db.query(AgentMemoryRecord).filter_by(subject_user_id=user_id).order_by(AgentMemoryRecord.id).all()

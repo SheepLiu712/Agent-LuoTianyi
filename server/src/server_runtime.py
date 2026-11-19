@@ -15,6 +15,7 @@ from src.application.user.data_transfer import TransferWorkspace, UserDataTransf
 from src.domain.stage import StageState
 from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
+from src.infrastructure.media.legacy_image import LegacyImageReader
 from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
@@ -224,9 +225,18 @@ class ServerRuntime:
                 call_sessions=database_manager.call_sessions,
                 call_maintenance_batches=database_manager.call_maintenance_batches,
             )
+            transfer_repository = UserDataRepository(database_manager.open_sql_session)
             runtime.user_data_transfer_service = UserDataTransferService(
-                repository=UserDataRepository(database_manager.open_sql_session),
-                projections=TransferProjections(agent_runtime.vector_store, media_store, runtime.media_resolver),
+                repository=transfer_repository,
+                projections=TransferProjections(
+                    agent_runtime.vector_store,
+                    media_store,
+                    runtime.media_resolver,
+                    legacy_image_reader=LegacyImageReader(
+                        database_manager.conversation_service, resolve_server_path("data/images"), media_store.max_bytes
+                    ),
+                    link_legacy_image=transfer_repository.link_legacy_image,
+                ),
                 vectors=agent_runtime.vector_store,
                 interactions=runtime.stage_manager,
                 redis=database_manager.redis,
