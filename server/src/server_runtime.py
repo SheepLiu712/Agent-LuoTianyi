@@ -234,7 +234,7 @@ class ServerRuntime:
                     resolve_server_path(config.get("database", {}).get("sql_db_folder", "data/database")) / "transfers"
                 ),
                 characters=agent_runtime.character_ids,
-                extract=agent_runtime.skills.imported_memory.extract,
+                extract=agent_runtime.extract_imported_memories,
             )
             runtime._wire_dependencies()
             # No new call admission until all previous-runtime candidates converge.
