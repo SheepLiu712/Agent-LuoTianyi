@@ -1274,6 +1274,8 @@ class CallStage:
             timing.finish("interrupted")
 
     def _playback_barriers(self, plan: d.ActionPlan) -> tuple[str, ...]:
+        if all(isinstance(action, d.RequestCallSpeech) for action in plan.actions):
+            return ()
         pending = (key for key, r in self._responses.items() if not r.playback_completed and not r.failed)
         if len(plan.actions) == 1 and isinstance(plan.actions[0], d.Say):
             current = self._segment_models.get(plan.actions[0].call_delivery.response_id)
@@ -1373,6 +1375,10 @@ class CallStage:
             with reply_timing_scope(self._reply_timings.get(plan.origin_request_id)):
                 report = await self._agent.realize_action_plan(plan, context, _OutputSink(self, context, turn_seq))
             await self._handle_plan_result(plan, report, turn_seq, execution_token, retried, response_ids)
+            if report.status is d.ExecutionStatus.COMPLETED and not execution_token.is_cancelled:
+                for action in plan.actions:
+                    if isinstance(action, d.RequestCallSpeech):
+                        await self._provider.push(InstructionText(action.instruction, "silence"))
             if (
                 report.status is d.ExecutionStatus.COMPLETED
                 and proactive_generation == self._generation

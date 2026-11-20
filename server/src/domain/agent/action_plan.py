@@ -196,6 +196,23 @@ class FinalizeCall(Action):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RequestCallSpeech(Action):
+    """角色要求当前通话模型主动续聊。"""
+
+    kind: ClassVar[ActionKind] = ActionKind.REQUEST_CALL_SPEECH
+    instruction: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MarkTopicShared(Action):
+    """同一计划的回复成功后，记录本用户已听取该事件话题。"""
+
+    kind: ClassVar[ActionKind] = ActionKind.MARK_TOPIC_SHARED
+    event_id: str
+    trigger_key: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Reflection(Action):
     """旧计划兼容类型；生产路由不再注册。"""
 

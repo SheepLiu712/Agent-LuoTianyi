@@ -9,6 +9,7 @@ from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
+from src.agent.facade import Agent
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode
 from src.stage import DueEvent
@@ -111,8 +112,9 @@ def completed_report(request: d.HandleStimulusRequest, plan_ids: tuple[str, ...]
     )
 
 
-class RecordingAgent:
+class RecordingAgent(Agent):
     def __init__(self, *, fail_handle: bool = False) -> None:
+        super().__init__(character_id="luotianyi")
         self.fail_handle = fail_handle
         self.stimuli: list[d.ProactivePromptDue] = []
 
