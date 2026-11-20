@@ -503,7 +503,6 @@ class RuntimeConfigValidator:
             "bili_dynamic_fetcher",
             "dynamic_interaction",
             "diary",
-            "proactive_topic_check",
             "expired_event_cleanup",
         ):
             section = world.get(task, {})

@@ -1,5 +1,6 @@
 """首次登录主动欢迎 handler 的失败结算。"""
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ import src.domain.agent as d
 from src.agent import Agent
 from src.agent.handlers.stimulus import proactive as proactive_module
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+from src.agent.handlers.stimulus.proactive_speech import ProactiveSpeechHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.reply_materials import ReplyGenerationResult
 from src.agent.skills.cognitive import ReplyDraft
@@ -121,7 +123,6 @@ async def test_missing_prepared_name_fails_without_silent_skip(monkeypatch):
     handler = FirstLoginHandler(
         prepared_names=("missing",),
         prepared_speech=PreparedSpeechCatalog({}),
-        skills=scripted_reply_skills(Composer()),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -165,7 +166,8 @@ async def test_runtime_injects_configured_names_into_real_handler(runtime_depend
         # Then: the placeholder is replaced and configured order is retained.
         assert isinstance(handler, FirstLoginHandler)
         assert handler._prepared_names == ("welcome_1", "welcome_2")
-        assert handler._skills.reply is runtime.skills.reply
+        proactive = runtime.get_agent()._stimulus_router.resolve(d.StimulusKind.PROACTIVE_SPEECH_DUE)
+        assert proactive._skills.reply is runtime.skills.reply
     finally:
         await runtime.shutdown()
 
@@ -183,14 +185,27 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
             ),
         )
     )
-    handler = FirstLoginHandler(
-        prepared_names=(),
-        prepared_speech=PreparedSpeechCatalog({}),
+    handler = ProactiveSpeechHandler(
+        events=SimpleNamespace(
+            list_due=lambda **kwargs: (
+                SimpleNamespace(
+                    event_id="event",
+                    reason="holiday",
+                    title="中秋节",
+                    description="赏月团圆",
+                    trigger_key="day_of_event",
+                    character_id="luotianyi",
+                    is_notified=False,
+                    is_personal=False,
+                    target_user_id=None,
+                ),
+            )
+        ),
         skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",
-        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),)),
+        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_SPEECH_DUE, handler),)),
     )
     sink = PlanSink()
     conversation = Conversation()
@@ -206,7 +221,7 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
 
     # When: Agent handles the reminder through its public handle entrypoint.
     report = await agent.handle_stimulus(
-        first_login_request("holiday"),
+        proactive_request(),
         sink,
         context=context,
     )
@@ -218,7 +233,8 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
     assert composer.calls[0]["invocation"].user_id == "user"
     assert [entry.content.text for entry in conversation.entries] == ["今天好像有个特别的日子，你有什么安排吗？"]
     assert len(sink.values) == 1
-    assert len(sink.values[0].actions) == 1
+    assert len(sink.values[0].actions) == 2
+    assert isinstance(sink.values[0].actions[-1], d.MarkTopicShared)
     action = sink.values[0].actions[0]
     assert isinstance(action, d.Say)
     assert action.content == "今天好像有个特别的日子，你有什么安排吗？"
@@ -231,14 +247,27 @@ async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
 @pytest.mark.asyncio
 async def test_due_reminder_with_no_deliverable_generation_does_not_persist_prompt_or_emit_plan():
     composer = Composer((ReplyDraft(content="", sound_content="", tone="normal", expression=None),))
-    handler = FirstLoginHandler(
-        prepared_names=(),
-        prepared_speech=PreparedSpeechCatalog({}),
+    handler = ProactiveSpeechHandler(
+        events=SimpleNamespace(
+            list_due=lambda **kwargs: (
+                SimpleNamespace(
+                    event_id="event",
+                    reason="holiday",
+                    title="中秋节",
+                    description="赏月团圆",
+                    trigger_key="day_of_event",
+                    character_id="luotianyi",
+                    is_notified=False,
+                    is_personal=False,
+                    target_user_id=None,
+                ),
+            )
+        ),
         skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",
-        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),)),
+        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_SPEECH_DUE, handler),)),
     )
     sink = PlanSink()
     conversation = Conversation()
@@ -248,9 +277,9 @@ async def test_due_reminder_with_no_deliverable_generation_does_not_persist_prom
         user=SimpleNamespace(read=lambda: SimpleNamespace()),
     )
 
-    report = await agent.handle_stimulus(first_login_request("holiday"), sink, context=context)
+    report = await agent.handle_stimulus(proactive_request(), sink, context=context)
 
-    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert report.request_status is d.HandlingRequestStatus.FAILED
     assert report.emitted_plan_ids == ()
     assert conversation.entries == []
     assert sink.values == []
@@ -261,14 +290,27 @@ async def test_cancelled_due_reminder_does_not_persist_or_emit_late_generation()
     composer = CancellingComposer(
         (ReplyDraft(content="过期回复", sound_content="过期回复", tone="normal", expression=None),)
     )
-    handler = FirstLoginHandler(
-        prepared_names=(),
-        prepared_speech=PreparedSpeechCatalog({}),
+    handler = ProactiveSpeechHandler(
+        events=SimpleNamespace(
+            list_due=lambda **kwargs: (
+                SimpleNamespace(
+                    event_id="event",
+                    reason="holiday",
+                    title="中秋节",
+                    description="赏月团圆",
+                    trigger_key="day_of_event",
+                    character_id="luotianyi",
+                    is_notified=False,
+                    is_personal=False,
+                    target_user_id=None,
+                ),
+            )
+        ),
         skills=scripted_reply_skills(composer),
     )
     agent = Agent(
         character_id="luotianyi",
-        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),)),
+        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_SPEECH_DUE, handler),)),
     )
     sink = PlanSink()
     conversation = Conversation()
@@ -278,8 +320,25 @@ async def test_cancelled_due_reminder_does_not_persist_or_emit_late_generation()
         user=SimpleNamespace(read=lambda: SimpleNamespace()),
     )
 
-    report = await agent.handle_stimulus(first_login_request("holiday"), sink, context=context)
+    report = await agent.handle_stimulus(proactive_request(), sink, context=context)
 
     assert report.request_status is d.HandlingRequestStatus.CANCELLED
     assert conversation.entries == []
     assert sink.values == []
+
+
+def proactive_request():
+    req = first_login_request()
+    return replace(
+        req,
+        stimulus=d.ProactiveSpeechDue(
+            stimulus_id="proactive",
+            schema_version=1,
+            occurred_at=req.interaction.now,
+            source=d.StimulusSource.AGENT,
+            target_character_ids=("luotianyi",),
+            user_id="user",
+            ephemeral=True,
+            generation=1,
+        ),
+    )

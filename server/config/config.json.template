@@ -17,7 +17,15 @@
     "stage_manager": {
         "call_setup_timeout": 10.0,
         "stage": {
-            "termination_timeout": 90
+            "termination_timeout": 90,
+            "proactive_idle_seconds": 30,
+            "proactive_half_life_seconds": 60,
+            "proactive_threshold": 0.5
+        },
+        "call_stage": {
+            "proactive_idle_seconds": 5,
+            "proactive_half_life_seconds": 15,
+            "proactive_threshold": 0
         }
     },
     "llm_service": {
@@ -165,48 +173,6 @@
             "terminal_send_max_attempts": 3,
             "terminal_send_retry_delay_seconds": 0.05,
             "shutdown_timeout_seconds": 30
-        },
-        "proactive_topic_maker": {
-            "return_user_threshold_seconds": 432000,
-            "silence_threshold_seconds": 180,
-            "activity_trigger_threshold": 5,
-            "inactivity_decay_interval_seconds": 180,
-            "silence_check_interval_seconds": 5,
-            "silence_trigger_cooldown_seconds": 180,
-            "activity_res": {
-                "first_login": {
-                    "manifest": "res/agent/prepared_speech/luotianyi/manifest.json",
-                    "resource_names": [
-                        "first_greet_1",
-                        "first_greet_2"
-                    ]
-                },
-                "return_login": {
-                    "prompt": "return_login_activity_prompt"
-                },
-                "user_silence": {
-                    "prompt": "user_silence_activity_prompt"
-                }
-            },
-            "reminder": {
-                "advance_days_concert": [
-                    3,
-                    1,
-                    0
-                ],
-                "advance_days_general": [
-                    0
-                ]
-            },
-            "context": {
-                "lookahead_days": 7,
-                "max_context_events": 5,
-                "mention_cooldown_hours": 6
-            },
-            "silence": {
-                "concert_pre_start_minutes": 60,
-                "concert_post_end_minutes": 30
-            }
         }
     },
     "agent_runtime": {
@@ -667,16 +633,6 @@
                     "use_json": true
                 },
                 "prompt_name": "bili_dynamic_fetcher_prompt"
-            }
-        },
-        "proactive_topic_check": {
-            "enabled": true,
-            "clock_config": {
-                "type": "interval",
-                "params": {
-                    "interval_seconds": 300,
-                    "run_immediately": false
-                }
             }
         },
         "diary": {

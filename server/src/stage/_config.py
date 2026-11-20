@@ -12,7 +12,6 @@ class _StageConfig:
     voice_recording_wait: float = 40.0
     voice_commit_wait: float = 15.0
     first_login_wait: float = 1.0
-    login_reminder_wait: float = 1.0
     proactive_idle_seconds: float = 30.0
     proactive_half_life_seconds: float = 60.0
     proactive_threshold: float = 0.5
@@ -36,7 +35,6 @@ class _StageConfig:
                 ("voice_recording_wait", 40.0),
                 ("voice_commit_wait", 15.0),
                 ("first_login_wait", 1.0),
-                ("login_reminder_wait", 1.0),
                 ("proactive_idle_seconds", 30.0),
                 ("proactive_half_life_seconds", 60.0),
                 ("proactive_threshold", 0.5),
@@ -53,7 +51,6 @@ class _StageConfig:
             "voice_recording_wait",
             "voice_commit_wait",
             "first_login_wait",
-            "login_reminder_wait",
             "proactive_idle_seconds",
             "proactive_half_life_seconds",
         ):

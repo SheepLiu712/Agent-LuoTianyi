@@ -25,7 +25,6 @@ WORLD_KEYS = (
     "bili_dynamic_fetcher",
     "dynamic_interaction",
     "diary",
-    "proactive_topic_check",
     "expired_event_cleanup",
 )
 
@@ -155,7 +154,6 @@ def prepare_instance(root: Path) -> None:
     )
     agent["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     agent["skills"]["touch_reaction"] = {}
-    config["chat_session_manager"]["proactive_topic_maker"]["silence_threshold_seconds"] = 3600
     (paths["CONFIG"] / "config.json").write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
 
 

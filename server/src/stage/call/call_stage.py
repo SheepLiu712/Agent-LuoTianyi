@@ -347,6 +347,8 @@ class CallStage:
             monotonic=monotonic,
         )
         self._proactive_reply_ready = False
+        self._proactive_realized_turns: set[int] = set()
+        self._proactive_reply_failed = False
         self._time_limit_task: asyncio.Task[Any] | None = None
         self._time_limit_changed = asyncio.Event()
         self._warning = CallWarning()
@@ -573,7 +575,7 @@ class CallStage:
         if response_id in self._tombstones:
             raise PlaybackSettlementError("interrupted response cannot register playback")
         self._playback.register_stream(response_id, stream_id)
-        self._refresh_silence_task()
+        self._refresh_proactive_timer()
 
     def playback_final(self, response_id: str, stream_id: int) -> None:
         self._playback.mark_final_sent(response_id, stream_id)
@@ -645,7 +647,7 @@ class CallStage:
         if response is not None:
             response.playback_completed = True
         self._settle_response_if_complete(response_id)
-        self._refresh_silence_task()
+        self._refresh_proactive_timer()
         self._finish_pending_end_if_ready()
         return result
 
@@ -661,7 +663,7 @@ class CallStage:
             },
         )
         self._settle_response_if_complete(response_id)
-        self._refresh_silence_task()
+        self._refresh_proactive_timer()
         self._finish_pending_end_if_ready()
         return result
 
@@ -729,7 +731,7 @@ class CallStage:
                         self._playback.restore_silence_after_reconnect(started_at=self._monotonic())
                     except ValueError:
                         pass
-                self._refresh_silence_task()
+                self._refresh_proactive_timer()
                 self._record_metric(
                     CallMetricName.RECONNECT,
                     duration_ms=0,
@@ -956,7 +958,7 @@ class CallStage:
         elif isinstance(event, ReplyFinished):
             call_latency("reply.generation_finished", self.call_id, response_id=event.response_id)
             self._generating.discard(event.response_id)
-            self._refresh_silence_task()
+            self._refresh_proactive_timer()
             self._schedule_output()
         elif isinstance(event, ReplySegment):
             await self._accept_segment(event)
@@ -971,7 +973,7 @@ class CallStage:
             self._playback.finish_invalid_user_speech()
         else:
             self._playback.set_user_speaking(False)
-        self._refresh_silence_task()
+        self._refresh_proactive_timer()
 
     def _accept_transcript(self, event):
         self._awaiting_transcript.discard(event.item_id)
@@ -984,9 +986,13 @@ class CallStage:
         self._completed_items.add(event.item_id)
         self._proactive_timer.get_user_stimulus()
         self._proactive_reply_ready = False
+        self._proactive_reply_failed = False
         seq = self._turn_for_item(event.item_id)
         turn = self._turns[seq]
         turn.semantic = event.text
+        if seq in self._proactive_realized_turns and seq == max(self._turns):
+            self._proactive_reply_ready = True
+            self._refresh_proactive_timer()
         turn.recognized_at = self._monotonic()
         call_latency(
             "turn.final", self.call_id, turn_seq=seq, item_id=event.item_id, measurement="final_transcript_received"
@@ -1081,7 +1087,7 @@ class CallStage:
                 tool_call_id=tool_call_id,
                 turn_seq=self._model_replies[response_id][0],
             )
-            self._refresh_silence_task()
+            self._refresh_proactive_timer()
 
     async def _cancel_model_replies(self):
         # 本地许可和停播已经由 _interrupt 撤销；取消云端失败不影响停播。
@@ -1235,7 +1241,7 @@ class CallStage:
             raise
         finally:
             self._request_tokens.discard(token)
-            self._refresh_silence_task()
+            self._refresh_proactive_timer()
             self._settle_warning()
             self._schedule_output()
             if turn_seq is not None and not sink.ids:
@@ -1309,7 +1315,7 @@ class CallStage:
 
     def _resume_queued_plans(self, completed) -> None:
         self._schedule_output()
-        self._refresh_silence_task()
+        self._refresh_proactive_timer()
         if (
             self._realize_task is completed
             and self._plans
@@ -1375,16 +1381,7 @@ class CallStage:
             with reply_timing_scope(self._reply_timings.get(plan.origin_request_id)):
                 report = await self._agent.realize_action_plan(plan, context, _OutputSink(self, context, turn_seq))
             await self._handle_plan_result(plan, report, turn_seq, execution_token, retried, response_ids)
-            if report.status is d.ExecutionStatus.COMPLETED and not execution_token.is_cancelled:
-                for action in plan.actions:
-                    if isinstance(action, d.RequestCallSpeech):
-                        await self._provider.push(InstructionText(action.instruction, "silence"))
-            if (
-                report.status is d.ExecutionStatus.COMPLETED
-                and proactive_generation == self._generation
-                and any(isinstance(action, d.Say) for action in plan.actions)
-            ):
-                self._proactive_reply_ready = True
+            await self._settle_proactive_plan(plan, report, turn_seq, execution_token, proactive_generation)
         except asyncio.CancelledError:
             if turn_seq is not None:
                 self._turns[turn_seq].status = CallReplyStatus.INTERRUPTED
@@ -1400,8 +1397,24 @@ class CallStage:
             set_busy_count(0)
             if turn_seq is not None and not self._turn_has_unsettled_response(turn_seq):
                 self._finish_user_turn(turn_seq)
-            self._refresh_silence_task()
+            self._refresh_proactive_timer()
             self._finish_pending_end_if_ready()
+
+    async def _settle_proactive_plan(self, plan, report, turn_seq, token, generation):
+        if report.status is d.ExecutionStatus.COMPLETED and not token.is_cancelled:
+            for action in plan.actions:
+                if isinstance(action, d.RequestCallSpeech):
+                    await self._provider.push(InstructionText(action.instruction, "silence"))
+        if report.status is not d.ExecutionStatus.COMPLETED:
+            self._proactive_reply_failed = True
+        if (
+            report.status is d.ExecutionStatus.COMPLETED
+            and generation == self._generation
+            and any(isinstance(action, d.Say) for action in plan.actions)
+        ):
+            self._proactive_reply_ready = True
+            if turn_seq is not None:
+                self._proactive_realized_turns.add(turn_seq)
 
     async def _handle_plan_result(self, plan, report, turn_seq, token, retried, response_ids):
         if any(isinstance(action, d.LookupCallMemory) for action in plan.actions):
@@ -1622,12 +1635,13 @@ class CallStage:
         ):
             self._request_call_end(CallEndReason.RECOVERY_TIMEOUT)
 
-    def _refresh_silence_task(self) -> None:
+    def _refresh_proactive_timer(self) -> None:
         if self.state is not CallState.ACTIVE or not self._connection_available:
             self._proactive_timer.stop_timer()
             return
         if (
             self._proactive_reply_ready
+            and not self._proactive_reply_failed
             and not self._generating
             and not self._execution_tokens
             and not self._plans
@@ -2322,7 +2336,7 @@ class CallStage:
         if self._lifetime.termination is None:
             for plan in plans:
                 self._enqueue_plan(plan, d.CancellationToken(), None)
-        self._refresh_silence_task()
+        self._refresh_proactive_timer()
 
     def _settle_warning(self) -> None:
         warning = self._warning

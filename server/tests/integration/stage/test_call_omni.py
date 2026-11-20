@@ -581,3 +581,15 @@ async def test_agent_proactive_call_requests_model_once_without_user_response(ca
         assert len([e for e in socket.sent if e["type"] == "response.create"]) == 2
     finally:
         await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_late_final_transcript_still_arms_proactive_after_reply_realized(call_setup):
+    stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.04})
+    try:
+        await send_reply(socket, response_id="late", text="听到了。", item_id="late-user")
+        await _eventually(lambda: not stage._generating and bool(stage._proactive_realized_turns))
+        await stage._on_omni_event(TranscriptFinal("late-user", "你好"))
+        await _eventually(lambda: len([e for e in socket.sent if e["type"] == "response.create"]) == 2)
+    finally:
+        await finish_call(stage)

@@ -19,7 +19,6 @@ TASKS = {
     "bili_dynamic_fetcher": ("BiliEventUpdateTask", "bili_event_update", True),
     "dynamic_interaction": ("DynamicInteractionTask", "dynamic_interaction", False),
     "diary": ("DiaryTask", "diary", True),
-    "proactive_topic_check": ("ProactiveTopicCheckTask", "proactive_topic_check", False),
     "expired_event_cleanup": ("ExpiredEventCleanupTask", "purge_expired_events", False),
 }
 
@@ -183,13 +182,13 @@ def test_singing_managers_and_bili_uid_mapping_limit_character_expansion(make_ru
 def test_clock_config_overrides_reach_registration(make_runtime, world_config):
     config = enable_all(world_config)
     config["citywalk"]["clock_config"] = {"type": "daily", "params": {"hour": 4, "minute": 5}}
-    config["proactive_topic_check"]["clock_config"] = {
+    config["expired_event_cleanup"]["clock_config"] = {
         "type": "interval",
         "params": {"interval_seconds": 120, "run_immediately": True},
     }
     actions = make_runtime(config).world_clock.actions
     assert actions["try_citywalk:luotianyi"][:2] == ("daily", {"hour": 4, "minute": 5})
-    assert actions["proactive_topic_check"][:2] == (
+    assert actions["purge_expired_events"][:2] == (
         "interval",
         {"interval_seconds": 120, "run_immediately": True},
     )
@@ -214,7 +213,7 @@ def test_top_level_false_cannot_be_reenabled_by_character_override(make_runtime,
 
 def test_all_three_previously_unconditional_families_honor_disabled_flag(make_runtime, world_config):
     config = enable_all(world_config)
-    for key in ("song_knowledge", "proactive_topic_check", "expired_event_cleanup"):
+    for key in ("song_knowledge", "expired_event_cleanup"):
         config[key]["enabled"] = False
     names = make_runtime(config).world_clock.actions
     assert not {"sync_new_song_knowledge", "proactive_topic_check", "purge_expired_events"} & names.keys()
