@@ -239,23 +239,27 @@ class MessageProcessor:
     def process_transport_message(self, response: AgentMessage, audio_saved: bool = False): # 展示和播放消息
         display_in_chat = getattr(response, "display_in_chat", True)
 
-        if display_in_chat and response.text:
-            self.response_signal(response.uuid, response.text)
+        try:
+            if display_in_chat and response.text:
+                self.response_signal(response.uuid, response.text)
 
-        if response.expression and self.expression_signal:
-            self.expression_signal(response.expression)
+            if response.expression and self.expression_signal:
+                self.expression_signal(response.expression)
 
-        if response.audio:
-            self.multimedia_stream.feed(response.audio)
+            if response.audio:
+                self.multimedia_stream.feed(response.audio)
 
-        if is_audio_terminal(response):
-            if display_in_chat and audio_saved and self.update_bubble_signal:
-                # 通知UI对应的气泡有本地音频可播放
-                try:
-                    self.update_bubble_signal(response.uuid, "has_audio")
-                except Exception as exc:
-                    self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={response.uuid}): {exc}")
-            self.multimedia_stream.finish_one_sentense()
+            if is_audio_terminal(response):
+                if display_in_chat and audio_saved and self.update_bubble_signal:
+                    # 通知UI对应的气泡有本地音频可播放
+                    try:
+                        self.update_bubble_signal(response.uuid, "has_audio")
+                    except Exception as exc:
+                        self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={response.uuid}): {exc}")
+        finally:
+            if is_audio_terminal(response):
+                # 终止包即使播放失败也必须释放在线语音占用；异常仍交给线程边界记录。
+                self.multimedia_stream.finish_one_sentense()
 
     def _prepare_agent_message(self, response: AgentMessage) -> PreparedAgentMessage:
         """在收包线程中聚合并落盘，不等待该句话展示或播放。"""
@@ -371,7 +375,7 @@ class MessageProcessor:
         if text and self.system_message_signal:
             self.system_message_signal(text)
 
-    async def process_llm_request(self, payload: dict) -> dict | None:
+    async def process_llm_request(self, payload: dict, on_delta=None) -> dict | None:
         request_id = payload.get("request_id")
         if not request_id:
             return None
@@ -415,11 +419,18 @@ class MessageProcessor:
             use_json=use_json,
             image_base64=payload.get("image_base64"),
         )
+        streaming = {}
+        if payload.get("stream") is True:
+            if on_delta is None:
+                raise ValueError("流式委托缺少增量接收器")
+            body.update(stream=True, stream_options={"include_usage": True})
+            streaming["on_delta"] = on_delta
         try:
             result = await call_llm_api_async(
                 url=f"{base_url.rstrip('/')}/chat/completions",
                 api_key=api_key,
                 payload=body,
+                **streaming,
             )
             if use_json:
                 try:
@@ -430,9 +441,10 @@ class MessageProcessor:
         except Exception as exc:
             return {"request_id": request_id, "error": str(exc)}
 
-    def get_llm_mode(self) -> dict[str, list[str]]:
+    def get_llm_mode(self) -> dict[str, object]:
         modules = llm_key_storage.get_llm_modules_config()
         return {
+            "stream": True,
             "types": [
                 str(type_id)
                 for type_id, entry in modules.items()
@@ -466,18 +478,32 @@ class MessageProcessor:
 
     def _listen_ws_events(self): # 处理线程
         while self._running:
-            payload = self._event_queue.get()
-            if payload is None:
-                self._playback_queue.put(None)
-                break
-            self._playback_queue.put(self._prepare_agent_message(payload))
+            try:
+                payload = self._event_queue.get()
+                if payload is None:
+                    self._playback_queue.put(None)
+                    break
+                self._playback_queue.put(self._prepare_agent_message(payload))
+            except Exception as exc:
+                # 单条消息处理失败不能杀死常驻线程，否则之后所有消息都会静默丢失
+                self.logger.error(
+                    f"消息预处理线程异常，已跳过该条消息: {type(exc).__name__}: {exc}"
+                )
+                continue
 
     def _process_playback_events(self):
         while self._running:
-            prepared = self._playback_queue.get()
-            if prepared is None:
-                break
-            self.process_transport_message(prepared.response, audio_saved=prepared.audio_saved)
+            try:
+                prepared = self._playback_queue.get()
+                if prepared is None:
+                    break
+                self.process_transport_message(prepared.response, audio_saved=prepared.audio_saved)
+            except Exception as exc:
+                # 展示/播放失败同样只跳过当前消息，保持线程存活以便后续消息继续处理
+                self.logger.error(
+                    f"消息展示/播放线程异常，已跳过该条消息: {type(exc).__name__}: {exc}"
+                )
+                continue
 
     def _next_local_id(self, prefix: str) -> str:
         self._reply_counter += 1

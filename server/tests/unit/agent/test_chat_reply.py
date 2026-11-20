@@ -6,19 +6,21 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from support.reply_capabilities import scripted_reply_skills
+from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
 from support.routing_support import Sink, request
 from support.skill_support import invocation
 
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.context import ConversationEntry, SongContent, TextContent, UserContextSnapshot
+from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.processing.reply_materials import ReplyGenerationResult
 from src.agent.skills.cognitive import (
-    ComposedReply,
-    ComposedResponse,
     ReplyDraft,
-    ResponseCompositionSkill,
 )
 from src.agent.skills.contracts import TopicExtraction
 
@@ -54,19 +56,10 @@ class Composer:
         self.provisional = provisional
         self.calls = []
 
-    async def compose(self, skill_invocation, **kwargs):
+    async def generate_drafts(self, skill_invocation, **kwargs):
         kwargs["invocation"] = skill_invocation
         self.calls.append(kwargs)
-        return self.drafts
-
-    async def compose_staged(self, skill_invocation, **kwargs):
-        kwargs["invocation"] = skill_invocation
-        self.calls.append(kwargs)
-
-        async def formal():
-            return ComposedReply(drafts=self.drafts)
-
-        return ComposedResponse(provisional=self.provisional, pending=formal)
+        return ReplyGenerationResult(drafts=self.drafts)
 
 
 def agent(composer):
@@ -76,7 +69,7 @@ def agent(composer):
             [
                 (
                     d.StimulusKind.TEXT_MESSAGE,
-                    ChatReplyHandler(composer),
+                    ChatReplyHandler(scripted_reply_skills(composer)),
                 )
             ]
         ),
@@ -108,8 +101,8 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     assert plan.actions[1].content == "唱了《歌》"
     assert plan.source_stimulus_ids == ("m2", "m1")
     assert reflection.plan_ordinal == 2
-    assert isinstance(reflection.actions[0], d.Reflection)
-    assert reflection.actions[0].prepared_inputs == deadline_request().prepared_inputs
+    assert isinstance(reflection.actions[0], d.CognitiveMaintenance)
+    assert reflection.actions[0].reason is d.MaintenanceReason.COMPACTION_THRESHOLD
     assert [entry.source for entry in ctx.conversation.entries] == ["agent", "agent"]
     assert isinstance(ctx.conversation.entries[0].content, TextContent)
     assert ctx.conversation.entries[0].content.text == "你好呀"
@@ -148,7 +141,7 @@ async def test_empty_batch_consumes_without_plan_or_persistence():
     sink = Sink()
     report = await agent(composer).handle_stimulus(replace(request(), prepared_inputs=()), sink, context=ctx)
     assert len(sink.values) == 1
-    assert isinstance(sink.values[0].actions[0], d.Reflection)
+    assert isinstance(sink.values[0].actions[0], d.CognitiveMaintenance)
     assert ctx.conversation.entries == []
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
     assert composer.calls == []
@@ -200,36 +193,35 @@ class _Singing:
 
 
 @pytest.mark.asyncio
-async def test_response_composition_skill_recalls_and_maps_drafts():
+async def test_chat_handler_retrieves_selects_and_generates_drafts():
     memory = _Memory()
     singing = _Singing()
     generator = _Generator()
-    skill = ResponseCompositionSkill(
-        {},
+    skill = ReplySkills(
         topic_extraction=SimpleNamespace(
             extract=AsyncMock(return_value=TopicExtraction(memory_queries=("你好",), sing_attempts=("《歌》",)))
         ),
-        memories={"luotianyi": memory},
-        singing=singing,
-        generators={"luotianyi": generator},
+        retrieval=stub_retrieval({"luotianyi": memory}),
+        singing=stub_singing(singing),
+        reply=make_reply_skill({"luotianyi": generator}),
     )
-    drafts = await skill.compose(
+    drafts = await ChatReplyHandler(skill)._generate_reply(
         invocation(),
         user_context=UserContextSnapshot(),
         reply_topic="你好",
         conversation_history="历史",
     )
-    assert [draft.sing for draft in drafts] == [None, ("歌", "副歌")]
-    assert drafts[0].content == "你好"
-    assert drafts[0].tone == "happy"
-    assert drafts[0].expression == "开心"
-    assert drafts[0].sound_content
+    assert [draft.sing for draft in drafts.drafts] == [None, ("歌", "副歌")]
+    assert drafts.drafts[0].content == "你好"
+    assert drafts.drafts[0].tone == "happy"
+    assert drafts.drafts[0].expression == "开心"
+    assert drafts.drafts[0].sound_content
     assert memory.memory_queries == [("u", ("你好",))]
     assert singing.plan_calls == [("luotianyi", ("《歌》",), None)]
     assert generator.kwargs["memory_hits"] == ["记忆1"]
     assert generator.kwargs["sing_plan"] == ("歌", "副歌")
     assert generator.kwargs["conversation_history"] == "历史"
-    assert drafts[1].lyrics == "歌词一行"
+    assert drafts.drafts[1].lyrics == "歌词一行"
     assert singing.calls == [("luotianyi", "歌", "副歌")]
 
 

@@ -9,16 +9,28 @@ import threading
 import time
 import traceback
 from contextlib import contextmanager
+from importlib.metadata import version
 from multiprocessing.queues import Queue as MPQueue
 from multiprocessing.synchronize import Event as MPEvent
 from queue import Empty
 from typing import Any, Dict, Generator, Optional
+from uuid import uuid4
 
 import yaml
 
+from src.infrastructure.observability.call_reply_timing import record_tts_worker_event
+from src.infrastructure.observability.tts_metrics import (
+    drain_worker_metrics,
+    emit_worker_metric,
+    mark_tts,
+    tts_request_id,
+)
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
 
+from .call_pcm import normalize_clip_to_pcm16_mono
 from .errors import TTSStreamCancelled
+from .gsv_languages import configure_chinese_language_labels
 
 
 def _build_absolute_path(path_value: Optional[str]) -> Optional[str]:
@@ -26,7 +38,7 @@ def _build_absolute_path(path_value: Optional[str]) -> Optional[str]:
         return None
     if os.path.isabs(path_value):
         return path_value
-    return os.path.abspath(path_value)
+    return str(resolve_server_path(path_value))
 
 
 def _extract_model_paths_from_yaml(config_path: str) -> Dict[str, Any]:
@@ -42,7 +54,7 @@ def _extract_model_paths_from_yaml(config_path: str) -> Dict[str, Any]:
         "sovits_model_path": sovits_path,
         "device": custom.get("device"),
         "is_half": custom.get("is_half"),
-        "pretrained_models_path": custom.get("pretrained_models_path"),
+        "pretrained_models_path": _build_absolute_path(custom.get("pretrained_models_path")),
     }
 
 
@@ -143,6 +155,7 @@ def _run_gsv_worker(  # noqa: C901
     stop_event: MPEvent,
     suppress_output: bool,
     trim_startup_memory: bool,
+    metrics_queue=None,
 ):
     devnull = _silence_worker_output() if suppress_output else None
     logger = get_logger("TTSServerWorker")
@@ -150,6 +163,21 @@ def _run_gsv_worker(  # noqa: C901
         import pathlib
 
         from gsv_tts import TTS
+        from gsv_tts.LangSegment import LangSegment
+
+        configure_chinese_language_labels(LangSegment)
+
+        if version("torch").partition("+")[0] == "2.8.0" and version("gsv-tts-lite") in {"0.4.6", "0.4.7"}:
+            from gsv_tts import Config
+            from gsv_tts.GPT_SoVITS.GPT import t2s_model
+            from torch.nn.attention import SDPBackend
+
+            # PyTorch 2.8.0 excludes cuDNN for single-token decoding even
+            # when gsv's square attention probe selected it successfully.
+            if Config.SDPBACKEND == SDPBackend.CUDNN_ATTENTION:
+                backends = [SDPBackend.CUDNN_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+                Config.SDPBACKEND = backends
+                t2s_model.SDPBACKEND = backends
 
         model_config = _extract_model_paths_from_yaml(config_path)
         tts = TTS(
@@ -205,8 +233,9 @@ def _run_gsv_worker(  # noqa: C901
                 response_queue.put({"request_id": request_id, "ok": True, "message": "ready"})
                 continue
 
+            emit_worker_metric(metrics_queue, message, "worker_started")
             if command != "synthesize":
-                if command == "stream_synthesize":
+                if command in {"stream_synthesize", "stream_synthesize_call_pcm"}:
                     try:
                         spk_audio_path = message["spk_audio_path"]
                         prompt_audio_path = message["prompt_audio_path"]
@@ -214,6 +243,16 @@ def _run_gsv_worker(  # noqa: C901
                         text = message["text"]
 
                         is_first_chunk = True
+                        first_call_packet = True
+                        if command == "stream_synthesize_call_pcm":
+                            response_queue.put(
+                                {
+                                    "request_id": request_id,
+                                    "ok": True,
+                                    "tts_phase": "started",
+                                    "monotonic_ns": time.monotonic_ns(),
+                                }
+                            )
                         for clip in tts.infer_stream(
                             spk_audio_path=spk_audio_path,
                             prompt_audio_path=prompt_audio_path,
@@ -222,27 +261,44 @@ def _run_gsv_worker(  # noqa: C901
                         ):
                             if stop_event.is_set():
                                 break
-                            chunk_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
-                            if not is_first_chunk:
-                                chunk_bytes = _strip_wav_header(chunk_bytes)
+                            if command == "stream_synthesize_call_pcm":
+                                chunk_bytes = normalize_clip_to_pcm16_mono(clip.audio_data, clip.samplerate)
                             else:
-                                chunk_bytes = _make_wav_chunk_streamable(chunk_bytes)
-                                is_first_chunk = False
+                                chunk_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
+                                if not is_first_chunk:
+                                    chunk_bytes = _strip_wav_header(chunk_bytes)
+                                else:
+                                    chunk_bytes = _make_wav_chunk_streamable(chunk_bytes)
+                                    is_first_chunk = False
 
+                            if first_call_packet and chunk_bytes:
+                                emit_worker_metric(metrics_queue, message, "first_audio")
                             response_queue.put(
                                 {
                                     "request_id": request_id,
                                     "ok": True,
                                     "audio_bytes": chunk_bytes,
                                     "is_final": False,
+                                    **(
+                                        {"tts_phase": "synthesized", "monotonic_ns": time.monotonic_ns()}
+                                        if command == "stream_synthesize_call_pcm" and first_call_packet and chunk_bytes
+                                        else {}
+                                    ),
                                 }
                             )
+                            if chunk_bytes:
+                                first_call_packet = False
 
                         response_queue.put(
                             {
                                 "request_id": request_id,
                                 "ok": True,
                                 "is_final": True,
+                                **(
+                                    {"tts_phase": "finished", "monotonic_ns": time.monotonic_ns()}
+                                    if command == "stream_synthesize_call_pcm"
+                                    else {}
+                                ),
                             }
                         )
                     except Exception as e:
@@ -255,6 +311,8 @@ def _run_gsv_worker(  # noqa: C901
                                 "is_final": True,
                             }
                         )
+                    finally:
+                        emit_worker_metric(metrics_queue, message, "worker_finished")
                     continue
 
                 response_queue.put(
@@ -279,6 +337,8 @@ def _run_gsv_worker(  # noqa: C901
                     text=text,
                 )
                 wav_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
+                if wav_bytes:
+                    emit_worker_metric(metrics_queue, message, "first_audio")
 
                 response_queue.put(
                     {
@@ -297,6 +357,8 @@ def _run_gsv_worker(  # noqa: C901
                         "traceback": traceback.format_exc(),
                     }
                 )
+            finally:
+                emit_worker_metric(metrics_queue, message, "worker_finished")
     except KeyboardInterrupt:
         logger.info("gsv_tts worker received KeyboardInterrupt, shutting down")
     except BaseException:
@@ -342,6 +404,9 @@ class TTSServer:
         self.ready_event: Optional[MPEvent] = None
         self.stop_event: Optional[MPEvent] = None
         self._request_counter = 0
+        self.metrics_id = uuid4().hex
+        self.metrics_queue = None
+        self._metrics_thread = None
         self._synthesize_lock = multiprocessing.Lock()
         self._lifecycle_lock = threading.RLock()
         self._lifecycle_condition = threading.Condition()
@@ -383,6 +448,7 @@ class TTSServer:
 
         self.request_queue = multiprocessing.Queue()
         self.response_queue = multiprocessing.Queue()
+        self.metrics_queue = multiprocessing.Queue()
         self.ready_event = multiprocessing.Event()
         self.stop_event = multiprocessing.Event()
 
@@ -398,10 +464,22 @@ class TTSServer:
                 self.stop_event,
                 self.suppress_worker_output,
                 self.trim_startup_memory,
+                self.metrics_queue,
             ),
             daemon=True,
         )
         self.server_process.start()
+        self._metrics_thread = threading.Thread(
+            target=drain_worker_metrics,
+            args=(
+                self.metrics_queue,
+                self.metrics_id,
+                lambda: self.server_process is not None and self.server_process.is_alive(),
+            ),
+            daemon=True,
+            name="tts-metrics",
+        )
+        self._metrics_thread.start()
 
         if not self._wait_for_worker_ready(self.timeout):
             self.logger.error("Failed to start gsv_tts worker.")
@@ -487,8 +565,14 @@ class TTSServer:
                 close_process()
             self.server_process = None
 
+        if self.metrics_queue is not None and self._metrics_thread is not None:
+            self.metrics_queue.put(None)
+            self._metrics_thread.join(timeout=5)
+            if self._metrics_thread.is_alive():
+                raise RuntimeError("TTS metrics receiver did not stop")
+            self._metrics_thread = None
         cleanup_errors: list[str] = []
-        for attribute in ("request_queue", "response_queue"):
+        for attribute in ("request_queue", "response_queue", "metrics_queue"):
             queue = getattr(self, attribute)
             if queue is None:
                 continue
@@ -533,8 +617,9 @@ class TTSServer:
                 self._request_counter += 1
                 request_id = f"req-{self._request_counter}"
 
-                self.request_queue.put(
+                self._submit_request(
                     {
+                        "telemetry_id": tts_request_id(),
                         "command": "synthesize",
                         "request_id": request_id,
                         "text": text,
@@ -577,8 +662,9 @@ class TTSServer:
                 self._request_counter += 1
                 request_id = f"req-{self._request_counter}"
 
-                self.request_queue.put(
+                self._submit_request(
                     {
+                        "telemetry_id": tts_request_id(),
                         "command": "stream_synthesize",
                         "request_id": request_id,
                         "text": text,
@@ -608,6 +694,76 @@ class TTSServer:
         finally:
             self._end_request()
 
+    def stream_synthesize_call_pcm(
+        self,
+        text: str,
+        spk_audio_path: str,
+        prompt_audio_path: str,
+        prompt_audio_text: str,
+        timeout: int = 600,
+        cancel_event: threading.Event | None = None,
+    ) -> Generator[bytes, None, None]:
+        """流式返回 worker 在完整 clip 边界规范化的 24 kHz PCM16 mono。"""
+        yield from self._stream_synthesize_command(
+            "stream_synthesize_call_pcm",
+            text,
+            spk_audio_path,
+            prompt_audio_path,
+            prompt_audio_text,
+            timeout,
+            cancel_event,
+        )
+
+    def _stream_synthesize_command(
+        self,
+        command: str,
+        text: str,
+        spk_audio_path: str,
+        prompt_audio_path: str,
+        prompt_audio_text: str,
+        timeout: int,
+        cancel_event: threading.Event | None,
+    ) -> Generator[bytes, None, None]:
+        self._begin_request()
+        try:
+            if not self.server_process or not self.server_process.is_alive():
+                raise RuntimeError("gsv_tts worker is not running")
+            if not self.request_queue or not self.response_queue:
+                raise RuntimeError("gsv_tts worker queues are not initialized")
+            with self._stream_lock(cancel_event):
+                self._request_counter += 1
+                request_id = f"req-{self._request_counter}"
+                self._submit_request(
+                    {
+                        "telemetry_id": tts_request_id(),
+                        "command": command,
+                        "request_id": request_id,
+                        "text": text,
+                        "spk_audio_path": spk_audio_path,
+                        "prompt_audio_path": prompt_audio_path,
+                        "prompt_audio_text": prompt_audio_text,
+                    }
+                )
+                while True:
+                    response = self._wait_for_response(
+                        request_id=request_id, timeout=timeout, cancel_event=cancel_event
+                    )
+                    if not response.get("ok"):
+                        raise RuntimeError(
+                            f"gsv_tts stream synthesize failed: {response.get('error', 'unknown error')}"
+                        )
+                    chunk = response.get("audio_bytes")
+                    if chunk:
+                        yield chunk
+                    if response.get("is_final"):
+                        return
+        finally:
+            self._end_request()
+
+    def _submit_request(self, message):
+        self.request_queue.put(message)
+        mark_tts("submitted")
+
     @contextmanager
     def _stream_lock(self, cancel_event: threading.Event | None):
         while not self._synthesize_lock.acquire(timeout=0.1):
@@ -618,6 +774,7 @@ class TTSServer:
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise TTSStreamCancelled()
+            mark_tts("lock_acquired")
             yield
         finally:
             self._synthesize_lock.release()
@@ -669,6 +826,8 @@ class TTSServer:
                 continue
 
             if message.get("request_id") == request_id:
+                if "tts_phase" in message:
+                    record_tts_worker_event(message["tts_phase"], message["monotonic_ns"])
                 return message
 
             self.logger.warning(f"Discarding unexpected response id: {message.get('request_id')}")

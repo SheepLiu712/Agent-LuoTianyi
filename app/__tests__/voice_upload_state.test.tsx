@@ -2,9 +2,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { GestureResponderEvent } from 'react-native';
-import { useChatLogic } from '../hooks/useChatLogic';
-import { NetworkClient } from '../utils/network_client';
-import { voiceRecorder } from '../utils/voice_recorder';
+import { useChatLogic } from '../features/chat/useChatLogic';
+import { NetworkClient } from '../features/chat/connection/network_client';
+import { voiceRecorder } from '../features/chat/voice_recorder';
 
 jest.mock('react-native', () => ({ AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
@@ -15,10 +15,10 @@ jest.mock('expo-file-system/legacy', () => ({
   getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 3 }),
   readAsStringAsync: jest.fn().mockResolvedValue('AAAA'),
 }));
-jest.mock('../utils/live2d_helper', () => ({ setExpression: jest.fn() }));
-jest.mock('../utils/voice_playback_manager', () => ({ voicePlaybackManager: { initialize: jest.fn().mockResolvedValue(undefined), finalizeUpload: jest.fn().mockResolvedValue('file://cached.m4a'), stop: jest.fn().mockResolvedValue(undefined), cacheLocal: jest.fn().mockResolvedValue('file://cached.m4a') } }));
-jest.mock('../utils/network_client', () => ({ NetworkClient: jest.fn() }));
-jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {
+jest.mock('../shared/character/live2d_helper', () => ({ setExpression: jest.fn() }));
+jest.mock('../features/chat/voice_playback_manager', () => ({ voicePlaybackManager: { initialize: jest.fn().mockResolvedValue(undefined), finalizeUpload: jest.fn().mockResolvedValue('file://cached.m4a'), stop: jest.fn().mockResolvedValue(undefined), cacheLocal: jest.fn().mockResolvedValue('file://cached.m4a') } }));
+jest.mock('../features/chat/connection/network_client', () => ({ NetworkClient: jest.fn() }));
+jest.mock('../features/chat/voice_recorder', () => ({ voiceRecorder: {
   getPermission: jest.fn().mockResolvedValue('granted'), start: jest.fn(),
   stop: jest.fn().mockResolvedValue({ localUri: 'file://recording.m4a', durationMs: 1000 }),
   cancel: jest.fn(), dispose: jest.fn(),
@@ -30,7 +30,7 @@ describe('voice upload result restores capture through chat, binder and send que
   let now: jest.SpyInstance;
   const event = { nativeEvent: { pageY: 200 } } as GestureResponderEvent;
   const webview = { current: null };
-  function Harness() { state = useChatLogic(webview, 'user', 'token'); return null; }
+  function Harness() { state = useChatLogic(webview, 'user', 'token', 'luotianyi'); return null; }
 
   beforeEach(() => {
     jest.clearAllMocks();

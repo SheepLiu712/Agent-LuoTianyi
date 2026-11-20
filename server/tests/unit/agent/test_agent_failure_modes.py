@@ -1,16 +1,8 @@
-import sys
-from pathlib import Path
-
 import pytest
 
-
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
-from src.agent.skills.cognitive.response_generation import (
+from src.agent.skills.cognitive._reply_resources import (
     DEFAULT_LLM_FAILURE_RESPONSE,
-    CharacterReplyGenerator,
+    ReplyResources,
 )
 from src.infrastructure.models.llm.interface import LLMContentInspectionError
 
@@ -41,7 +33,7 @@ class SequenceLLM:
 
 
 def build_main_chat(llm, *, max_attempts=2, fallback=DEFAULT_LLM_FAILURE_RESPONSE):
-    chat = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
+    chat = ReplyResources.__new__(ReplyResources)
     chat.llm = llm
     chat.logger = RecordingLogger()
     chat.llm_failure_max_attempts = max_attempts
@@ -103,6 +95,6 @@ async def test_content_inspection_failure_is_not_retried():
 
 
 def test_configured_failure_text_is_always_structured_and_non_empty():
-    assert CharacterReplyGenerator._structured_failure_response("稍后再试") == "[中性]稍后再试"
-    assert CharacterReplyGenerator._structured_failure_response("") == DEFAULT_LLM_FAILURE_RESPONSE
-    assert CharacterReplyGenerator._structured_failure_response("[中性]") == DEFAULT_LLM_FAILURE_RESPONSE
+    assert ReplyResources._structured_failure_response("稍后再试") == "[中性]稍后再试"
+    assert ReplyResources._structured_failure_response("") == DEFAULT_LLM_FAILURE_RESPONSE
+    assert ReplyResources._structured_failure_response("[中性]") == DEFAULT_LLM_FAILURE_RESPONSE

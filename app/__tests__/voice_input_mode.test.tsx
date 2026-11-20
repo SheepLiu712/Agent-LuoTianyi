@@ -2,8 +2,8 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { Keyboard } from 'react-native';
 
-import { VoiceInputBar } from '../components/VoiceInputBar';
-import { useVoiceInput } from '../hooks/useVoiceInput';
+import { VoiceInputBar } from '../features/chat/VoiceInputBar';
+import { useVoiceInput } from '../features/chat/useVoiceInput';
 
 jest.mock('react-native', () => ({
   Image: 'Image', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View',
@@ -13,7 +13,7 @@ jest.mock('react-native', () => ({
 }));
 jest.mock('@expo/vector-icons/MaterialIcons', () => 'MaterialIcons');
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn(), ImpactFeedbackStyle: { Medium: 'medium' } }));
-jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: { dispose: jest.fn() } }));
+jest.mock('../features/chat/voice_recorder', () => ({ voiceRecorder: { dispose: jest.fn() } }));
 
 function Composer() {
   const [draft, setDraft] = React.useState('未发送的草稿');

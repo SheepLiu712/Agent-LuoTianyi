@@ -192,6 +192,7 @@ class CitywalkSessionRunner:
             energy_left=self.state_manager.state.energy,
             events=city_walk_data.events,
             selected_destination=selected_destination,
+            province=destination_data["province"],
             destination_reason=destination_reason,
             poi_details=city_walk_data.poi_details,
         )
@@ -377,28 +378,38 @@ class CitywalkSessionRunner:
             chunks = []
             for idx, row in enumerate(history_rows[-10:], start=1):
                 city_name = str(row.get("city", "")).strip() or "未知城市"
+                province = row.get("province") or "旧记录未填写"
                 places = row.get("places", [])
                 if not isinstance(places, list):
                     places = []
                 places_text = "、".join([str(x).strip() for x in places if str(x).strip()]) or "无"
-                chunks.append(f"第{idx}次: 城市={city_name}; 经过={places_text}")
+                chunks.append(f"第{idx}次: 省级行政区={province}; 城市={city_name}; 经过={places_text}")
             history_text = "\n".join(chunks)
 
         prompt = (
             f"角色设定: {self.persona}\n"
             "任务: 在中国范围挑选一个今天要去玩的目的地。"
-            "目的地可以是景点、商圈、美食地标。如“九寨沟”“上海外滩”\n"
-            "请参考最近逛街历史，尽量避免与最近路线高度重复。\n"
-            f"最近逛街历史:\n{history_text}\n"
+            "先选省级行政区和城市，再选该城市的具体景点、商圈或美食地标。\n"
+            "若用户指定目的地，以用户指定为准。自动选址时按以下规则决定：\n"
+            "最近连续至少2次在同一城市，本次必须换城。最近连续至少5次在同一省级行政区，"
+            "本次优先换省，即使这5次去了不同城市也一样。直辖市按一个省级行政区计算。\n"
+            "需要换省时优先选最近历史中没去过的省级行政区；需要换城时优先选没去过的城市。"
+            "若要重访，优先选最久没去的，并避开已经走过的路线。未达到门槛时可以留下继续探索。\n"
+            "旧记录缺省份时，可按能明确识别的城市推断所属省级行政区。\n"
+            f"最近逛街历史（从旧到新）：\n{history_text}\n"
             "只输出JSON，字段:\n"
             "- destination_name: 目的地名称\n"
             "- city: 所在城市\n"
+            "- province: 所在省级行政区全称，含自治区、直辖市和特别行政区\n"
             "- category: 景点|美食|商圈\n"
             "- reason: 50字内理由，像洛天依会说的话\n"
             f"用户偏好目的地提示: {preferred_destination or '无'}"
         )
 
         data = self._call_llm_json("你是城市出行规划助手，只输出JSON。", prompt)
+        province = data.get("province")
+        if not isinstance(province, str) or not province.strip():
+            raise ValueError("城市漫步选址结果缺少有效省级行政区")
         destination_name = str(data.get("destination_name", "")).strip()
         destination_city = str(data.get("city", "")).strip()
         category = str(data.get("category", "")).strip() or "景点"
@@ -410,6 +421,7 @@ class CitywalkSessionRunner:
         return {
             "destination_name": destination_name,
             "destination_city": destination_city,
+            "province": province.strip(),
             "category": category,
             "reason": reason,
         }

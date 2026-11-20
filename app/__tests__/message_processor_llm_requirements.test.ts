@@ -1,7 +1,7 @@
 import {
   validateClientModelRequirements,
   validateJsonResponse,
-} from '../utils/llm_requirements';
+} from '../shared/client-model/llm_requirements';
 
 const base = {
   requiredKind: 'llm',

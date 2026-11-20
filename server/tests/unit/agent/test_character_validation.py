@@ -1,19 +1,14 @@
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
-from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
+from src.agent.skills.cognitive._reply_resources import ReplyResources
 
 
-def load_static_variables(path: Path) -> CharacterReplyGenerator:
-    main_chat = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
+def load_static_variables(path: Path) -> ReplyResources:
+    main_chat = ReplyResources.__new__(ReplyResources)
     main_chat.character_profile = SimpleNamespace(
         character_id="test-character",
         static_variables_file=str(path),

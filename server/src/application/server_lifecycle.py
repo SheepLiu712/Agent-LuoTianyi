@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from src.application.admin import AdminShell, init_admin_shell, shutdown_admin_shell
+from src.application.host_context import ServerHostContext
+from src.infrastructure.config.secrets import SecretStore
 from src.utils.logger import get_logger
 
 InitializeAdminShell = Callable[..., Awaitable[AdminShell]]
@@ -20,11 +22,13 @@ class ServerLifecycle:
         *,
         root_dir: str | Path,
         config_path: str | Path = "config/config.json",
+        secret_store: SecretStore | None = None,
         initialize_admin_shell: InitializeAdminShell = init_admin_shell,
         shutdown_admin_shell: ShutdownAdminShell = shutdown_admin_shell,
     ) -> None:
         self._root_dir = Path(root_dir)
         self._config_path = config_path
+        self._secret_store = secret_store
         self._initialize_admin_shell = initialize_admin_shell
         self._shutdown_admin_shell = shutdown_admin_shell
         self._admin_shell: AdminShell | None = None
@@ -35,20 +39,25 @@ class ServerLifecycle:
     def admin_shell(self) -> AdminShell | None:
         return self._admin_shell
 
-    async def start(self) -> dict[str, Any]:
+    async def start(self, *, host_context: ServerHostContext | None = None) -> dict[str, Any]:
         """Initialize the administration shell and attempt to start ServerRuntime."""
         async with self._lock:
             if self._admin_shell is not None:
                 return self._admin_shell.runtime_supervisor.status()
 
+            options = {"secret_store": self._secret_store} if self._secret_store is not None else {}
             admin_shell = await self._initialize_admin_shell(
                 root_dir=self._root_dir,
                 config_path=self._config_path,
+                **options,
             )
             self._admin_shell = admin_shell
             self._logger.info("AdminShell 初始化完成，正在校验配置并启动系统运行时")
             try:
-                runtime_status = await admin_shell.runtime_supervisor.start()
+                if host_context is None:
+                    runtime_status = await admin_shell.runtime_supervisor.start()
+                else:
+                    runtime_status = await admin_shell.runtime_supervisor.start(host_context=host_context)
             except BaseException:
                 await self._shutdown_after_failed_start()
                 raise

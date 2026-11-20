@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
+
 from src.application.user.agreement_service import (
     AgreementService,
     Clock,
@@ -49,7 +51,7 @@ class InvalidAgreementInputError(RegistrationError):
 
     code = "INVALID_AGREEMENT_INPUT"
     status_code = 422
-    detail = "注册信息不完整或格式有误，请检查后重试"
+    detail = "协议提交字段不合法"
 
 
 class AgreementChangedError(RegistrationError):
@@ -69,7 +71,7 @@ class RegistrationRequestConflictError(RegistrationError):
 
     code = "REGISTRATION_REQUEST_CONFLICT"
     status_code = 409
-    detail = "注册信息与之前提交的内容不一致，请核对后继续"
+    detail = "该注册请求与先前提交的内容不一致，请勿盲目重试"
 
 
 class RegistrationRequestUnverifiableError(RegistrationError):
@@ -77,7 +79,7 @@ class RegistrationRequestUnverifiableError(RegistrationError):
 
     code = "REGISTRATION_REQUEST_UNVERIFIABLE"
     status_code = 409
-    detail = "上次注册已经完成，请用该账号登录确认"
+    detail = "原注册结果无法核验，请用账号密码登录确认；不会创建替代账号"
 
 
 class RegistrationService:
@@ -140,12 +142,20 @@ class RegistrationService:
                 )
             )
             db.commit()
+        except IntegrityError:
+            db.rollback()
+            replayed = self._recover_integrity_error(
+                username, password, invite_code, registration_request_id, agreement_version
+            )
+            if replayed is not None:
+                return replayed
+            raise
         except RegistrationError as error:
             db.rollback()
             # 两个相同 request ID 可能同时通过首次 replay 检查；若另一事务已提交，
             # 本事务会在邀请码占用处失败。回滚后重新核验原请求，保证幂等重试最终返回同一结果。
-            if error.code is None:
-                replayed = self._recover_after_race(
+            if error.code is None and registration_request_id:
+                replayed = self._replay_after_race(
                     username=username,
                     password=password,
                     invite_code=invite_code,
@@ -157,17 +167,6 @@ class RegistrationService:
             raise
         except Exception:
             db.rollback()
-            # 并发同 ID 时另一方可能已先提交，本事务会在用户名/邀请码的唯一约束上抛 IntegrityError；
-            # 同样尝试按原请求恢复，避免把"已经成功的注册"变成 500。
-            replayed = self._recover_after_race(
-                username=username,
-                password=password,
-                invite_code=invite_code,
-                registration_request_id=registration_request_id,
-                agreement_version=agreement_version,
-            )
-            if replayed is not None:
-                return replayed
             raise
         finally:
             db.close()
@@ -175,20 +174,16 @@ class RegistrationService:
         self._credentials.cache_user_uuid(username, user_uuid)
         return payload
 
-    def _recover_after_race(
+    def _replay_after_race(
         self,
         *,
         username: str,
         password: str,
         invite_code: str,
-        registration_request_id: Optional[str],
+        registration_request_id: str,
         agreement_version: str,
     ) -> Optional[dict]:
-        """竞争失败后在独立会话里复核原请求；复核自身出错时保留原失败原因。
-
-        边界：复核时若另一方尚未提交，返回 None，调用方仍抛原错误——
-        因此"并发相同 ID 归一"保证的是重试后结果一致，而不是单次请求必然返回原结果。
-        """
+        """事务竞争失败后，用独立会话确认另一提交是否已完成同一请求。"""
         db = self._credentials.new_session()
         try:
             return self._replay(
@@ -199,11 +194,41 @@ class RegistrationService:
                 registration_request_id=registration_request_id,
                 agreement_version=agreement_version,
             )
-        except RegistrationError:
-            # 冲突 / 无法核验是确定的业务结论，必须原样返回（409），不能回退成 500。
-            raise
-        except Exception:
-            return None
+        finally:
+            db.close()
+
+    def _recover_integrity_error(
+        self,
+        username: str,
+        password: str,
+        invite_code: str,
+        registration_request_id: str,
+        agreement_version: str,
+    ) -> Optional[dict]:
+        """仅将已提交同请求或确认的注册竞争从完整性错误归一为业务结果。"""
+        replayed = self._replay_after_race(
+            username=username,
+            password=password,
+            invite_code=invite_code,
+            registration_request_id=registration_request_id,
+            agreement_version=agreement_version,
+        )
+        if replayed is not None:
+            return replayed
+        if self._has_competing_registration(username=username, invite_code=invite_code):
+            raise RegistrationError()
+        return None
+
+    def _has_competing_registration(self, *, username: str, invite_code: str) -> bool:
+        """回滚后确认完整性错误是否由另一笔注册占用用户名或邀请码造成。"""
+        db = self._credentials.new_session()
+        try:
+            username_claimed = db.query(User.uuid).filter(User.username == username).first() is not None
+            invite_claimed = (
+                db.query(InviteCode.code).filter(InviteCode.code == invite_code, InviteCode.is_used.is_(True)).first()
+                is not None
+            )
+            return username_claimed or invite_claimed
         finally:
             db.close()
 
@@ -242,10 +267,7 @@ class RegistrationService:
         user = db.query(User).filter(User.uuid == request.user_uuid).first()
         if user is None:
             raise RegistrationRequestUnverifiableError()
-        # 核验“原操作”，而不是账号当前状态：账号被重置后 username 可能已经改掉，
-        # 只有原响应里记录的用户名才代表这次注册提交的内容。
-        original_payload = json.loads(request.response_json)
-        if original_payload.get("user_id") != username:
+        if json.loads(request.response_json).get("user_id") != username:
             raise RegistrationRequestConflictError()
         if user.username != username:
             raise RegistrationRequestConflictError()
@@ -258,8 +280,6 @@ class RegistrationService:
         if owned_invite is None:
             raise RegistrationRequestConflictError()
 
-        # 必须核验"原注册操作"：账号重置会改掉 users.password，不能拿当前密码当原操作证据。
-        # 指纹缺失（旧记录或服务端无密钥）时按无法核验处理，不创建替代账号。
         if not request.password_fingerprint or not self._credentials.password_matches_fingerprint(
             password, request.password_fingerprint
         ):

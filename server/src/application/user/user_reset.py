@@ -1,7 +1,18 @@
+"""Complete user-owned data reset without changing account credentials."""
+
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Protocol
+
+from src.utils.owned_operation import complete_owned
+
+
+class UserResetFencePort(Protocol):
+    async def begin_user_data_reset(self, user_id: str) -> object: ...
+
+    async def end_user_data_reset(self, user_id: str, token: object) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -27,49 +38,83 @@ class UserResetReport:
 
 
 class UserResetService:
-    """Best-effort, retry-safe orchestration for deleting all user-owned data."""
+    """Reject busy users, fence admission, then retry-safely delete user-owned data."""
 
-    def __init__(self, *, conversation_service, vector_store, redis_buffer, media_store) -> None:
+    def __init__(
+        self,
+        *,
+        interactions: UserResetFencePort,
+        conversation_service,
+        memory_store,
+        user_store,
+        vector_store,
+        redis_buffer,
+        media_store,
+        call_sessions,
+        call_maintenance_batches,
+    ) -> None:
+        self._interactions = interactions
         self._conversation_service = conversation_service
+        self._memory_store = memory_store
+        self._user_store = user_store
         self._vector_store = vector_store
         self._redis = redis_buffer
         self._media_store = media_store
+        self._call_sessions = call_sessions
+        self._call_maintenance_batches = call_maintenance_batches
 
-    def reset(self, user_id: str) -> UserResetReport:
-        steps = (
-            self._run_count_step("conversations", lambda: self._conversation_service.reset_user_conversations(user_id)),
-            self._run_count_step("vectors", lambda: self._vector_store.delete_user_records(user_id)),
-            self._run_void_step("cache", lambda: self._redis.clear_user(user_id)),
-            self._run_media_step(user_id),
-        )
-        return UserResetReport(user_id=user_id, steps=steps)
+    async def reset(self, user_id: str) -> UserResetReport:
+        return await complete_owned(self._reset_owned(user_id))
 
-    @staticmethod
-    def _run_count_step(name: str, operation: Callable[[], int]) -> UserResetStep:
+    async def _reset_owned(self, user_id: str) -> UserResetReport:
+        token = await self._interactions.begin_user_data_reset(user_id)
         try:
-            deleted_count = operation()
-        except Exception as error:
-            return UserResetStep(name=name, success=False, error=type(error).__name__)
-        return UserResetStep(name=name, success=True, deleted_count=deleted_count)
-
-    @staticmethod
-    def _run_void_step(name: str, operation: Callable[[], None]) -> UserResetStep:
-        try:
-            operation()
-        except Exception as error:
-            return UserResetStep(name=name, success=False, error=type(error).__name__)
-        return UserResetStep(name=name, success=True)
-
-    def _run_media_step(self, user_id: str) -> UserResetStep:
-        try:
-            report = self._media_store.delete_owned_by(owner_user_id=user_id)
-        except Exception as error:
-            return UserResetStep(name="media", success=False, error=type(error).__name__)
-        if report.failures:
-            return UserResetStep(
-                name="media",
-                success=False,
-                deleted_count=report.deleted_count,
-                error=",".join(failure.media_id for failure in report.failures),
+            steps = [UserResetStep("interactions", True)]
+            steps.extend(
+                [
+                    await self._count("vectors", self._delete_vectors, user_id),
+                    await self._count("canonical_memory", self._memory_store.delete_user_memory_records, user_id),
+                    await self._count(
+                        "call_maintenance_batches", self._call_maintenance_batches.delete_by_user, user_id
+                    ),
+                    await self._count("call_sessions", self._call_sessions.delete_by_user, user_id),
+                    await self._count("conversations", self._conversation_service.reset_user_conversations, user_id),
+                    await self._count("profile", self._user_store.reset_user_profile, user_id),
+                    await self._void("cache", self._redis.clear_user, user_id),
+                    await self._media(user_id),
+                ]
             )
-        return UserResetStep(name="media", success=True, deleted_count=report.deleted_count)
+            return UserResetReport(user_id, tuple(steps))
+        finally:
+            await self._interactions.end_user_data_reset(user_id, token)
+
+    def _delete_vectors(self, user_id: str) -> int:
+        operation = getattr(self._vector_store, "delete_user_records_strict", None)
+        if operation is None:
+            raise RuntimeError("strict vector deletion is unavailable")
+        return operation(user_id)
+
+    @staticmethod
+    async def _count(name: str, operation: Callable[[str], int], user_id: str) -> UserResetStep:
+        try:
+            count = await complete_owned(asyncio.to_thread(operation, user_id))
+        except Exception as error:
+            return UserResetStep(name, False, error=type(error).__name__)
+        return UserResetStep(name, True, count)
+
+    @staticmethod
+    async def _void(name: str, operation: Callable[[str], None], user_id: str) -> UserResetStep:
+        try:
+            await complete_owned(asyncio.to_thread(operation, user_id))
+        except Exception as error:
+            return UserResetStep(name, False, error=type(error).__name__)
+        return UserResetStep(name, True)
+
+    async def _media(self, user_id: str) -> UserResetStep:
+        try:
+            report = await complete_owned(asyncio.to_thread(self._media_store.delete_owned_by, owner_user_id=user_id))
+        except Exception as error:
+            return UserResetStep("media", False, error=type(error).__name__)
+        if report.failures:
+            return UserResetStep("media", False, report.deleted_count, "MEDIA_DELETE_PARTIAL")
+        return UserResetStep("media", True, report.deleted_count)

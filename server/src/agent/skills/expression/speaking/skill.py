@@ -8,23 +8,28 @@ from typing import Any
 from src.agent.skills.contracts import SkillInvocation
 from src.agent.skills.expression.speaking.backend import SpeechBackend
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
-from src.domain.agent import AudioFraming, Tone
+from src.domain.agent import CALL_PCM_FORMAT, MAX_CALL_PCM_CHUNK_BYTES, AudioFormat, AudioFraming, Tone
+from src.infrastructure.observability.tts_metrics import tts_request
 
 
 @dataclass(frozen=True)
 class _SpeakingConfig:
     """说话 Skill 的角色 TTS 配置。"""
 
+    enabled: bool
     characters: dict[str, dict[str, Any]]
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "_SpeakingConfig":
         if not isinstance(config, dict):
             raise TypeError("speaking 必须是字典")
-        characters = config.get("characters", {})
+        enabled = config.get("enabled", True)
+        if type(enabled) is not bool:
+            raise TypeError("agent_runtime.skills.speaking.enabled 必须是布尔值")
+        characters = config.get("characters", {}) if enabled else {}
         if not isinstance(characters, dict):
             raise TypeError("speaking.characters 必须是字典")
-        return cls(characters)
+        return cls(enabled, characters)
 
 
 @dataclass(frozen=True)
@@ -33,10 +38,15 @@ class SpeakingAudioChunk:
 
     data: bytes
     framing: AudioFraming
+    audio_format: AudioFormat | None = None
 
 
 class EmptySpeechError(Exception):
     """TTS 正常结束，但没有产生任何有效音频。"""
+
+
+class SpeakingDisabledError(RuntimeError):
+    """配置主动关闭语音，不是供应商错误或空音频。"""
 
 
 class SpeakingSkill:
@@ -45,28 +55,64 @@ class SpeakingSkill:
     def __init__(self, config: dict[str, Any], tts_engine: AsyncTTS | None = None) -> None:
         """构造角色 TTS worker；测试可注入已初始化的 tts_engine。"""
         self._config = _SpeakingConfig.from_dict(config)
-        self._backend = None if tts_engine is not None else SpeechBackend(self._config.characters)
-        self._tts = tts_engine or AsyncTTS(self._backend)
+        self._backend = None
+        self._tts = None
+        if self.enabled:
+            self._backend = None if tts_engine is not None else SpeechBackend(self._config.characters)
+            self._tts = tts_engine if tts_engine is not None else AsyncTTS(self._backend)
+
+    @property
+    def enabled(self) -> bool:
+        """是否配置启用语音；禁用不拥有后端或音频流资源。"""
+        return self._config.enabled
 
     async def stop(self) -> None:
         """停止该 Skill 拥有的所有共享 TTS worker。"""
         if self._backend is not None:
             await self._backend.stop()
 
+    def supports_call_audio(self, character_id: str) -> bool:
+        """Report whether the configured character has a live CALL PCM backend."""
+        if not self.enabled:
+            return False
+        if self._backend is None:
+            return True
+        module = self._backend.tts_module.get(character_id)
+        return module is not None and callable(getattr(module, "stream_synthesize_call_pcm_with_tone", None))
+
     def abort_initialization(self) -> None:
         """初始化后续 Skill 失败时同步回收已启动的 worker。"""
         if self._backend is not None:
             self._backend._abort_initialization()
 
-    async def speak(self, invocation: SkillInvocation, *, text: str, tone: Tone) -> AsyncIterator[SpeakingAudioChunk]:
+    async def speak(
+        self,
+        invocation: SkillInvocation,
+        *,
+        text: str,
+        tone: Tone,
+        output_format: AudioFormat | None = None,
+    ) -> AsyncIterator[SpeakingAudioChunk]:
         """按角色、朗读文本和语调生成音频；取消时释放本次流，空音频抛 EmptySpeechError。
 
         调用方提前停止消费时须关闭生成器；可使用 contextlib.aclosing。
         """
+        if not self.enabled:
+            raise SpeakingDisabledError("speaking is disabled")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("朗读文本不能为空")
         if not isinstance(tone, Tone):
             raise TypeError("tone 必须使用领域类型")
+        if output_format is not None and output_format != CALL_PCM_FORMAT:
+            raise ValueError("CALL 音频必须使用规范 24 kHz PCM16 单声道格式")
+        with tts_request(invocation) as timing:
+            async with aclosing(self._speak(invocation, text=text, tone=tone, output_format=output_format)) as stream:
+                async for chunk in stream:
+                    if chunk.data:
+                        timing.mark("returned")
+                    yield chunk
+
+    async def _speak(self, invocation, *, text, tone, output_format):
         generated = False
         async with aclosing(
             self._tts.stream(
@@ -74,10 +120,20 @@ class SpeakingSkill:
                 text=text,
                 tone=tone.value,
                 cancellation=invocation.cancellation,
+                output_format=output_format,
             )
         ) as stream:
             async for data in stream:
-                generated = True
-                yield SpeakingAudioChunk(data, AudioFraming.FILE_FRAGMENT)
+                if output_format is None:
+                    generated = True
+                    yield SpeakingAudioChunk(data, AudioFraming.FILE_FRAGMENT, None)
+                    continue
+                if len(data) % 2:
+                    raise ValueError("CALL PCM 后端返回了不完整的 PCM16 样本")
+                for offset in range(0, len(data), MAX_CALL_PCM_CHUNK_BYTES):
+                    chunk = data[offset : offset + MAX_CALL_PCM_CHUNK_BYTES]
+                    if chunk:
+                        generated = True
+                        yield SpeakingAudioChunk(chunk, AudioFraming.RAW_PCM, CALL_PCM_FORMAT)
         if not generated:
             raise EmptySpeechError("TTS 未生成有效音频")

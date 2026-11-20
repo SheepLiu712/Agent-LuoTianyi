@@ -10,7 +10,7 @@ import pytest
 
 import src.domain.agent as d
 from src.agent_runtime.agent_runtime import AgentRuntime
-from src.agent.skills.expression.speaking import SpeakingSkill, EmptySpeechError
+from src.agent.skills.expression.speaking import EmptySpeechError, SpeakingDisabledError, SpeakingSkill
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
 from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from support.routing_support import Sink, plan_and_context
@@ -335,7 +335,7 @@ async def test_prepared_say_delivery_and_complete_file(
 ):
     kwargs, _ = runtime_dependencies
     manifest, audio = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    kwargs["config"]["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     module = Module()
     runtime = AgentRuntime(**kwargs)
     runtime.skills.speaking._tts._speech.tts_module["luotianyi"] = module
@@ -378,7 +378,7 @@ async def test_prepared_audio_is_read_at_execution_and_fails_before_output(
 ):
     kwargs, _ = runtime_dependencies
     manifest, audio = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    kwargs["config"]["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     runtime = AgentRuntime(**kwargs)
     try:
         if failure == "deleted":
@@ -425,7 +425,7 @@ async def test_tts_ephemeral_delivery_suppresses_text_and_preserves_terminal_fla
 async def test_prepared_read_cancellation_stops_all_delivery(runtime_dependencies, prepared_manifest, monkeypatch):
     kwargs, _ = runtime_dependencies
     manifest, _ = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    kwargs["config"]["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     runtime = AgentRuntime(**kwargs)
     started, proceed = threading.Event(), threading.Event()
     read = runtime.skills.prepared_speech._read_audio
@@ -453,3 +453,96 @@ async def test_prepared_read_cancellation_stops_all_delivery(runtime_dependencie
     finally:
         proceed.set()
         await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_call_worker_timing_survives_thread_handoff_and_ignores_stale_requests(monkeypatch):
+    from queue import Queue
+    from src.agent.skills.expression.speaking.tts_server import TTSServer
+    from src.infrastructure.observability import call_reply_timing as timing
+
+    server = object.__new__(TTSServer)
+    server.server_process = SimpleNamespace(is_alive=lambda: True)
+    server.request_queue, server.response_queue = Queue(), Queue()
+    server._synthesize_lock = threading.Lock()
+    server._request_counter, server._stopping = 0, False
+    server.stop_event = threading.Event()
+    server._begin_request = server._end_request = lambda: None
+    server.logger = SimpleNamespace(warning=lambda *args: None)
+    events = []
+    monkeypatch.setattr(timing, "call_latency", lambda name, call_id, **fields: events.append((name, call_id, fields)))
+
+    def consume():
+        return list(server.stream_synthesize_call_pcm("文字", "ref", "ref", "prompt"))
+
+    with timing.call_tts_scope("call", "segment"):
+        task = asyncio.create_task(asyncio.to_thread(consume))
+        request = await asyncio.to_thread(server.request_queue.get, True, 2)
+        server.response_queue.put(dict(request_id="stale", tts_phase="started", monotonic_ns=1))
+        for phase, ns, payload in (
+            ("started", 100, {}),
+            ("synthesized", 200, {"audio_bytes": b"pcm"}),
+            ("finished", 300, {"is_final": True}),
+        ):
+            server.response_queue.put(
+                dict(request_id=request["request_id"], ok=True, tts_phase=phase, monotonic_ns=ns, **payload)
+            )
+        assert await asyncio.wait_for(task, 2) == [b"pcm"]
+        await asyncio.sleep(0)
+    assert [row[0] for row in events] == ["tts.requested", "tts.started", "tts.synthesized", "tts.finished"]
+    assert [row[2]["monotonic_ns"] for row in events[1:]] == [100, 200, 300]
+    assert all(row[1] == "call" and row[2]["response_id"] == "segment" for row in events)
+
+
+@pytest.mark.asyncio
+async def test_disabled_speaking_creates_no_backend_and_closes_idempotently(monkeypatch):
+    from src.agent.skills.expression.speaking import skill as speaking_module
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("disabled speaking must not construct TTS resources")
+
+    monkeypatch.setattr(speaking_module, "SpeechBackend", forbidden)
+    monkeypatch.setattr(speaking_module, "AsyncTTS", forbidden)
+
+    skill = SpeakingSkill({"enabled": False})
+
+    assert skill.enabled is False
+    assert not skill.supports_call_audio("luotianyi")
+    assert not skill.supports_call_audio("unknown")
+    await skill.stop()
+    await skill.stop()
+    skill.abort_initialization()
+    skill.abort_initialization()
+
+
+@pytest.mark.asyncio
+async def test_disabled_speaking_rejects_direct_calls_instead_of_returning_empty_audio():
+    skill = SpeakingSkill({"enabled": False})
+
+    with pytest.raises(SpeakingDisabledError, match="speaking is disabled"):
+        await anext(skill.speak(invocation(), text="不要朗读", tone=d.Tone(value="normal")))
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_speaking_rejects_non_boolean_enabled_before_engine_use(value):
+    with pytest.raises(TypeError, match=r"agent_runtime.skills.speaking.enabled"):
+        SpeakingSkill({"enabled": value}, tts_engine=object())
+
+
+def test_speaking_is_enabled_by_default_with_an_injected_engine():
+    skill = speaking(Module())
+
+    assert skill.enabled is True
+    assert skill.supports_call_audio("luotianyi")
+
+
+@pytest.mark.asyncio
+async def test_disabled_speaking_does_not_use_an_injected_engine():
+    module = Module()
+    skill = SpeakingSkill({"enabled": False}, tts_engine=AsyncTTS(SimpleNamespace(tts_module={"luotianyi": module})))
+
+    assert not skill.supports_call_audio("luotianyi")
+    with pytest.raises(SpeakingDisabledError):
+        await anext(skill.speak(invocation(), text="不会发音", tone=d.Tone(value="normal")))
+    assert module.calls == []
+    await skill.stop()

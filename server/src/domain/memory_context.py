@@ -16,6 +16,7 @@ class MemoryHit:
     source: str = "vector"
     record: Optional[MemoryRecord] = None
     vector_id: str | None = None
+    source_record_id: str | None = None
 
     @property
     def memory_type(self) -> MemoryType | None:
@@ -23,7 +24,7 @@ class MemoryHit:
 
     @property
     def memory_record_id(self) -> str | None:
-        return self.record.id if self.record else None
+        return self.record.id if self.record else self.source_record_id
 
 
 @dataclass(frozen=True)

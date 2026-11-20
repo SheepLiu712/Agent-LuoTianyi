@@ -10,7 +10,10 @@ from src.utils.logger import get_logger
 
 from .runtime_access import require_bearer_token, runtime_not_ready_detail
 from .types import (
+    AgreementAcceptRequest,
     AutoLoginRequest,
+    CallCapabilityQuery,
+    CallCapabilityResponse,
     DynamicCommentCreateRequest,
     DynamicCommentListQuery,
     DynamicCommentListRequest,
@@ -27,6 +30,7 @@ from .types import (
     PreferenceOverwriteRequest,
     RegisterRequest,
     ResetAccountRequest,
+    UserDataResetRequest,
 )
 
 if TYPE_CHECKING:
@@ -60,6 +64,15 @@ async def get_agreement(server_runtime: "ServerRuntime" = Depends(get_runtime)):
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.post("/auth/agreement/accept")
+async def accept_agreement(
+    req: AgreementAcceptRequest,
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+    request: Request = None,
+):
+    return await server_runtime.user_interface.accept_agreement(req, server_runtime, request)
 
 
 @router.get("/llm/client-model-types")
@@ -96,6 +109,16 @@ async def reset_account(
 ):
     logger.info("Reset account request for username=%s", req.new_username)
     return await server_runtime.user_interface.reset_account(req, server_runtime, request)
+
+
+@router.post("/user/data/reset")
+async def reset_user_data(
+    req: UserDataResetRequest,
+    authorization: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    token = require_bearer_token(authorization)
+    return await server_runtime.user_interface.reset_user_data(req, token, server_runtime)
 
 
 @router.post("/auth/login")
@@ -139,6 +162,16 @@ async def get_history(
         request.count,
         request.end_index,
     )
+
+
+@router.get("/call/capability", response_model=CallCapabilityResponse)
+async def get_call_capability(
+    request: CallCapabilityQuery = Depends(),
+    authorization: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    token = require_bearer_token(authorization)
+    return await server_runtime.user_interface.get_call_capability(token, request.character_id, server_runtime)
 
 
 @router.get("/media/audio/{message_uuid}")

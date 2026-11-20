@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import copy
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.skills import SkillsConfig
+from src.infrastructure.models.realtime_speech.config import AliyunRealtimeSpeechConfig, RealtimeSpeechConfigError
 from src.infrastructure.persistence.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
     MIN_MESSAGE_TOKEN_TTL_SECONDS,
 )
+from src.utils.server_paths import ServerPaths
 
 
 @dataclass
@@ -35,19 +39,16 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY", "QWEN_API_KEY"]
-
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
         "database.memory_store": "database.memory_store.llm_module",
-        "conversation.summary": "chat_session_manager.conversation_service.llm_module",
-        "agent.topic_extractor": "agent_runtime.agent.topic_extractor.llm_module",
-        "agent.main_chat": "agent_runtime.agent.main_chat.llm_module",
-        "agent.memory_writer": "agent_runtime.agent.memory.memory_writer.llm_module",
-        "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
-        "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
+        "conversation.summary": "agent_runtime.skills.cognitive_maintenance.conversation_compaction.llm_module",
+        "agent.topic_extractor": "agent_runtime.skills.topic_extraction.llm_module",
+        "agent.main_chat": "agent_runtime.skills.reply.llm_module",
+        "agent.memory_writer": "agent_runtime.skills.memory_write.llm_module",
+        "agent.user_profile": "agent_runtime.skills.cognitive_maintenance.user_profile.llm_module",
         "skill.singing.song_emotion_tagger": "agent_runtime.skills.singing.song_emotion_tagger",
-        "skill.diary": "agent_runtime.skills.diary.diary_llm.llm_module",
+        "skill.diary": "agent_runtime.skills.dynamic.diary_composer.llm_module",
     }
 
     CORE_VLM_MODULE_PATHS = {
@@ -73,12 +74,23 @@ class RuntimeConfigValidator:
 
     def validate(self, config: dict[str, Any]) -> dict[str, Any]:
         items: list[ValidationItem] = []
-        items.extend(self._validate_secrets())
+        if "agent_runtime" in config:
+            try:
+                SkillsConfig.reject_legacy_summary(config)
+                SkillsConfig.from_runtime(config["agent_runtime"])
+            except (ValueError, TypeError) as error:
+                items.append(ValidationItem("core", "agent_runtime.skills", "error", str(error)))
+        items.extend(self._validate_secrets(config))
         items.extend(self._validate_security_config(config))
+        items.extend(self._validate_user_agreement_config(config))
         items.extend(self._validate_llm_interfaces(config))
+        items.extend(self._validate_call_setup_timeout(config))
+        items.extend(self._validate_realtime_speech(config))
         items.extend(self._validate_client_model_types(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
+        items.extend(self._validate_vector_store(config))
+        items.extend(self._validate_world_switches(config))
         items.extend(self._validate_world_optionals(config))
         has_core_error = any(item.scope != "world" and item.status == "error" for item in items)
         return {
@@ -105,10 +117,15 @@ class RuntimeConfigValidator:
                 world.setdefault("auto_song_learner", {})["enabled"] = False
         return next_config
 
-    def _validate_secrets(self) -> list[ValidationItem]:
+    @staticmethod
+    def required_secret_keys(config: dict[str, Any]) -> list[str]:
+        citywalk_disabled = RuntimeConfigValidator._get(config, "world.citywalk.enabled") is False
+        return ["JWT_SECRET"] if citywalk_disabled else ["JWT_SECRET", "AMAP_KEY"]
+
+    def _validate_secrets(self, config: dict[str, Any]) -> list[ValidationItem]:
         result = []
         secrets = self.secret_store.read()
-        for key in self.REQUIRED_SECRET_KEYS:
+        for key in self.required_secret_keys(config):
             configured = bool(secrets.get(key) or os.environ.get(key))
             result.append(
                 ValidationItem(
@@ -157,6 +174,17 @@ class RuntimeConfigValidator:
                 )
             ]
         return [ValidationItem("core", name, "ok", f"消息令牌有效期为 {value} 秒")]
+
+    @staticmethod
+    def _validate_user_agreement_config(config: dict[str, Any]) -> list[ValidationItem]:
+        name = "config.user_agreements.exempt_user_uuids"
+        agreement_config = config.get("user_agreements", {})
+        if not isinstance(agreement_config, dict):
+            return [ValidationItem("core", name, "error", "user_agreements 必须是对象")]
+        user_uuids = agreement_config.get("exempt_user_uuids", [])
+        if not isinstance(user_uuids, list) or any(not isinstance(value, str) or not value for value in user_uuids):
+            return [ValidationItem("core", name, "error", "exempt_user_uuids 必须是非空账号 ID 的列表")]
+        return [ValidationItem("core", name, "ok", f"协议豁免账号数: {len(user_uuids)}")]
 
     def _validate_llm_interfaces(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
@@ -350,6 +378,33 @@ class RuntimeConfigValidator:
         walk(config, "")
         return bindings
 
+    @staticmethod
+    def _validate_call_setup_timeout(config: dict[str, Any]) -> list[ValidationItem]:
+        manager = config.get("stage_manager", {})
+        if not isinstance(manager, dict):
+            return [ValidationItem("core", "stage_manager", "error", "stage_manager 必须是对象")]
+        value = manager.get("call_setup_timeout", 10.0)
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            return [
+                ValidationItem("core", "stage_manager.call_setup_timeout", "error", "通话建立总时限必须是正的有限秒数")
+            ]
+        return []
+
+    def _validate_realtime_speech(self, config: dict[str, Any]) -> list[ValidationItem]:
+        transport = config.get("call_transport", {})
+        try:
+            if not isinstance(transport, dict) or type(transport.get("enabled", False)) is not bool:
+                raise RealtimeSpeechConfigError("call_transport.enabled 必须是布尔值")
+            speech = transport.get("realtime_speech", {})
+            if not isinstance(speech, dict) or type(speech.get("enabled", False)) is not bool:
+                raise RealtimeSpeechConfigError("realtime_speech.enabled 必须是布尔值")
+            if speech.get("enabled", False):
+                provider = AliyunRealtimeSpeechConfig.from_mapping(speech, use_legacy_setup_timeouts=False)
+                _ = provider.websocket_url
+        except RealtimeSpeechConfigError as error:
+            return [ValidationItem("core", "call_transport.realtime_speech", "error", str(error))]
+        return []
+
     def _validate_core_modules(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
         llms = set((config.get("llm_service", {}).get("available_llms") or {}).keys())
@@ -362,6 +417,11 @@ class RuntimeConfigValidator:
             module = self._get(config, path) or {}
             vlm_name = ((module.get("vlm") or {}).get("name") or "").strip()
             result.append(self._module_item("vlm", name, vlm_name, vlms))
+        audio_names = set((config.get("llm_service", {}).get("available_audio_models") or {}).keys())
+        audio_module = self._get(config, "agent_runtime.skills.audio_understanding.audio_model_module")
+        if isinstance(audio_module, dict):
+            audio_name = str((audio_module.get("audio") or {}).get("name") or "").strip()
+            result.append(self._module_item("audio", "audio_understanding", audio_name, audio_names))
         return result
 
     def _validate_core_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
@@ -371,12 +431,7 @@ class RuntimeConfigValidator:
             result.append(self._path_item("core", f"resource.{name}", raw))
         result.extend(self._validate_song_knowledge_resources(config))
 
-        tts_cfg = config.get("agent_runtime", {}).get("skills", {}).get("speaking", {}).get("characters", {})
-        if not tts_cfg:
-            result.append(ValidationItem("core", "resource.tts", "error", "未配置 TTS"))
-        for character, item in tts_cfg.items():
-            for key in self.TTS_RESOURCE_KEYS:
-                result.append(self._path_item("core", f"resource.tts.{character}.{key}", item.get(key)))
+        result.extend(self._validate_tts_resources(config))
 
         sing_cfg = config.get("agent_runtime", {}).get("skills", {}).get("singing", {})
         characters_cfg = sing_cfg.get("characters")
@@ -393,15 +448,50 @@ class RuntimeConfigValidator:
                 )
         return result
 
+    def _validate_vector_store(self, config: dict[str, Any]) -> list[ValidationItem]:
+        vectors = self._get(config, "agent_runtime.vector_store")
+        if vectors is None:
+            return []
+        if not isinstance(vectors, dict):
+            return [ValidationItem("core", "agent_runtime.vector_store", "error", "vector_store 必须是对象")]
+        enabled = vectors.get("enabled", True)
+        if type(enabled) is not bool:
+            return [
+                ValidationItem(
+                    "core",
+                    "agent_runtime.vector_store.enabled",
+                    "error",
+                    "agent_runtime.vector_store.enabled 必须是布尔值",
+                )
+            ]
+        if not enabled:
+            return [ValidationItem("core", "resource.vector_store", "disabled", "长期记忆向量检索已关闭，正本仍保存")]
+        return []
+
+    def _validate_tts_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
+        speaking = self._get(config, "agent_runtime.skills.speaking") or {}
+        if not isinstance(speaking, dict):
+            return [ValidationItem("core", "resource.tts", "error", "speaking 必须是对象")]
+        if speaking.get("enabled", True) is False:
+            return [ValidationItem("core", "resource.tts", "disabled", "语音合成已由配置关闭，不加载 TTS 资源")]
+        tts_cfg = speaking.get("characters", {})
+        if not isinstance(tts_cfg, dict) or not tts_cfg:
+            return [ValidationItem("core", "resource.tts", "error", "未配置 TTS")]
+        result = []
+        for character, item in tts_cfg.items():
+            for key in self.TTS_RESOURCE_KEYS:
+                result.append(self._path_item("core", f"resource.tts.{character}.{key}", item.get(key)))
+        return result
+
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
-        linker_cfg = self._get(config, "agent_runtime.agent.preprocessing.song_entity_linker") or {}
-        songname_file = linker_cfg.get("songname_file") or "res/knowledge/song_name_keywords.txt"
+        linker_cfg = self._get(config, "agent_runtime.skills.jargon_recognition.song_entity_linker") or {}
+        songname_file = linker_cfg.get("songname_file") or "data/knowledge/song_name_keywords.txt"
         lyric_file = (
-            linker_cfg.get("lyric_file") or linker_cfg.get("lyrics_file") or "res/knowledge/song_lyric_keywords.txt"
+            linker_cfg.get("lyric_file") or linker_cfg.get("lyrics_file") or "data/knowledge/song_lyric_keywords.txt"
         )
 
-        song_db_cfg = self._get(config, "agent_runtime.agent.song_knowledge.song_database") or {}
-        db_folder = song_db_cfg.get("db_folder") or "res/knowledge"
+        song_db_cfg = self._get(config, "agent_runtime.skills.knowledge.song_database") or {}
+        db_folder = song_db_cfg.get("db_folder") or "data/knowledge"
         db_file = song_db_cfg.get("db_file") or "knowledge_db.db"
         raw_db_file = Path(str(db_file))
         db_path = raw_db_file if raw_db_file.is_absolute() else Path(str(db_folder)) / raw_db_file
@@ -412,24 +502,92 @@ class RuntimeConfigValidator:
             self._path_item("core", "resource.song lyric keywords", lyric_file),
         ]
 
+    def _validate_world_switches(self, config: dict[str, Any]) -> list[ValidationItem]:
+        result = []
+        world = config.get("world", {})
+        if not isinstance(world, dict):
+            return [ValidationItem("core", "world", "error", "world 必须是对象")]
+        for task in (
+            "citywalk",
+            "auto_song_learner",
+            "qq_music_credential_refresh",
+            "song_knowledge",
+            "bili_dynamic_fetcher",
+            "dynamic_interaction",
+            "diary",
+            "proactive_topic_check",
+            "expired_event_cleanup",
+        ):
+            section = world.get(task, {})
+            if not isinstance(section, dict):
+                result.append(ValidationItem("core", f"world.{task}", "error", f"world.{task} 必须是对象"))
+                continue
+            if type(section.get("enabled", True)) is not bool:
+                path = f"world.{task}.enabled"
+                result.append(ValidationItem("core", path, "error", f"{path} 必须是布尔值"))
+            overrides = section.get("characters", section.get("per_character", {}))
+            if isinstance(overrides, dict):
+                for character, override in overrides.items():
+                    if isinstance(override, dict) and type(override.get("enabled", True)) is not bool:
+                        path = f"world.{task}.characters.{character}.enabled"
+                        result.append(ValidationItem("core", path, "error", f"{path} 必须是布尔值"))
+        return result
+
     def _validate_world_optionals(self, config: dict[str, Any]) -> list[ValidationItem]:
         result = []
         world = config.get("world", {})
+        if not isinstance(world, dict):
+            return result
+        citywalk_enabled = self._get(world, "citywalk.enabled") is not False
         citywalk_key = self._get(world, "citywalk.amap.api_key")
-        result.append(
-            ValidationItem(
-                "world",
-                "citywalk",
-                "ok" if citywalk_key and not str(citywalk_key).startswith("$") else "disabled",
-                (
-                    "高德地图 key 已配置"
-                    if citywalk_key and not str(citywalk_key).startswith("$")
-                    else "缺少 AMAP_KEY，将禁用 citywalk"
-                ),
-                severity="warning",
+        if not citywalk_enabled:
+            result.append(ValidationItem("world", "citywalk", "disabled", "城市漫步已由配置关闭", severity="warning"))
+        else:
+            result.append(
+                ValidationItem(
+                    "world",
+                    "citywalk",
+                    "ok" if citywalk_key and not str(citywalk_key).startswith("$") else "disabled",
+                    (
+                        "高德地图 key 已配置"
+                        if citywalk_key and not str(citywalk_key).startswith("$")
+                        else "缺少 AMAP_KEY，将禁用 citywalk"
+                    ),
+                    severity="warning",
+                )
             )
-        )
+            if self._get(config, "agent_runtime.vector_store.enabled") is False:
+                result.append(
+                    ValidationItem(
+                        "world",
+                        "citywalk.vector_projection",
+                        "warning",
+                        "城市漫步已请求开启，但向量库关闭；本次运行跳过整个城市漫步，"
+                        "未生成报告、SQL travel 或观察事实；启用向量库并重启可恢复",
+                        severity="warning",
+                    )
+                )
 
+        if self._get(world, "bili_dynamic_fetcher.enabled") is False:
+            result.append(
+                ValidationItem(
+                    "world", "bili_dynamic_fetcher", "disabled", "B站动态任务已由配置关闭", severity="warning"
+                )
+            )
+        else:
+            result.extend(self._validate_bili_credential(world))
+        if self._get(world, "auto_song_learner.enabled") is False:
+            result.append(
+                ValidationItem(
+                    "world", "auto_song_learner.qq_music", "disabled", "自动学歌已由配置关闭", severity="warning"
+                )
+            )
+        else:
+            result.extend(self._validate_qq_credential(world))
+        return result
+
+    def _validate_bili_credential(self, world: dict[str, Any]) -> list[ValidationItem]:
+        result = []
         bili_cookie = self._get(world, "bili_dynamic_fetcher.bili_cookie_file")
         bili_cookie_path = self._resolve_path(bili_cookie) if bili_cookie else None
         result.append(
@@ -454,6 +612,10 @@ class RuntimeConfigValidator:
             )
         )
 
+        return result
+
+    def _validate_qq_credential(self, world: dict[str, Any]) -> list[ValidationItem]:
+        result = []
         qq_credential = self._get(world, "auto_song_learner.qq_credential_file") or "config/qq_music_credential.json"
         qq_path = self._resolve_path(qq_credential)
         legacy_qq_path = (
@@ -502,7 +664,7 @@ class RuntimeConfigValidator:
         path = Path(str(raw))
         if path.is_absolute():
             return path
-        return self.root_dir / path
+        return ServerPaths.from_environment(self.root_dir).resolve(path)
 
     @staticmethod
     def _get(data: dict[str, Any], path: str) -> Any:

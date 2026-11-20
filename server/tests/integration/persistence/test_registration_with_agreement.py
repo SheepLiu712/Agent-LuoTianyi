@@ -1,6 +1,8 @@
 """UA-2 注册用例：账号、协议签署、邀请码与注册请求结果必须在同一次提交里完成。"""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +19,7 @@ from src.application.user.registration_service import (
     RegistrationRequestUnverifiableError,
     RegistrationService,
 )
+from src.infrastructure.persistence.database import sql_database
 from src.infrastructure.persistence.database.database_service import DatabaseManager
 from src.infrastructure.persistence.database.services import credential_service
 from src.infrastructure.persistence.database.sql_database import (
@@ -56,6 +59,7 @@ def env(tmp_path, monkeypatch):
                 )
             )
         session.add(InviteCode(code=INVITE, is_used=False, disabled=False))
+        session.add(InviteCode(code="INVITE-BBBB", is_used=False, disabled=False))
         session.commit()
     finally:
         session.close()
@@ -91,6 +95,7 @@ def snapshot(manager):
             "signatures": session.query(AgreementSignature).all(),
             "requests": session.query(RegistrationRequest).all(),
             "invite": session.query(InviteCode).filter_by(code=INVITE).one(),
+            "invites": {row.code: row for row in session.query(InviteCode).all()},
         }
     finally:
         session.close()
@@ -162,12 +167,6 @@ def test_same_request_id_with_different_username_conflicts(env):
 
 
 def test_same_request_id_with_different_invite_code_conflicts(env):
-    session = env.manager.open_sql_session()
-    try:
-        session.add(InviteCode(code="INVITE-BBBB", is_used=False, disabled=False))
-        session.commit()
-    finally:
-        session.close()
     submit(env.build())
 
     with pytest.raises(RegistrationRequestConflictError):
@@ -236,83 +235,121 @@ def test_failure_after_claiming_invite_rolls_back_every_write(env, monkeypatch):
     assert state["invite"].is_used is False
 
 
-def test_same_request_id_race_replays_the_committed_result(env, monkeypatch):
-    service = env.build()
-    first = submit(service, registration_request_id="req-race")
-    original_replay = service._replay
-    calls = 0
+def test_concurrent_same_request_id_replays_the_committed_result(env, monkeypatch):
+    barrier = Barrier(2)
+    original_create = env.manager.credential_service.create_account_with_invite
 
-    def hide_first_replay(db, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return None
-        return original_replay(db, **kwargs)
+    def create_after_both_requests_reach_the_transaction(*args, **kwargs):
+        barrier.wait(timeout=10)
+        return original_create(*args, **kwargs)
 
-    monkeypatch.setattr(service, "_replay", hide_first_replay)
-    second = submit(service, registration_request_id="req-race")
+    monkeypatch.setattr(
+        env.manager.credential_service,
+        "create_account_with_invite",
+        create_after_both_requests_reach_the_transaction,
+    )
 
-    assert second == first
-    assert calls == 2
-    state = snapshot(env.manager)
+    def register():
+        return submit(env.build(), registration_request_id="req-race")
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = [future.result() for future in (executor.submit(register), executor.submit(register))]
+        state = snapshot(env.manager)
+    finally:
+        # SQLite keeps pooled file handles on Windows until the global engine is disposed.
+        # All registration sessions are closed before this point.
+        sql_database.engine.dispose()
+
+    assert results == [{"message": "注册成功", "user_id": "newbie"}] * 2
     assert len(state["users"]) == 1
     assert len(state["signatures"]) == 1
     assert len(state["requests"]) == 1
     assert state["invite"].is_used is True
 
 
-class _FlushRaisesIntegrityError:
-    """把 flush 换成唯一约束冲突，其余委托真实会话（模拟并发同名注册的时序）。"""
+def test_concurrent_different_request_ids_with_same_username_return_registration_error(env, monkeypatch):
+    barrier = Barrier(2)
+    original_create = env.manager.credential_service.create_account_with_invite
 
-    def __init__(self, inner) -> None:
-        self._inner = inner
+    def create_after_both_requests_reach_the_transaction(*args, **kwargs):
+        barrier.wait(timeout=10)
+        return original_create(*args, **kwargs)
 
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
+    monkeypatch.setattr(
+        env.manager.credential_service,
+        "create_account_with_invite",
+        create_after_both_requests_reach_the_transaction,
+    )
 
-    def flush(self):
-        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
+    def register(invite_code, request_id):
+        try:
+            return submit(env.build(), invite_code=invite_code, registration_request_id=request_id)
+        except RegistrationError as error:
+            return error
 
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = [
+                future.result()
+                for future in (
+                    executor.submit(register, INVITE, "req-same-name-a"),
+                    executor.submit(register, "INVITE-BBBB", "req-same-name-b"),
+                )
+            ]
+        state = snapshot(env.manager)
+    finally:
+        sql_database.engine.dispose()
 
-def test_concurrent_same_request_id_unique_violation_replays_committed_result(env, monkeypatch):
-    """另一方已提交、本事务撞唯一约束时，应返回原成功结果而不是抛 IntegrityError（HTTP 500）。"""
-    service = env.build()
-    first = submit(service, registration_request_id="req-race-500")
-
-    calls = 0
-    original_replay = service._replay
-
-    def hide_first_replay(db, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return None
-        return original_replay(db, **kwargs)
-
-    def fail_with_unique_violation(*args, **kwargs):
-        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
-
-    monkeypatch.setattr(service, "_replay", hide_first_replay)
-    monkeypatch.setattr(service._credentials, "create_account_with_invite", fail_with_unique_violation)
-
-    second = submit(service, registration_request_id="req-race-500")
-
-    assert second == first
-    state = snapshot(env.manager)
+    assert sum(isinstance(outcome, dict) for outcome in outcomes) == 1
+    assert sum(isinstance(outcome, RegistrationError) for outcome in outcomes) == 1
+    assert next(outcome for outcome in outcomes if isinstance(outcome, RegistrationError)).status_code == 400
     assert len(state["users"]) == 1
     assert len(state["signatures"]) == 1
     assert len(state["requests"]) == 1
+    unused_invites = [invite for invite in (INVITE, "INVITE-BBBB") if not state["invites"][invite].is_used]
+    assert len(unused_invites) == 1
 
 
-def test_two_requests_competing_for_one_invite_code_leave_exactly_one_account(env):
-    service = env.build()
-    submit(service)
+def test_concurrent_different_request_ids_competing_for_one_invite_code_leave_one_account(env, monkeypatch):
+    barrier = Barrier(2)
+    original_create = env.manager.credential_service.create_account_with_invite
 
-    with pytest.raises(RegistrationError):
-        submit(env.build(), username="second", registration_request_id="req-2")
+    def create_after_both_requests_reach_the_transaction(*args, **kwargs):
+        barrier.wait(timeout=10)
+        return original_create(*args, **kwargs)
 
-    state = snapshot(env.manager)
-    assert [user.username for user in state["users"]] == ["newbie"]
+    monkeypatch.setattr(
+        env.manager.credential_service,
+        "create_account_with_invite",
+        create_after_both_requests_reach_the_transaction,
+    )
+
+    def register(username, request_id):
+        try:
+            return submit(env.build(), username=username, registration_request_id=request_id)
+        except RegistrationError as error:
+            return error
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = [
+                future.result()
+                for future in (
+                    executor.submit(register, "newbie", "req-invite-a"),
+                    executor.submit(register, "second", "req-invite-b"),
+                )
+            ]
+        state = snapshot(env.manager)
+    finally:
+        sql_database.engine.dispose()
+
+    assert sum(isinstance(outcome, dict) for outcome in outcomes) == 1
+    assert sum(isinstance(outcome, RegistrationError) for outcome in outcomes) == 1
+    assert next(outcome for outcome in outcomes if isinstance(outcome, RegistrationError)).status_code == 400
+    assert len(state["users"]) == 1
+    assert len(state["signatures"]) == 1
+    assert len(state["requests"]) == 1
     assert state["invite"].user_id == state["users"][0].uuid
 
 
@@ -322,22 +359,6 @@ def test_accepted_time_uses_injected_clock_and_second_precision(env):
 
     row = snapshot(env.manager)["signatures"][0]
     assert row.accepted_at == "2027-01-01T07:59:59+08:00"
-
-
-def test_duplicate_username_unique_conflict_is_business_failure(env):
-    """并发同名注册：唯一约束冲突要变成业务失败，而不是 IntegrityError 冒泡成 500。"""
-    session = env.manager.open_sql_session()
-    try:
-        ok, message, user_uuid = env.manager.credential_service.create_account_with_invite(
-            _FlushRaisesIntegrityError(session), "racer", "pw", INVITE
-        )
-    finally:
-        session.rollback()
-        session.close()
-
-    assert ok is False
-    assert user_uuid is None
-    assert "注册失败" in message
 
 
 def test_replay_after_account_reset_does_not_accept_new_credentials(env):
@@ -396,3 +417,110 @@ def test_replay_after_password_only_reset_is_unverifiable(env):
     state = snapshot(env.manager)
     assert len(state["users"]) == 1
     assert len(state["requests"]) == 1
+
+
+def test_same_request_id_race_replays_the_committed_result(env, monkeypatch):
+    service = env.build()
+    first = submit(service, registration_request_id="req-race")
+    original_replay = service._replay
+    calls = 0
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_replay(db, **kwargs)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    second = submit(service, registration_request_id="req-race")
+
+    assert second == first
+    assert calls == 2
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["signatures"]) == 1
+    assert len(state["requests"]) == 1
+    assert state["invite"].is_used is True
+
+
+def test_concurrent_same_request_id_unique_violation_replays_committed_result(env, monkeypatch):
+    """另一方已提交、本事务撞唯一约束时，应返回原成功结果而不是抛 IntegrityError（HTTP 500）。"""
+    service = env.build()
+    first = submit(service, registration_request_id="req-race-500")
+
+    calls = 0
+    original_replay = service._replay
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_replay(db, **kwargs)
+
+    def fail_with_unique_violation(*args, **kwargs):
+        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    monkeypatch.setattr(service._credentials, "create_account_with_invite", fail_with_unique_violation)
+
+    second = submit(service, registration_request_id="req-race-500")
+
+    assert second == first
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["signatures"]) == 1
+    assert len(state["requests"]) == 1
+
+
+def test_two_requests_competing_for_one_invite_code_leave_exactly_one_account(env):
+    service = env.build()
+    submit(service)
+
+    with pytest.raises(RegistrationError):
+        submit(env.build(), username="second", registration_request_id="req-2")
+
+    state = snapshot(env.manager)
+    assert [user.username for user in state["users"]] == ["newbie"]
+    assert state["invite"].user_id == state["users"][0].uuid
+
+
+def test_existing_schema_one_registration_records_survive_upgrade(env):
+    service = env.build()
+    submit(service)
+    # Reproduce the persisted schema from feat/user_agreement before this PR.
+    with sql_database.engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE registration_requests DROP COLUMN password_fingerprint")
+    sql_database.init_sql_db(env.manager.config["sql_db_folder"], env.manager.config["sql_db_file"])
+    state = snapshot(env.manager)
+    assert len(state["users"]) == len(state["signatures"]) == len(state["requests"]) == 1
+    assert state["requests"][0].password_fingerprint is None
+    with pytest.raises(RegistrationRequestUnverifiableError):
+        submit(service)
+    # Old records are not assigned invented credentials; fresh registrations still work.
+    assert (
+        submit(service, username="second", invite_code="INVITE-BBBB", registration_request_id="req-new")["user_id"]
+        == "second"
+    )
+
+
+def test_existing_dev_database_gets_agreement_tables_before_registration(env):
+    with sql_database.engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE registration_requests")
+        connection.exec_driver_sql("DROP TABLE agreement_signatures")
+        connection.exec_driver_sql("DROP TABLE agreement_versions")
+    sql_database.init_sql_db(env.manager.config["sql_db_folder"], env.manager.config["sql_db_file"])
+    with env.manager.open_sql_session() as session:
+        session.add(
+            AgreementVersion(
+                version=V1,
+                title="协议",
+                format="agreement.richtext.v1",
+                content_json="[]",
+                content_sha256="0" * 64,
+                created_at="2026-10-10T14:30:25+08:00",
+            )
+        )
+        session.commit()
+    assert submit(env.build())["user_id"] == "newbie"

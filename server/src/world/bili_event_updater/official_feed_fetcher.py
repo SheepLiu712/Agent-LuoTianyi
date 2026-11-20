@@ -13,8 +13,10 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
-from .types import OfficialDynamic
 from src.utils.logger import get_logger
+from src.utils.server_paths import resolve_server_path
+
+from .types import OfficialDynamic
 
 logger = get_logger(__name__)
 
@@ -42,7 +44,7 @@ class OfficialFeedFetcher:
         self.bili_accounts: Dict[str, str] = self.config.get("bilibili_uids", {"luotianyi": "36081646"})
         self.cookie_file = Path(self.config.get("bili_cookie_file", "config/bili_cookie.txt"))
 
-        self.data_file = Path(self.config.get("data_file", "data/schedule/feed_cache.json"))
+        self.data_file = resolve_server_path(self.config.get("data_file", "data/schedule/feed_cache.json"))
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -198,6 +200,9 @@ class OfficialFeedFetcher:
                     if not dyn_id:
                         continue
                     if dyn_id in seen:
+                        tag = item.get("modules", {}).get("module_tag")
+                        if tag is not None and tag.get("text") == "置顶":
+                            continue
                         break
 
                     seen.add(dyn_id)

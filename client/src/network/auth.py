@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Event
 from typing import Optional, Tuple
 
 import requests
@@ -81,11 +82,46 @@ def _error_detail(response: requests.Response, fallback: str) -> str:
     return fallback
 
 
+@dataclass(frozen=True)
+class AccountRequest:
+    """窗口调度时的纯网络输入，不持有客户端、Binder 或 Qt 对象。"""
+
+    context: tuple = field(repr=False)
+    action: str
+    base_url: str
+    username: str = ""
+    password: str = field(default="", repr=False)
+    invite: str = field(default="", repr=False)
+    remember: bool = False
+
+    def execute(self, cancelled: Event) -> tuple[bool, str, dict]:
+        if cancelled.is_set():
+            return False, "Request cancelled", {}
+        with HttpClientFactory.create_session() as session:
+            api = AuthApi(self.base_url, session=session, cancelled=cancelled)
+            if self.action == "login":
+                return api.login(self.username, self.password, self.remember)
+            if self.action == "register":
+                ok, message = api.register(self.username, self.password, self.invite)
+                return ok, message, {}
+            if self.action == "reset":
+                ok, message = api.reset_account(self.invite, self.username, self.password)
+                return ok, message, {}
+            if self.action == "server":
+                response = session.get(f"{self.base_url}/auth/public_key", verify=True, timeout=10)
+                return response.status_code == 200, f"服务器返回状态码: {response.status_code}", {}
+            raise ValueError("Unknown account operation")
+
+
 class AuthApi:
-    def __init__(self, base_url: str, verify_ssl: bool = True):
+    def __init__(self, base_url: str, verify_ssl: bool = True, session=None, cancelled: Event | None = None):
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = verify_ssl
-        self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
+        self.session = session if session is not None else HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
+        self.cancelled = cancelled
+
+    def _cancelled(self) -> bool:
+        return self.cancelled is not None and self.cancelled.is_set()
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
         """更新服务器地址，同时重新创建 HTTP 会话。"""
@@ -98,10 +134,13 @@ class AuthApi:
             password,
             base_url=self.base_url,
             verify_ssl=self.verify_ssl,
+            session=self.session,
         )
         if not encrypted_password:
             return False, "密码加密失败，请检查网络连接后重试", {}
 
+        if self._cancelled():
+            return False, "Request cancelled", {}
         resp = self.session.post(
             f"{self.base_url}/auth/login",
             json={
@@ -113,7 +152,15 @@ class AuthApi:
             timeout=15,
         )
         if resp.status_code != 200:
-            return False, _error_detail(resp, "登录失败，请检查用户名和密码"), {}
+            return (
+                False,
+                _error_detail(resp, "登录失败，请检查用户名和密码"),
+                {
+                    "code": _error_code(resp),
+                    "agreement_version": _agreement_version(resp),
+                    "status_code": resp.status_code,
+                },
+            )
 
         data = resp.json()
         return True, "Login Successful", data
@@ -126,28 +173,72 @@ class AuthApi:
             timeout=15,
         )
         if resp.status_code != 200:
-            return False, {}
+            return False, {
+                "code": _error_code(resp),
+                "message": _error_detail(resp, "登录失败"),
+                "agreement_version": _agreement_version(resp),
+                "status_code": resp.status_code,
+            }
         return True, resp.json()
+
+    def accept_agreement(
+        self,
+        username: str,
+        version: str,
+        *,
+        password: str | None = None,
+        token: str | None = None,
+    ):
+        if (password is None) == (token is None):
+            return False, "协议签署凭据无效", {"status_code": 422}
+        if password is not None:
+            encrypted = encrypt_pwd.encrypt_password(password, base_url=self.base_url, verify_ssl=self.verify_ssl)
+            if not encrypted:
+                return (
+                    False,
+                    "无法发送协议签署请求，请检查服务器连接后重试",
+                    {"code": "AGREEMENT_NOT_SENT"},
+                )
+            credential = {
+                "kind": "password",
+                "username": username,
+                "password": encrypted,
+            }
+        else:
+            credential = {
+                "kind": "auto_login",
+                "username": username,
+                "token": token or "",
+            }
+        resp = self.session.post(
+            f"{self.base_url}/auth/agreement/accept",
+            json={
+                "agreement_version": version,
+                "accepted": True,
+                "credential": credential,
+            },
+            verify=self.verify_ssl,
+            timeout=15,
+        )
+        try:
+            body = resp.json()
+        except Exception:
+            body = {}
+        if resp.status_code == 200:
+            return True, "协议签署成功", body
+        return (
+            False,
+            _error_detail(resp, "协议签署失败"),
+            {
+                "code": _error_code(resp),
+                "agreement_version": _agreement_version(resp),
+                "status_code": resp.status_code,
+            },
+        )
 
     def register(self, username: str, password: str, invite_code: str) -> Tuple[bool, str]:
         outcome = self.register_with_agreement(username, password, invite_code)
         return outcome.ok, outcome.message
-
-    def _encrypt_password(self, password: str) -> Optional[str]:
-        """加密密码；失败时刷新一次公钥再试（服务端换钥后旧缓存会一直失败）。"""
-        encrypted = encrypt_pwd.encrypt_password(
-            password,
-            base_url=self.base_url,
-            verify_ssl=self.verify_ssl,
-        )
-        if encrypted:
-            return encrypted
-        encrypt_pwd.invalidate_public_key()
-        return encrypt_pwd.encrypt_password(
-            password,
-            base_url=self.base_url,
-            verify_ssl=self.verify_ssl,
-        )
 
     def register_with_agreement(
         self,
@@ -167,9 +258,11 @@ class AuthApi:
         # 服务端换钥后，本地仍能用旧公钥生成合法密文，失败只会在服务端解密时暴露；
         # 收到 PASSWORD_DECRYPT_FAILED 时刷新公钥重试一次（同一 payload，保持幂等）。
         for attempt in range(2):
-            encrypted_password = self._encrypt_password(password)
+            encrypted_password = encrypt_pwd.encrypt_password(
+                password, base_url=self.base_url, verify_ssl=self.verify_ssl, session=self.session
+            )
             if not encrypted_password:
-                return RegisterOutcome(False, "密码加密失败，请检查网络连接后重试")
+                return RegisterOutcome(False, "无法发送注册请求，请检查服务器连接后重试", code="REGISTRATION_NOT_SENT")
 
             payload: dict = {
                 "username": username,
@@ -183,6 +276,8 @@ class AuthApi:
             if accepted is not None:
                 payload["accepted"] = accepted
 
+            if self._cancelled():
+                return RegisterOutcome(False, "Request cancelled", code="REGISTRATION_NOT_SENT")
             try:
                 resp = self.session.post(
                     f"{self.base_url}/auth/register",
@@ -190,7 +285,7 @@ class AuthApi:
                     verify=self.verify_ssl,
                     timeout=15,
                 )
-            except Exception as error:  # noqa: BLE001 - 传输失败：本次结果未知
+            except requests.RequestException as error:  # 传输失败：本次结果未知
                 logger.error(f"Register request failed: {error}")
                 return RegisterOutcome(False, "网络异常，请检查网络连接后重试", code="NETWORK_ERROR")
             if resp.status_code == 200:
@@ -198,7 +293,6 @@ class AuthApi:
 
             code = _error_code(resp)
             if code == "PASSWORD_DECRYPT_FAILED" and attempt == 0:
-                encrypt_pwd.invalidate_public_key()
                 continue
 
             return RegisterOutcome(
@@ -217,10 +311,13 @@ class AuthApi:
             new_password,
             base_url=self.base_url,
             verify_ssl=self.verify_ssl,
+            session=self.session,
         )
         if not encrypted_password:
             return False, "密码加密失败，请检查网络连接后重试"
 
+        if self._cancelled():
+            return False, "Request cancelled"
         resp = self.session.post(
             f"{self.base_url}/auth/reset_account",
             json={

@@ -1,10 +1,12 @@
 import os
 import re
-from dataclasses import fields
+from dataclasses import dataclass, field, fields
 from typing import Callable, List, Tuple
 
 from . import AuthApi, WsTransport
 from .auth import RegisterOutcome
+from .auth import AccountRequest
+from .dynamics import DynamicRequest
 from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
@@ -19,7 +21,63 @@ def _is_safe_uuid(value: str | None) -> bool:
 
 
 def _conversation_item_from_dict(item: dict) -> ConversationItem:
-    return ConversationItem(**{key: value for key, value in item.items() if key in _CONVERSATION_ITEM_FIELDS})
+    return ConversationItem(
+        **{
+            key: value
+            for key, value in item.items()
+            if key in _CONVERSATION_ITEM_FIELDS
+        }
+    )
+
+
+@dataclass(frozen=True)
+class DynamicUnreadRequest:
+    """调度时冻结的只读请求；不持有客户端或 UI 对象。"""
+
+    client_identity: object = field(repr=False)
+    revision: int
+    base_url: str
+    username: str | None
+    message_token: str | None = field(repr=False)
+    verify_ssl: bool = True
+
+    def fetch(self, session) -> dict:
+        if not self.username:
+            return self.failure("Not logged in")
+        try:
+            headers = {"Authorization": f"Bearer {self.message_token}"} if self.message_token else {}
+            resp = session.get(
+                f"{self.base_url}/dynamics/unread",
+                params={"username": self.username},
+                headers=headers,
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                get_logger("NetworkClient").warning(f"获取动态未读状态失败: HTTP {resp.status_code}")
+                return self.failure(detail)
+            data = resp.json()
+            data["ok"] = True
+            return data
+        except Exception as exc:
+            get_logger("NetworkClient").error(f"获取动态未读状态失败: {type(exc).__name__}")
+            return self.failure(str(exc))
+
+    @staticmethod
+    def failure(message: str) -> dict:
+        return {
+            "ok": False,
+            "message": message,
+            "has_unread": False,
+            "unread_count": 0,
+            "unread_dynamic_count": 0,
+            "unread_comment_count": 0,
+        }
 
 
 class NetworkClient:
@@ -30,6 +88,8 @@ class NetworkClient:
 
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
+        self._account_identity = object()
+        self._account_revision = 0
 
         self.user_id: str | None = None
         self.message_token: str | None = None
@@ -48,20 +108,26 @@ class NetworkClient:
         """更新服务器地址，同步更新 AuthApi、WsTransport 和 HTTP 会话。"""
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
+        self._account_revision += 1
         self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.logger.info(f"Base URL updated to: {self.base_url}")
 
-    def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str]:
+    def login(
+        self, username: str, password: str, request_token: bool = False
+    ) -> Tuple[bool, str]:
         try:
-            success, msg, data = self.auth_api.login(username, password, request_token=request_token)
+            success, msg, data = self.auth_api.login(
+                username, password, request_token=request_token
+            )
             if not success:
                 return False, msg
 
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
+            self._account_revision += 1
 
             if request_token:
                 credential.save_credentials(self.user_id, self.login_token, True)
@@ -73,6 +139,27 @@ class NetworkClient:
         except Exception as exc:
             return False, str(exc)
 
+    def login_with_details(
+        self, username: str, password: str, request_token: bool = False
+    ):
+        try:
+            success, msg, data = self.auth_api.login(
+                username, password, request_token=request_token
+            )
+            if not success:
+                return False, msg, data
+            self.user_id = data.get("user_id")
+            self.login_token = data.get("login_token")
+            self.message_token = data.get("message_token")
+            if request_token:
+                credential.save_credentials(self.user_id, self.login_token, True)
+            else:
+                credential.save_credentials(self.user_id, None, False)
+            self.ws_transport.start()
+            return True, msg, data
+        except Exception as exc:
+            return False, str(exc), {"code": "LOGIN_NOT_SENT"}
+
     def auto_login(self, username: str, token: str) -> bool:
         try:
             success, data = self.auth_api.auto_login(username, token)
@@ -82,12 +169,77 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
+            self._account_revision += 1
             credential.save_credentials(self.user_id, self.login_token, True)
             self.ws_transport.start()
             return True
         except Exception as exc:
             self.logger.error(f"Auto login error: {exc}")
             return False
+
+    def auto_login_with_details(self, username: str, token: str):
+        try:
+            success, data = self.auth_api.auto_login(username, token)
+            if not success:
+                return False, data.get("message", "登录失败"), data
+            self.user_id = data.get("user_id")
+            self.login_token = data.get("login_token")
+            self.message_token = data.get("message_token")
+            credential.save_credentials(self.user_id, self.login_token, True)
+            self.ws_transport.start()
+            return True, "登录成功", data
+        except Exception as exc:
+            return False, str(exc), {"code": "LOGIN_NOT_SENT"}
+
+    def accept_agreement(
+        self,
+        username: str,
+        version: str,
+        *,
+        password: str | None = None,
+        token: str | None = None,
+    ):
+        try:
+            return self.auth_api.accept_agreement(
+                username, version, password=password, token=token
+            )
+        except Exception as exc:
+            return False, str(exc), {"code": "AGREEMENT_RESULT_UNKNOWN"}
+
+    def account_context(self) -> tuple:
+        return (self._account_identity, self._account_revision, self.base_url, self.user_id, self.message_token)
+
+    def prepare_account_request(
+        self,
+        action: str,
+        username: str = "",
+        password: str = "",
+        invite: str = "",
+        remember: bool = False,
+        server_url: str | None = None,
+    ) -> AccountRequest:
+        return AccountRequest(
+            self.account_context(), action, server_url or self.base_url, username, password, invite, remember
+        )
+
+    def apply_account_result(self, request: AccountRequest, result: tuple) -> tuple[bool, str]:
+        """由有效 UI ticket 调用；这里不执行认证 HTTP 或等待 WS 就绪。"""
+        if request.context != self.account_context():
+            return False, "账号或服务器已变更，请重试"
+        success, message, data = result
+        if not success:
+            return False, message
+        if request.action == "login":
+            self.user_id = data.get("user_id")
+            self.login_token = data.get("login_token")
+            self.message_token = data.get("message_token")
+            self._account_revision += 1
+            credential.save_credentials(self.user_id, self.login_token if request.remember else None, request.remember)
+            self.ws_transport.start()
+        elif request.action == "server":
+            self.set_base_url(request.base_url, verify_ssl=True)
+            credential.save_server_url(request.base_url, verify_ssl=True)
+        return True, message
 
     def register(self, username: str, password: str, invite_code: str) -> Tuple[bool, str]:
         try:
@@ -118,7 +270,9 @@ class NetworkClient:
         except Exception as exc:
             return RegisterOutcome(False, str(exc))
 
-    def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+    def reset_account(
+        self, invite_code: str, new_username: str, new_password: str
+    ) -> Tuple[bool, str]:
         """通过邀请码重置账号的用户名和密码。"""
         try:
             return self.auth_api.reset_account(invite_code, new_username, new_password)
@@ -126,10 +280,19 @@ class NetworkClient:
             return False, str(exc)
 
     def send_chat(
-        self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0, client_msg_id: str | None = None
+        self,
+        text: str,
+        is_proactive: bool = False,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
     ):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
+            return {
+                "ok": False,
+                "request_id": client_msg_id,
+                "error": "Not logged in",
+                "drop": True,
+            }
 
         return self.ws_transport.submit_user_text(
             text,
@@ -147,7 +310,12 @@ class NetworkClient:
         client_msg_id: str | None = None,
     ):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
+            return {
+                "ok": False,
+                "request_id": client_msg_id,
+                "error": "Not logged in",
+                "drop": True,
+            }
 
         try:
             return self.ws_transport.submit_user_image(
@@ -159,11 +327,25 @@ class NetworkClient:
             )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
+            return {
+                "ok": False,
+                "request_id": client_msg_id,
+                "error": f"Connection Error: {exc}",
+            }
 
-    def send_typing(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None):
+    def send_typing(
+        self,
+        text_length: int,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
+            return {
+                "ok": False,
+                "request_id": client_msg_id,
+                "error": "Not logged in",
+                "drop": True,
+            }
 
         try:
             return self.ws_transport.submit_typing_event(
@@ -173,7 +355,11 @@ class NetworkClient:
             )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
+            return {
+                "ok": False,
+                "request_id": client_msg_id,
+                "error": f"Connection Error: {exc}",
+            }
 
     def send_touch(
         self,
@@ -184,7 +370,12 @@ class NetworkClient:
         client_msg_id: str | None = None,
     ):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
+            return {
+                "ok": False,
+                "request_id": client_msg_id,
+                "error": "Not logged in",
+                "drop": True,
+            }
         try:
             return self.ws_transport.submit_user_touch(
                 touch_area=touch_area,
@@ -195,32 +386,56 @@ class NetworkClient:
             )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
+            return {
+                "ok": False,
+                "request_id": client_msg_id,
+                "error": f"Connection Error: {exc}",
+            }
 
     def send_image_selecting(self, ack_timeout: float = 5.0):
         """通知服务端用户开始选择图片。"""
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {
+                "ok": False,
+                "request_id": None,
+                "error": "Not logged in",
+                "drop": True,
+            }
         try:
             return self.ws_transport.submit_image_selecting(ack_timeout=ack_timeout)
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+            return {
+                "ok": False,
+                "request_id": None,
+                "error": f"Connection Error: {exc}",
+            }
 
     def send_image_selecting_cancel(self, ack_timeout: float = 5.0):
         """通知服务端用户取消了图片选择。"""
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {
+                "ok": False,
+                "request_id": None,
+                "error": "Not logged in",
+                "drop": True,
+            }
         try:
-            return self.ws_transport.submit_image_selecting_cancel(ack_timeout=ack_timeout)
+            return self.ws_transport.submit_image_selecting_cancel(
+                ack_timeout=ack_timeout
+            )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+            return {
+                "ok": False,
+                "request_id": None,
+                "error": f"Connection Error: {exc}",
+            }
 
-    def get_preferences(self) -> dict:
-        """从服务器获取偏好设置。"""
+    def get_preferences(self) -> dict | None:
+        """读取偏好；成功的空偏好返回 {}，读取失败返回 None。"""
         if not self.user_id:
-            return {}
+            return None
         try:
             resp = self.session.post(
                 f"{self.base_url}/preference/get",
@@ -230,16 +445,20 @@ class NetworkClient:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return data.get("preferences", data)
+                preferences = data.get("preferences", data)
+                if not isinstance(preferences, dict):
+                    self.logger.warning("获取偏好设置失败: 响应格式无效")
+                    return None
+                return preferences
             elif resp.status_code == 401:
                 self.logger.warning("获取偏好设置失败: 未授权")
-                return {}
+                return None
             else:
                 self.logger.warning(f"获取偏好设置失败: HTTP {resp.status_code}")
-                return {}
+                return None
         except Exception as exc:
             self.logger.error(f"获取偏好设置失败: {exc}")
-            return {}
+            return None
 
     def overwrite_preferences(self, preferences: dict) -> dict:
         """覆盖保存偏好设置到服务器。"""
@@ -266,7 +485,9 @@ class NetworkClient:
             self.logger.error(f"保存偏好设置失败: {exc}")
             return {"status": "error", "message": str(exc)}
 
-    def get_history(self, count: int, end_index: int) -> Tuple[List[ConversationItem], int]:
+    def get_history(
+        self, count: int, end_index: int
+    ) -> Tuple[List[ConversationItem], int]:
         if not self.user_id:
             return [], -1
 
@@ -293,228 +514,56 @@ class NetworkClient:
             if "history" not in data:
                 return [], -1
 
-            history_items = [_conversation_item_from_dict(item) for item in data.get("history", [])]
+            history_items = [
+                _conversation_item_from_dict(item) for item in data.get("history", [])
+            ]
             history_items = self._clean_history(history_items)
             return history_items, data.get("start_index", 0)
         except Exception as exc:
             self.logger.error(f"History Error: {exc}")
             return [], -1
 
-    def get_dynamics(self, limit: int = 50, cursor: str | None = None) -> dict:
-        if not self.user_id:
-            return {"ok": False, "message": "Not logged in", "items": [], "has_more": False, "next_cursor": None}
+    def prepare_dynamic_request(self, action: str, **values) -> DynamicRequest:
+        return DynamicRequest(self.account_context(), action, self.base_url, self.user_id, self.message_token, **values)
 
-        try:
-            params = {
-                "username": self.user_id,
-                "limit": limit,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            headers = {}
-            if self.message_token:
-                headers["Authorization"] = f"Bearer {self.message_token}"
-            resp = self.session.get(
-                f"{self.base_url}/dynamics",
-                params=params,
-                headers=headers,
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                self.logger.warning(f"获取动态失败: {detail}")
-                return {"ok": False, "message": detail, "items": [], "has_more": False, "next_cursor": None}
-            data = resp.json()
-            data["ok"] = True
-            return data
-        except Exception as exc:
-            self.logger.error(f"获取动态失败: {exc}")
-            return {"ok": False, "message": str(exc), "items": [], "has_more": False, "next_cursor": None}
+    def get_dynamics(self, limit: int = 50, cursor: str | None = None) -> dict:
+        return self.prepare_dynamic_request("list", limit=limit, cursor=cursor).fetch(self.session)
 
     def create_dynamic(self, content: str) -> dict:
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "message": "Not logged in"}
-
-        try:
-            resp = self.session.post(
-                f"{self.base_url}/dynamics",
-                json={
-                    "username": self.user_id,
-                    "token": self.message_token,
-                    "content": content,
-                },
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                return {"ok": False, "message": detail}
-            data = resp.json()
-            return {"ok": True, "item": data.get("item")}
-        except Exception as exc:
-            self.logger.error(f"发布动态失败: {exc}")
-            return {"ok": False, "message": str(exc)}
+        return self.prepare_dynamic_request("post", content=content).fetch(self.session)
 
     def get_dynamic_comments(self, dynamic_id: str, limit: int = 100, cursor: str | None = None) -> dict:
-        if not self.user_id:
-            return {"ok": False, "message": "Not logged in", "items": [], "has_more": False, "next_cursor": None}
-
-        try:
-            params = {
-                "username": self.user_id,
-                "limit": limit,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            headers = {}
-            if self.message_token:
-                headers["Authorization"] = f"Bearer {self.message_token}"
-            resp = self.session.get(
-                f"{self.base_url}/dynamics/{dynamic_id}/comments",
-                params=params,
-                headers=headers,
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                self.logger.warning(f"获取动态评论失败: {detail}")
-                return {"ok": False, "message": detail, "items": [], "has_more": False, "next_cursor": None}
-            data = resp.json()
-            data["ok"] = True
-            return data
-        except Exception as exc:
-            self.logger.error(f"获取动态评论失败: {exc}")
-            return {"ok": False, "message": str(exc), "items": [], "has_more": False, "next_cursor": None}
+        return self.prepare_dynamic_request("comments", dynamic_id=dynamic_id, limit=limit, cursor=cursor).fetch(
+            self.session
+        )
 
     def create_dynamic_comment(self, dynamic_id: str, content: str, parent_comment_id: str | None = None) -> dict:
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "message": "Not logged in"}
+        return self.prepare_dynamic_request(
+            "comment", dynamic_id=dynamic_id, content=content, parent_comment_id=parent_comment_id
+        ).fetch(self.session)
 
-        try:
-            resp = self.session.post(
-                f"{self.base_url}/dynamics/{dynamic_id}/comments",
-                json={
-                    "username": self.user_id,
-                    "token": self.message_token,
-                    "content": content,
-                    "parent_comment_id": parent_comment_id,
-                },
-                verify=self.verify_ssl,
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                return {"ok": False, "message": detail}
-            data = resp.json()
-            return {"ok": True, "item": data.get("item")}
-        except Exception as exc:
-            self.logger.error(f"发表评论失败: {exc}")
-            return {"ok": False, "message": str(exc)}
+    def dynamic_unread_request(self) -> DynamicUnreadRequest:
+        return DynamicUnreadRequest(
+            self._account_identity,
+            self._account_revision,
+            self.base_url,
+            self.user_id,
+            self.message_token,
+            self.verify_ssl,
+        )
 
     def get_dynamic_unread_status(self) -> dict:
-        if not self.user_id:
-            return {
-                "ok": False,
-                "message": "Not logged in",
-                "has_unread": False,
-                "unread_count": 0,
-                "unread_dynamic_count": 0,
-                "unread_comment_count": 0,
-            }
-
-        try:
-            params = {
-                "username": self.user_id,
-            }
-            headers = {}
-            if self.message_token:
-                headers["Authorization"] = f"Bearer {self.message_token}"
-            resp = self.session.get(
-                f"{self.base_url}/dynamics/unread",
-                params=params,
-                headers=headers,
-                verify=self.verify_ssl,
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                self.logger.warning(f"获取动态未读状态失败: {detail}")
-                return {
-                    "ok": False,
-                    "message": detail,
-                    "has_unread": False,
-                    "unread_count": 0,
-                    "unread_dynamic_count": 0,
-                    "unread_comment_count": 0,
-                }
-            data = resp.json()
-            data["ok"] = True
-            return data
-        except Exception as exc:
-            self.logger.error(f"获取动态未读状态失败: {exc}")
-            return {
-                "ok": False,
-                "message": str(exc),
-                "has_unread": False,
-                "unread_count": 0,
-                "unread_dynamic_count": 0,
-                "unread_comment_count": 0,
-            }
+        return self.dynamic_unread_request().fetch(self.session)
 
     def mark_dynamics_read(self) -> dict:
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "message": "Not logged in"}
-
-        try:
-            resp = self.session.post(
-                f"{self.base_url}/dynamics/read",
-                json={
-                    "username": self.user_id,
-                    "token": self.message_token,
-                },
-                verify=self.verify_ssl,
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                detail = f"HTTP {resp.status_code}"
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                return {"ok": False, "message": detail}
-            return resp.json()
-        except Exception as exc:
-            self.logger.error(f"标记动态已读失败: {exc}")
-            return {"ok": False, "message": str(exc)}
+        return self.prepare_dynamic_request("read").fetch(self.session)
 
     def network_set_message_listener(
         self,
         listener: Callable[[dict], None] | None,
         agent_state_listener: Callable[[bool], None] | None,
         system_message_listener: Callable[[str], None] | None = None,
-        llm_request_listener: Callable[[dict], object] | None = None,
+        llm_request_listener: Callable[..., object] | None = None,
         llm_mode_getter: Callable[[], dict[str, bool]] | None = None,
     ) -> None:
         self.ws_transport.set_agent_message_listener(
@@ -527,7 +576,9 @@ class NetworkClient:
 
     ###### Internal methods ######
 
-    def _clean_history(self, history_items: List[ConversationItem]) -> List[ConversationItem]:
+    def _clean_history(
+        self, history_items: List[ConversationItem]
+    ) -> List[ConversationItem]:
         modified_history = []
         for item in history_items:
             if item.type != "image":
@@ -548,7 +599,11 @@ class NetworkClient:
             if not _is_safe_uuid(item.uuid):
                 self.logger.error(f"Unsafe uuid from server: {item.uuid}")
                 return item
-            payload = {"username": self.user_id, "token": self.message_token, "uuid": item.uuid}
+            payload = {
+                "username": self.user_id,
+                "token": self.message_token,
+                "uuid": item.uuid,
+            }
             resp = self.session.post(
                 f"{self.base_url}/get_image",
                 json=payload,
@@ -589,5 +644,7 @@ class NetworkClient:
                     f"Failed to update image path for history item {item.uuid}, status code: {update_resp.status_code}"
                 )
         except Exception as exc:
-            self.logger.error(f"Failed to retrieve image for history item {item.uuid}: {exc}")
+            self.logger.error(
+                f"Failed to retrieve image for history item {item.uuid}: {exc}"
+            )
         return item

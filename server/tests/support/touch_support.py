@@ -8,7 +8,7 @@ import src.domain.agent as d
 
 def touch_request(
     *,
-    regions: tuple[str, ...] = ("head",),
+    regions: tuple[str, ...] = ("头",),
     frequency: d.TouchClickFrequency | None = None,
 ) -> d.HandleStimulusRequest:
     stimulus = d.TouchInteraction(

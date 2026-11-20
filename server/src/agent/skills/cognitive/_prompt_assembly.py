@@ -7,6 +7,7 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class RealizationPromptInput:
+    scene: str
     character_name: str
     character_persona: str
     speaking_style: str
@@ -31,6 +32,7 @@ class RealizationPromptAssembler:
         reply_topic: str,
         user_nickname: str,
         user_description: str,
+        scene: str = "chat",
         preference_context: str = "",
         conversation_history: str = "",
         fact_hits: Optional[list[str]] = None,
@@ -38,6 +40,7 @@ class RealizationPromptAssembler:
         sing_plan: Optional[tuple[str, str]] = None,
     ) -> RealizationPromptInput:
         return RealizationPromptInput(
+            scene=scene,
             character_name=character_name,
             character_persona=character_persona,
             speaking_style=speaking_style,

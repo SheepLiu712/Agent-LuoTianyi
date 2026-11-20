@@ -17,7 +17,7 @@ import {
   blockLineHeight,
   blockTextAlign,
   splitRunsOnNewline,
-} from '../components/RichAgreement';
+} from '../features/account/RichAgreement';
 
 jest.mock('react-native', () => ({
   ScrollView: 'ScrollView',

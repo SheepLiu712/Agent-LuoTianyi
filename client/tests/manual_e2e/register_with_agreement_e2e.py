@@ -177,7 +177,9 @@ def main() -> int:
         agreement_version=args.current_version,
         accepted=True,
     )
-    check("另一请求 ID 顺序重用已用邀请码失败", competing.ok is False, {"ok": competing.ok, "message": competing.message})
+    check(
+        "另一请求 ID 顺序重用已用邀请码失败", competing.ok is False, {"ok": competing.ok, "message": competing.message}
+    )
 
     print()
     if failures:

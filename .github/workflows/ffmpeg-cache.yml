@@ -1,0 +1,22 @@
+name: 准备共享音频工具缓存
+
+on:
+  push:
+    branches: [dev, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ffmpeg-cache:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ffmpeg

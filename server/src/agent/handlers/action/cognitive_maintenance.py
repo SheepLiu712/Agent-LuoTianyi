@@ -1,0 +1,69 @@
+"""COGNITIVE_MAINTENANCE 行动：通过 Agent 技能维护长期认知。"""
+
+from __future__ import annotations
+
+import src.domain.agent as d
+from src.agent.processing.output_emitter import OutputEmitter
+from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill, MaintenanceRequest
+from src.agent.skills.invocation import execution_invocation
+
+
+class CognitiveMaintenanceActionHandler:
+    """执行统一认知维护；不产生用户可见输出。"""
+
+    def __init__(self, character_id: str, skill: CognitiveMaintenanceSkill) -> None:
+        self._character_id = character_id
+        self._skill = skill
+
+    async def realize(
+        self,
+        action: d.Action,
+        execution_context: d.ExecutionContext,
+        outputs: OutputEmitter,
+    ) -> d.ActionResult:
+        _ = outputs
+        if not isinstance(action, d.CognitiveMaintenance):
+            raise TypeError("CognitiveMaintenanceActionHandler 只处理 CognitiveMaintenance")
+        context = execution_context.interaction_context
+        if context is None or not all(hasattr(context, name) for name in ("identity", "conversation", "user")):
+            return self._result(action, d.ActionExecutionStatus.FAILED, d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)
+        recalled_ids = frozenset(entry.entry_id for entry in context.recalled_memory.read())
+        try:
+            if context.identity.user_id is None:
+                return self._result(action)
+            invocation = execution_invocation(
+                self._character_id,
+                execution_context,
+                user_id=context.identity.user_id,
+            )
+            entries = context.conversation.read().entries
+            report = await self._skill.maintain(
+                invocation,
+                request=MaintenanceRequest(
+                    reason=action.reason,
+                    context=context,
+                    call_snapshot=execution_context.call_maintenance_snapshot,
+                    through_entry_id=entries[-1].entry_id if entries else None,
+                ),
+            )
+            if report.status is d.MaintenanceStatus.CONFLICT:
+                raise RuntimeError("COGNITIVE_MAINTENANCE_CONFLICT")
+            return self._result(action)
+        finally:
+            # 只清理维护开始前的召回，保留并行回复新加入的记录。
+            if context is not None and hasattr(context, "recalled_memory"):
+                context.recalled_memory.remove(recalled_ids)
+
+    @staticmethod
+    def _result(
+        action: d.CognitiveMaintenance,
+        status: d.ActionExecutionStatus = d.ActionExecutionStatus.COMPLETED,
+        error: d.ExecutionErrorCode | None = None,
+    ) -> d.ActionResult:
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=status,
+            error_code=error,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        )

@@ -36,6 +36,97 @@ def test_local_replay_is_blocked_while_server_audio_is_active(monkeypatch):
     assert stream._local_play_thread is None
 
 
+@pytest.fixture
+def terminal_processor():
+    stream = _bare_stream()
+    stream._mouth_queue = None
+    stream._stop_mouth_event = None
+    stream.local_audio_properties = stream_module.AudioProperties()
+    stream._open_audio_stream_if_needed = Mock()
+    stream.audio_queue_in = queue.Queue()
+    stream.audio_queue_out = Mock()
+    stream.audio_queue_out.empty.return_value = True
+    stream.audio_queue_out.get.return_value = "finished"
+    processor = MessageProcessor.__new__(MessageProcessor)
+    processor._running = True
+    processor._event_queue = queue.Queue()
+    processor._playback_queue = queue.Queue()
+    processor._audio_buffers = {}
+    processor._send_queue = []
+    processor._send_cond = threading.Condition()
+    processor._reply_counter = 0
+    processor.logger = Mock()
+    processor.multimedia_stream = stream
+    processor.response_signal = Mock()
+    processor.expression_signal = None
+    processor.update_bubble_signal = None
+    return processor
+
+
+def _process_terminal_then_text(processor, response):
+    listener = threading.Thread(target=processor._listen_ws_events, daemon=True)
+    playback = threading.Thread(target=processor._process_playback_events, daemon=True)
+    listener.start()
+    playback.start()
+    try:
+        processor.feed_agent_msg(response)
+        processor.feed_agent_msg(AgentMessage(
+            uuid="next", text="still available", expression="", audio="",
+            is_final_package=False, reply_to=None,
+        ))
+    finally:
+        processor._event_queue.put(None)
+        listener.join(timeout=3)
+        playback.join(timeout=3)
+    assert not listener.is_alive()
+    assert not playback.is_alive()
+
+
+def test_zero_sample_terminal_audio_allows_follow_up_messages_and_touch(terminal_processor):
+    import base64
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+    response = AgentMessage(
+        uuid="empty-terminal", text="", expression="",
+        audio=base64.b64encode(buffer.getvalue()).decode("ascii"),
+        is_final_package=True, reply_to=None, is_ephemeral=True,
+    )
+
+    _process_terminal_then_text(terminal_processor, response)
+
+    assert not terminal_processor.is_server_audio_active()
+    terminal_processor.response_signal.assert_called_once_with("next", "still available")
+    assert terminal_processor.send_touch("头") is not None
+
+
+def test_playback_failure_is_logged_and_allows_follow_up_messages_and_touch(terminal_processor, monkeypatch):
+    monkeypatch.setattr(
+        terminal_processor.multimedia_stream,
+        "feed",
+        Mock(side_effect=RuntimeError("explicit-playback-failure")),
+    )
+    response = AgentMessage(
+        uuid="failed-terminal", text="", expression="", audio="c2VydmVy",
+        is_final_package=True, reply_to=None, is_ephemeral=True,
+    )
+
+    _process_terminal_then_text(terminal_processor, response)
+
+    assert not terminal_processor.is_server_audio_active()
+    terminal_processor.response_signal.assert_called_once_with("next", "still available")
+    assert terminal_processor.send_touch("头") is not None
+    assert any(
+        "explicit-playback-failure" in call.args[0]
+        for call in terminal_processor.logger.error.call_args_list
+    )
+
+
 def test_server_audio_stops_local_replay_before_streaming(monkeypatch):
     stream = _bare_stream()
     events = []

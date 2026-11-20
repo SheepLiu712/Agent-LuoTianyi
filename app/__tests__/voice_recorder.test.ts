@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { VoiceRecorder } from '../utils/voice_recorder';
+import { VoiceRecorder } from '../features/chat/voice_recorder';
 
 const mockRecording = {
   setOnRecordingStatusUpdate: jest.fn(),

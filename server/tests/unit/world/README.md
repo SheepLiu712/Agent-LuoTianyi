@@ -28,7 +28,7 @@ Ruff锁定**0.14.10**，使用项目规则，包括C901，不使用`--isolated`�
 默认离线，标题映射使用manifest；输出使用新的`data/test_outputs`子目录，不提交凭据。
 
 ```text
-python scripts/vcpedia_prompt_lab.py --material title:Foxy --out data/test_outputs/prompt-lab-local
+python tests/support/vcpedia_prompt_lab.py --material title:Foxy --out data/test_outputs/prompt-lab-local
 ```
 
 `--dry-run`明确离线；`--live`才发出真实、可能计费的模型请求，需配置`extraction_llm_module`及provider/凭据。live仅支持配置中的OpenAI-compatible接口；`--provider`只覆盖显式live的补提provider，不回退总结模型。A/B使用`--prompt`与`--prompt-b`。工具复用生产材料与回答/合并校验，不发送片段POST，不代表完整在线采集验收。

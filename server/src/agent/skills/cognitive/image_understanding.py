@@ -16,7 +16,6 @@ from src.infrastructure.media import (
 
 if TYPE_CHECKING:
     from src.infrastructure.models.service import LLMService
-    from src.infrastructure.models.vlm.module import VLMModule
 
 
 class ImageUnderstandingSkill:
@@ -26,21 +25,14 @@ class ImageUnderstandingSkill:
         self,
         config: dict[str, Any],
         media_resolver: MediaResolver,
-        llm_service: LLMService | None = None,
-        *,
-        vlm_module: VLMModule | None = None,
+        llm_service: LLMService,
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("image_understanding config must be a dictionary")
         self._media_resolver = media_resolver
-        if vlm_module is None:
-            if llm_service is None:
-                raise RuntimeError("image understanding requires LLMService or VLMModule")
-            vlm_module = llm_service.register_vlm_module(
-                "image_understanding",
-                config.get("vlm_module", {}),
-            )
-        self._vlm_module = vlm_module
+        self._vlm_module = llm_service.register_vlm_module(
+            "skill.image_understanding.describe", config.get("vlm_module", {})
+        )
 
     async def understand(
         self,

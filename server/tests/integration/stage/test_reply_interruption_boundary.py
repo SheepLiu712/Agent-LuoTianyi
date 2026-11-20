@@ -96,7 +96,7 @@ async def test_committed_reply_is_preserved_at_every_stage(kind, phase):  # noqa
     try:
         if phase == "queued":
             stage.stimulus_input_sink.submit(
-                stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="head"),), click_frequency=None)
+                stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="头"),), click_frequency=None)
             )
             await until(lambda: len(executions) == 1)
         stage.stimulus_input_sink.submit(original)
@@ -111,7 +111,7 @@ async def test_committed_reply_is_preserved_at_every_stage(kind, phase):  # noqa
         old_ids = tuple(p.plan_id for p in accepted)
         expected_pending = phase in ("handle_running", "plans_done")
         assert (original.stimulus_id in stage._pending) == expected_pending
-        with patch.object(adapter, "submit_output", wraps=adapter.submit_output) as submit:
+        with patch.object(adapter, "_submit_output", wraps=adapter._submit_output) as submit:
             stage.stimulus_input_sink.submit(trigger(kind))
             await asyncio.sleep(0)
             assert not old.cancellation.is_cancelled
@@ -161,7 +161,7 @@ async def test_thinking_notification_does_not_prevent_cancelling_chat_handle(kin
         await until(lambda: stage._deadline is not None)
         stage._on_deadline(stage._schedule_revision)
         await until(lambda: bool(replies))
-        with patch.object(adapter, "submit_output", wraps=adapter.submit_output) as submit:
+        with patch.object(adapter, "_submit_output", wraps=adapter._submit_output) as submit:
             stage.stimulus_input_sink.submit(trigger(kind))
             await asyncio.wait_for(cancelled.wait(), 1)
             assert replies[0].cancellation.reason is d.CancellationReason.SUPERSEDED
@@ -183,7 +183,7 @@ async def test_other_handles_are_not_candidates_even_if_their_permission_is_true
     gate = asyncio.Event()
     requests = []
     original = (
-        stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="head"),), click_frequency=None)
+        stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="头"),), click_frequency=None)
         if input_kind == "touch"
         else trigger(input_kind)
     )

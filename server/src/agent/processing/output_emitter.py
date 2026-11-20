@@ -14,10 +14,18 @@ from .output_drafts import OutputDraft
 class OutputEmitter:
     """单个行动的输出入口；只在内存中记录本次交付结果。"""
 
-    def __init__(self, execution, action_id: str, *, message_id: str | None = None) -> None:
+    def __init__(
+        self,
+        execution,
+        action_id: str,
+        *,
+        message_id: str | None = None,
+        call_delivery=None,
+    ) -> None:
         """绑定本次执行和当前行动标识。"""
         self._execution, self._action_id = execution, action_id
         self._message_id = message_id
+        self._call_delivery = call_delivery or d.CallSpeechDelivery()
         self._lock = asyncio.Lock()
         self.error = None
         self.code = None
@@ -31,6 +39,18 @@ class OutputEmitter:
         _check_cancellation(self._execution.context.cancellation)
         self._execution.interruption.allowed = interruptible
 
+    def ensure_call_allowed(self) -> None:
+        """CALL 输出在开始工作及每次进入 sink 前都必须持有 Stage 许可。"""
+        execution = self._execution
+        if execution is None:
+            raise RuntimeError("output emitter is closed")
+        delivery = self._call_delivery
+        if delivery.audio_route is not d.CallAudioRoute.CALL:
+            return
+        permit = execution.context.call_output_permit
+        if permit is None or delivery.response_id is None or not permit.allows(delivery.response_id):
+            raise d.SinkRejectedError("call output permit revoked", code=d.SinkRejectionCode.STALE_INTERACTION)
+
     async def emit(self, draft: OutputDraft) -> d.OutputReceipt:
         """校验并顺序交付一份输出，返回接收确认；首次失败后拒绝继续交付。"""
         async with self._lock:
@@ -41,6 +61,7 @@ class OutputEmitter:
                 raise self.error
             context = execution.context
             _check_cancellation(context.cancellation)
+            self.ensure_call_allowed()
             try:
                 output_types = {
                     drafts.TextFinalDraft: d.TextFinalOutput,
@@ -57,6 +78,7 @@ class OutputEmitter:
                     action_id=self._action_id,
                     sequence_no=sequence,
                     message_id=self._message_id,
+                    call_delivery=self._call_delivery,
                     **{field.name: getattr(draft, field.name) for field in fields(draft)},
                 )
                 receipt = await execution.sink.emit(output)

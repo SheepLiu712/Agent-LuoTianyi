@@ -5,9 +5,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from support.reply_skill import make_reply_skill
+from support.retrieval import stub_retrieval, stub_singing
 
 import src.domain.agent as d
-from src.agent.skills.cognitive import ReplyDraft, ResponseCompositionSkill
+from src.agent.handlers.reply_skills import ReplySkills
+from src.agent.handlers.stimulus.chat import ChatReplyHandler
+from src.agent.skills.cognitive import ReplyDraft
 from src.agent.skills.contracts import SkillInvocation, TopicExtraction
 from src.agent_runtime.agent_runtime import AgentRuntime
 
@@ -79,8 +83,7 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
         "agent-b": Generator("b", gate),
     }
     singing = Singing()
-    skill = ResponseCompositionSkill(
-        {},
+    skill = ReplySkills(
         topic_extraction=SimpleNamespace(
             extract=AsyncMock(
                 side_effect=[
@@ -89,14 +92,14 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
                 ]
             )
         ),
-        memories=memories,
-        singing=singing,
-        generators=generators,
+        retrieval=stub_retrieval(memories),
+        singing=stub_singing(singing),
+        reply=make_reply_skill(generators),
     )
 
     tasks = (
         asyncio.create_task(
-            skill.compose(
+            ChatReplyHandler(skill)._generate_reply(
                 invocation("agent-a", "user-a"),
                 user_context=type("User", (), {})(),
                 reply_topic="topic-a",
@@ -104,7 +107,7 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
             )
         ),
         asyncio.create_task(
-            skill.compose(
+            ChatReplyHandler(skill)._generate_reply(
                 invocation("agent-b", "user-b"),
                 user_context=type("User", (), {})(),
                 reply_topic="topic-b",
@@ -119,8 +122,8 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
     assert memories["agent-a"].calls == [("user-a", ("query-a",))]
     assert memories["agent-b"].calls == [("user-b", ("query-b",))]
     assert sorted(singing.calls) == ["agent-a", "agent-b"]
-    assert replies_a[0].content == "a:topic-a"
-    assert replies_b[0].content == "b:topic-b"
+    assert replies_a.drafts[0].content == "a:topic-a"
+    assert replies_b.drafts[0].content == "b:topic-b"
 
 
 def test_runtime_agents_reference_the_same_skill_instances(runtime_dependencies):
@@ -136,8 +139,10 @@ def test_runtime_agents_reference_the_same_skill_instances(runtime_dependencies)
 
         assert first_say._speaking is runtime.skills.speaking
         assert second_say._speaking is runtime.skills.speaking
-        assert first_reply._composition is runtime.skills.response_composition
-        assert second_reply._composition is runtime.skills.response_composition
+        assert first_reply._skills.reply is runtime.skills.reply
+        assert first_reply._skills.retrieval is runtime.skills.memory_retrieval
+        assert second_reply._skills.reply is runtime.skills.reply
+        assert second_reply._skills.topic_extraction is runtime.skills.topic_extraction
     finally:
         asyncio.run(runtime.shutdown())
 

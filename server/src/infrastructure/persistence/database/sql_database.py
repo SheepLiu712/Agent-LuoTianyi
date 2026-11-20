@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Engine,
@@ -20,7 +21,18 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
+from src.utils.database_schema import guard_version, stamp
+
 Base = declarative_base()
+
+
+class MemoryEventBatch(Base):
+    __tablename__ = "memory_event_batches"
+
+    identity = Column(String, primary_key=True)
+    subject_user_id = Column(String, nullable=True, index=True)
+    envelope = Column(Text, nullable=False)
+    candidates = Column(Text, nullable=False)
 
 
 # ————————————
@@ -95,11 +107,131 @@ class ConversationContext(Base):
     character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi")
     context_summary = Column(Text, default="")
     context_memory_count = Column(Integer, default=0)
+    maintenance_entry_id = Column(String, nullable=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     user = relationship("User", back_populates="conversation_contexts")
 
     __table_args__ = (UniqueConstraint("user_id", "character_id", name="uq_conversation_context_user_character"),)
+
+
+class CognitiveMaintenanceBatch(Base):
+    __tablename__ = "cognitive_maintenance_batches"
+
+    maintenance_id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
+    character_id = Column(String, nullable=False)
+    previous_progress_key = Column(String, nullable=False)
+    previous_entry_id = Column(String, nullable=True)
+    target_entry_id = Column(String, nullable=False)
+    covered_entry_ids = Column(Text, nullable=False)
+    maintained_entry_ids = Column(Text, nullable=False)
+    candidates = Column(Text, nullable=False)
+    proposed_profile = Column(Text, nullable=True)
+    input_digest = Column(String, nullable=False)
+    compaction_previous_summary = Column(Text, nullable=True)
+    compaction_covered_entry_ids = Column(Text, nullable=False, default="[]")
+    compaction_summary = Column(Text, nullable=True)
+    compaction_expected_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "character_id",
+            "previous_progress_key",
+            name="uq_cognitive_maintenance_batch_predecessor",
+        ),
+    )
+
+
+class CallSession(Base):
+    """Durable privacy-allowlisted lifecycle facts for one realtime call."""
+
+    __tablename__ = "call_sessions"
+
+    call_id = Column(String, primary_key=True)
+    client_request_id = Column(String, nullable=False, unique=True)
+    user_id = Column(String, nullable=False, index=True)
+    character_id = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    outcome = Column(String, nullable=True)
+    end_reason = Column(String, nullable=True)
+    requested_at = Column(DateTime, nullable=False)
+    connected_at = Column(DateTime, nullable=True)
+    disconnected_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    active_duration_ms = Column(Integer, nullable=False, default=0, server_default="0")
+    summary_status = Column(String, nullable=False, default="pending", server_default="pending")
+    maintenance_status = Column(String, nullable=False, default="pending", server_default="pending")
+    conversation_id = Column(String, nullable=True)
+    maintenance_turn_seq = Column(Integer, nullable=False, default=0, server_default="0")
+    settlement_input_digest = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("active_duration_ms >= 0", name="ck_call_sessions_active_duration_nonnegative"),
+        CheckConstraint("maintenance_turn_seq >= 0", name="ck_call_sessions_maintenance_turn_seq_nonnegative"),
+        CheckConstraint(
+            "state IN ('preparing', 'ringing', 'active', 'reconnecting', 'ending', 'declined', 'ended', 'failed')",
+            name="ck_call_sessions_state",
+        ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('connected', 'cancelled_before_answer', 'declined')",
+            name="ck_call_sessions_outcome",
+        ),
+        CheckConstraint(
+            "end_reason IS NULL OR end_reason IN "
+            "('user_hangup', 'agent_hangup', 'declined', 'setup_timeout', 'time_limit', "
+            "'provider_failed', 'recovery_timeout', 'system_failure')",
+            name="ck_call_sessions_end_reason",
+        ),
+        CheckConstraint(
+            "summary_status IN ('pending', 'succeeded', 'failed')",
+            name="ck_call_sessions_summary_status",
+        ),
+        CheckConstraint(
+            "maintenance_status IN ('pending', 'succeeded', 'failed')",
+            name="ck_call_sessions_maintenance_status",
+        ),
+        Index("ix_call_sessions_stale", "state", "updated_at"),
+    )
+
+
+class CallMaintenanceBatch(Base):
+    """Privacy-allowlisted frozen call maintenance results, never raw dialogue input."""
+
+    __tablename__ = "call_maintenance_batches"
+
+    maintenance_id = Column(String, primary_key=True)
+    call_id = Column(String, nullable=False, index=True)
+    user_id = Column(String, nullable=False, index=True)
+    character_id = Column(String, nullable=False)
+    previous_turn_seq = Column(Integer, nullable=False)
+    target_turn_seq = Column(Integer, nullable=False)
+    # Nullable only for pre-migration legacy rows whose original snapshot is unavailable.
+    # New repository writes require a real SHA-256 digest.
+    settlement_input_digest = Column(String, nullable=True)
+    candidates = Column(Text, nullable=False)
+    proposed_profile = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="frozen", server_default="frozen")
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "call_id",
+            "user_id",
+            "character_id",
+            "previous_turn_seq",
+            "target_turn_seq",
+            name="uq_call_maintenance_batch_range",
+        ),
+        CheckConstraint("previous_turn_seq >= 0", name="ck_call_maintenance_previous_nonnegative"),
+        CheckConstraint("target_turn_seq > previous_turn_seq", name="ck_call_maintenance_target_after_previous"),
+        CheckConstraint("status IN ('frozen', 'completed')", name="ck_call_maintenance_status"),
+    )
 
 
 # ————————————
@@ -193,6 +325,8 @@ class MemoryChunkRecord(Base):
     meta_data = Column(Text, nullable=True)
 
     memory = relationship("AgentMemoryRecord", back_populates="chunks")
+
+    __table_args__ = (UniqueConstraint("embedding_id", name="uq_memory_chunk_embedding_id"),)
 
 
 class MemoryEdgeRecord(Base):
@@ -433,6 +567,8 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
     global engine, SessionLocal
     DATABASE_URL = f"sqlite:///{os.path.join(db_folder, db_file)}"
 
+    schema_version = guard_version(os.path.join(db_folder, db_file), "main")
+
     # Create engine and session factory globally
     if not os.path.exists(db_folder):
         os.makedirs(db_folder, exist_ok=True)
@@ -455,9 +591,18 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         cursor.close()
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-    _migrate_sqlite_schema(engine)
-    # 迁移：为已存在的数据库添加新列
+    if schema_version == 0:
+        Base.metadata.create_all(bind=engine)
+        _migrate_sqlite_schema(engine)
+        with engine.begin() as connection:
+            stamp(connection.connection.driver_connection, "main")
+    # Agreement tables are additive to schema 1; old dev installations may not have them yet.
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[AgreementVersion.__table__, AgreementSignature.__table__, RegistrationRequest.__table__],
+    )
+    with engine.begin() as connection:
+        _migrate_registration_schema(connection)
 
 
 def _migrate_sqlite_schema(db_engine: Engine) -> None:
@@ -468,10 +613,63 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
         _migrate_notification_schema(connection)
         _migrate_dynamic_schema(connection)
         _migrate_invite_schema(connection)
+        _migrate_memory_chunk_schema(connection)
+        _migrate_call_session_schema(connection)
+        _migrate_call_maintenance_schema(connection)
+        _migrate_registration_schema(connection)
 
 
 def _table_columns(connection, table_name: str) -> set[str]:
     return {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _migrate_registration_schema(connection) -> None:
+    columns = _table_columns(connection, "registration_requests")
+    if columns and "password_fingerprint" not in columns:
+        connection.exec_driver_sql("ALTER TABLE registration_requests ADD COLUMN password_fingerprint VARCHAR")
+
+
+def _migrate_call_session_schema(connection) -> None:
+    columns = _table_columns(connection, "call_sessions")
+    if "status" in columns and "state" not in columns:
+        if connection.exec_driver_sql("SELECT 1 FROM call_sessions LIMIT 1").first() is not None:
+            raise RuntimeError("Legacy call_sessions contains records; explicit data migration is required")
+        # 旧版通话表没有可可靠换算的生命周期语义；仅自动升级空表。
+        connection.exec_driver_sql("DROP TABLE call_sessions")
+        CallSession.__table__.create(connection)
+        return
+    if columns and "settlement_input_digest" not in columns:
+        connection.exec_driver_sql("ALTER TABLE call_sessions ADD COLUMN settlement_input_digest VARCHAR")
+
+
+def _migrate_call_maintenance_schema(connection) -> None:
+    """Add the digest fence without inventing input identity for historical rows."""
+    columns = _table_columns(connection, "call_maintenance_batches")
+    if columns and "settlement_input_digest" not in columns:
+        connection.exec_driver_sql("ALTER TABLE call_maintenance_batches ADD COLUMN settlement_input_digest VARCHAR")
+
+
+def _migrate_memory_chunk_schema(connection) -> None:
+    """Add the partial unique embedding index without rewriting historic chunks."""
+    columns = _table_columns(connection, "memory_chunks")
+    if not columns or "embedding_id" not in columns:
+        return
+    duplicates = connection.exec_driver_sql("""
+        SELECT embedding_id, COUNT(*) AS occurrences
+        FROM memory_chunks
+        WHERE embedding_id IS NOT NULL
+        GROUP BY embedding_id
+        HAVING COUNT(*) > 1
+        LIMIT 10
+        """).fetchall()
+    if duplicates:
+        identities = ", ".join(f"{row[0]!r} ({row[1]})" for row in duplicates)
+        raise RuntimeError(f"memory_chunks contains duplicate non-null embedding_id values: {identities}")
+    connection.exec_driver_sql("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_chunk_embedding_id
+        ON memory_chunks(embedding_id)
+        WHERE embedding_id IS NOT NULL
+        """)
 
 
 def _migrate_conversation_schema(connection) -> None:
@@ -482,6 +680,9 @@ def _migrate_conversation_schema(connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_conversations_character_id ON conversations (character_id)"
     )
+    context_columns = _table_columns(connection, "conversation_contexts")
+    if context_columns and "maintenance_entry_id" not in context_columns:
+        connection.exec_driver_sql("ALTER TABLE conversation_contexts ADD COLUMN maintenance_entry_id VARCHAR")
 
 
 def _migrate_event_schema(connection) -> None:

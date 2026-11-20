@@ -54,7 +54,12 @@ class _LoadSignals(QObject):
 class _LoadTask(QRunnable):
     """在后台线程拉取协议正文，避免阻塞界面。"""
 
-    def __init__(self, request_id: int, loader: Callable[[], Mapping[str, Any]], signals: _LoadSignals) -> None:
+    def __init__(
+        self,
+        request_id: int,
+        loader: Callable[[], Mapping[str, Any]],
+        signals: _LoadSignals,
+    ) -> None:
         super().__init__()
         self._request_id = request_id
         self._loader = loader
@@ -244,11 +249,16 @@ class AgreementSignDialog(QDialog):
         self._set_error("")
         self._refresh_actions()
 
-    def finish_submit(self, success: bool, message: str = "") -> None:
+    def finish_submit(self, success: bool, message: str = "", *, close: bool = False) -> None:
         """提交结果：成功关闭窗口；失败恢复可操作状态并保留本窗口的阅读状态。"""
         if success:
             self._timer.stop()
             self.accept()
+            return
+        if close:
+            self._timer.stop()
+            self.gate.end_submit()
+            self.reject()
             return
         self.gate.end_submit()
         self.last_error = message

@@ -1,0 +1,712 @@
+"""Offline loopback host for the successful call.v1 E2E acceptance flow."""
+
+# ruff: noqa: C901 - one bounded process host registers the complete test surface
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import socket
+import sys
+import threading
+import time
+import wave
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import UUID, uuid4
+
+_START_MONOTONIC = float(os.environ.get("CALL_TEST_START_MONOTONIC", time.monotonic()))
+
+
+def _startup_phase(name: str) -> None:
+    print(
+        f"CALL_TEST_PHASE {name} elapsed={time.monotonic() - _START_MONOTONIC:.3f}"
+        f" pid={os.getpid()} source={Path(__file__).resolve()}",
+        flush=True,
+    )
+
+
+_startup_phase("module-entered")
+
+from fastapi import HTTPException  # noqa: E402
+
+import server_main  # noqa: E402
+import src.agent.skills.expression.speaking.backend as speaking_backend  # noqa: E402
+import src.agent_runtime.agent_runtime as agent_runtime_module  # noqa: E402
+import src.server_runtime as server_runtime_module  # noqa: E402
+from src.application.server_lifecycle import ServerLifecycle  # noqa: E402
+from src.domain.call import omni  # noqa: E402
+from src.infrastructure.models.realtime_speech import RealtimeSpeechConfig  # noqa: E402
+from support.call_coherent_runtime import (  # noqa: E402
+    DeterministicCallTTSModule,
+    DeterministicLLMService,
+    DeterministicVectorStore,
+)
+from support.realtime_speech import FakeRealtimeSpeechSession, FakeRealtimeSpeechSessionFactory  # noqa: E402
+
+_startup_phase("imports-complete")
+
+
+class _LoopbackOmniSession(FakeRealtimeSpeechSession):
+    """只替换外部模型，按当前实时模型契约产生开场和受控回复。"""
+
+    async def push(self, frame):
+        if isinstance(frame, omni.AudioFrame):
+            await self.push_audio(frame)
+        else:
+            await self.emit(omni.ReplyStarted(frame.kind))
+            await self.emit(omni.ReplySegment(frame.kind, 0, "你好", tone="normal"))
+            await self.emit(omni.ReplyFinished(frame.kind))
+
+    async def interrupt(self, response_id):
+        pass
+
+    async def submit_tool_result(self, tool_call_id, result):
+        pass
+
+
+class _LoopbackOmniFactory(FakeRealtimeSpeechSessionFactory):
+    async def open(self, call_id, instructions, *, remaining_setup_time, on_session_created):
+        remaining_setup_time()
+        session = _LoopbackOmniSession()
+        try:
+            on_session_created(session)
+        except BaseException:
+            await session.close()
+            raise
+        self.sessions[call_id] = session
+        remaining_setup_time()
+        await session.start(RealtimeSpeechConfig(instructions=instructions))
+        return session
+
+
+class _DeterministicSpeechFactory:
+    """Factory seam installed before ServerRuntime initializes its provider."""
+
+    instance: FakeRealtimeSpeechSessionFactory | None = None
+
+    @classmethod
+    def from_mapping(cls, _config: object, **_kwargs) -> _LoopbackOmniFactory:
+        cls.instance = _LoopbackOmniFactory()
+        return cls.instance
+
+
+class _AddressPublishingLifecycle(ServerLifecycle):
+    def __init__(self, *, root_dir: Path, config_path: Path, address_path: Path, url: str) -> None:
+        super().__init__(root_dir=root_dir, config_path=config_path)
+        self._address_path = address_path
+        self._url = url
+
+    async def start(self, **kwargs) -> dict:
+        status = await super().start(**kwargs)
+        if not status["running"]:
+            raise RuntimeError(f"production runtime did not become ready: {status}")
+        _startup_phase("runtime-initialized")
+        from src.infrastructure.persistence.database import InviteCode
+
+        runtime = self.admin_shell.runtime_supervisor.runtime  # type: ignore[union-attr]
+        with runtime.database_manager.open_sql_session() as session:
+            if session.query(InviteCode).filter_by(code="invite").one_or_none() is None:
+                session.add(InviteCode(code="invite", is_used=False))
+                session.commit()
+        temporary = self._address_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"url": self._url}), encoding="utf-8")
+        temporary.replace(self._address_path)
+        _startup_phase("address-published")
+        return status
+
+
+def _runtime_config(root: Path) -> Path:
+    # 与持续集成使用同一份公开配置，避免依赖开发者本机的私有配置。
+    source = Path(server_main.current_dir) / "config" / "config.json.template"
+    config = json.loads(source.read_text(encoding="utf-8"))
+    config["call_transport"] = {
+        "enabled": True,
+        "realtime_speech": {
+            "enabled": True,
+            "api_key": "offline-provider-key",
+            "model": "offline-realtime",
+            "endpoint": "wss://offline.invalid/realtime",
+        },
+    }
+    config["database"]["sql_db_folder"] = str(root / "db")
+    config["database"]["sql_db_file"] = "calls.sqlite"
+    config["infrastructure"]["media_resolution"]["root"] = str(root / "media")
+    resources = root / "resources"
+    resources.mkdir(exist_ok=True)
+    for name in (
+        "knowledge.db",
+        "song_names.txt",
+        "song_lyrics.txt",
+        "lyrics.json",
+        "tts.yaml",
+        "interface.json",
+    ):
+        path = resources / name
+        if not path.exists():
+            path.write_text("{}" if name.endswith(".json") else "", encoding="utf-8")
+    for name in ("reference_audio", "songs"):
+        (resources / name).mkdir(exist_ok=True)
+    (resources / "songs" / "songs").mkdir(exist_ok=True)
+    agent = config["agent_runtime"]
+    agent["skills"]["knowledge"]["song_database"] = {
+        "db_folder": str(resources),
+        "db_file": "knowledge.db",
+    }
+    agent["skills"]["jargon_recognition"]["song_entity_linker"] = {
+        "songname_file": str(resources / "song_names.txt"),
+        "lyric_file": str(resources / "song_lyrics.txt"),
+    }
+    speaking = agent["skills"]["speaking"]["characters"]["luotianyi"]
+    speaking.update(
+        {
+            "reference_audio_dir": str(resources / "reference_audio"),
+            "reference_audio_lyrics": str(resources / "lyrics.json"),
+            "server_config_path": str(resources / "tts.yaml"),
+            "interface_config_path": str(resources / "interface.json"),
+        }
+    )
+    agent["skills"]["singing"]["characters"]["luotianyi"]["resource_path"] = str(resources / "songs")
+    agent["skills"]["touch_reaction"] = {}
+    apology = resources / "call-apology.wav"
+    with wave.open(str(apology), "wb") as audio:
+        audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\0\0" * 480)
+    manifest = resources / "prepared.json"
+    manifest.write_text(
+        json.dumps(
+            [
+                {
+                    "name": f"call_apology_{scene}_1",
+                    "audio_path": apology.name,
+                    "text": "Sorry",
+                    "expression": "normal",
+                }
+                for scene in ("opening", "turn", "silence")
+            ]
+        ),
+        encoding="utf8",
+    )
+    agent["skills"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
+    _resolve_test_environment(config)
+    path = root / "config.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    return path
+
+
+def _resolve_test_environment(value: object) -> None:
+    if isinstance(value, dict):
+        for key, child in tuple(value.items()):
+            if isinstance(child, str) and child.startswith("$"):
+                value[key] = "offline-config-value"
+            else:
+                _resolve_test_environment(child)
+    elif isinstance(value, list):
+        for child in value:
+            _resolve_test_environment(child)
+
+
+def _install_external_seams() -> None:
+    vector = DeterministicVectorStore()
+    agent_runtime_module.init_vector_store = lambda _config: vector
+    agent_runtime_module.get_vector_store = lambda: vector
+    agent_runtime_module.clear_vector_store = lambda expected: expected is vector
+    speaking_backend.init_tts_module = lambda _config: DeterministicCallTTSModule()
+    server_runtime_module.LLMService = DeterministicLLMService
+    server_runtime_module.QwenOmniSessionFactory = _DeterministicSpeechFactory
+
+
+def _observe_terminations():
+    """保留原owned任务，只快照完成结果，不持有旧Stage或任务。"""
+    from src.stage.stage_manager import StageManager
+
+    completed = {}
+    original = StageManager._own_termination
+
+    def observe(manager, stage, operation):
+        task = original(manager, stage, operation)
+        identity = str(stage.interaction_id)
+
+        def finished(done):
+            snapshot = {"completed": True, "resources_released": False, "failed": True}
+            if not done.cancelled():
+                try:
+                    result = done.result()
+                    if result.interaction_id == identity:
+                        snapshot["resources_released"] = result.resources_released is True
+                        snapshot["failed"] = bool(result.finalization_error or result.cleanup_error)
+                except BaseException:
+                    pass
+            completed[identity] = snapshot
+
+        task.add_done_callback(finished)
+        return task
+
+    StageManager._own_termination = observe
+    return completed
+
+
+def _reset_readiness(runtime, call_id, completed):
+    """瞬时只读实际准入事实；未知身份或缺完成快照不视为安全。"""
+    manager = runtime.stage_manager
+    identity = str(UUID(call_id))
+    record = runtime.database_manager.call_sessions.find_by_id(UUID(identity))
+    result = completed.get(identity, {"completed": False, "resources_released": False, "failed": True})
+    if record is None:
+        return {"ready": False, **result}
+    fence = manager._user_reset_fence
+    busy = manager._user_has_interactions(record.user_id)
+    fence_owned = sum(not task.done() for task in fence._operations.get(record.user_id, ())) if fence is not None else 0
+    resetting = fence.is_resetting(record.user_id) if fence is not None else True
+    lease_owned = manager._lease_registry.current(record.user_id, record.character_id) is not None
+    return {
+        **result,
+        "manager_closed": manager.is_closed(),
+        "user_interactions_busy": busy,
+        "fence_configured": fence is not None,
+        "fence_owned": fence_owned,
+        "resetting": resetting,
+        "lease_owned": lease_owned,
+        "ready": bool(
+            result["completed"]
+            and result["resources_released"]
+            and not result["failed"]
+            and not manager.is_closed()
+            and not busy
+            and fence is not None
+            and not fence_owned
+            and not resetting
+            and not lease_owned
+        ),
+    }
+
+
+def main() -> None:  # noqa: C901 - production-loopback support exposes bounded evidence routes
+    root = Path(sys.argv[1]).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    os.environ["JWT_SECRET"] = "call-network-success-isolated-secret"
+    os.environ["AMAP_KEY"] = "offline-amap-key"
+    os.environ["QWEN_API_KEY"] = "offline-qwen-key"
+    _install_external_seams()
+    completed_terminations = _observe_terminations()
+    config_path = _runtime_config(root)
+    _startup_phase("config-built")
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    url = f"http://127.0.0.1:{port}"
+    lifecycle = _AddressPublishingLifecycle(
+        root_dir=Path(server_main.current_dir),
+        config_path=config_path,
+        address_path=root / "address.json",
+        url=url,
+    )
+    settlement_write_entered = threading.Event()
+    settlement_write_release = threading.Event()
+    settlement_write_release.set()
+    settlement_write_armed = threading.Event()
+
+    @server_main.app.get("/test/evidence")
+    async def evidence():
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime if lifecycle.admin_shell is not None else None
+        provider = _DeterministicSpeechFactory.instance
+        return {
+            "call_transport_available": (runtime.call_transport_available if runtime is not None else False),
+            "provider_audio": provider.evidence() if provider is not None else [],
+        }
+
+    @server_main.app.get("/test/call_state/{call_id}")
+    async def call_state(call_id: str, reset_readiness_only: bool = False):
+        try:
+            runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+            call_id = str(UUID(call_id))
+            readiness = _reset_readiness(runtime, call_id, completed_terminations)
+            stage = runtime.stage_manager._call_stages.get(call_id)
+        except Exception:
+            return {
+                "missing": True,
+                "reset_readiness": {
+                    "ready": False,
+                    "completed": False,
+                    "resources_released": False,
+                    "failed": True,
+                },
+            }
+        if reset_readiness_only:
+            return {"reset_readiness": readiness}
+        if stage is None:
+            return {"missing": True, "reset_readiness": readiness}
+        return {
+            "reset_readiness": readiness,
+            "state": stage.state.value,
+            "pending": list(stage._inputs.pending),
+            "ready": sorted(stage._inputs.ready),
+            "speech": list(stage._inputs.speech),
+            "fact_tasks": len(stage._fact_tasks),
+            "responses": {
+                key: {
+                    "completed": value.playback_completed,
+                    "message_end": value.message_completed,
+                    "failed": value.failed,
+                    "confirmed": value.confirmed,
+                    "provisional": value.provisional,
+                }
+                for key, value in stage._responses.items()
+            },
+        }
+
+    @server_main.app.post("/test/settlement_write/block_next")
+    async def block_next_settlement_write():
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        conversations = runtime.database_manager.conversation_service
+        original = conversations.add_call_conversation
+
+        def blocked_add_call_conversation(*args, **kwargs):
+            if settlement_write_armed.is_set():
+                settlement_write_armed.clear()
+                settlement_write_entered.set()
+                if not settlement_write_release.wait(timeout=30):
+                    raise TimeoutError("test settlement write release timed out")
+            return original(*args, **kwargs)
+
+        conversations.add_call_conversation = blocked_add_call_conversation
+        settlement_write_entered.clear()
+        settlement_write_release.clear()
+        settlement_write_armed.set()
+        return {"ok": True}
+
+    @server_main.app.get("/test/settlement_write/status")
+    async def settlement_write_status():
+        return {
+            "entered": settlement_write_entered.is_set(),
+            "armed": settlement_write_armed.is_set(),
+        }
+
+    @server_main.app.post("/test/settlement_write/release")
+    async def release_settlement_write():
+        settlement_write_release.set()
+        return {"ok": True}
+
+    @server_main.app.get("/test/reset_counts")
+    async def reset_counts():
+        from src.infrastructure.persistence.database.sql_database import (
+            AgentMemoryRecord,
+            CallMaintenanceBatch,
+            CallSession,
+            Conversation,
+            User,
+        )
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one_or_none()
+            user_id = None if user is None else user.uuid
+            return {
+                "call_sessions": (
+                    0 if user_id is None else session.query(CallSession).filter_by(user_id=user_id).count()
+                ),
+                "conversations": (
+                    0 if user_id is None else session.query(Conversation).filter_by(user_id=user_id).count()
+                ),
+                "maintenance_batches": (
+                    0 if user_id is None else session.query(CallMaintenanceBatch).filter_by(user_id=user_id).count()
+                ),
+                "memories": (
+                    0
+                    if user_id is None
+                    else session.query(AgentMemoryRecord).filter_by(subject_user_id=user_id).count()
+                ),
+                "profile": None if user is None else user.description,
+            }
+
+    @server_main.app.post("/test/seed_stale_calls")
+    async def seed_stale_calls():
+        from src.domain.call import CallState
+        from src.infrastructure.persistence.call_sessions import CallSessionRecord
+        from src.infrastructure.persistence.database.sql_database import User
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            user_id = user.uuid
+        now = datetime.now(timezone.utc)
+        preparing = CallSessionRecord(
+            call_id=uuid4(),
+            client_request_id=f"restart-preparing-{uuid4()}",
+            user_id=user_id,
+            character_id="luotianyi",
+            state=CallState.PREPARING,
+            requested_at=now - timedelta(minutes=4),
+            created_at=now - timedelta(minutes=4),
+            updated_at=now,
+        )
+        active = CallSessionRecord(
+            call_id=uuid4(),
+            client_request_id=f"restart-active-{uuid4()}",
+            user_id=user_id,
+            character_id="luotianyi",
+            state=CallState.ACTIVE,
+            requested_at=now - timedelta(minutes=4),
+            created_at=now - timedelta(minutes=4),
+            updated_at=now,
+            connected_at=now - timedelta(seconds=90),
+            disconnected_at=now - timedelta(seconds=45),
+            active_duration_ms=20_000,
+        )
+        runtime.database_manager.call_sessions.create_if_absent(preparing)
+        runtime.database_manager.call_sessions.create_if_absent(active)
+        return {
+            "preparing_call_id": str(preparing.call_id),
+            "active_call_id": str(active.call_id),
+        }
+
+    @server_main.app.post("/test/seed_recovery_conflict")
+    async def seed_recovery_conflict():
+        from src.domain.call import (
+            CallEndReason,
+            CallOutcome,
+            CallState,
+            derive_call_conversation_id,
+        )
+        from src.domain.conversation_type import ConversationItem
+        from src.infrastructure.persistence.call_sessions import CallSessionRecord
+        from src.infrastructure.persistence.database.sql_database import User
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            user_id = user.uuid
+        now = datetime.now(timezone.utc)
+        call_id = uuid4()
+        record = CallSessionRecord(
+            call_id=call_id,
+            client_request_id=f"restart-conflict-{uuid4()}",
+            user_id=user_id,
+            character_id="luotianyi",
+            state=CallState.ENDED,
+            requested_at=now - timedelta(minutes=4),
+            created_at=now - timedelta(minutes=4),
+            updated_at=now - timedelta(minutes=3),
+            connected_at=now - timedelta(seconds=90),
+            ended_at=now - timedelta(seconds=45),
+            outcome=CallOutcome.CONNECTED,
+            end_reason=CallEndReason.SYSTEM_FAILURE,
+            active_duration_ms=20_000,
+        )
+        runtime.database_manager.call_sessions.create_if_absent(record)
+        conversation_id = derive_call_conversation_id(user_id=user_id, character_id="luotianyi", call_id=call_id)
+        runtime.database_manager.conversation_service.add_call_conversation(
+            user_id,
+            "luotianyi",
+            ConversationItem(
+                uuid=str(conversation_id),
+                timestamp=record.requested_at.replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds"),
+                source="user",
+                type="call",
+                content="[语音通话]冲突投影",
+                data={
+                    "call_id": str(call_id),
+                    "outcome": "connected",
+                    "active_duration_ms": 20_000,
+                    "summary": "冲突投影",
+                    "end_reason": "user_hangup",
+                },
+            ),
+        )
+        return {"call_id": str(call_id)}
+
+    @server_main.app.post("/test/seed_partial_settlement")
+    async def seed_partial_settlement():
+        from src.domain.call import (
+            CallContent,
+            CallEndReason,
+            CallOutcome,
+            CallState,
+            derive_call_conversation_id,
+        )
+        from src.domain.conversation_type import ConversationItem
+        from src.infrastructure.persistence.call_maintenance import CallMaintenanceBatch
+        from src.infrastructure.persistence.call_sessions import (
+            CallSessionRecord,
+            SettlementStatus,
+        )
+        from src.infrastructure.persistence.database.sql_database import User
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            user_id = user.uuid
+            user.description = "stable recovered profile"
+            session.commit()
+        now = datetime.now(timezone.utc)
+
+        def record(call_id, request_id, digest):
+            return CallSessionRecord(
+                call_id=call_id,
+                client_request_id=request_id,
+                user_id=user_id,
+                character_id="luotianyi",
+                state=CallState.ENDED,
+                requested_at=now - timedelta(minutes=4),
+                created_at=now - timedelta(minutes=4),
+                updated_at=now - timedelta(minutes=3),
+                connected_at=now - timedelta(seconds=90),
+                ended_at=now - timedelta(seconds=45),
+                outcome=CallOutcome.CONNECTED,
+                end_reason=CallEndReason.USER_HANGUP,
+                active_duration_ms=20_000,
+                settlement_input_digest=digest,
+            )
+
+        summary_call_id = uuid4()
+        summary_digest = "a" * 64
+        summary_record = record(summary_call_id, f"partial-summary-{uuid4()}", summary_digest)
+        runtime.database_manager.call_sessions.create_if_absent(summary_record)
+        conversation_id = derive_call_conversation_id(
+            user_id=user_id, character_id="luotianyi", call_id=summary_call_id
+        )
+        summary = "已写入但账本尚未确认的正常概要"
+        content = CallContent(
+            call_id=summary_call_id,
+            outcome=CallOutcome.CONNECTED,
+            active_duration_ms=20_000,
+            summary=summary,
+            end_reason=CallEndReason.USER_HANGUP,
+        )
+        runtime.database_manager.conversation_service.add_call_conversation(
+            user_id,
+            "luotianyi",
+            ConversationItem(
+                uuid=str(conversation_id),
+                timestamp=summary_record.requested_at.replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds"),
+                source="user",
+                type="call",
+                content=content.render_for_agent(),
+                data={
+                    "call_id": str(summary_call_id),
+                    "outcome": CallOutcome.CONNECTED.value,
+                    "active_duration_ms": 20_000,
+                    "summary": summary,
+                    "end_reason": CallEndReason.USER_HANGUP.value,
+                },
+            ),
+        )
+
+        maintenance_call_id = uuid4()
+        maintenance_digest = "b" * 64
+        maintenance_record = record(
+            maintenance_call_id, f"partial-maintenance-{uuid4()}", maintenance_digest
+        ).with_update(
+            summary_status=SettlementStatus.SUCCEEDED,
+            conversation_id=derive_call_conversation_id(
+                user_id=user_id, character_id="luotianyi", call_id=maintenance_call_id
+            ),
+        )
+        runtime.database_manager.call_sessions.create_if_absent(maintenance_record)
+        batch = CallMaintenanceBatch(
+            maintenance_id=f"partial-maintenance-{maintenance_call_id}",
+            call_id=maintenance_call_id,
+            user_id=user_id,
+            character_id="luotianyi",
+            previous_turn_seq=0,
+            target_turn_seq=1,
+            settlement_input_digest=maintenance_digest,
+            candidates=(),
+            proposed_profile="stable recovered profile",
+            status="completed",
+        )
+        runtime.database_manager.call_maintenance_batches.create_or_load(batch)
+        runtime.database_manager.call_maintenance_batches.mark_completed(batch.maintenance_id)
+        return {
+            "summary_call_id": str(summary_call_id),
+            "summary_conversation_id": str(conversation_id),
+            "maintenance_call_id": str(maintenance_call_id),
+        }
+
+    @server_main.app.get("/test/recovery_counts")
+    async def recovery_counts():
+        from src.infrastructure.persistence.database.sql_database import (
+            CallMaintenanceBatch,
+            CallSession,
+            Conversation,
+            User,
+        )
+
+        runtime = lifecycle.admin_shell.runtime_supervisor.runtime
+        with runtime.database_manager.open_sql_session() as session:
+            user = session.query(User).filter_by(username="alice").one()
+            calls = session.query(CallSession).filter_by(user_id=user.uuid).all()
+            return {
+                "calls": [
+                    {
+                        "call_id": row.call_id,
+                        "state": row.state,
+                        "summary_status": row.summary_status,
+                        "maintenance_status": row.maintenance_status,
+                        "conversation_id": row.conversation_id,
+                        "maintenance_turn_seq": row.maintenance_turn_seq,
+                    }
+                    for row in calls
+                ],
+                "call_conversations": session.query(Conversation).filter_by(user_id=user.uuid, type="call").count(),
+                "maintenance_batches": session.query(CallMaintenanceBatch).filter_by(user_id=user.uuid).count(),
+                "profile": user.description,
+            }
+
+    @server_main.app.post("/test/stop")
+    async def stop():
+        server_main.app.state.server.should_exit = True
+        return {"ok": True}
+
+    @server_main.app.post("/test/provider/{call_id}/turn")
+    async def emit_turn(call_id: str):
+        provider = _provider(call_id)
+        await provider.emit(omni.SpeechStarted("input-1"))
+        await provider.emit(omni.SpeechStopped("input-1"))
+        await provider.emit(omni.TranscriptFinal("input-1", "你还记得我喜欢什么吗"))
+        await provider.emit(omni.ReplyStarted("turn-1", "input-1"))
+        await provider.emit(omni.ReplySegment("turn-1", 0, "我记得你喜欢音乐", tone="normal"))
+        await provider.emit(omni.ReplyFinished("turn-1"))
+        return {"ok": True}
+
+    @server_main.app.post("/test/provider/{call_id}/interrupt")
+    async def interrupt(call_id: str):
+        provider = _provider(call_id)
+        await provider.emit(omni.SpeechStarted("interrupt-1"))
+        await asyncio.sleep(0)
+        await provider.emit(omni.SpeechStopped("interrupt-1"))
+        return {"ok": True}
+
+    def _provider(call_id: str):
+        from uuid import UUID
+
+        provider = _DeterministicSpeechFactory.instance
+        try:
+            return provider.sessions[UUID(call_id)]  # type: ignore[union-attr]
+        except (KeyError, ValueError) as error:
+            raise HTTPException(status_code=404, detail="unknown call") from error
+
+    server_main.uvicorn.Config = _server_config_with_websockets(server_main.uvicorn.Config)
+    original_server = server_main.uvicorn.Server
+
+    class RecordingServer(original_server):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            server_main.app.state.server = self
+
+    server_main.uvicorn.Server = RecordingServer
+    asyncio.run(server_main.run_server("127.0.0.1", port, lifecycle=lifecycle))
+
+
+def _server_config_with_websockets(config_type):
+    def make_config(*args, **kwargs):
+        kwargs.setdefault("ws", "websockets")
+        return config_type(*args, **kwargs)
+
+    return make_config
+
+
+if __name__ == "__main__":
+    main()

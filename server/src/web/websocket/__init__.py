@@ -1,13 +1,5 @@
-"""WebSocket connection and wire-protocol hosting."""
+"""WebSocket network hosting and pre-admission authentication."""
 
-from .messages import BUSINESS_INPUT_EVENTS, ChatResponse, WSEventType, WSMessage
 from .service import WebSocketConnection, WebSocketService
 
-__all__ = [
-    "BUSINESS_INPUT_EVENTS",
-    "ChatResponse",
-    "WSEventType",
-    "WSMessage",
-    "WebSocketConnection",
-    "WebSocketService",
-]
+__all__ = ["WebSocketConnection", "WebSocketService"]

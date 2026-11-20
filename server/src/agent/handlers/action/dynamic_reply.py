@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import src.domain.agent as d
 from src.agent.processing.output_emitter import OutputEmitter
-from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from src.agent.skills.expression.dynamic import (
+    DynamicPublicationError,
+    DynamicReplyDraft,
+    DynamicSkill,
+    ReplyPublication,
+)
 from src.agent.skills.invocation import execution_invocation
 from src.utils.logger import get_logger
 
@@ -12,7 +17,7 @@ from src.utils.logger import get_logger
 class ReplyDynamicHandler:
     """角色私有的动态回复处理器；只提交持久效果，不投递聊天输出。"""
 
-    def __init__(self, character_id: str, reply: DynamicReplySkill) -> None:
+    def __init__(self, character_id: str, reply: DynamicSkill) -> None:
         self._character_id = character_id
         self._reply = reply
         self._logger = get_logger(__name__)
@@ -29,17 +34,25 @@ class ReplyDynamicHandler:
             raise TypeError("ReplyDynamicHandler 只处理 ReplyDynamic")
         if execution_context.cancellation.is_cancelled:
             return self._failed(action, d.ExecutionErrorCode.CANCELLED)
-        result = self._reply.publish(
-            execution_invocation(self._character_id, execution_context, user_id=action.owner_user_id),
-            action,
-        )
-        if result.ok and result.comment_id:
+        try:
+            result = await self._reply.publish_reply(
+                execution_invocation(self._character_id, execution_context, user_id=action.owner_user_id),
+                draft=DynamicReplyDraft(
+                    action.body, action.target.dynamic_id, action.target.parent_comment_id, action.owner_user_id
+                ),
+                publication=ReplyPublication(
+                    f"reply:{action.target.dynamic_id}:{action.target.parent_comment_id or action.target.dynamic_id}"
+                ),
+            )
+        except DynamicPublicationError:
+            return self._failed(action, d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)
+        if result.identifier:
             return d.ActionResult(
                 action_id=action.action_id,
                 status=d.ActionExecutionStatus.COMPLETED,
                 error_code=None,
                 irreversible_effect_committed=True,
-                effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_COMMENT, effect_id=result.comment_id),
+                effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_COMMENT, effect_id=result.identifier),
             )
         self._logger.error(
             "REPLY_DYNAMIC 失败 action_id=%s dynamic=%s parent=%s",

@@ -40,8 +40,7 @@ def long_document() -> dict:
         "title": "用户协议",
         "format": "agreement.richtext.v1",
         "blocks": [
-            {"font_size": 16, "align": "justify", "runs": [{"text": "甲" * 400, "bold": False}]}
-            for _ in range(20)
+            {"font_size": 16, "align": "justify", "runs": [{"text": "甲" * 400, "bold": False}]} for _ in range(20)
         ],
     }
 
@@ -109,11 +108,13 @@ def main() -> int:
         widget._sync_scroll_state()
         app.processEvents()
         range_stable = bar.maximum() == stable_maximum
-        results["checks"].update({
-            "bottom_value_equals_max": at_bottom,
-            "maximum_stable_after_sync": range_stable,
-            "stable_maximum": stable_maximum,
-        })
+        results["checks"].update(
+            {
+                "bottom_value_equals_max": at_bottom,
+                "maximum_stable_after_sync": range_stable,
+                "stable_maximum": stable_maximum,
+            }
+        )
         if not at_bottom:
             failures.append(f"滚到底后 value={bar.value()} != maximum={stable_maximum}")
         if not range_stable:

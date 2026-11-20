@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 import requests
+from support import vcpedia_prompt_lab as lab
 
-from scripts import vcpedia_prompt_lab as lab
 from src.world.get_new_songs.source_extraction import collect_materials, material_text, merge_missing
 from src.world.get_new_songs.wikitext_parser import parse_details
 

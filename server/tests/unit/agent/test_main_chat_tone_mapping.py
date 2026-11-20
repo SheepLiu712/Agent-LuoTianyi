@@ -1,13 +1,6 @@
-import sys
-from pathlib import Path
-
 import pytest
 
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
-from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
+from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.contracts import ReplyDraft
 
 
@@ -19,8 +12,8 @@ class FakeLogger:
         self.warnings.append(message)
 
 
-def build_main_chat_with_mapping() -> CharacterReplyGenerator:
-    main_chat = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
+def build_main_chat_with_mapping() -> ReplyResources:
+    main_chat = ReplyResources.__new__(ReplyResources)
     main_chat.logger = FakeLogger()
     main_chat.llm_tone_to_tts_tone = {
         "中性": "happy",
@@ -76,7 +69,7 @@ def test_main_chat_tone_mapping_falls_back_for_empty_tone():
 
 
 def test_main_chat_tone_mapping_falls_back_when_mapping_is_missing():
-    main_chat = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
+    main_chat = ReplyResources.__new__(ReplyResources)
     main_chat.logger = FakeLogger()
     main_chat.llm_tone_to_tts_tone = {}
     main_chat.llm_tone_to_l2d_expression = {}

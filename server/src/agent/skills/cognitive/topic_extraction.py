@@ -9,7 +9,7 @@ from src.agent.skills.contracts import TopicExtraction
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.agent.skills.cognitive.text_preprocessing import TextPreprocessingSkill
+    from src.agent.skills.cognitive.jargon_recognition import JargonRecognitionSkill
     from src.infrastructure.models.service import LLMService
 
 
@@ -17,7 +17,7 @@ class TopicExtractionSkill:
     """术语只作为模型线索，检索 key 和演唱 attempt 均由同一次决策产生。"""
 
     def __init__(
-        self, config: dict[str, Any], llm_service: LLMService, *, understanding: TextPreprocessingSkill
+        self, config: dict[str, Any], llm_service: LLMService, *, understanding: JargonRecognitionSkill
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("topic_extractor 必须是字典")
@@ -37,7 +37,7 @@ class TopicExtractionSkill:
         if self._llm is None:
             return TopicExtraction()
         try:
-            terms = self._understanding.extract_terms(message)
+            terms = self._understanding.recognize(message)
             response = await self._llm.generate_response(
                 conversation_history=conversation_history,
                 message_content=message,

@@ -1,5 +1,7 @@
+from typing import Literal, Union
+
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel, ConfigDict, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class ChatRequest(BaseModel):
@@ -19,6 +21,28 @@ class HistoryQuery(BaseModel):
     username: str
     count: int = 10
     end_index: int = -1
+
+
+class CallCapabilityQuery(BaseModel):
+    character_id: str = Field(min_length=1)
+
+
+class CallCapabilityResponse(BaseModel):
+    available: bool
+    character_id: str
+    reason: Literal[
+        "available",
+        "disabled",
+        "untrusted_host",
+        "provider_unavailable",
+        "call_tts_unavailable",
+        "summary_unavailable",
+        "settlement_unavailable",
+        "stage_binding_unavailable",
+        "recovery_unavailable",
+        "character_unavailable",
+        "runtime_not_ready",
+    ]
 
 
 class LoginRequest(BaseModel):
@@ -47,9 +71,39 @@ class ResetAccountRequest(BaseModel):
     new_password: str
 
 
+class UserDataResetRequest(BaseModel):
+    """Authenticated request to erase resettable data while retaining credentials."""
+
+    username: str
+
+
 class AutoLoginRequest(BaseModel):
     username: str
     token: str
+
+
+class PasswordAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["password"]
+    username: str
+    password: str
+
+
+class AutoLoginAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["auto_login"]
+    username: str
+    token: str
+
+
+class AgreementAcceptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agreement_version: str
+    accepted: StrictBool
+    credential: Union[PasswordAgreementCredential, AutoLoginAgreementCredential]
 
 
 class PreferenceGetRequest(BaseModel):

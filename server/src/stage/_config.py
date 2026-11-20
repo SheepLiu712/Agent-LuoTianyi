@@ -16,7 +16,7 @@ class _StageConfig:
     proactive_idle_seconds: float = 30.0
     max_stimuli: int = 256
     max_plans: int = 64
-    termination_timeout: float = 30.0
+    termination_timeout: float = 90.0
 
     @classmethod
     def from_dict(cls, config: dict) -> "_StageConfig":
@@ -27,7 +27,7 @@ class _StageConfig:
             for key, default in (
                 ("max_stimuli", 256),
                 ("max_plans", 64),
-                ("termination_timeout", 30.0),
+                ("termination_timeout", 90.0),
                 ("response_wait", 1.0),
                 ("typing_wait", 10.0),
                 ("image_selection_wait", 60.0),
