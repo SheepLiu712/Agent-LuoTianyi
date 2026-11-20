@@ -22,7 +22,7 @@ func _run() -> void:
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await create_timer(.4).timeout
 	await capture(root,"agentluo-011-login")
-	await account.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"visual","password":"synthetic","request_token":false},false)
+	await account.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"visual","password":"synthetic"},false)
 	await create_timer(.5).timeout
 	var chat = app.find_child("ChatView",true,false)
 	chat.get_node("%Input").text = "今天忙了一整天，终于可以休息一下了。"

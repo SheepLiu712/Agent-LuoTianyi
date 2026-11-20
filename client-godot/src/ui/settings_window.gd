@@ -222,7 +222,7 @@ func save_changes() -> Dictionary:
 	%BusyBlocker.show()
 	%BusyBlocker.grab_focus()
 	_notify("正在保存全部修改…", "saving")
-	var model_result: Dictionary = await _model_page.save_changes()
+	var model_result: Dictionary = await _model_page.save_changes(validation)
 	var preference_result: Dictionary = await _preferences_page.save_changes()
 	var ui_style_result := {"ok":true,"results":[]}
 	if _ui_style != null: ui_style_result = await %StylePage.save_ui_style()

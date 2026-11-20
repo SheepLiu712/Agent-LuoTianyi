@@ -53,7 +53,7 @@ func run() -> void:
 	root.add_child(app)
 	await process_frame
 	for username in ["ui","other"]:
-		var login: Dictionary = await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":username,"password":"synthetic-password","request_token":false},false)
+		var login: Dictionary = await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":username,"password":"synthetic-password"},false)
 		check(login.ok, "real account enters extension lifecycle")
 		check(first.contexts[-1] == second.contexts[-1], "one adapter cannot mutate another adapter's context")
 		_check_extensions_receive_only_scope_generation_and_character_identity(first)

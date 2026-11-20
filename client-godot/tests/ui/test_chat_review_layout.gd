@@ -39,7 +39,7 @@ func run() -> void:
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	print("Chat review layout: mounted actual application")
-	await account.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual", "password":"synthetic", "request_token":false}, false)
+	await account.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual", "password":"synthetic"}, false)
 	check(await until(func(): return app.get_workspace() != null and app._chat.get_state().phase == "ready"), "actual application login reaches chat")
 	if app.get_workspace() == null:
 		quit(1)

@@ -44,10 +44,6 @@ func _payload_for(operation: String, fields: Dictionary) -> Dictionary:
 		if not fields.get(field) is String or fields[field].is_empty():
 			return _failure("INVALID_INPUT")
 		payload[field] = fields[field]
-	if operation == "login":
-		if not fields.get("request_token", false) is bool:
-			return _failure("INVALID_INPUT")
-		payload.request_token = fields.get("request_token", false)
 	return {"ok": true, "code": "OK", "status": 0, "data": payload}
 
 func probe_server(address: String) -> Dictionary:

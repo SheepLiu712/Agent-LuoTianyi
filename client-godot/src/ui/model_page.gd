@@ -127,7 +127,11 @@ func _scroll_ancestor(node: Node) -> ScrollContainer:
 	return null
 
 func validate_changes() -> Dictionary:
+	return _validated_drafts()
+
+func _validated_drafts() -> Dictionary:
 	var failures: Array = []
+	var configs := {}
 	for id in _drafts:
 		if _drafts[id] == _as_draft(_settings.get_config(id)): continue
 		var config: Dictionary = _drafts[id].duplicate(true)
@@ -138,23 +142,22 @@ func validate_changes() -> Dictionary:
 			config.params = parsed
 			config.erase("params_text")
 			result = _settings.validate(id,config)
-		if not result.ok:
+		if result.ok:
+			configs[id] = config
+		else:
 			failures.append({"section":"models","id":id,"ok":false,"code":result.code})
 			_locate_error(id, result.code)
-	return {"ok":failures.is_empty(),"results":failures}
+	return {"ok":failures.is_empty(),"results":failures,"configs":configs}
 
-func save_changes() -> Dictionary:
-	var validation := validate_changes()
-	if not validation.ok: return validation
+func save_changes(validation: Dictionary = {}) -> Dictionary:
+	var checked: Dictionary = validation if validation.has("configs") else _validated_drafts()
+	if not checked.ok: return {"ok":false,"results":checked.results}
 	_saving = true
 	_set_editable()
 	var results: Array = []
 	var all_ok := true
-	for id in _drafts:
-		if _drafts[id] == _as_draft(_settings.get_config(id)): continue
-		var config: Dictionary = _drafts[id].duplicate(true)
-		config.params = JSON.parse_string(config.params_text)
-		config.erase("params_text")
+	for id in checked.configs:
+		var config: Dictionary = checked.configs[id].duplicate(true)
 		var result: Dictionary = _settings.save(id,config)
 		if result.code == "PLAINTEXT_CONFIRMATION_REQUIRED":
 			_plain.popup_centered()

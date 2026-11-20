@@ -63,7 +63,7 @@ func run() -> void:
 	app.setup(session, path+"/window.cfg")
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"ui", "password":"synthetic", "request_token":false}, false)
+	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"ui", "password":"synthetic"}, false)
 	var workspace = app.get_workspace()
 	workspace.get_chat_view().get_node("%Input").text = "retain chat on cancel"
 	workspace.get_node("%NavLogs").pressed.emit()
@@ -108,7 +108,7 @@ func run() -> void:
 	await click(dialog.get_ok_button())
 	await process_frame
 	_check_discard_logs_out_preserves_logs_and_reusable_decision(session, logs, dialog)
-	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"fail_save", "password":"synthetic", "request_token":false}, false)
+	await session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"fail_save", "password":"synthetic"}, false)
 	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
 	check(await until_ms(func(): return settings.visible, 1000), "settings opens promptly for the second account")

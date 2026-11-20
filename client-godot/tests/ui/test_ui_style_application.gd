@@ -48,7 +48,7 @@ func run() -> void:
 	_check_compact_transparent_login_geometry_unchanged()
 	_check_application_defaults_to_flat_svg(app)
 	await capture(root, "login-flat")
-	await app._session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual","password":"synthetic","request_token":false}, false)
+	await app._session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual","password":"synthetic"}, false)
 	check(await until(func(): return app.get_workspace() != null and app._chat.get_state().phase == "ready"), "local fixture login and chat ready")
 	if app.get_workspace() == null:
 		app.queue_free()
@@ -94,7 +94,7 @@ func run() -> void:
 	await create_timer(.3).timeout
 	_check_new_application_restores_appearance_before_login(app)
 	await capture(root, "login-restored-crystal")
-	await app._session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual","password":"synthetic","request_token":false}, false)
+	await app._session.perform("login", OS.get_environment("GODOT_TEST_SERVER"), {"username":"visual","password":"synthetic"}, false)
 	workspace = app.get_workspace()
 	check_icon(workspace, "NavChat", "nav_chat", true)
 	workspace.get_node("%NavSettings").pressed.emit()

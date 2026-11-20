@@ -174,7 +174,6 @@ func send_image(bytes: PackedByteArray, mime: String) -> String:
 	var payload := {
 		"image_base64": Marshalls.raw_to_base64(attachment.bytes),
 		"mime_type": attachment.mime,
-		"image_client_path": "",
 	}
 	var id := _queue_or_send(_make_local_message("image", ""), "user_image", payload)
 	if id.is_empty():

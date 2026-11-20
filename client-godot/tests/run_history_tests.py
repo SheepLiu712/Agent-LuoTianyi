@@ -71,7 +71,7 @@ async def run(godot, script, gpu=False):
             return web.json_response({},status=400)
     async def receive_image(ws, user, value, payload):
         if user not in opened: errors.append('image sent before first history boundary')
-        if payload.get('mime_type') != 'image/png' or payload.get('image_client_path') != '' or not base64.b64decode(payload.get('image_base64','')).startswith(b'\x89PNG\r\n\x1a\n'):
+        if payload.get('mime_type') != 'image/png' or 'image_client_path' in payload or not base64.b64decode(payload.get('image_base64','')).startswith(b'\x89PNG\r\n\x1a\n'):
             errors.append('invalid image payload')
         if payload.get('llm_mode') != {'types': []}: errors.append('missing image model capabilities')
         await ws.send_json({'type':'server_ack','reply_to':value['client_msg_id'],'payload':{'ok':True}})

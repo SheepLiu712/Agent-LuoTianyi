@@ -22,7 +22,7 @@ func _run() -> void:
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
-	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"ui","password":"synthetic-password","request_token":false},false)
+	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"ui","password":"synthetic-password"},false)
 	await process_frame
 	var workspace: Control = app.get_workspace()
 	check(workspace.get_node_or_null("%AccountMenu") == null,"main navigation no longer owns account actions")
@@ -81,7 +81,7 @@ func _run() -> void:
 	await process_frame
 	check(session.get_session().is_empty(),"confirmed discard completes logout")
 	_check_logout_closes_business_windows_but_preserves_logs(window, logs)
-	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"slow_save","password":"synthetic-password","request_token":false},false)
+	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"slow_save","password":"synthetic-password"},false)
 	workspace = app.get_workspace()
 	workspace.get_node("%NavSettings").pressed.emit()
 	window = app.find_child("SettingsWindow",true,false)

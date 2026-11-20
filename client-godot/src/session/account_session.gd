@@ -150,7 +150,6 @@ func perform(operation: String, server: String, fields: Dictionary, remember: bo
 	if not _session.is_empty(): _end_active_session()
 	remember = remember or auto_login
 	var payload := fields.duplicate(true)
-	if operation == "login": payload.request_token = remember
 	_busy = true
 	var generation := _generation
 	_emit("PENDING")

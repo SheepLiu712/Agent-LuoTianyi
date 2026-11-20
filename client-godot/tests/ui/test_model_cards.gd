@@ -48,6 +48,7 @@ func run() -> void:
 		var deadline := Time.get_ticks_msec() + 2500
 		while settings.get_state().phase == "loading" and Time.get_ticks_msec() < deadline: await process_frame
 		_check_refresh_rebuilds_requirements_and_retains_saved_configuration(cards, settings, window)
+		await _check_save_reuses_validated_config(page, settings)
 	window.queue_free()
 	settings.queue_free()
 	await process_frame
@@ -62,6 +63,18 @@ func remove_folder(path: String) -> void:
 
 func _check_refresh_rebuilds_requirements_and_retains_saved_configuration(cards: Variant, settings: Variant, window: Variant) -> void:
 	check(cards.get_child_count() == 2 and settings.get_config("text-purpose").model == "draft-kept" and not window.is_dirty(), "refresh rebuilds requirements and retains saved configuration")
+
+func _check_save_reuses_validated_config(page: Variant, settings: Variant) -> void:
+	var card = page.get_node("%Cards").get_child(0)
+	card.get_node("%ModelName").text = "validated-once"
+	card.get_node("%ModelName").text_changed.emit("validated-once")
+	var validation: Dictionary = page.validate_changes()
+	check(validation.ok and validation.configs.has("text-purpose"), "validation returns prepared configuration")
+	var draft: Dictionary = page._drafts["text-purpose"]
+	draft.params_text = "{"
+	page._drafts["text-purpose"] = draft
+	var result: Dictionary = await page.save_changes(validation)
+	check(result.ok and settings.get_config("text-purpose").model == "validated-once", "save reuses validated configuration without reparsing")
 
 func _check_disabled_purposes_begin_collapsed(first: Variant, second: Variant) -> void:
 	check(not first.get_node("%Fields").visible and not second.get_node("%Fields").visible, "disabled purposes begin collapsed")

@@ -222,7 +222,7 @@ func _authenticate_http() -> bool:
 	if registered == null:
 		return false
 	var login: Variant = await _http_call("http.login", HTTPClient.METHOD_POST, "/auth/login", {
-		"username": _username, "password": PASSWORD, "request_token": false
+		"username": _username, "password": PASSWORD
 	})
 	if login == null:
 		return false
@@ -346,7 +346,7 @@ func _test_image_sequence() -> bool:
 	if not touch_ack.ok or touch_ack.event.get("reply_to") != touch_id:
 		return false
 	var image_id := _send_event("ws.user_image.send", "user_image", {
-		"image_base64": IMAGE, "mime_type": "image/png", "image_client_path": "", "llm_mode": {"types": []}
+		"image_base64": IMAGE, "mime_type": "image/png", "llm_mode": {"types": []}
 	})
 	var image_ack := await _expect_event("ws.user_image.ack", "server_ack")
 	if not image_ack.ok or image_ack.event.get("reply_to") != image_id:

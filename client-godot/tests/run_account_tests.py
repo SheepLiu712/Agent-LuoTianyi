@@ -47,7 +47,7 @@ def run(godot, script="res://tests/test_account_api.gd", gpu=False):
             self.reply(200, {"public_key": "bad-key" if self.path.startswith("/badkey/") else crypto.get_public_key_pem()})
 
         def validate_fields(self, operation, fields):
-            allowed = {"login":{"username", "password", "request_token"}, "register":{"username", "password", "invite_code"},
+            allowed = {"login":{"username", "password"}, "register":{"username", "password", "invite_code"},
                        "reset_account":{"invite_code", "new_username", "new_password"}, "auto_login":{"username", "token"}}
             try:
                 assert set(fields) == allowed[operation], "request field mismatch"
