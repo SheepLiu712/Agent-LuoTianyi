@@ -132,16 +132,38 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount, pending
       Alert.alert('注册失败', '两次输入的密码不一致');
       return;
     }
-    setAgreementLoading(true); setAgreementError('');
+    setLoading(true); setAgreementError('');
     const identity = `${regUsername}\u0000${regPassword}\u0000${regConfirmPassword}\u0000${inviteCode}`;
     const savedResume = await loadRegistrationResume(server_config.BASE_URL).catch(() => null);
     if (savedResume?.state === 'same_user_login') {
-      setAgreementLoading(false);
+      setLoading(false);
       setActiveTab('login');
       setLoginUsername(savedResume.username);
       Alert.alert('请先登录确认', '检测到原注册结果待确认，请先登录确认原注册结果。');
       return;
     }
+    if (!savedResume) {
+      const policy = await (await import('./useAuth')).fetchAgreementPolicy();
+      if (!policy.success) {
+        setLoading(false);
+        Alert.alert('注册失败', policy.message);
+        return;
+      }
+      if (!policy.required) {
+        try {
+          const result = await onRegister(regUsername, regPassword, regConfirmPassword, inviteCode);
+          if (result.success) {
+            Alert.alert('注册成功', '注册成功，请使用新账号登录！');
+            setActiveTab('login'); setLoginUsername(regUsername);
+          } else {
+            Alert.alert('注册失败', result.message);
+          }
+        } finally { setLoading(false); }
+        return;
+      }
+    }
+    setLoading(false);
+    setAgreementLoading(true);
     const restoredRequestId = savedResume && savedResume.username === regUsername && savedResume.state === 'unknown'
       ? savedResume.requestId
       : '';

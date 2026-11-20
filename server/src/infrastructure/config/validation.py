@@ -181,6 +181,12 @@ class RuntimeConfigValidator:
         agreement_config = config.get("user_agreements", {})
         if not isinstance(agreement_config, dict):
             return [ValidationItem("core", name, "error", "user_agreements 必须是对象")]
+        if not isinstance(agreement_config.get("require_acceptance", False), bool):
+            return [
+                ValidationItem(
+                    "core", "config.user_agreements.require_acceptance", "error", "require_acceptance 必须是布尔值"
+                )
+            ]
         user_uuids = agreement_config.get("exempt_user_uuids", [])
         if not isinstance(user_uuids, list) or any(not isinstance(value, str) or not value for value in user_uuids):
             return [ValidationItem("core", name, "error", "exempt_user_uuids 必须是非空账号 ID 的列表")]

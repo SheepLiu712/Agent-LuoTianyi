@@ -47,6 +47,10 @@ class FakeSignDialog(QDialog):
     def exec(self) -> int:
         return FakeSignDialog.next_result
 
+    def deleteLater(self):
+        # This fake exits exec immediately; retain it until parent teardown for simulated responses.
+        pass
+
     def finish_submit(self, success: bool, message: str = "", *, close=False) -> None:
         self.submissions.append((success, message))
         if close:
@@ -86,8 +90,10 @@ class FakeBinder:
             action=action,
             base_url=self.server_url,
             **values,
-            execute=lambda _cancelled: self.on_login_with_details(
-                values["username"], values["password"], values.get("remember", False)
+            execute=lambda _cancelled: (
+                (False, "请签署协议", {"code": "AGREEMENT_REQUIRED"})
+                if action == "register"
+                else self.on_login_with_details(values["username"], values["password"], values.get("remember", False))
             ),
         )
 
@@ -96,9 +102,6 @@ class FakeBinder:
 
     def on_registration_server_identity(self):
         return self.server_url
-
-    def on_login(self, username, password, do_auto_login=False):
-        return self.login_result
 
     def on_login_with_details(self, username, password, do_auto_login=False):
         self.detail_login_calls += 1
@@ -221,7 +224,7 @@ def dialog(app, monkeypatch, tmp_path, messages):
 
 def test_invalid_form_does_not_open_agreement(dialog):
     dialog.widget.r_username.setText("")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert FakeSignDialog.last_instance is None
     assert dialog.messages.warnings
@@ -230,7 +233,7 @@ def test_invalid_form_does_not_open_agreement(dialog):
 def test_mismatched_passwords_do_not_open_agreement(dialog):
     dialog.widget.fill_register_form(password="pw")
     dialog.widget.r_confirm_password.setText("other")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert FakeSignDialog.last_instance is None
     assert dialog.messages.warnings
@@ -241,7 +244,7 @@ def test_reject_returns_to_form_and_keeps_input(dialog):
     dialog.widget.fill_register_form()
     dialog.widget.tabs.setCurrentIndex(1)  # 用户在注册页点了"注册"
 
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     sign = FakeSignDialog.last_instance
     assert sign is not None
@@ -256,7 +259,7 @@ def test_success_returns_to_login_tab_with_prefilled_username(dialog):
     dialog.widget.fill_register_form()
     registration_resume.save_pending("req-1", "newbie", server_url="https://example.invalid")
 
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert dialog.widget.l_username.text() == "newbie"
     assert dialog.widget.tabs.currentIndex() == 0
@@ -266,7 +269,7 @@ def test_success_returns_to_login_tab_with_prefilled_username(dialog):
 
 def test_submit_sends_request_id_version_and_acceptance(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
@@ -305,7 +308,7 @@ def test_resume_submission_reuses_original_agreement_version(dialog):
 
 def test_same_username_changed_password_or_invite_cannot_open_new_request(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     first_id = dialog.widget._submit_context["request_id"]
     dialog.widget._sign_dialog = FakeSignDialog()
     dialog.widget._start_registration_submit("terms-2026-10-v1")
@@ -313,7 +316,7 @@ def test_same_username_changed_password_or_invite_cannot_open_new_request(dialog
     dialog.widget.r_password.setText("changed")
     dialog.widget.r_confirm_password.setText("changed")
     dialog.widget.r_invite.setText("OTHER")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert dialog.widget._submit_context["request_id"] == first_id
     assert registration_resume.load_pending()["registration_request_id"] == first_id
@@ -322,7 +325,7 @@ def test_same_username_changed_password_or_invite_cannot_open_new_request(dialog
 
 def test_version_change_clears_known_old_request_and_prepares_new_id(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -346,7 +349,7 @@ def test_version_change_clears_known_old_request_and_prepares_new_id(dialog):
 
 def test_unknown_result_keeps_pending_request_and_does_not_clear_identity(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -378,7 +381,7 @@ def test_unknown_result_keeps_pending_request_and_does_not_clear_identity(dialog
 )
 def test_unconfirmed_outcomes_keep_pending_request(dialog, status_code, code):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -403,7 +406,7 @@ def test_unconfirmed_outcomes_keep_pending_request(dialog, status_code, code):
 )
 def test_unknown_or_unverifiable_codes_keep_pending_request(dialog, status_code, code):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -465,7 +468,7 @@ def test_cross_restart_recovery_can_correct_credentials_without_new_request_id(d
 
 def test_not_sent_fresh_request_releases_pending_but_recovered_request_stays(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -507,7 +510,7 @@ def test_not_sent_fresh_request_releases_pending_but_recovered_request_stays(dia
 
 def test_unverifiable_can_be_cleared_only_by_successful_same_username_login(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -547,7 +550,7 @@ def test_pending_request_cannot_be_replayed_after_server_switch(dialog):
     registration_resume.save_pending("req-server", "newbie", "terms-v1", "https://original.example")
     dialog.widget.fill_register_form()
     dialog.binder.server_url = "https://other.example"
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert FakeSignDialog.last_instance is None
     assert registration_resume.load_pending()["registration_request_id"] == "req-server"
@@ -737,7 +740,7 @@ def test_post_sign_in_error_routes_and_later_reject_exits(dialog, monkeypatch, l
 def test_legacy_pending_without_server_identity_is_not_replayed(dialog):
     registration_resume.save_pending("req-legacy", "newbie", "terms-v1")
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert FakeSignDialog.last_instance is None
     assert registration_resume.load_pending()["registration_request_id"] == "req-legacy"
@@ -757,7 +760,7 @@ def test_late_result_from_old_dialog_does_not_complete_new_dialog(dialog):
 
 def test_version_change_prompts_reread_and_reloads(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -778,7 +781,7 @@ def test_version_change_prompts_reread_and_reloads(dialog):
 
 def test_conflict_shows_error_without_reload(dialog, monkeypatch):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -799,7 +802,7 @@ def test_conflict_shows_error_without_reload(dialog, monkeypatch):
 
 def test_conflict_offers_discard_entry_and_cancel_has_no_side_effect(dialog, monkeypatch):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -820,7 +823,7 @@ def test_conflict_offers_discard_entry_and_cancel_has_no_side_effect(dialog, mon
 
 def test_conflict_confirm_discard_clears_only_same_pending_and_returns_to_form(dialog, monkeypatch):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -846,7 +849,7 @@ def test_conflict_confirm_discard_clears_only_same_pending_and_returns_to_form(d
 
 def test_conflict_stale_dialog_cannot_clear_new_pending(dialog, monkeypatch):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -899,7 +902,7 @@ def test_conflict_stale_dialog_cannot_clear_new_pending(dialog, monkeypatch):
 
 def test_network_failure_keeps_window_open(dialog):
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -932,7 +935,7 @@ def login_and_wait(dialog):
 def test_lost_response_keeps_request_id_for_retry(dialog):
     """响应丢失：失败结果不得清除未决记录，重试必须复用同一 request ID。"""
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -968,7 +971,7 @@ def test_transport_error_becomes_visible_failure(dialog):
 def test_version_change_starts_new_request_with_new_version(dialog):
     """换版后不能继续重放旧版本：清掉旧版本绑定并换新的请求 ID。"""
     dialog.widget.fill_register_form()
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -996,7 +999,7 @@ def test_changing_username_before_confirming_previous_request_is_blocked(dialog)
     registration_resume.save_pending("req-old", "alice", "terms-v1", "https://example.invalid")
     dialog.widget.fill_register_form(username="bob")
 
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert FakeSignDialog.last_instance is None  # 没有打开协议窗口
     assert dialog.messages.warnings
@@ -1019,7 +1022,7 @@ def test_definitive_business_failure_allows_new_username(dialog, app, status_cod
     from PySide6.QtCore import QThreadPool
 
     dialog.widget.fill_register_form(username="taken")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     old_request_id = dialog.widget._submit_context["request_id"]
@@ -1042,7 +1045,7 @@ def test_definitive_business_failure_allows_new_username(dialog, app, status_cod
 
     FakeSignDialog.last_instance = None
     dialog.widget.fill_register_form(username="available")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     assert FakeSignDialog.last_instance is not None  # 新用户名可以继续注册
     new_request_id = dialog.widget._submit_context["request_id"]
     assert new_request_id != old_request_id  # 开始新的请求，而不是复用已失败的那次
@@ -1051,7 +1054,7 @@ def test_definitive_business_failure_allows_new_username(dialog, app, status_cod
 def test_unknown_result_keeps_pending_record(dialog):
     """结果未知（传输失败）时仍保留恢复记录，不能被当成明确失败清掉。"""
     dialog.widget.fill_register_form(username="taken")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -1069,7 +1072,7 @@ def test_unknown_result_keeps_pending_record(dialog):
 def test_rate_limit_keeps_pending_record_for_retry(dialog):
     """429 是暂不可用，不能清未决请求；限流解除后仍用原 request ID 恢复（spec AC-06）。"""
     dialog.widget.fill_register_form(username="taken")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -1091,7 +1094,7 @@ def test_resume_flow_explains_unconfirmed_result_and_original_account(dialog):
     registration_resume.save_pending("req-old", "newbie", "terms-2026-10-v1", "https://example.invalid")
     dialog.widget.fill_register_form()
 
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     infos = " ".join(str(item) for item in dialog.messages.infos)
     assert any(word in infos for word in ("未确认", "尚未确认", "未确定"))
@@ -1162,7 +1165,7 @@ def test_registration_success_survives_pending_cleanup_failure(dialog, monkeypat
     monkeypatch.setattr(dialog.widget.logger, "warning", lambda message: warnings.append(str(message)))
     dialog.widget.fill_register_form()
 
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert any("注册成功，请登录" in str(item) for item in dialog.messages.infos)
     assert dialog.widget.l_username.text() == "newbie"
@@ -1176,7 +1179,7 @@ def test_password_decryption_failure_keeps_pending_for_key_refresh(dialog):
     """服务端仍可用 400 表示密码解密失败；此时保留 pending 以便客户端换钥重试。"""
     FakeSignDialog.next_result = QDialog.DialogCode.Rejected
     dialog.widget.fill_register_form(username="taken")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = sign
     dialog.widget._active_register_token = sign.submit_token
@@ -1200,7 +1203,7 @@ def test_server_failure_retry_reuses_pending_request_id(dialog, app, status_code
 
     FakeSignDialog.next_result = QDialog.DialogCode.Rejected
     dialog.widget.fill_register_form(username="taken")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     first_sign = FakeSignDialog.last_instance
     first_request_id = dialog.widget._submit_context["request_id"]
     registration_resume.save_pending(first_request_id, "taken", "terms-2026-10-v1", "https://example.invalid")
@@ -1216,7 +1219,7 @@ def test_server_failure_retry_reuses_pending_request_id(dialog, app, status_code
 
     # 再次进入流程并真正发起下一次提交；payload 仍必须带旧 ID。
     dialog.widget.fill_register_form(username="taken")
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
     assert dialog.widget._submit_context["request_id"] == first_request_id
     second_sign = FakeSignDialog.last_instance
     dialog.widget._sign_dialog = second_sign
@@ -1233,7 +1236,7 @@ def test_non_resume_success_keeps_original_message(dialog):
     """没有未决记录时仍是普通注册成功文案，不误报"已确认上次注册"。"""
     dialog.widget.fill_register_form()
 
-    dialog.widget.do_register()
+    register_and_wait(dialog.widget)
 
     assert any("注册成功，请登录" in str(item) for item in dialog.messages.infos)
     assert not any("已确认上次注册成功" in str(item) for item in dialog.messages.infos)
@@ -1308,3 +1311,11 @@ def test_unverifiable_closes_real_modal_and_preserves_pending(app, monkeypatch, 
         widget.close()
         widget.deleteLater()
         app.processEvents()
+
+
+def register_and_wait(dialog):
+    dialog.do_register()
+    deadline = monotonic() + 5
+    while dialog._account_operation.busy and monotonic() < deadline:
+        QTest.qWait(25)
+    assert not dialog._account_operation.busy

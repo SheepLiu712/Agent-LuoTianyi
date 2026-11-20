@@ -30,6 +30,8 @@ class _AccountResultRequest:
     context: tuple = ()
 
     def execute(self, cancelled):
+        if self.action == "register":
+            return False, "请签署协议", {"code": "AGREEMENT_REQUIRED"}
         return True, "ok", {}
 
 
@@ -78,7 +80,7 @@ def dialog(qapp, monkeypatch, tmp_path):
     def apply(request, result):
         if request.action == "login":
             return binder.on_login(request.username, request.password, do_auto_login=request.remember)
-        return binder.on_register(request.username, request.password, request.invite)
+        return result[:2]
 
     binder.apply_account_result.side_effect = apply
     window = LoginDialog(binder)
@@ -309,8 +311,12 @@ def test_enter_tracks_registration_then_login_after_tab_switch(
     assert login_clicked.count() == 0
     wait_for(lambda: dialog.tabs.currentIndex() == 0)
     dialog.binder.on_register_with_agreement.assert_called_once_with(
-        username="register-user", password="register-password", invite_code="test-invite",
-        registration_request_id=ANY, agreement_version="keyboard-test-v1", accepted=True,
+        username="register-user",
+        password="register-password",
+        invite_code="test-invite",
+        registration_request_id=ANY,
+        agreement_version="keyboard-test-v1",
+        accepted=True,
     )
     dialog.binder.on_login.assert_not_called()
     assert dialog.tabs.currentIndex() == 0

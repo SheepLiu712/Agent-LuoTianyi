@@ -73,6 +73,19 @@ interface AgreementFetchOptions {
   timeoutMs?: number;
 }
 
+export async function fetchAgreementPolicy(): Promise<
+  { success: true; required: boolean } | { success: false; message: string }
+> {
+  try {
+    const response = await authFetch(`${server_config.BASE_URL}/auth/agreement/policy`);
+    const data = await response.json();
+    if (!response.ok || typeof data.require_acceptance !== 'boolean') throw new Error('Invalid agreement policy');
+    return { success: true, required: data.require_acceptance };
+  } catch {
+    return { success: false, message: '无法获取注册策略，请稍后重试' };
+  }
+}
+
 async function getCurrentAgreementForAuth(): Promise<AgreementPayload | null> {
   const result = await fetchCurrentAgreement();
   return result.success ? result.data : null;

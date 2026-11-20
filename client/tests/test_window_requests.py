@@ -127,7 +127,7 @@ def account_window(qapp, monkeypatch):
     windows = []
     states = []
 
-    def create(post_status=503, block="POST"):
+    def create(post_status=503, block="POST", require_acceptance=False):
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         pem = (
             key.public_key()
@@ -161,6 +161,8 @@ def account_window(qapp, monkeypatch):
                     "detail": "retry",
                 }
             )
+            if request.url.endswith("/auth/agreement/policy"):
+                payload = {"require_acceptance": require_acceptance}
             response._content = json.dumps(payload).encode()
             response.request = request
             state["complete"].set()
@@ -391,3 +393,38 @@ def test_synchronous_account_interfaces_keep_original_result_contract(account_wi
     assert network.user_id == "test-user"
     assert len(saves) == 1
     network.ws_transport.start.assert_called_once()
+
+
+def test_disabled_policy_registers_without_opening_agreement(account_window, monkeypatch):
+    window, network, state, saves, _key = account_window(post_status=200)
+    state["gate"].set()
+    monkeypatch.setattr(dialog_module.registration_resume, "load_pending", lambda: None)
+    sign = Mock(side_effect=AssertionError("disabled policy must not open signing dialog"))
+    monkeypatch.setattr(dialog_module, "AgreementSignDialog", sign)
+    window.tabs.setCurrentIndex(1)
+    window.r_username.setText("test-user")
+    window.r_password.setText("test-password")
+    window.r_confirm_password.setText("test-password")
+    window.r_invite.setText("test-invite")
+    window.do_register()
+    wait_for(lambda: not window._account_operation.busy)
+    assert window.tabs.currentIndex() == 0
+    assert window.l_username.text() == "test-user"
+    posts = [request for _, request, _ in state["calls"] if request.method == "POST"]
+    assert len(posts) == 1
+    payload = json.loads(posts[0].body)
+    assert payload["username"] == "test-user"
+    assert "accepted" not in payload
+    sign.assert_not_called()
+
+
+@pytest.mark.parametrize("policy", [True, "false"])
+def test_registration_policy_requires_signing_or_rejects_invalid_policy_without_post(account_window, policy):
+    window, network, state, _, _key = account_window(require_acceptance=policy)
+    state["gate"].set()
+    request = network.prepare_account_request("register", username="test-user", password="pw", invite="invite")
+    ok, message, details = request.execute(threading.Event())
+    assert not ok
+    assert message
+    assert details.get("code") == ("AGREEMENT_REQUIRED" if policy is True else None)
+    assert not any(req.method == "POST" for _, req, _ in state["calls"])

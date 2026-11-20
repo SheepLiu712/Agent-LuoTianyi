@@ -52,6 +52,14 @@ async def get_public_key(server_runtime: "ServerRuntime" = Depends(get_runtime))
     return {"public_key": server_runtime.user_interface.get_public_key_pem()}
 
 
+@router.get("/auth/agreement/policy")
+async def get_agreement_policy(server_runtime: "ServerRuntime" = Depends(get_runtime)):
+    return JSONResponse(
+        {"require_acceptance": server_runtime.agreement_service.require_acceptance},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/auth/agreement")
 async def get_agreement(server_runtime: "ServerRuntime" = Depends(get_runtime)):
     agreement_doc = server_runtime.agreement_service.get_current()

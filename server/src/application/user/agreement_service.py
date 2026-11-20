@@ -71,8 +71,16 @@ def validate_signature_time(value: str, now: datetime) -> str:
 
 class AgreementService:
     def __init__(
-        self, current_version: str, docs: dict[str, AgreementDoc], exempt_user_uuids: Optional[set[str]] = None
+        self,
+        current_version: str,
+        docs: dict[str, AgreementDoc],
+        exempt_user_uuids: Optional[set[str]] = None,
+        *,
+        require_acceptance: bool = False,
     ):
+        if not isinstance(require_acceptance, bool):
+            raise ValueError("user_agreements.require_acceptance 必须是布尔值")
+        self.require_acceptance = require_acceptance
         self._current_version = current_version
         self._docs = docs
         self._exempt_user_uuids = frozenset(exempt_user_uuids or ())
@@ -91,7 +99,11 @@ class AgreementService:
         return user_uuid in self._exempt_user_uuids
 
     def is_login_eligible(self, session, user_uuid: str) -> bool:
-        return self.is_exempt(user_uuid) or first_signed_at(session, user_uuid, self.current_version) is not None
+        return (
+            not self.require_acceptance
+            or self.is_exempt(user_uuid)
+            or first_signed_at(session, user_uuid, self.current_version) is not None
+        )
 
     def accept(self, session, *, user_uuid: str, version: str, accepted: bool, clock: Optional[Clock] = None) -> str:
         if accepted is not True:

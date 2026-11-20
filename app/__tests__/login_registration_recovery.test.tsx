@@ -19,7 +19,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn(), setItemAsync: jest.fn(), deleteItemAsync: jest.fn() }));
-jest.mock('../features/account/useAuth', () => ({ fetchCurrentAgreement: jest.fn(async () => ({ success: true, data: agreement })) }));
+jest.mock('../features/account/useAuth', () => ({ fetchAgreementPolicy: jest.fn(async () => ({ success: true, required: true })), fetchCurrentAgreement: jest.fn(async () => ({ success: true, data: agreement })) }));
 jest.mock('../features/account/AgreementModal', () => ({
   AgreementModal: (props: any) => {
     latestModal = { props } as ReactTestInstance;
@@ -74,10 +74,30 @@ async function fillAndOpen(tree: ReactTestRenderer, username: string) {
 describe('LoginScreen 注册恢复真实消费者', () => {
   beforeEach(() => {
     storage.clear();
+    require('../features/account/useAuth').fetchAgreementPolicy.mockResolvedValue({ success: true, required: true });
     agreementSubmit = undefined;
     latestModal = undefined;
     (globalThis as any).__lastAlertButtons = undefined;
     server_config.BASE_URL = 'https://server.example';
+  });
+
+  it('关闭强制签署时直接注册，不展示签署弹窗', async () => {
+    require('../features/account/useAuth').fetchAgreementPolicy.mockResolvedValue({ success: true, required: false });
+    const register = jest.fn().mockResolvedValue({ success: true });
+    const tree = renderPage(register);
+    await fillAndOpen(tree, 'alice');
+    expect(register).toHaveBeenCalledWith('alice', 'pw', 'pw', 'invite');
+    expect(latestModal?.props.visible).toBe(false);
+    expect(input(tree, '请输入用户名').props.value).toBe('alice');
+  });
+
+  it('无法确认签署策略时提示失败，不提交注册', async () => {
+    require('../features/account/useAuth').fetchAgreementPolicy.mockResolvedValue({ success: false, message: '无法获取策略' });
+    const register = jest.fn();
+    const tree = renderPage(register);
+    await fillAndOpen(tree, 'alice');
+    expect(register).not.toHaveBeenCalled();
+    expect(require('react-native').Alert.alert).toHaveBeenCalledWith('注册失败', '无法获取策略');
   });
 
   it('unknown V1 + 当前正文 V2 仍把原 R1/V1 传给 onRegister', async () => {

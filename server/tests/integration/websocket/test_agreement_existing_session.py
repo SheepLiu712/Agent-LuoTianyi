@@ -73,7 +73,7 @@ def agreement_ws(tmp_path, monkeypatch):
     adapter.initialize(stages)
     runtime = SimpleNamespace(
         database_manager=manager,
-        agreement_service=AgreementService(V1, {}),
+        agreement_service=AgreementService(V1, {}, require_acceptance=True),
         websocket_service=WebSocketService(),
         stage_manager=stages,
         chat_adapter=adapter,
@@ -123,7 +123,7 @@ def test_established_websocket_remains_authenticated_after_policy_changes_but_ne
             session.commit()
         finally:
             session.close()
-        agreement_ws.runtime.agreement_service = AgreementService(V1, {}, {"ws-user"})
+        agreement_ws.runtime.agreement_service = AgreementService(V1, {}, {"ws-user"}, require_acceptance=True)
 
     login = _login(agreement_ws.client)
     assert login.status_code == 200
@@ -142,7 +142,9 @@ def test_established_websocket_remains_authenticated_after_policy_changes_but_ne
         assert agreement_ws.connected == [("ws-user", "luotianyi")]
 
         agreement_ws.runtime.agreement_service = (
-            AgreementService(V2, {}) if policy == "version_change" else AgreementService(V1, {})
+            AgreementService(V2, {}, require_acceptance=True)
+            if policy == "version_change"
+            else AgreementService(V1, {}, require_acceptance=True)
         )
         websocket.send_json(
             {

@@ -62,11 +62,12 @@ def register_http(tmp_path, monkeypatch):
     app.include_router(routes.router)
     app.dependency_overrides[routes.get_runtime] = lambda: runtime
 
-    def build(current_version=V1):
+    def build(current_version=V1, require_acceptance=True):
+        runtime.agreement_service = AgreementService(current_version, {}, require_acceptance=require_acceptance)
         runtime.registration_service = __import__(
             "src.application.user.registration_service", fromlist=["RegistrationService"]
         ).RegistrationService(
-            agreement_service=AgreementService(current_version, {}),
+            agreement_service=runtime.agreement_service,
             credential_service=manager.credential_service,
             clock=lambda: FIXED_NOW,
         )
@@ -323,3 +324,36 @@ def test_undecryptable_password_returns_stable_code(register_http, monkeypatch):
     assert response.status_code == 400
     assert response.json()["code"] == "PASSWORD_DECRYPT_FAILED"
     assert counts(register_http.manager) == {"users": 0, "signatures": 0, "requests": 0, "invite_used": False}
+
+
+def test_disabled_policy_registers_without_fabricating_consent(register_http):
+    register_http.build(require_acceptance=False)
+    policy = register_http.client.get("/auth/agreement/policy")
+    assert policy.json() == {"require_acceptance": False}
+    assert policy.headers["cache-control"] == "no-store"
+    payload = {"username": "newbie", "password": "cipher", "invite_code": INVITE}
+    response = register_http.client.post("/auth/register", json=payload)
+    assert response.status_code == 200
+    assert counts(register_http.manager) == {"users": 1, "signatures": 0, "requests": 0, "invite_used": True}
+    assert register_http.client.post("/auth/register", json={**payload, "username": "other"}).status_code == 400
+    register_http.build(require_acceptance=True)
+    assert register_http.client.get("/auth/agreement/policy").json() == {"require_acceptance": True}
+    assert register_http.client.post("/auth/register", json=payload).status_code == 403
+
+
+def test_signed_registration_can_be_recovered_after_disabling_policy(register_http):
+    register_http.build()
+    payload = {
+        "username": "newbie",
+        "password": "cipher",
+        "invite_code": INVITE,
+        "registration_request_id": "in-flight",
+        "agreement_version": V1,
+        "accepted": True,
+    }
+    first = register_http.client.post("/auth/register", json=payload)
+    register_http.build(require_acceptance=False)
+    retry = register_http.client.post("/auth/register", json=payload)
+    assert first.status_code == retry.status_code == 200
+    assert first.json() == retry.json()
+    assert counts(register_http.manager) == {"users": 1, "signatures": 1, "requests": 1, "invite_used": True}

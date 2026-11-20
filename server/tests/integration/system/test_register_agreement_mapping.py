@@ -56,7 +56,7 @@ def env(tmp_path, monkeypatch):
 
     def service(current_version=V1):
         return RegistrationService(
-            agreement_service=AgreementService(current_version, {}),
+            agreement_service=AgreementService(current_version, {}, require_acceptance=True),
             credential_service=manager.credential_service,
             clock=lambda: FIXED_NOW,
         )
