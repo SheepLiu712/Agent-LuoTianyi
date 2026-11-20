@@ -74,7 +74,9 @@ class AgentMemory:
         return memory_store
 
     async def citywalk_memory_on(self, day: date) -> MemoryContext:
-        """从角色的漫步事件正本读取完整经历，不依赖向量相似度或虚拟用户身份。"""
+        """按日期召回角色漫步经历；长期检索关闭时为空，不访问正本。"""
+        if not self.vector_store.enabled:
+            return MemoryContext()
         events = await asyncio.to_thread(
             self.database_manager.event_store.get_citywalk_events, self.owner_character_id, day
         )
@@ -107,7 +109,7 @@ class AgentMemory:
         向量库只作为召回索引使用；命中向量后会批量回查 MemoryStore 中
         的规范记忆正本，并把正本挂到 MemoryHit 上。
         """
-        if not queries:
+        if not queries or not self.vector_store.enabled:
             return MemoryContext()
 
         with retrieval_phase("authorization"):

@@ -49,6 +49,8 @@ class SkillsConfig:
             raise TypeError("agent_runtime.skills 必须是字典")
         cls._reject_skill_legacy(values)
         cls._validate_skill_nodes(values)
+        if type(values.get("speaking", {}).get("enabled", True)) is not bool:
+            raise TypeError("agent_runtime.skills.speaking.enabled 必须是布尔值")
         for key in ("reply", "memory_write"):
             cls.require_model(values.get(key, {}), f"agent_runtime.skills.{key}")
         maintenance = values.get("cognitive_maintenance", {})

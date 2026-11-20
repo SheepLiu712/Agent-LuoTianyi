@@ -537,7 +537,7 @@ async def test_call_embedding_outage_keeps_threshold_summary_profile_and_ending_
     async def write(**kwargs):
         return await MemoryWriter({}, None).write_maintenance_candidates(
             **kwargs, owner_character_id="luotianyi",
-            vector_store=SimpleNamespace(prepare_embeddings=unavailable), memory_store=SimpleNamespace(),
+            vector_store=SimpleNamespace(enabled=True, prepare_embeddings=unavailable), memory_store=SimpleNamespace(),
         )
 
     setup.memory.write_maintenance_candidates = write

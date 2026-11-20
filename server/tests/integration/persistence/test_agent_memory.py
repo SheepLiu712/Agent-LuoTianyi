@@ -55,6 +55,8 @@ class FakeMemoryWriterLogger:
 
 
 class InMemoryVectorStore:
+    enabled = True
+
     async def embed_query(self, query):
         return [1.0]
 

@@ -117,6 +117,15 @@ type ClientModelType = {
   requires_thinking: boolean;
 };
 
+type ComponentStartup = {
+  speaking_enabled: boolean;
+  vector_store_enabled: boolean;
+};
+
+function componentStartupValues(values?: Partial<ComponentStartup>): ComponentStartup {
+  return { speaking_enabled: values?.speaking_enabled ?? true, vector_store_enabled: values?.vector_store_enabled ?? true };
+}
+
 type LlmConfigInfo = {
   available_llms: Record<string, LlmInterfaceConfig>;
   available_vlms: Record<string, LlmInterfaceConfig>;
@@ -125,6 +134,11 @@ type LlmConfigInfo = {
   call_setup_timeout: number | string;
   client_model_types: ClientModelType[];
   module_bindings: ModuleBinding[];
+  component_startup: ComponentStartup;
+};
+
+type LlmConfigPatch = Omit<Partial<LlmConfigInfo>, 'component_startup'> & {
+  component_startup?: Partial<ComponentStartup>;
 };
 
 const modelPanels = [
@@ -148,6 +162,11 @@ const modelPanels = [
     title: '模型 module（调用模块）绑定',
     Editor: LlmModuleBindingDraftEditor,
     select: ({ module_bindings }: LlmConfigInfo) => ({ module_bindings }),
+  },
+  {
+    title: '组件启动',
+    Editor: ComponentStartupDraftEditor,
+    select: ({ component_startup }: LlmConfigInfo) => ({ component_startup }),
   },
 ] as const;
 
@@ -781,7 +800,7 @@ function PipelinePage() {
   const { data, error, loading } = usePolling<LatencyGroups>(`/admin/api/metrics/latency?window=${window}`, 60000);
   const notes: Record<string, string> = {
     chat: '总耗时从本批最早输入准备完成算起，结束于首段文本被服务端输出层接纳；不代表客户端收到。',
-    call: '首个 ACK 是客户端确认的代理指标；判停使用音频结束估计。实时模型自动触发，LLM 启动以收到供应商开始回复事件为起点。',
+    call: 'ACK 表示客户端确认接纳音频。说话结束估计到供应商判停发生在 ACK 总耗时之前。检索可能与模型生成重叠，各行的样本范围也可能不同。',
     tts: '首包以 worker 生成有效音频为准。排队包含线程池、合成锁和 worker 等待；无首包的请求不填零。',
     stage_chat: '完整回收包含停止任务、维护和上下文关闭；90秒预算仅针对维护。',
     stage_call: '同次回收的多次停止或清理先累计再统计；清理包含部分停止任务，不能将所有行直接相加。',
@@ -795,7 +814,9 @@ function PipelinePage() {
       {window === 'all' && ' · 所有数据指指标库当前保留的数据'}</p>}
     {data?.groups.map(group => <Panel key={group.id} title={group.title}>
       <p className="metrics-note">{notes[group.id]}</p>
-      <p className="metrics-outcomes">{Object.entries(group.outcomes).map(([key, count]) => `${outcomeLabels[key] || key} ${count}`).join(' · ') || '暂无请求记录'}</p>
+      <p className="metrics-outcomes">{group.id === 'call'
+        ? `全部轮次 ${Object.values(group.outcomes).reduce((sum, count) => sum + count, 0)} · 已收到首包 ACK ${group.outcomes.success ?? 0} · 已结束且无 ACK ${group.outcomes.incomplete ?? 0} · 待确认 ${group.outcomes.pending ?? 0}`
+        : Object.entries(group.outcomes).map(([key, count]) => `${outcomeLabels[key] || key} ${count}`).join(' · ') || '暂无请求记录'}</p>
       <div className="table-overflow"><table><thead><tr><th>环节</th><th>样本数</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th></tr></thead>
         <tbody>{group.rows.map(row => <tr key={row.key}><td>{row.label}</td><td>{row.count}</td>
           {(['avg_ms', 'p50_ms', 'p90_ms', 'p99_ms'] as const).map(field => <td key={field}>{row.count ? formatMs(row[field]) : '—'}</td>)}
@@ -1524,9 +1545,25 @@ function ConfigPage() {
     setLlmApplyStatus(previous => previous?.panel === panel ? null : previous);
   }
 
-  async function applyLlmConfig(panel: ModelPanelTitle, patch: Partial<LlmConfigInfo>) {
+  async function applyLlmConfig(panel: ModelPanelTitle, patch: LlmConfigPatch) {
     if (!savedConfig) return;
-    const candidate = { ...savedConfig, ...patch };
+    if (panel === '组件启动') {
+      const saved = componentStartupValues(savedConfig.component_startup);
+      const current = { ...saved, ...patch.component_startup };
+      const changed = Object.fromEntries(
+        (['speaking_enabled', 'vector_store_enabled'] as const)
+          .filter(key => current[key] !== saved[key])
+          .map(key => [key, current[key]]),
+      );
+      if (Object.keys(changed).length === 0) {
+        updatePanelDraft(panel);
+        setLlmApplyStatus({ panel, tone: 'info', message: '组件启动设置未变化，无需写入' });
+        return;
+      }
+      patch = { component_startup: changed };
+    }
+    const candidate = { ...savedConfig, ...patch,
+      component_startup: { ...savedConfig.component_startup, ...patch.component_startup } };
     const errors = validateClientModelTypes(candidate.client_model_types, candidate.module_bindings);
     if ('call_setup_timeout' in patch) {
       const raw = patch.call_setup_timeout;
@@ -1544,7 +1581,7 @@ function ConfigPage() {
     setApplyingPanel(panel);
     setLlmApplyStatus({ panel, tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
     try {
-      const result = await postJson<{ ok: boolean; config: LlmConfigInfo; validation: RuntimeValidation; restarted: boolean }>(
+      const result = await postJson<{ ok: boolean; config: LlmConfigInfo; validation: RuntimeValidation; restarted: boolean; runtime: RuntimeStatus }>(
         '/admin/api/llm/config/apply', patch,
       );
       if (!result.ok) {
@@ -1554,8 +1591,14 @@ function ConfigPage() {
       }
       setSavedConfig(result.config);
       updatePanelDraft(panel);
-      const message = result.restarted ? '配置已写入，runtime 已重启' : '配置已写入，runtime 当前未启动';
-      setLlmApplyStatus({ panel, tone: 'success', message });
+      const actual = result.runtime;
+      if (actual) setRuntimeOverride(actual);
+      const ready = actual?.state === 'running' && actual.running;
+      const failed = ['failed', 'blocked'].includes(actual?.state || '');
+      const message = ready ? '配置已写入，runtime 当前运行中'
+        : failed ? `配置已写入，runtime 当前状态：${actual.state}；请查看配置检查和 last_error`
+        : `配置已写入，runtime 当前状态：${actual?.state || '未知'}；尚未确认运行就绪`;
+      setLlmApplyStatus({ panel, tone: failed ? 'error' : ready ? 'success' : 'info', message });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setLlmApplyStatus({ panel, tone: 'error', message: `配置写入失败：${message}` });
@@ -1592,7 +1635,7 @@ function ConfigPage() {
           <button disabled={runtimeBusy} onClick={() => void runtimeAction('restart')}>重启</button>
           <button disabled={runtimeBusy} onClick={() => void runtimeAction('stop')}>停止</button>
         </div>
-        {runtime?.last_error && <pre className="error-block">{runtime.last_error}</pre>}
+        {effectiveRuntime?.last_error && <pre className="error-block">{effectiveRuntime.last_error}</pre>}
       </Panel>
       <Panel title="环境变量 / Secrets">
         <div className="secret-list">
@@ -1684,6 +1727,27 @@ function LlmInterfacesDraftEditor({
       <InterfaceEditor title="音频模型 Interface" kind="available_audio_models" rows={currentDraft.available_audio_models} onChange={updateInterfaces} />
     </div>
   );
+}
+
+function ComponentStartupDraftEditor({ draft, onChange }: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+}) {
+  if (!draft) return <div className="empty-state">暂无组件启动配置</div>;
+  const values = componentStartupValues(draft.component_startup);
+  function update(key: keyof ComponentStartup, value: boolean) {
+    onChange({ ...draft!, component_startup: { ...values, [key]: value } });
+  }
+  return <div className="llm-config-editor">
+    <div className="interface-flags">
+      <label><input type="checkbox" checked={values.speaking_enabled}
+        onChange={event => update('speaking_enabled', event.target.checked)} />启用语音合成（TTS）</label>
+      <label><input type="checkbox" checked={values.vector_store_enabled}
+        onChange={event => update('vector_store_enabled', event.target.checked)} />启用长期记忆向量库</label>
+    </div>
+    <p>默认均开启。关闭语音合成仍保留文字和表情，不代表演唱静音；关闭向量库仍保存 SQL 正本，重新启用不会自动回填。</p>
+    <p>点击“修改”只保存本面板有变化的开关；运行中的服务将请求重启，请以实际运行时状态确认是否就绪。</p>
+  </div>;
 }
 
 function RealtimeSpeechDraftEditor({ draft, onChange }: {

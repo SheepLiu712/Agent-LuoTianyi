@@ -30,6 +30,8 @@ class ReplyGenerator(Dependency):
 
 
 class VectorStore:
+    enabled = True
+
     def __init__(self):
         self.close_calls = 0
 

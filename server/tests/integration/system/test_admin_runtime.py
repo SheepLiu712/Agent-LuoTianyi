@@ -694,3 +694,180 @@ def test_audio_model_secret_references_are_visible():
         "call_transport": {"realtime_speech": {"api_key": "$REALTIME_MODEL_KEY"}},
     }
     assert _collect_llm_api_key_names(config) == {"AUDIO_MODEL_KEY", "REALTIME_MODEL_KEY"}
+
+
+@pytest.mark.parametrize("characters", [None, {"luotianyi": {"server_config_path": "missing/tts.yaml"}}])
+def test_validator_allows_disabled_speaking_without_tts_resources(tmp_path, monkeypatch, characters):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"] = {"enabled": False}
+    if characters is not None:
+        config["agent_runtime"]["skills"]["speaking"]["characters"] = characters
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    tts_items = [item for item in result["items"] if item["name"].startswith("resource.tts")]
+    assert len(tts_items) == 1
+    assert tts_items[0]["status"] == "disabled"
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_validator_rejects_non_boolean_speaking_enabled(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"]["enabled"] = value
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(
+        item["status"] == "error" and "agent_runtime.skills.speaking.enabled" in item["message"]
+        for item in result["items"]
+    )
+
+
+@pytest.mark.parametrize("speaking", [{}, {"enabled": True}])
+def test_validator_enabled_or_omitted_speaking_still_requires_tts_resources(tmp_path, monkeypatch, speaking):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"] = speaking
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == "resource.tts" and item["status"] == "error" for item in result["items"])
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_validator_rejects_non_boolean_vector_enabled(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": value}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == "agent_runtime.vector_store.enabled" and item["status"] == "error" for item in result["items"])
+
+
+def test_validator_reports_disabled_vectors_without_embedding_configuration(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": False}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    assert any(item["name"] == "resource.vector_store" and item["status"] == "disabled" for item in result["items"])
+
+
+def test_citywalk_disabled_does_not_require_amap_but_jwt_stays_required(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.delenv("AMAP_KEY", raising=False)
+    config = minimal_config(tmp_path)
+    config["world"]["citywalk"]["enabled"] = False
+    config["world"]["citywalk"]["characters"] = {"luotianyi": {"enabled": True}}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    assert not any(item["name"] == "secret.AMAP_KEY" and item["status"] == "error" for item in result["items"])
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    assert validator.validate(config)["core_ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_secrets_required_status_matches_citywalk_condition(tmp_path, monkeypatch):
+    from src.web.admin import admin_interface
+
+    config = minimal_config(tmp_path)
+    config["world"]["citywalk"]["enabled"] = False
+    store = ConfigStore(tmp_path / "config.json", root_dir=tmp_path)
+    store.write_raw(config)
+    secrets = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secrets)
+    shell = SimpleNamespace(config_store=store, secret_store=secrets, validator=validator)
+    monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
+
+    status = await admin_interface.secrets_status()
+
+    assert status["JWT_SECRET"]["required"] is True
+    assert status.get("AMAP_KEY", {}).get("required", False) is False
+    config["world"]["citywalk"]["enabled"] = True
+    store.write_raw(config)
+    assert (await admin_interface.secrets_status())["AMAP_KEY"]["required"] is True
+
+
+@pytest.mark.parametrize("task,value", [("citywalk", "false"), ("auto_song_learner", 0), ("qq_music_credential_refresh", 1), ("song_knowledge", None), ("bili_dynamic_fetcher", []), ("dynamic_interaction", {}), ("diary", "false"), ("proactive_topic_check", 0), ("expired_event_cleanup", 1)])
+def test_validator_rejects_non_boolean_world_task_enabled(tmp_path, monkeypatch, task, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["world"].setdefault(task, {})["enabled"] = value
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == f"world.{task}.enabled" and item["status"] == "error" for item in result["items"])
+
+
+def test_mixed_citywalk_warning_preserves_requested_enabled_and_amap_requirement(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": False}
+    config["world"]["citywalk"] = {"enabled": True, "amap": {"api_key": "test"}}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    warning = next(item for item in result["items"] if item["name"] == "citywalk.vector_projection")
+    assert warning["status"] == "warning"
+    assert validator.apply_world_disablements(config, result)["world"]["citywalk"]["enabled"] is True
+    monkeypatch.delenv("AMAP_KEY")
+    assert validator.validate(config)["core_ok"] is False
+
+
+def test_explicit_disabled_world_does_not_read_bili_or_qq_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    config = minimal_config(tmp_path)
+    config["world"]["citywalk"]["enabled"] = False
+    config["world"]["bili_dynamic_fetcher"]["enabled"] = False
+    config["world"]["auto_song_learner"]["enabled"] = False
+    config["world"]["bili_dynamic_fetcher"]["bili_cookie_file"] = str(tmp_path / "do-not-read-cookie")
+    config["world"]["auto_song_learner"]["qq_credential_file"] = str(tmp_path / "do-not-read-qq")
+    original = Path.exists
+    def guarded(self):
+        if self.name.startswith("do-not-read"):
+            pytest.fail("disabled task credential path was inspected")
+        return original(self)
+    monkeypatch.setattr(Path, "exists", guarded)
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    assert validator.validate(config)["core_ok"] is True
+
+
+@pytest.mark.parametrize("world,path", [([], "world"), ({"citywalk": []}, "world.citywalk")])
+def test_invalid_new_world_switch_container_is_a_validation_error(tmp_path, monkeypatch, world, path):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["world"] = world
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == path and item["status"] == "error" for item in result["items"])
+    assert validator.required_secret_keys(config) == ["JWT_SECRET", "AMAP_KEY"]

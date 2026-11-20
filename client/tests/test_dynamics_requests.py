@@ -202,19 +202,21 @@ def dynamic_window(qapp, monkeypatch):
         return window, network, transport, read_notices
 
     yield create
+    # 先隐藏窗口，禁止完成回调派生新请求；再释放并等待已有 worker。
+    # 固定等待不能保证慢 CI 上的请求已退出，残留请求会误用下一例的全局 HTTP 替身。
+    live_windows = [window for window in windows if module.isValid(window)]
+    for window in live_windows:
+        window.close()
     for transport in transports:
         for gate in transport.pending:
             gate.set()
         for gate in (transport.comments_gate, transport.write_gate, transport.page_gate):
             if gate is not None:
                 gate.set()
-    QTest.qWait(100)
-    for window in windows:
-        try:
-            window.close()
-            window.deleteLater()
-        except RuntimeError:
-            pass
+    for window in live_windows:
+        operations = window.findChildren(module.WindowOperation)
+        wait_for(lambda: all(not operation.busy for operation in operations))
+        window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
 
@@ -316,6 +318,8 @@ def test_first_page_failure_does_not_mark_read_and_manual_refresh_recovers(qapp,
         assert window.dynamic_list.count() >= 2
     finally:
         window.close()
+        operations = window.findChildren(module.WindowOperation)
+        wait_for(lambda: all(not operation.busy for operation in operations))
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 

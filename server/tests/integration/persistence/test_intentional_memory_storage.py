@@ -7,6 +7,8 @@ from src.infrastructure.persistence.database.vector_store import Document
 
 
 class _VectorStore:
+    enabled = True
+
     async def embed_query(self, query):
         return [1.0]
 

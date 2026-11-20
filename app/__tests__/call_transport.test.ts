@@ -367,6 +367,47 @@ describe('reliable call transport', () => {
     expect(native.pauseCount).toBe(1);
   });
 
+  test('resumes paused capture after the server drains cached overloaded audio and acknowledges it', async () => {
+    const { session, socket, native } = await establish();
+    const resume = jest.spyOn(native, 'resumeCapture');
+    const emit = native.frames[0];
+    const format = { encoding: 'pcm_s16le', sampleRateHz: 16_000, channels: 1 };
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 1 }));
+    for (let i = 0; i < 5; i += 1) emit({ deviceSequence: i + 1, format, payload: new Uint8Array(16_000) });
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'OVERLOADED', message: 'queue full',
+      retryable: true, call_id: CALL_ID, request_seq: 2,
+    }));
+    await flush();
+    expect(native.pauseCount).toBe(1);
+    expect(session.state.status).toBe('connected');
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 6 }));
+    await flush();
+    expect(resume).toHaveBeenCalledTimes(1);
+    emit({ deviceSequence: 6, format, payload: new Uint8Array([1, 0]) });
+    await flush();
+    expect(socket.sent.filter(wire => typeof wire !== 'string')).toHaveLength(6);
+  });
+
+  test('preserves a retryable dial rejection instead of replacing it with connection lost', async () => {
+    const sockets = new FakeSockets();
+    const session = new CallTransportSession({
+      url: 'ws://example/call_ws', credentials: { username: 'u', token: 't' }, characterId: 'luotianyi',
+      sockets, nativeAudio: fakeNative(), clock: new FakeClock(), serverAvailable: true, nativeAvailable: true,
+    });
+    await session.start({ clientRequestId: 'rejected-start', characterId: 'luotianyi' });
+    const socket = sockets.sockets[0];
+    socket.message(JSON.stringify({ type: 'system_ready', payload: {} }));
+    await flush();
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'INTERACTION_FINALIZING',
+      message: 'previous interaction finalizing', retryable: true,
+    }));
+    await flush();
+    socket.emit('close', { code: 1013 });
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'INTERACTION_FINALIZING' });
+  });
+
   test('stop cancels the stream generation and late native completion cannot fake completion', async () => {
     const { socket, native } = await establish();
     socket.message(serverControl({
@@ -464,6 +505,34 @@ describe('reliable call transport', () => {
 
     expect(session.state).toMatchObject({ status: 'failed', errorCode: 'CALL_SETUP_FAILED' });
     expect(native.replyFailureToneCount).toBe(0);
+  });
+
+  test('keeps the call connected on a retryable server error and still accepts the next response', async () => {
+    const { session, socket, native } = await establish();
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', code: 'OVERLOADED',
+      message: 'pcm queue full, retry after backoff', retryable: true,
+      request_type: 'audio', request_seq: 7, call_id: CALL_ID,
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(socket.readyState).toBe(1);
+    expect(native.stopCaptureCount).toBe(0);
+    expect(native.replyFailureToneCount).toBe(0);
+
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'audio.stream_started', seq: 3, call_id: CALL_ID, audio_route: 'CALL',
+      stream_id: 9, response_id: 'after-overload', encoding: 'pcm_s16le', sample_rate: 24000, channels: 1,
+    }));
+    socket.message(new BinaryAudioFrameCodec().encode({
+      version: 1, route: 2, flags: 1, streamId: 9, seq: 4, payload: new Uint8Array([2, 0]),
+    }));
+    await flush();
+
+    expect(session.state.status).toBe('connected');
+    expect(native.enqueued).toEqual([new Uint8Array([2, 0])]);
   });
 
   test('does not terminate the call when the local reply failure tone cannot play', async () => {
@@ -713,6 +782,53 @@ describe('reliable call transport', () => {
     expect(new BinaryAudioFrameCodec().decode(audio[0])).toMatchObject({ seq: 2, payload: new Uint8Array([2, 0]) });
     native.frames[0]({ payload: new Uint8Array([3, 0]) } as CapturedAudioFrame);
     expect(recovery.sent.filter((wire) => wire instanceof Uint8Array)).toHaveLength(2);
+    session.close();
+  });
+
+  test('resume handshake before capacity ACK preserves the cursor and allows the next captured frame', async () => {
+    const { sockets, socket, native, session } = await establish();
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 1 }));
+    native.frames[0]({ payload: new Uint8Array([2, 0]) } as CapturedAudioFrame);
+    socket.message(serverControl({
+      protocol: 'call.v1', type: 'error', call_id: CALL_ID, code: 'OVERLOADED',
+      message: 'queue full', retryable: true, request_seq: 2,
+    }));
+    await flush();
+    socket.emit('close', { code: 1006 });
+    const recovery = sockets.sockets[1];
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 2,
+    }));
+    recovery.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 2 }));
+    await flush();
+    expect(session.state.status).toBe('connected');
+    native.frames[0]({ payload: new Uint8Array([3, 0]) } as CapturedAudioFrame);
+    await flush();
+    const audio = recovery.sent.filter((wire): wire is Uint8Array => wire instanceof Uint8Array);
+    expect(audio.map(wire => new BinaryAudioFrameCodec().decode(wire).seq)).toEqual([2, 3]);
+    expect(new BinaryAudioFrameCodec().decode(audio[1]).payload).toEqual(new Uint8Array([3, 0]));
+    session.close();
+  });
+
+  test('still rejects a capacity ACK sent before a resume handshake with an older cursor', async () => {
+    const { sockets, socket, native, session } = await establish();
+    socket.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 1 }));
+    native.frames[0]({ payload: new Uint8Array([2, 0]) } as CapturedAudioFrame);
+    await flush();
+    socket.emit('close', { code: 1006 });
+    const recovery = sockets.sockets[1];
+    recovery.message(JSON.stringify({ type: 'auth_ok', payload: {} }));
+    await flush();
+    recovery.message(serverControl({ protocol: 'call.v1', type: 'ack', call_id: CALL_ID, ack_seq: 2 }));
+    recovery.message(serverControl({
+      protocol: 'call.v1', type: 'call.resumed', call_id: CALL_ID, character_id: 'luotianyi',
+      last_contiguous_client_seq: 1, last_contiguous_server_seq: 2,
+    }));
+    await flush();
+    expect(session.state).toMatchObject({ status: 'failed', errorCode: 'INVALID_ACK_CURSOR' });
     session.close();
   });
 

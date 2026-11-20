@@ -120,6 +120,122 @@ journalctl -u agentluo.service -n 100 --no-pager
 
 开发环境在仓库中安装，生产实例的 `environments/` 由版本部署管理。以下命令均从仓库的 `server/` 执行，配置、数据和运行目录应与生产隔离。
 
+### 按组件关闭重资源：隔离源码联调
+
+以下开关在业务 runtime 装配时生效，默认全部为 JSON `true`；只接受 `true/false`，`"false"`、`0`、`null` 等不是合法值。省略开关等同 `true`，不等于可以省略角色、模型和其他核心配置。本功能没有新增 preset、环境模式或一键关闭 world 的控制台入口。
+
+| 完整配置键 | 默认 | 关闭后的行为与限制 |
+| --- | --- | --- |
+| `agent_runtime.skills.speaking.enabled` | `true` | 不创建 TTS worker、不加载 TTS 权重；普通 SAY（含预制欢迎和瞬时反应）只交付文字／表情和成功终态，不读取预制音频。它不是全局静音：Sing 演唱仍可输出歌曲音频。通话能力不可用，满足更早条件时原因是 `call_tts_unavailable`；独立通话配置错误仍按原规则校验。 |
+| `agent_runtime.vector_store.enabled` | `true` | 不创建 Chroma／embedding 资源，长期记忆召回为空；显式记忆和维护仍保存 SQL 正本、画像、摘要及进度，不产生假向量 ID／链接。公共歌曲资料仍可查询。重新启用并重启后恢复旧索引，但关闭期间的新 SQL-only 正本不会自动回填，也不承诺已有回填命令。 |
+| `world.citywalk.enabled` | `true` | 不构造／注册城市漫步；顶层 `false` 压过角色覆盖，并解除 AMAP 核心必需条件。 |
+| `world.auto_song_learner.enabled` | `true` | 不构造自动学歌任务及其专属资源；不关闭已有歌曲演唱，显式学歌不保证完成。 |
+| `world.qq_music_credential_refresh.enabled` | `true` | 不启动 QQ 音乐凭据定时或启动即刷新；即便开启，没有自动学歌任务时也不创建刷新任务。 |
+| `world.bili_dynamic_fetcher.enabled` | `true` | 不采集 B 站动态，不读取该任务 cookie，也不启动该任务 browser。 |
+| `world.dynamic_interaction.enabled` | `true` | 不进行 world 动态互动轮询；HTTP 动态读写仍可用。 |
+| `world.diary.enabled` | `true` | 不进行定时日记规划；不改日记技能内部算法。 |
+| `world.song_knowledge.enabled` | `true` | 不构造／注册 VCPedia 歌曲知识抓取任务；已有 SQL 歌曲知识和目录仍可读。 |
+| `world.proactive_topic_check.enabled` | `true` | 不运行 world 主动提醒扫描；不关闭 ChatStage 自有期限、登录欢迎或 WS 心跳。 |
+| `world.expired_event_cleanup.enabled` | `true` | 不注册过期事件清理任务；过期数据会积累，重新启用仍按原清理规则执行。 |
+
+九项 world 都关闭时，world 定时注册与执行集合为空，不构造这些任务。它不表示进程没有其他后台工作：节假日正本初始化、Stage 回收、心跳和观测仍按原契约运行。`crawler.activated=false`、把间隔设为 `0` 或很大都不能代替关闭任务。
+
+**城市漫步混合组合（M1-S）。** 若 `world.citywalk.enabled=true`，但向量库关闭，保留用户“请求开启”的配置和原任务周期，validator 发出 `citywalk.vector_projection` warning；整个城市漫步执行跳过，不生成报告、SQL travel 或观察事实，也没有可报告的向量写入成功数。该组合不是“城市漫步正常、只少索引”。AMAP 仍按 citywalk 请求开启进行校验；只有顶层明确设 `world.citywalk.enabled=false` 才解除 AMAP 核心要求。启用向量库并重启后恢复原城市任务，不补跑跳过轮次。
+
+**旧索引与重置。** 向量关闭不删除已有数据。全新无索引隔离实例可正常重置；若磁盘有旧向量资料或无法确认目录为空，严格用户重置返回 `USER_DATA_RESET_FAILED`、`vectors.success=false`、`vectors.error="VectorDeletionUnavailable"`，表示向量步骤未清除。请先重新启用向量库并重启，再重试重置；不要手删共享目录或把删除数 `0` 当作清除完成。其他步骤可能已部分成功，不提供事务回滚保证。
+
+#### 1. 创建独立配置、数据和运行目录
+
+使用已经安装项目依赖的 Python 环境，不需要为切换开关重装环境。以下 PowerShell 命令块从**仓库根目录**开始，第一行进入 `server/`；后续直到服务启动均保持该 cwd。`$instance` 必须是一个全新、未使用的目录；只复制公开模板，不覆盖现用配置。配置、数据与日志各自隔离，源码静态资源只读共享；禁用的 TTS／学歌资产目录可以是这个隔离实例下不存在的路径。
+
+```powershell
+cd server
+$instance = Join-Path $env:TEMP ('agentluo-components-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path (Join-Path $instance 'config') | Out-Null
+Copy-Item config/config.json.template (Join-Path $instance 'config/config.json')
+$env:AGENTLUO_CONFIG_DIR = Join-Path $instance 'config'
+$env:AGENTLUO_DATA_DIR = Join-Path $instance 'data'
+$env:AGENTLUO_RUNTIME_DIR = Join-Path $instance 'runtime'
+$env:AGENTLUO_ASSET_DIR = Join-Path $instance 'assets'
+$env:AGENTLUO_RESOURCE_DIR = (Resolve-Path res).Path
+$env:SERVER_HOST = '127.0.0.1'
+```
+
+这些都是原有路径隔离变量，不是能力开关。`AGENTLUO_RESOURCE_DIR` 保留当前版本 persona、prompt、表情、预制文字及静态曲库；`AGENTLUO_DATA_DIR` 保存本实例 SQL、媒体和知识数据。不要把这些变量指向生产用户数据。Linux 可用相同绝对路径设置 `export AGENTLUO_*`，然后用已有 Python 或源码启动器；Windows 也可沿 `scripts/deploy/startup/start_server.bat` 选择已有环境。
+
+用编辑器打开 `$env:AGENTLUO_CONFIG_DIR/config.json`，只在模板副本中把上表两项重组件与九项 world 开关设为 `false`，保留原角色 ID、模型绑定和其他节点。例如将以下片段**逐叶合并**，不要用它覆盖整个文件：
+
+```json
+{
+  "agent_runtime": {
+    "skills": {"speaking": {"enabled": false}},
+    "vector_store": {"enabled": false}
+  },
+  "world": {
+    "citywalk": {"enabled": false},
+    "auto_song_learner": {"enabled": false},
+    "qq_music_credential_refresh": {"enabled": false},
+    "bili_dynamic_fetcher": {"enabled": false},
+    "dynamic_interaction": {"enabled": false},
+    "diary": {"enabled": false},
+    "song_knowledge": {"enabled": false},
+    "proactive_topic_check": {"enabled": false},
+    "expired_event_cleanup": {"enabled": false}
+  }
+}
+```
+
+在同一副本明确设置 `is_debug=true`，把 `server.debug_port` 改为未占用的测试端口（例如 `24524`）。公开模板默认调试端口是 `24523`，生产端口是 `15673`；实际选取由 `is_debug` 决定，不靠另设能力环境变量覆盖。不得启动替代实例后声称现用服务已更新。
+
+密钥仅由操作者写入该隔离配置目录的原有 `secrets.local.env`／管理 Secrets。保留有效 `JWT_SECRET`，并为仍引用的核心模型提供合法密钥及接口；只有所选组件／任务的专属资源可省略。关闭 TTS、embedding、AMAP、B 站和 QQ 任务**不等于零依赖**：角色 persona、prompt、模型引用、SQL／媒体、静态歌曲知识／目录和预制文字／表情仍须有效。关闭自动学歌不自动关闭演唱资料校验；模板保留的其他已启用能力也仍要满足原条件。
+
+#### 2. 启动并完成注册、文字与历史闭环
+
+在同一终端、`server/` cwd 中，使用已安装项目依赖的 Python：
+
+```powershell
+python server_main.py --check-startup
+python server_main.py
+```
+
+`--check-startup` 只检查配置解析和监听设置，不证明数据库、业务装配、文字回复或资源收益已经验收。打开 `http://127.0.0.1:24524/admin`，从隔离配置目录的 `admin_setup_token.txt` 取得首次 setup token，并在页面初始化管理员密码；以后使用该管理员登录。检查 validation 和 Runtime 卡片，只有 `state=running` 且 `running=true` 才是业务运行。配置不全时管理壳仍可运行，不要把 HTTP 可访问等同业务就绪。
+
+在“邀请码管理”生成一个隔离测试邀请码。在另一终端先切到**同一仓库根目录**，以下块第一行再进入 `cli-client/`。使用已有 CLI 环境，按[CLI 操作说明](../cli-client/README.md)设置以下**示例变量**；密码和邀请码由隔离实例操作者提供，不粘贴真实凭据：
+
+```powershell
+cd cli-client
+$env:CLI_E2E_BASE_URL = 'http://127.0.0.1:24524'
+$env:CLI_E2E_USER = 'spec412_user'
+$env:CLI_E2E_PASSWORD = '<隔离测试密码>'
+$env:CLI_E2E_INVITE = '<本隔离实例生成的邀请码>'
+python cli.py
+```
+
+在同一 CLI 会话执行；每轮回复后用 `/history` 刷新服务端历史（不要用只读取登录缓存的 `/initial-history`）：
+
+```text
+/register
+/login
+/text "请只回复：核心链路412"
+/reply --timeout 120
+/history
+/text "再说一句你好"
+/reply --timeout 120
+/history
+```
+
+CLI 注册／登录会取当前 RSA 公钥、加密密码并使用原 HTTP 接口，登录后完成原 WebSocket 鉴权。确认两次实际回复正文非空、各有成功终态、普通 SAY 没有音频，历史能找到本用户输入和对应的实际回复，且第二次对话可继续。只有离线固定生成器验收要求逐字“核心链路412”；真实自由模型不保证逐字输出，不能据合理文案差异判失败。此操作流程供非作者联调，当前 README 不声称已完成真实供应商 A5 或性能／内存对比。
+
+#### 3. 控制台修改与恢复
+
+“服务配置”中的独立“组件启动”面板有语音合成和长期向量两个复选框，默认均勾选。切换一项后点击“修改”，只提交变化的叶子；“放弃草稿”恢复本面板最后保存值，不清理其他模型面板的未保存草稿。正在运行时，保存沿 validator → 原子落盘 → 旧 runtime 安全停止／新 runtime 装配；停止状态保存不自动启动。提示以返回的 `runtime.state/running` 为准，`restarted=true` 只表示发起过重启，不等于已就绪。
+
+保存失败保留草稿；已落盘但启动失败时看 Runtime 卡片、配置检查和 `last_error`，补齐所需 TTS 权重／embedding／其他资源后再启动。刷新页面核对保存值，并重新做文字／记忆行为复核。JSON 手改后须显式重启，两个开关不是热切换。重新启用向量不自动回填关闭期间 SQL-only 记录；重新启用语音恢复原校验与音频链路，不吞真实供应商错误。
+
+#### 与全量部署、验证的区别
+
+全量生产 `install/apply` 和资源导入仍按部署锁检查完整 `tts/`、`song_learner/` 资产，本功能不保证全量安装可以省略它们，也不弱化资源清单。无需 TTS 权重的验证应采用上述隔离源码实例；依赖安装耗时／磁盘体积不是启动开关指标。控制台浏览器脚本使用临时 API 响应只验证面板与草稿行为，不替代真实管理 API 重启、两轮 WS／历史、资源构造或真实供应商闭环；这些结果须各自记录。
+
 ### Linux 源码环境
 
 准备上述主机依赖后，以普通账号运行安装器。它创建仓库内的 `.venv/`，按锁安装依赖，安装 Chromium 系统库及浏览器，并检查 CUDA、音频处理和浏览器渲染；系统库安装需要管理员权限。
@@ -308,13 +424,7 @@ TTS 数值由父进程后台批量写 SQLite，音频路径不等待数据库提
 
 同次拨号的连接、模型就绪、源聊天切换及响铃共用登记时确定的唯一截止时间，重连不续期。明确的连接拒绝、鉴权或初始化错误会立即结束；总时限不是必须等待的最小时长，也不保证网络连接成功。关闭资源可晚于用户看见终态，未确认安全释放前仍保护交互占用。
 
-生产 Qwen 通话不再使用 `call_transport.realtime_speech.connect_timeout_seconds` 和 `session_timeout_seconds`。旧文件可以保留这两项（包括旧非法值），不会用它们截断拨号或阻止生产配置校验；服务启动不自动删除或重写用户配置。请只修改总时限，不再调整旧键。关闭、清理超时和队列容量仍保留各自用途。独立 Aliyun/Fun-ASR 诊断适配器仍按其显式连接/初始化限时运行，不沿用生产 Manager 的总预算。
-
-#### Fun-ASR 独立诊断等待上限
-
-`python scripts/diagnose_fun_asr.py --config-root <隔离实例根目录> --wav <公开合成WAV> --output <诊断JSON>` 可用 `--connect-timeout-seconds` 和 `--session-timeout-seconds` 分别设置连接与初始化等待，缺省各 10 秒，必须是正的有限秒数。加 `--adapter` 时也使用这两个脚本参数；它们在内存中覆盖旧配置的连接/初始化限时，不读生产 `stage_manager.call_setup_timeout`，不改写配置文件。直连的初始化上限覆盖 run-task 发送与等待 task-started；适配器路径仍由独立 Fun-ASR session 的就绪限时处理。
-
-启动失败、初始化超时或取消时，脚本会关闭已经取得的连接并等待其消费任务结束。该脚本会连接供应商并可能计费，只能显式运行；测试中的假 WebSocket 通过不代表线上识别通过。请只使用允许记录的合成音频，诊断输出包含识别文本。
+生产 Qwen 通话不再使用 `call_transport.realtime_speech.connect_timeout_seconds` 和 `session_timeout_seconds`。旧文件可以保留这两项（包括旧非法值），不会用它们截断拨号或阻止生产配置校验；服务启动不自动删除或重写用户配置。请只修改总时限，不再调整旧键。关闭、清理超时和队列容量仍保留各自用途。底层 Aliyun/Fun-ASR 适配器仍保留显式连接与初始化限时，但不属于当前生产 Qwen 通话路径。
 
 ### Embedding 请求与维护降级
 

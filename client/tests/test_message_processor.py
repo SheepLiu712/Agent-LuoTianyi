@@ -1,7 +1,10 @@
+import queue
+import threading
+
 import pytest
 
 from src.message_process import message_processor as message_processor_module
-from src.message_process.message_processor import MessageProcessor
+from src.message_process.message_processor import MessageProcessor, PreparedAgentMessage
 
 
 @pytest.fixture
@@ -256,3 +259,67 @@ async def test_process_request_rejects_disabled_module(processor, config, monkey
         "error": "no api key configured on client",
     }
     assert "url" not in called
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.errors = []
+
+    def error(self, message, *args, **kwargs):
+        self.errors.append(message)
+
+
+def _bare_processor():
+    processor = MessageProcessor.__new__(MessageProcessor)
+    processor._running = True
+    processor._event_queue = queue.Queue()
+    processor._playback_queue = queue.Queue()
+    processor.logger = _RecordingLogger()
+    return processor
+
+
+def test_listener_thread_survives_poison_message():
+    processor = _bare_processor()
+    prepared_payloads = []
+
+    def prepare(payload):
+        if payload == "poison":
+            raise RuntimeError("prepare boom")
+        prepared_payloads.append(payload)
+        return PreparedAgentMessage(response=payload, audio_saved=False)
+
+    processor._prepare_agent_message = prepare
+    thread = threading.Thread(target=processor._listen_ws_events, daemon=True)
+    thread.start()
+    processor._event_queue.put("poison")
+    processor._event_queue.put("good")
+    processor._event_queue.put(None)
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert prepared_payloads == ["good"]
+    assert processor._playback_queue.get(timeout=1).response == "good"
+    assert processor._playback_queue.get(timeout=1) is None
+    assert processor.logger.errors, "预处理异常必须被记录"
+
+
+def test_playback_thread_survives_poison_message():
+    processor = _bare_processor()
+    processed = []
+
+    def process(response, audio_saved=False):
+        if response == "poison":
+            raise RuntimeError("playback boom")
+        processed.append(response)
+
+    processor.process_transport_message = process
+    thread = threading.Thread(target=processor._process_playback_events, daemon=True)
+    thread.start()
+    processor._playback_queue.put(PreparedAgentMessage(response="poison"))
+    processor._playback_queue.put(PreparedAgentMessage(response="good"))
+    processor._playback_queue.put(None)
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert processed == ["good"]
+    assert processor.logger.errors, "展示/播放异常必须被记录"

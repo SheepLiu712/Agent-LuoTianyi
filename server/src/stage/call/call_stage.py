@@ -309,6 +309,7 @@ class CallStage:
         self._provider: OmniSession | None = None
         self._provider_close_task: asyncio.Task[None] | None = None
         self._pcm: asyncio.Queue[AudioFrame] = asyncio.Queue(self._pcm_capacity)
+        self._pcm_capacity_changed = asyncio.Event()
         self._pcm_buffered_bytes = 0
         self._receipts: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         self._item_turns: dict[str, int] = {}
@@ -537,13 +538,15 @@ class CallStage:
         self._receipts[key] = receipt.fingerprint
         if len(self._receipts) > self._receipt_capacity:
             self._receipts.popitem(last=False)
-        self._record_metric(
-            CallMetricName.BUFFER,
-            duration_ms=0,
-            numeric={"buffered_bytes": self._pcm_buffered_bytes},
-            labels={"result": CallMetricResult.SUCCEEDED.value},
-        )
         return True
+
+    async def wait_pcm_capacity(self) -> None:
+        """协议层在队列满后等待业务容量变化，不依赖客户端再发送一帧。"""
+        if self._pcm.full() and not self.termination_requested:
+            call_latency("input.audio_capacity_wait", self.call_id, buffered_bytes=self._pcm_buffered_bytes)
+        while self._pcm.full() and not self.termination_requested:
+            self._pcm_capacity_changed.clear()
+            await self._pcm_capacity_changed.wait()
 
     async def apply_answer(self, action: d.AnswerCall) -> bool:
         """Consume the Stage-owned answer action once it has been produced by Agent integration."""
@@ -577,14 +580,21 @@ class CallStage:
 
     def audio_acknowledged(self, response_id: str) -> None:
         response = self._responses.get(response_id)
-        if response is not None:
-            timing = self._reply_timings.get(response.request_id)
-            if timing is not None:
-                timing.acknowledged(response_id)
-            turn = self._turns.get(response.turn_seq)
-            if turn is not None and turn.speech_ended_at is not None:
-                self._record_latency_v2(response.turn_seq, "ack", turn.speech_ended_at)
-                self._record_latency_v2(response.turn_seq, "terminal", self._monotonic())
+        if response is None:
+            return
+        timing = self._reply_timings.get(response.request_id)
+        if timing is not None:
+            timing.acknowledged(response_id)
+        seq = response.turn_seq
+        turn = self._turns.get(seq)
+        if turn is None or turn.speech_ended_at is None or (seq, "ack") in self._latency_v2_seen:
+            return
+        ack_at = self._monotonic()
+        self._record_latency_v2(seq, "ack", turn.speech_ended_at, ack_at)
+        self._record_latency_v2(seq, "terminal", ack_at, ack_at)
+        synthesized_at = timing.first_packet_synthesized_at if timing is not None else None
+        if synthesized_at is not None and synthesized_at <= ack_at:
+            self._record_latency_v2(seq, "tts_to_ack", synthesized_at, ack_at)
 
     def audio_sent(self, response_id: str) -> None:
         """接纳非空 PCM 的网络发送成功通知，按正式轮次记录一次首音频耗时。"""
@@ -760,6 +770,14 @@ class CallStage:
         self._time_limit_changed.set()
         # 同步关闭输入与输出许可；终态和持久化不依赖挂断输入锁。
         self._interrupt()
+        closed_at = self._monotonic()
+        for seq, turn in self._turns.items():
+            if (
+                turn.speech_ended_at is not None
+                or turn.recognized_at is not None
+                or (seq, "generation") in self._latency_v2_seen
+            ):
+                self._record_latency_v2(seq, "terminal", closed_at, closed_at, status="incomplete")
         failed = not self._lifecycle.snapshot.has_connected and self._termination_reason in {
             CallEndReason.SYSTEM_FAILURE,
             CallEndReason.SETUP_TIMEOUT,
@@ -891,7 +909,9 @@ class CallStage:
             await self._cancel_model_replies()
         elif isinstance(event, SpeechStopped):
             seq = self._turn_for_item(event.item_id)
-            self._turns[seq].speech_ended_at = self._monotonic()
+            stopped_at = self._monotonic()
+            self._turns[seq].speech_ended_at = stopped_at
+            self._record_latency_v2(seq, "started", stopped_at, stopped_at)
             self._record_endpointing(seq, event.estimated_end_ns)
             self._turns[seq].speech_ended_timestamp = (
                 self._now().astimezone(timezone.utc).isoformat(timespec="milliseconds")
@@ -1234,8 +1254,6 @@ class CallStage:
             timing.finish(outcome)
 
     def _interrupt_reply_timings(self):
-        for seq in self._turns:
-            self._record_latency_v2(seq, "terminal", self._monotonic(), status="incomplete")
         for timing in self._reply_timings.values():
             timing.finish("interrupted")
 
@@ -1542,6 +1560,7 @@ class CallStage:
             finally:
                 self._pcm_buffered_bytes = max(0, self._pcm_buffered_bytes - len(frame.payload))
                 self._pcm.task_done()
+                self._pcm_capacity_changed.set()
                 self._schedule_output()
 
     def _report_retention(self, deadline):

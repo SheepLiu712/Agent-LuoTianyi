@@ -348,6 +348,7 @@ class ChatReplyHandler:
         if identity.user_id is None or self._memory_commit is None:
             return _failed_memory_report(request)
         committed_contents: list[str] = []
+        retrieval_enabled = True
         for item, memory_content in memory_items:
             source = next(
                 value for value in request.interaction.pending_stimuli if value.stimulus_id == item.stimulus_id
@@ -366,7 +367,10 @@ class ChatReplyHandler:
             if not revision.memory_ids or any(not value.strip() for value in revision.memory_ids):
                 return _failed_memory_report(request)
             committed_contents.append(memory_content)
+            retrieval_enabled = retrieval_enabled and revision.retrieval_enabled
         reply_topic = f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{'；'.join(committed_contents)}"
+        if not retrieval_enabled:
+            reply_topic += "。已保存正文；当前长期检索关闭，恢复时不自动建索引，不要承诺下次可召回"
         normal_topic = "\n".join(reply_parts)
         if normal_topic:
             reply_topic = f"{reply_topic}\n{normal_topic}"

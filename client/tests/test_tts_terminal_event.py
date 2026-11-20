@@ -144,22 +144,26 @@ def test_desktop_saves_complete_audio_before_waiting_and_defers_next_sentence():
     )
     processor._event_queue.put(None)
 
-    assert first_playback_wait_started.wait(timeout=2)
-    assert second_audio_saved.wait(timeout=2)
-    listener.join(timeout=2)
-    assert "text-sentence-1" in events
-    assert "expression-开心" in events
-    assert "save-sentence-1-audio-1-tail" in events
-    assert events.index("save-sentence-1-audio-1-tail") < events.index("finish-1")
-    assert "save-sentence-2-audio-2" in events
-    assert "text-sentence-2" not in events
-    assert "expression-期待" not in events
-    assert not listener.is_alive()
-    assert playback.is_alive()
+    try:
+        assert first_playback_wait_started.wait(timeout=2)
+        assert second_audio_saved.wait(timeout=2)
+        listener.join(timeout=2)
+        assert "text-sentence-1" in events
+        assert "expression-开心" in events
+        assert "save-sentence-1-audio-1-tail" in events
+        assert events.index("save-sentence-1-audio-1-tail") < events.index("finish-1")
+        assert "bubble-sentence-1-has_audio" in events
+        assert "save-sentence-2-audio-2" in events
+        assert "text-sentence-2" not in events
+        assert "expression-期待" not in events
+        assert not listener.is_alive()
+        assert playback.is_alive()
+    finally:
+        release_first_playback.set()
+        listener.join(timeout=2)
+        playback.join(timeout=2)
 
-    release_first_playback.set()
     assert second_text_displayed.wait(timeout=2)
-    playback.join(timeout=2)
 
     assert "text-sentence-2" in events
     assert "expression-期待" in events
