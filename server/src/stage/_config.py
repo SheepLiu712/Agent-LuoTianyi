@@ -14,6 +14,8 @@ class _StageConfig:
     first_login_wait: float = 1.0
     login_reminder_wait: float = 1.0
     proactive_idle_seconds: float = 30.0
+    proactive_half_life_seconds: float = 60.0
+    proactive_threshold: float = 0.5
     max_stimuli: int = 256
     max_plans: int = 64
     termination_timeout: float = 90.0
@@ -36,6 +38,8 @@ class _StageConfig:
                 ("first_login_wait", 1.0),
                 ("login_reminder_wait", 1.0),
                 ("proactive_idle_seconds", 30.0),
+                ("proactive_half_life_seconds", 60.0),
+                ("proactive_threshold", 0.5),
             )
         }
         for key in ("max_stimuli", "max_plans"):
@@ -51,8 +55,12 @@ class _StageConfig:
             "first_login_wait",
             "login_reminder_wait",
             "proactive_idle_seconds",
+            "proactive_half_life_seconds",
         ):
             value = values[key]
             if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{key} must be positive and finite")
+        threshold = values["proactive_threshold"]
+        if type(threshold) not in (int, float) or not math.isfinite(threshold) or threshold < 0:
+            raise ValueError("proactive_threshold must be nonnegative and finite")
         return cls(**values)

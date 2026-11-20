@@ -461,26 +461,21 @@ async def test_late_transcripts_follow_input_order_and_do_not_trigger_extra_repl
 
 
 @pytest.mark.asyncio
-async def test_silence_uses_one_control_request_after_playback_and_waits_during_tool(call_setup, monkeypatch):
-    stage, socket, _, _ = await create_stage(call_setup)
+async def test_silence_emits_once_after_realization_without_waiting_for_playback(call_setup, monkeypatch):
+    received = []
+    monkeypatch.setattr(CallStage, "_on_speech_due", lambda self, stimulus: received.append(stimulus))
+    stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.03})
     try:
-        stage._cancel_task(stage._silence_task)
-        # Advance the timer without changing asyncio.sleep for other modules/tasks.
-        from types import SimpleNamespace
-
-        from src.stage.call import call_stage
-
-        async def elapsed(_delay):
-            await asyncio.sleep(0)
-
-        monkeypatch.setattr(call_stage, "asyncio", SimpleNamespace(**{**vars(asyncio), "sleep": elapsed}))
-        monkeypatch.setattr(stage._playback, "silence_elapsed", lambda: True)
-        stage._tool_calls["pending"] = "opening"
-        await stage._await_silence()
-        assert len([e for e in socket.sent if e["type"] == "response.create"]) == 1
-        stage._tool_results.add("pending")
-        await stage._await_silence()
-        assert len([e for e in socket.sent if e["type"] == "response.create"]) == 2
+        await _eventually(lambda: len(received) == 1)
+        await stage._on_omni_event(TranscriptFinal("new-user", "你好"))
+        await send_reply(socket, response_id="next", text="继续说。", item_id=None, done=False)
+        await asyncio.sleep(0.05)
+        assert len(received) == 1
+        await socket.server_event({"type": "response.done", "response": {"id": "next", "status": "completed"}})
+        await _eventually(lambda: len(received) == 2)
+        assert stage._playback.pending_streams  # 未发送播放完成确认也会到期。
+        await asyncio.sleep(0.08)
+        assert len(received) == 2
     finally:
         await finish_call(stage)
 

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
 from src.agent.context import ContextFactory, ConversationMode, InteractionContext
+from src.agent.proactive_timer import ProactivePolicy
 from src.domain.stage import (
     AgentPresentationChanged,
     AgentPresentationState,
@@ -112,6 +113,17 @@ class ChatStage:
         self._input_suspended = False
         self._due_event_provider = due_event_provider
         self._config = _StageConfig.from_dict({} if config is None else config)
+        self._proactive_timer = agent.create_proactive_timer(
+            user_id=user_id,
+            on_due=self._on_speech_due,
+            policy=ProactivePolicy(
+                self._config.proactive_idle_seconds,
+                self._config.proactive_half_life_seconds,
+                self._config.proactive_threshold,
+            ),
+            monotonic=monotonic,
+        )
+        self._proactive_reply_ready = False
         self._timezone = ZoneInfo(timezone_name)
         self._state = StageState.OFFLINE
         self._connection_state = d.ConnectionState.DISCONNECTED
@@ -264,6 +276,7 @@ class ChatStage:
 
     def _resume_proactive(self):
         if not self._input_suspended and self._state is StageState.ONLINE:
+            self._maybe_start_proactive()
             if self._first_login_pending:
                 self._schedule_first_login()
             elif self._login_reminder_pending:
@@ -394,6 +407,9 @@ class ChatStage:
     def set_input_suspended(self, suspended: bool) -> None:
         """切换准备只关闭新刺激准入，不取消已接纳的工作。"""
         self._input_suspended = suspended
+        if suspended:
+            self._proactive_reply_ready |= self._proactive_timer.running
+            self._proactive_timer.stop_timer()
         if not suspended:
             self._resume_proactive()
 
@@ -456,6 +472,11 @@ class ChatStage:
             self._refresh_deadline()
             return
         if isinstance(stimulus, _CONTENT):
+            self._proactive_timer.get_user_stimulus()
+            self._proactive_reply_ready = False
+            for request in tuple(self._requests.values()):
+                if isinstance(request.stimulus, d.ProactiveSpeechDue):
+                    request.cancellation.cancel(d.CancellationReason.SUPERSEDED)
             self._cancel_interruptible_reply_handles()
             self._pending[stimulus.stimulus_id] = _PendingInput(stimulus, self._revision)
             self._wait_until, self._wait_immediate = None, False
@@ -479,6 +500,19 @@ class ChatStage:
         request = self._make_request(stimulus, (stimulus,) if not isinstance(stimulus, _COORDINATION) else ())
         self._launch_handle(request, self._on_preprocessing_finished)
         self._refresh_deadline()
+
+    def _on_speech_due(self, stimulus: d.ProactiveSpeechDue) -> None:
+        if not self._proactive_timer.is_current(stimulus) or not self._can_dispatch_proactive(require_idle=False):
+            return
+        request = self._make_request(stimulus)
+        attempt = _ReplyAttempt(request, ())
+        self._attempts[request.request_id] = attempt
+        self._launch_handle(request, self._on_reply_finished)
+
+    def _maybe_start_proactive(self) -> None:
+        if self._proactive_reply_ready and self._can_dispatch_proactive(require_idle=False):
+            self._proactive_reply_ready = False
+            self._proactive_timer.start_timer()
 
     def _apply_voice_coordination(self, stimulus: d.Stimulus) -> bool:
         if isinstance(stimulus, d.VoiceRecordingStarted):
@@ -546,6 +580,7 @@ class ChatStage:
         if self._reply is not None and self._reply.request.request_id == request_id:
             self._reply = None
         self._refresh_deadline()
+        self._maybe_start_proactive()
 
     def _failed_report(self, request: d.HandleStimulusRequest) -> d.HandlingReport:
         ids = tuple(s.stimulus_id for s in request.interaction.pending_stimuli)
@@ -684,11 +719,15 @@ class ChatStage:
             )
         if attempt.interrupted or attempt.report.request_status is not d.HandlingRequestStatus.COMPLETED:
             return
+        if attempt.has_committed_plan and not self._pending and not attempt.execution_failed:
+            self._proactive_reply_ready = True
 
     def _on_execution_finished(self, plan: d.ActionPlan, report: d.ExecutionReport | None) -> None:
         """登记计划已经结束，推进所属回复尝试的清理和维护。"""
         attempt = self._attempts.get(plan.origin_request_id)
         if attempt is not None:
+            if report is None or report.status is not d.ExecutionStatus.COMPLETED:
+                attempt.execution_failed = True
             attempt.remaining_plans.discard(plan.plan_id)
             if attempt.interrupted and not attempt.remaining_plans:
                 self._attempts.pop(plan.origin_request_id, None)
@@ -778,6 +817,7 @@ class ChatStage:
         if self._plans and self._state is StageState.ONLINE and (self._realizing is None or self._realizing.done()):
             self._realizing = asyncio.create_task(self._realize_plans(), name="stage-realize")
             self._realizing.add_done_callback(lambda _: self._resume_execution())
+        self._maybe_start_proactive()
 
     async def _realize_plans(self) -> None:
         while self._plans and self._state is StageState.ONLINE:
@@ -984,6 +1024,8 @@ class ChatStage:
                 attempt.timing.finish("cancelled")
 
     async def _stop_work(self, *, require_safe_cleanup: bool = False) -> None:
+        self._proactive_reply_ready |= self._proactive_timer.running
+        self._proactive_timer.stop_timer()
         self._scheduling = False
         self._invalidate_deadline()
         if self._first_login_timer is not None:
