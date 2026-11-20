@@ -8,7 +8,7 @@ export interface DebugTraceEntry {
 
 type Listener = (entries: DebugTraceEntry[]) => void;
 
-const MAX_ENTRIES = 200;
+const MAX_ENTRIES = 2000;
 const entries: DebugTraceEntry[] = [];
 const listeners = new Set<Listener>();
 let nextId = 1;
@@ -71,6 +71,15 @@ export function subscribeDebugTrace(listener: Listener) {
 
 export function getDebugTraceSnapshot() {
   return [...entries];
+}
+
+export function formatDebugTraceReport(metadata: Record<string, unknown> = {}) {
+  const snapshot = getDebugTraceSnapshot();
+  return [
+    'AgentLuo 调试日志',
+    JSON.stringify({ ...metadata, exportedAt: new Date().toISOString(), entries: snapshot.length }),
+    ...snapshot.map((entry) => `[${new Date(entry.ts).toISOString()}] [${entry.scope}] ${entry.message}${entry.detail ? ` | ${entry.detail}` : ''}`),
+  ].join('\n');
 }
 
 export function clearDebugTrace() {

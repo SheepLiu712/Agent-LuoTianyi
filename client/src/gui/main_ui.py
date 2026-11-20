@@ -6,6 +6,7 @@ Description: 主界面UI实现，包含Live2D显示和聊天窗口两部分，�
 import os
 import time
 from collections import deque
+from queue import Empty
 from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, QPointF, Signal
 from PySide6.QtGui import QMouseEvent, QPainter, QPen, QColor, QImage, QResizeEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
@@ -25,6 +26,7 @@ from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
 from .llm_settings_dialog import LLMSettingsDialog
 from .agreement_dialog import AgreementDialog
+from .async_request import start_dynamic_unread_request
 
 DYNAMIC_ICON_PATH = "res/gui/dynamic.png"
 DYNAMIC_HAS_NEW_ICON_PATH = "res/gui/dynamic_has_new.png"
@@ -488,6 +490,14 @@ class ChatWidget(QWidget):
         self.dynamic_badge_timer = QTimer(self)
         self.dynamic_badge_timer.timeout.connect(self.refresh_dynamic_badge)
         self.dynamic_badge_timer.start(30000)
+        self._badge_closed = False
+        self._badge_generation = 0
+        self._badge_request = None
+        self._badge_identity = None
+        self._badge_dirty = False
+        self._badge_result_timer = QTimer(self)
+        self._badge_result_timer.setInterval(20)
+        self._badge_result_timer.timeout.connect(self._collect_dynamic_badge)
         QTimer.singleShot(400, self.refresh_dynamic_badge)
         
         # Initial load
@@ -729,7 +739,9 @@ class ChatWidget(QWidget):
     def open_dynamics(self):
         if self.network_client:
             if self.dynamic_dialog is None:
-                self.dynamic_dialog = DynamicsDialog(self.network_client, on_read_callback=self.refresh_dynamic_badge, parent=self)
+                self.dynamic_dialog = DynamicsDialog(
+                    self.network_client, on_read_callback=self.invalidate_dynamic_badge, parent=self
+                )
             self.dynamic_dialog.show()
             self.dynamic_dialog.raise_()
             self.dynamic_dialog.activateWindow()
@@ -737,27 +749,76 @@ class ChatWidget(QWidget):
         else:
             QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开动态窗口")
 
+    def _current_badge_identity(self):
+        return self.network_client.dynamic_unread_request() if self.network_client else None
+
     def refresh_dynamic_badge(self):
-        if not self.network_client:
+        if self._badge_closed:
+            return
+        identity = self._current_badge_identity()
+        if identity != self._badge_identity:
+            self._badge_identity = identity
+            self._badge_generation += 1
+            self.dynamic_unread_count = 0
+            self.dynamic_btn.setIcon(QIcon(DYNAMIC_ICON_PATH))
+            self.dynamic_btn.setText("动态")
+        if self._badge_request is not None:
+            self._badge_dirty = True
+            return
+        if identity is None or not identity.username:
             self.dynamic_unread_count = 0
             self.dynamic_btn.setIcon(QIcon(DYNAMIC_ICON_PATH))
             self.dynamic_btn.setText("动态")
             return
+        thread, results = start_dynamic_unread_request(identity)
+        self._badge_request = (thread, results, identity, self._badge_generation)
+        self._badge_result_timer.start()
 
-        status = self.network_client.get_dynamic_unread_status()
-        if not status.get("ok", False):
+    def invalidate_dynamic_badge(self):
+        self._badge_generation += 1
+        self.refresh_dynamic_badge()
+
+    def _collect_dynamic_badge(self):
+        if self._badge_closed or self._badge_request is None:
             return
-        count = int(status.get("unread_count") or 0)
-        self.dynamic_unread_count = count
-        icon_path = DYNAMIC_HAS_NEW_ICON_PATH if count > 0 else DYNAMIC_ICON_PATH
-        self.dynamic_btn.setIcon(QIcon(icon_path))
-        if count > 0:
-            text = str(min(count, 99))
-            if count > 99:
-                text = "99+"
-        else:
-            text = ""
-        self.dynamic_btn.setText(text)
+        thread, results, identity, generation = self._badge_request
+        if thread.is_alive():
+            return
+        try:
+            status = results.get_nowait()
+        except Empty:
+            return
+        # 所有终态先回收实际在途，再决定是否消费一个合并刷新。
+        self._badge_request = None
+        self._badge_result_timer.stop()
+        dirty, self._badge_dirty = self._badge_dirty, False
+        current = self._current_badge_identity()
+        if current != identity:
+            dirty = True
+        elif generation == self._badge_generation and status.get("ok", False):
+            try:
+                count = int(status.get("unread_count") or 0)
+                if count < 0:
+                    raise ValueError("negative unread count")
+            except (TypeError, ValueError, OverflowError):
+                pass
+            else:
+                self.dynamic_unread_count = count
+                self.dynamic_btn.setIcon(QIcon(DYNAMIC_HAS_NEW_ICON_PATH if count > 0 else DYNAMIC_ICON_PATH))
+                self.dynamic_btn.setText("99+" if count > 99 else str(count) if count > 0 else "")
+        if dirty:
+            self.refresh_dynamic_badge()
+
+    def stop_dynamic_badge(self):
+        self._badge_closed = True
+        self._badge_generation += 1
+        self._badge_dirty = False
+        self.dynamic_badge_timer.stop()
+        self._badge_result_timer.stop()
+
+    def closeEvent(self, event):
+        self.stop_dynamic_badge()
+        super().closeEvent(event)
     
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:
@@ -1010,6 +1071,10 @@ class MainWindow(QWidget):
         self.layout.addWidget(self.chat_widget)
         
         self.setLayout(self.layout)
+
+    def closeEvent(self, event):
+        self.chat_widget.stop_dynamic_badge()
+        super().closeEvent(event)
 
     def resizeEvent(self, event: QResizeEvent):
         # 我们保证左侧界面的宽高比为4:3，右侧聊天界面占满剩余空间

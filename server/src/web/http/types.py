@@ -1,5 +1,7 @@
+from typing import Literal, Union
+
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class ChatRequest(BaseModel):
@@ -21,6 +23,28 @@ class HistoryQuery(BaseModel):
     end_index: int = -1
 
 
+class CallCapabilityQuery(BaseModel):
+    character_id: str = Field(min_length=1)
+
+
+class CallCapabilityResponse(BaseModel):
+    available: bool
+    character_id: str
+    reason: Literal[
+        "available",
+        "disabled",
+        "untrusted_host",
+        "provider_unavailable",
+        "call_tts_unavailable",
+        "summary_unavailable",
+        "settlement_unavailable",
+        "stage_binding_unavailable",
+        "recovery_unavailable",
+        "character_unavailable",
+        "runtime_not_ready",
+    ]
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -28,9 +52,15 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     username: str
     password: str
     invite_code: str
+    # 新客户端在同意协议后提交；旧客户端不带这三个字段，由业务层返回 AGREEMENT_REQUIRED。
+    registration_request_id: str | None = None
+    agreement_version: str | None = None
+    accepted: StrictBool | None = None
 
 
 class ResetAccountRequest(BaseModel):
@@ -41,9 +71,39 @@ class ResetAccountRequest(BaseModel):
     new_password: str
 
 
+class UserDataResetRequest(BaseModel):
+    """Authenticated request to erase resettable data while retaining credentials."""
+
+    username: str
+
+
 class AutoLoginRequest(BaseModel):
     username: str
     token: str
+
+
+class PasswordAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["password"]
+    username: str
+    password: str
+
+
+class AutoLoginAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["auto_login"]
+    username: str
+    token: str
+
+
+class AgreementAcceptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agreement_version: str
+    accepted: StrictBool
+    credential: Union[PasswordAgreementCredential, AutoLoginAgreementCredential]
 
 
 class PreferenceGetRequest(BaseModel):

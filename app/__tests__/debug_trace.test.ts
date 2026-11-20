@@ -2,7 +2,7 @@
  * debug_trace 单元测试
  * 测试环形缓冲区、订阅/取消订阅、清空等功能。
  */
-import { addDebugTrace, clearDebugTrace, getDebugTraceSnapshot, subscribeDebugTrace } from '../utils/debug_trace';
+import { addDebugTrace, clearDebugTrace, formatDebugTraceReport, getDebugTraceSnapshot, subscribeDebugTrace } from '../utils/debug_trace';
 
 beforeEach(() => {
   clearDebugTrace();
@@ -44,17 +44,26 @@ describe('addDebugTrace', () => {
 });
 
 describe('ring buffer', () => {
-  it('should keep at most MAX_ENTRIES (200) entries', () => {
-    for (let i = 0; i < 250; i++) {
+  it('should keep the latest 2000 entries', () => {
+    for (let i = 0; i < 2050; i++) {
       addDebugTrace('stress', `entry-${i}`);
     }
 
     const snapshot = getDebugTraceSnapshot();
-    expect(snapshot).toHaveLength(200);
+    expect(snapshot).toHaveLength(2000);
     // 最早的条目应被丢弃
     expect(snapshot[0].message).toBe('entry-50');
-    expect(snapshot[199].message).toBe('entry-249');
+    expect(snapshot[1999].message).toBe('entry-2049');
   });
+});
+
+it('exports all retained logs in chronological order with device metadata', () => {
+  for (let i = 0; i < 300; i++) addDebugTrace('call-audio', `failure-${i}`, { reason: 'aec_unavailable' });
+  const lines = formatDebugTraceReport({ appVersion: '0.5.1', model: 'test-device' }).split('\n');
+  expect(JSON.parse(lines[1])).toMatchObject({ appVersion: '0.5.1', model: 'test-device', entries: 300 });
+  expect(lines).toHaveLength(302);
+  expect(lines[2]).toContain('failure-0 | {"reason":"aec_unavailable"}');
+  expect(lines.at(-1)).toContain('failure-299');
 });
 
 describe('subscribeDebugTrace', () => {

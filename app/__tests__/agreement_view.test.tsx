@@ -15,8 +15,8 @@ import React, { ElementType } from 'react';
 import { act, create, ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 
 import AgreementScreen from '../app/agreement';
-import { fetchCurrentAgreement } from '../hooks/useAuth';
-import { THEMES } from '../utils/theme';
+import { fetchCurrentAgreement } from '../features/account/useAuth';
+import { THEMES } from '../shared/ui/theme';
 
 jest.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
@@ -38,7 +38,7 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 24, bottom: 12, left: 0, right: 0 }),
 }));
 
-jest.mock('../hooks/useAuth', () => ({ fetchCurrentAgreement: jest.fn() }));
+jest.mock('../features/account/useAuth', () => ({ fetchCurrentAgreement: jest.fn() }));
 
 jest.mock('@expo/vector-icons/MaterialIcons', () => 'MaterialIcons');
 

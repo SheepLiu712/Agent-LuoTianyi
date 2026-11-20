@@ -22,6 +22,8 @@ def test_wheel_contains_regular_and_namespace_packages(tmp_path: Path) -> None:
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "temp"),
     )
 
+    shutil.copytree(SERVER_ROOT / "res/user_agreements", source / "res/user_agreements")
+
     result = subprocess.run(
         [sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", "dist"],
         cwd=source,
@@ -42,9 +44,11 @@ def test_wheel_contains_regular_and_namespace_packages(tmp_path: Path) -> None:
 
     assert {
         "server_main.py",
+        "res/user_agreements/__init__.py",
+        "res/user_agreements/manifest.json",
         "src/agent/facade.py",
         "src/agent/skills/adapters/memory/facade.py",
-        "src/agent/skills/cognitive/response_generation.py",
+        "src/agent/skills/cognitive/reply.py",
         "src/infrastructure/persistence/song_knowledge.py",
         "src/world/get_new_songs/task.py",
         "src/world/get_new_songs/vcpedia_templates.json",
@@ -78,6 +82,12 @@ sys.path[:] = [str(root), *sys.path, *dependencies]
 assert not any(Path(item).resolve() == source for item in sys.path if item)
 
 import src
+from importlib.resources import files
+agreement_root = files("res.user_agreements")
+manifest = json.loads((agreement_root / "manifest.json").read_text(encoding="utf-8"))
+current = manifest["current_version"]
+document = json.loads((agreement_root / manifest["files"][current]).read_text(encoding="utf-8"))
+assert document["version"] == current
 from src.world.get_new_songs import template_rules, wikitext_parser
 
 assert Path(src.__file__).resolve().is_relative_to(root)

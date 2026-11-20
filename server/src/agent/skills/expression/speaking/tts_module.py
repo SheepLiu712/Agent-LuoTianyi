@@ -173,6 +173,26 @@ class TTSModule:
 
         return self.stream_synthesize_speech(text, ref_audio_name, cancel_event=cancel_event)
 
+    def stream_synthesize_call_pcm_with_tone(
+        self, text: str, tone: str, *, cancel_event: threading.Event | None = None
+    ) -> Generator[bytes, None, None]:
+        """使用 worker 的完整 clip 边界生成 24 kHz PCM16 单声道。"""
+        ref_audio_name = self.tone_reference_audio_projection.get(tone)
+        if not ref_audio_name:
+            if not self.tone_reference_audio_projection:
+                raise ValueError("No reference audio available.")
+            ref_audio_name = next(iter(self.tone_reference_audio_projection.values()))
+        ref_audio_obj = self.reference_audio.get(ref_audio_name)
+        if ref_audio_obj is None:
+            raise ValueError(f"Reference audio '{ref_audio_name}' not found.")
+        yield from self.tts_server.stream_synthesize_call_pcm(
+            text=text,
+            spk_audio_path=ref_audio_obj.audio_path,
+            prompt_audio_path=ref_audio_obj.audio_path,
+            prompt_audio_text=ref_audio_obj.lyrics,
+            cancel_event=cancel_event,
+        )
+
     def stream_synthesize_speech(
         self, text: str, ref_audio_key: str, *, cancel_event: threading.Event | None = None
     ) -> Generator[bytes, None, None]:

@@ -1,0 +1,10 @@
+gradle.beforeProject { p ->
+    if (p.path == ':app') {
+        p.plugins.withId('com.android.application') {
+            p.androidComponents.finalizeDsl { dsl ->
+                dsl.defaultConfig.applicationId = 'com.sheepliu712.agentluochat.notice403'
+                p.extensions.getByName('react').entryFile.set(p.file('../../scripts/acceptance/NoticeAcceptance.android.tsx'))
+            }
+        }
+    }
+}

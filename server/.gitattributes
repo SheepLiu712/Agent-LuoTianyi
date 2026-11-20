@@ -1,0 +1,8 @@
+# 发布清单按原始字节校验，检出时保留资源文件的换行符和二进制内容。
+res/admin_ui/admin_static/** -text
+res/agent/persona/llm_tones_mapping.json -text
+res/agent/persona/persona.json -text
+res/agent/prepared_speech/** -text
+res/agent/prompts/* -text
+src/world/get_new_songs/vcpedia_templates.json -text
+src/world/learn_sing_songs/song_learner/src/msaf/algorithms/olda/models/*.npy -text

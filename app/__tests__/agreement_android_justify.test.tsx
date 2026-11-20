@@ -2,10 +2,10 @@ import React, { ElementType } from 'react';
 import { Platform } from 'react-native';
 import { act, create, ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 
-import { AndroidJustifiedText } from '../components/AndroidJustifiedText';
-import { RichAgreement } from '../components/RichAgreement';
+import { AndroidJustifiedText } from '../features/account/AndroidJustifiedText';
+import { RichAgreement } from '../features/account/RichAgreement';
 import type { AgreementPayload } from '../utils/agreement';
-import { THEMES } from '../utils/theme';
+import { THEMES } from '../shared/ui/theme';
 
 const mockWindow = { width: 400, height: 800, fontScale: 1 };
 
@@ -374,4 +374,24 @@ describe('RichAgreement 的平台和显式换行边界', () => {
     expect(flattenStyle(emptyLines[0].props.style).lineHeight).toBe(24);
     expect(textWithStyle(tree.root, 'fontWeight', 'bold')).toBe('甲  乙');
   });
+});
+
+it('协议换版只移动粗体边界时立即显示新版格式并重新测量', () => {
+  const agreement = (version: string, first: string, rest: string): AgreementPayload => ({
+    version, title: '用户协议', format: 'agreement.richtext.v1',
+    blocks: [{ font_size: 16, align: 'justify', runs: [
+      { text: first, bold: true }, { text: rest, bold: false },
+    ] }],
+  });
+  let tree!: ReactTestRenderer;
+  act(() => { tree = create(<RichAgreement data={agreement('v1', '甲乙', '丙丁戊己')} theme={THEMES.light} />); });
+  layout(tree, 100);
+  emitFirst(tree, [{ text: '甲乙丙', width: 60 }, { text: '丁戊己', width: 60 }]);
+  expect(textWithStyle(byTestId(tree, 'agreement-justify-final'), 'fontWeight', 'bold')).toBe('甲乙');
+  act(() => { tree.update(<RichAgreement data={agreement('v2', '甲', '乙丙丁戊己')} theme={THEMES.light} />); });
+  const displayed = allByTestId(tree, 'agreement-justify-final')[0] || byTestId(tree, 'agreement-justify-placeholder');
+  expect(textContent(displayed)).toBe('甲乙丙丁戊己');
+  expect(textWithStyle(displayed, 'fontWeight', 'bold')).toBe('甲');
+  emitFirst(tree, [{ text: '甲乙丙', width: 55 }, { text: '丁戊己', width: 60 }]);
+  expect(textWithStyle(byTestId(tree, 'agreement-justify-final'), 'fontWeight', 'bold')).toBe('甲');
 });

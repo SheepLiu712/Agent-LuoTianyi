@@ -20,19 +20,30 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from msst_core.inference import proc_folder
+
 try:
     from .download_qq_song import download_song_and_lyric
 except ImportError:
     from pipeline.download_qq_song import download_song_and_lyric
 
 
+from src.utils.server_paths import resolve_server_path  # noqa: E402
+
 DEFAULT_STAGE1_MODEL_TYPE = "bs_roformer"
-DEFAULT_STAGE1_CONFIG = "res/song_learner/msst/configs/model_bs_roformer_ep_317_sdr_12.9755.yaml"
-DEFAULT_STAGE1_CKPT = "res/song_learner/msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+
+DEFAULT_STAGE1_CONFIG = str(
+    resolve_server_path("res/song_learner/msst/configs/model_bs_roformer_ep_317_sdr_12.9755.yaml")
+)
+DEFAULT_STAGE1_CKPT = str(
+    resolve_server_path("res/song_learner/msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt")
+)
 
 DEFAULT_STAGE2_MODEL_TYPE = "mel_band_roformer"
-DEFAULT_STAGE2_CONFIG = "res/song_learner/msst/configs/model_mel_band_roformer_denoise.yaml"
-DEFAULT_STAGE2_CKPT = "res/song_learner/msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"
+DEFAULT_STAGE2_CONFIG = str(resolve_server_path("res/song_learner/msst/configs/model_mel_band_roformer_denoise.yaml"))
+DEFAULT_STAGE2_CKPT = str(
+    resolve_server_path("res/song_learner/msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt")
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -129,9 +140,7 @@ def encode_mp3_under_size(
 
             encoded = True
             size = output_mp3.stat().st_size
-            print(
-                f"[INFO] 已编码 {bitrate} ({encoder})，文件大小 {size / 1024 / 1024:.2f} MB"
-            )
+            print(f"[INFO] 已编码 {bitrate} ({encoder})，文件大小 {size / 1024 / 1024:.2f} MB")
             if size <= max_size_bytes:
                 return
             break
@@ -163,8 +172,7 @@ def encode_mp3_under_size(
         return
 
     raise RuntimeError(
-        "无法使用当前 ffmpeg 进行 MP3 编码。请安装支持 MP3 编码的 ffmpeg，"
-        "或传入 --ffmpeg_bin 指向可用版本。"
+        "无法使用当前 ffmpeg 进行 MP3 编码。请安装支持 MP3 编码的 ffmpeg，或传入 --ffmpeg_bin 指向可用版本。"
     )
 
 
@@ -196,8 +204,7 @@ def encode_mp3_128k(
             print(f"[WARN] 编码器 {encoder} 不可用，尝试下一个。原因: {exc}")
 
     raise RuntimeError(
-        "无法使用当前 ffmpeg 进行 MP3 编码。请安装支持 MP3 编码的 ffmpeg，"
-        "或传入 --ffmpeg_bin 指向可用版本。"
+        "无法使用当前 ffmpeg 进行 MP3 编码。请安装支持 MP3 编码的 ffmpeg，或传入 --ffmpeg_bin 指向可用版本。"
     )
 
 

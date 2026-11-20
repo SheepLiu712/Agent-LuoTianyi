@@ -1,0 +1,769 @@
+import { usePageNotices } from '../../shell/notices/AppNotices';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  BackHandler,
+  Keyboard,
+  KeyboardAvoidingView, Modal, Platform, ScrollView,
+  StyleSheet,
+  Text, TextInput, TouchableOpacity,
+  useColorScheme,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { server_config } from '../../config/index';
+import { addDebugTrace } from '../../utils/debug_trace';
+import { COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../../shared/ui/theme';
+import { switchServer } from './credentials';
+
+import { AgreementModal } from './AgreementModal';
+import { AgreementPayload } from '../../utils/agreement';
+import { clearRegistrationResume, loadRegistrationResume } from '../../utils/registration_resume';
+
+interface LoginScreenProps {
+  resetAccount: (username: string, password: string, inviteCode: string) => Promise<void>;
+  onLogin: (username: string, password: string, autoLogin: boolean) => Promise<{ success: boolean; message: string }>;
+  onRegister: (username: string, password: string, confirmPassword: string, inviteCode: string, requestId?: string, agreementVersion?: string) => Promise<{ success: boolean; message: string; code?: string; agreement?: AgreementPayload }>;
+  pendingAgreement?: { agreement: AgreementPayload; credential: { kind: 'password' | 'auto_login'; username: string; password?: string; token?: string; autoLogin?: boolean } } | null;
+  onAcceptAgreement?: () => Promise<{ success: boolean; message: string }>;
+  onAgreementClose?: () => void;
+}
+
+type TabType = 'login' | 'register';
+
+export default function LoginScreen({ onLogin, onRegister, resetAccount, pendingAgreement, onAcceptAgreement, onAgreementClose }: LoginScreenProps) {
+  const insets = useSafeAreaInsets();
+  const systemScheme = useColorScheme();
+  const [activeTab, setActiveTab] = useState<TabType>('login');
+  const [loading, setLoading] = useState(false);
+  const [colorMode, setColorMode] = useState<ColorMode>('light');
+  const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
+
+  // 登录表单
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [autoLogin, setAutoLogin] = useState(false);
+
+  // 注册表单
+  const [regUsername, setRegUsername] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
+
+  // 重置账号弹窗
+  const [showReset, setShowReset] = useState(false);
+  const [resetInvite, setResetInvite] = useState('');
+  const [resetUsername, setResetUsername] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirm, setResetConfirm] = useState('');
+  const [resetting, setResetting] = useState(false);
+
+  // 服务器地址弹窗
+  const [showServer, setShowServer] = useState(false);
+  const [serverUrl, setServerUrl] = useState(server_config.BASE_URL);
+  const [serverPhase, setServerPhase] = useState<'idle' | 'verifying' | 'saving'>('idle');
+  const [registrationAgreement, setRegistrationAgreement] = useState<AgreementPayload | null>(null);
+  const [agreementLoading, setAgreementLoading] = useState(false);
+  const [agreementError, setAgreementError] = useState('');
+  const registrationIdentity = useRef('');
+  const registrationRequestId = useRef('');
+  const registrationSubmitVersion = useRef('');
+
+
+  const serverRequest = useRef<AbortController | 'saving' | null>(null);
+
+  useEffect(() => () => {
+    if (serverRequest.current instanceof AbortController) serverRequest.current.abort();
+  }, []);
+
+  const cancelServer = () => {
+    if (serverRequest.current === 'saving') return;
+    serverRequest.current?.abort();
+    serverRequest.current = null;
+    setServerPhase('idle');
+    setShowServer(false);
+  };
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(COLOR_MODE_STORAGE_KEY)
+      .then((storedMode) => {
+        if (!active) {
+          return;
+        }
+        if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
+          setColorMode(storedMode);
+        }
+      })
+      .catch((error) => {
+        addDebugTrace('theme', 'load login color mode failed', { error: String(error) });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const inputStyle = [styles.input, { backgroundColor: theme.inputBackground, borderColor: theme.border, color: theme.inputText }];
+  const modalInputStyle = [styles.modalInput, { backgroundColor: theme.inputBackground, borderColor: theme.border, color: theme.inputText }];
+  const labelStyle = [styles.label, { color: theme.textSoft }];
+  const modalTextColor = theme.name === 'dark' ? '#0F1419' : '#ffffff';
+
+  const showNotice = usePageNotices(showReset ? 'reset' : showServer ? 'server' : activeTab);
+  const closeLoginNotice = useRef<() => void>(() => {});
+  const handleLogin = async () => {
+    Keyboard.dismiss();
+    setLoading(true);
+    closeLoginNotice.current();
+    const result = await onLogin(loginUsername, loginPassword, autoLogin);
+    setLoading(false);
+    if (!result.success) {
+      closeLoginNotice.current = showNotice({ title: '登录失败', message: result.message, theme });
+    }
+  };
+
+  const handleRegister = async () => {
+    Keyboard.dismiss();
+    if (!regUsername.trim() || !regPassword.trim() || !inviteCode.trim()) {
+      Alert.alert('注册失败', '请填写用户名、密码和邀请码');
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      Alert.alert('注册失败', '两次输入的密码不一致');
+      return;
+    }
+    setAgreementLoading(true); setAgreementError('');
+    const identity = `${regUsername}\u0000${regPassword}\u0000${regConfirmPassword}\u0000${inviteCode}`;
+    const savedResume = await loadRegistrationResume(server_config.BASE_URL).catch(() => null);
+    if (savedResume?.state === 'same_user_login') {
+      setAgreementLoading(false);
+      setActiveTab('login');
+      setLoginUsername(savedResume.username);
+      Alert.alert('请先登录确认', '检测到原注册结果待确认，请先登录确认原注册结果。');
+      return;
+    }
+    const restoredRequestId = savedResume && savedResume.username === regUsername && savedResume.state === 'unknown'
+      ? savedResume.requestId
+      : '';
+    if (identity !== registrationIdentity.current) {
+      registrationIdentity.current = identity;
+      registrationRequestId.current = restoredRequestId || `app-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    const agreement = await (await import('./useAuth')).fetchCurrentAgreement();
+    setAgreementLoading(false);
+    if (!agreement.success) { setAgreementError(agreement.message); return; }
+    registrationSubmitVersion.current = restoredRequestId && savedResume?.state === 'unknown'
+      ? savedResume.agreementVersion
+      : agreement.data.version;
+    setRegistrationAgreement(agreement.data);
+  };
+
+  const submitRegistration = async () => {
+    if (!registrationAgreement) return { success: false, message: '协议未加载' };
+    setLoading(true);
+    const result = await onRegister(
+      regUsername,
+      regPassword,
+      regConfirmPassword,
+      inviteCode,
+      registrationRequestId.current,
+      registrationSubmitVersion.current || registrationAgreement.version,
+    );
+    const changedAgreement = result.agreement;
+    if (!result.success && changedAgreement) {
+      setRegistrationAgreement(changedAgreement);
+      if (result.code === 'AGREEMENT_CHANGED') {
+        registrationRequestId.current = `app-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        registrationSubmitVersion.current = changedAgreement.version;
+        registrationIdentity.current = '';
+      }
+    }
+    if (!result.success && result.code === 'REGISTRATION_REQUEST_CONFLICT') {
+      const conflictRequestId = registrationRequestId.current;
+      Alert.alert(
+        '注册请求冲突',
+        '这个注册请求与服务器记录不一致。继续清除恢复记录将放弃确认原结果，可能导致无法恢复先前注册。',
+        [
+          { text: '取消', style: 'cancel' },
+           {
+             text: '确认清除',
+             style: 'destructive',
+             onPress: () => {
+               if (registrationRequestId.current !== conflictRequestId) {
+                 return;
+               }
+               void loadRegistrationResume(server_config.BASE_URL).then((current) => {
+                 if (current?.requestId !== conflictRequestId) return;
+                 return clearRegistrationResume(server_config.BASE_URL).then(() => {
+                   registrationRequestId.current = '';
+                   registrationSubmitVersion.current = '';
+                   registrationIdentity.current = '';
+                   setRegistrationAgreement(null);
+                   setAgreementError('');
+                 });
+               }).catch(() => undefined);
+            },
+          },
+        ],
+      );
+    }
+    setLoading(false);
+    if (result.success) {
+      await clearRegistrationResume(server_config.BASE_URL).catch(() => undefined);
+      setRegistrationAgreement(null);
+      Alert.alert('注册成功', '注册成功，请使用新账号登录！');
+      setActiveTab('login');
+      setLoginUsername(regUsername);
+    }
+    return result;
+  };
+
+  const handleResetAccount = () => {
+    Keyboard.dismiss();
+    if (!resetInvite || !resetUsername || !resetPassword || !resetConfirm) {
+      Alert.alert('错误', '请填写所有信息');
+      return;
+    }
+    if (resetPassword !== resetConfirm) {
+      Alert.alert('错误', '两次输入的密码不一致');
+      return;
+    }
+    Alert.alert(
+      '确认重置',
+      '重置后原账号将被覆盖，确定要继续吗？',
+      [
+        { text: '取消', style: 'cancel' },
+        { text: '确认重置', style: 'destructive', onPress: doResetAccount },
+      ],
+    );
+  };
+
+  const doResetAccount = async () => {
+    setResetting(true);
+    try {
+      await resetAccount(resetUsername, resetPassword, resetInvite);
+      Alert.alert('成功', '账号重置成功，请使用新账号登录');
+      setShowReset(false);
+      setLoginUsername(resetUsername);
+      setActiveTab('login');
+    } catch (e: any) {
+      Alert.alert('重置失败', e.message || '网络错误');
+    }
+    setResetting(false);
+  };
+
+  const handleVerifyServer = async () => {
+    const url = serverUrl.trim().replace(/\/+$/, '');
+    if (!url) {
+      Alert.alert('错误', '请输入服务器地址');
+      return;
+    }
+    if (serverRequest.current !== null) return;
+    const request = new AbortController();
+    serverRequest.current = request;
+    setServerPhase('verifying');
+    try {
+      await switchServer(url, {
+        signal: request.signal,
+        onCommit: () => {
+          serverRequest.current = 'saving';
+          setServerPhase('saving');
+        },
+      });
+      if (request.signal.aborted) return;
+      Alert.alert('成功', '服务器地址验证成功，地址已保存');
+      setShowServer(false);
+    } catch (e: any) {
+      if (request.signal.aborted) return;
+      Alert.alert('验证失败', `无法连接到服务器: ${e.message}`);
+    }
+    serverRequest.current = null;
+    setServerPhase('idle');
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: theme.root }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <View style={[styles.container, { paddingTop: insets.top + 40, paddingBottom: insets.bottom, backgroundColor: theme.root }]}>
+        {/* 标题 */}
+        <Text style={[styles.title, { color: theme.accent }]}>AI小洛</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Chat with LuoTianyi</Text>
+
+        {/* Tab 切换 */}
+        <View style={[styles.tabContainer, { backgroundColor: theme.surfaceAlt }]}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'login' && styles.activeTab, activeTab === 'login' && { backgroundColor: theme.surface }]}
+            disabled={loading}
+            onPress={() => setActiveTab('login')}
+          >
+            <Text style={[styles.tabText, { color: theme.textMuted }, activeTab === 'login' && { color: theme.accent, fontWeight: '600' }]}>
+              登录
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'register' && styles.activeTab, activeTab === 'register' && { backgroundColor: theme.surface }]}
+            disabled={loading}
+            onPress={() => setActiveTab('register')}
+          >
+            <Text style={[styles.tabText, { color: theme.textMuted }, activeTab === 'register' && { color: theme.accent, fontWeight: '600' }]}>
+              注册
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 表单区域 */}
+        <ScrollView
+          style={styles.formScrollView}
+          contentContainerStyle={styles.formContainer}
+          keyboardShouldPersistTaps="handled"
+        >
+          {activeTab === 'login' ? (
+            /* ========== 登录表单 ========== */
+            <View>
+              <Text style={labelStyle}>用户名</Text>
+              <TextInput
+                style={inputStyle}
+                placeholder="请输入用户名"
+                placeholderTextColor={theme.placeholder}
+                value={loginUsername}
+                onChangeText={setLoginUsername}
+                autoCapitalize="none"
+              />
+
+              <Text style={labelStyle}>密码</Text>
+              <TextInput
+                style={inputStyle}
+                placeholder="请输入密码"
+                placeholderTextColor={theme.placeholder}
+                value={loginPassword}
+                onChangeText={setLoginPassword}
+                secureTextEntry
+              />
+
+              {/* 自动登录勾选 */}
+              <TouchableOpacity
+                style={styles.checkboxRow}
+                onPress={() => setAutoLogin(!autoLogin)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, { borderColor: theme.border }, autoLogin && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
+                  {autoLogin && <Text style={[styles.checkmark, { color: modalTextColor }]}>✓</Text>}
+                </View>
+                <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>自动登录</Text>
+              </TouchableOpacity>
+
+              {/* 登录按钮 */}
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: theme.accent, shadowColor: theme.accent }, loading && styles.buttonDisabled]}
+                onPress={handleLogin}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.buttonText, { color: modalTextColor }]}>{loading ? '登录中...' : '登录'}</Text>
+              </TouchableOpacity>
+
+              {/* 底部操作区 */}
+              <View style={styles.bottomActions}>
+                <TouchableOpacity
+                  style={styles.actionLink}
+                  disabled={loading}
+                  onPress={() => setShowReset(true)}
+                >
+                  <Text style={[styles.actionLinkText, { color: theme.accent }]}>重置账号</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionLink}
+                  disabled={loading}
+                  onPress={() => setShowServer(true)}
+                >
+                  <Text style={[styles.actionLinkText, { color: theme.accent }]}>服务器地址</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            /* ========== 注册表单 ========== */
+            <View>
+              <Text style={labelStyle}>用户名</Text>
+              <TextInput
+                style={inputStyle}
+                placeholder="请输入用户名"
+                placeholderTextColor={theme.placeholder}
+                value={regUsername}
+                onChangeText={setRegUsername}
+                autoCapitalize="none"
+              />
+
+              <Text style={labelStyle}>密码</Text>
+              <TextInput
+                style={inputStyle}
+                placeholder="请输入密码"
+                placeholderTextColor={theme.placeholder}
+                value={regPassword}
+                onChangeText={setRegPassword}
+                secureTextEntry
+              />
+
+              <Text style={labelStyle}>确认密码</Text>
+              <TextInput
+                style={inputStyle}
+                placeholder="请再次输入密码"
+                placeholderTextColor={theme.placeholder}
+                value={regConfirmPassword}
+                onChangeText={setRegConfirmPassword}
+                secureTextEntry
+              />
+
+              <Text style={labelStyle}>邀请码</Text>
+              <TextInput
+                style={inputStyle}
+                placeholder="请输入邀请码"
+                placeholderTextColor={theme.placeholder}
+                value={inviteCode}
+                onChangeText={setInviteCode}
+                autoCapitalize="none"
+              />
+
+              {/* 注册按钮 */}
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: theme.accent, shadowColor: theme.accent }, loading && styles.buttonDisabled]}
+                onPress={handleRegister}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.buttonText, { color: modalTextColor }]}>{loading ? '注册中...' : '注册'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* ========== 重置账号弹窗 ========== */}
+        <Modal visible={showReset} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>重置账号</Text>
+              <Text style={[styles.modalDesc, { color: theme.textMuted }]}>输入已使用的邀请码和新账号信息：</Text>
+
+              <TextInput
+                style={modalInputStyle}
+                placeholder="已使用的邀请码"
+                placeholderTextColor={theme.placeholder}
+                value={resetInvite}
+                onChangeText={setResetInvite}
+              />
+              <TextInput
+                style={modalInputStyle}
+                placeholder="新用户名"
+                placeholderTextColor={theme.placeholder}
+                value={resetUsername}
+                onChangeText={setResetUsername}
+                autoCapitalize="none"
+              />
+              <TextInput
+                style={modalInputStyle}
+                placeholder="新密码"
+                placeholderTextColor={theme.placeholder}
+                value={resetPassword}
+                onChangeText={setResetPassword}
+                secureTextEntry
+              />
+              <TextInput
+                style={modalInputStyle}
+                placeholder="确认新密码"
+                placeholderTextColor={theme.placeholder}
+                value={resetConfirm}
+                onChangeText={setResetConfirm}
+                secureTextEntry
+              />
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: theme.surfaceAlt }]}
+                  onPress={() => { setShowReset(false); setResetting(false); }}
+                >
+                  <Text style={[styles.modalBtnText, { color: theme.textSoft }]}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: theme.dangerText }, resetting && styles.buttonDisabled]}
+                  onPress={handleResetAccount}
+                  disabled={resetting}
+                >
+                  <Text style={[styles.modalBtnText, { color: '#fff' }]}>
+                    {resetting ? '重置中...' : '确认重置'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ========== 服务器地址弹窗 ========== */}
+        <Modal visible={showServer} onRequestClose={cancelServer} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>服务器地址</Text>
+              <Text style={[styles.modalDesc, { color: theme.textMuted }]}>输入自定义服务器地址（URL），输入后会自动验证连接：</Text>
+
+              <TextInput
+                style={modalInputStyle}
+                placeholder="https://your-server.com:60030"
+                placeholderTextColor={theme.placeholder}
+                value={serverUrl}
+                onChangeText={setServerUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: theme.surfaceAlt }]}
+                  onPress={cancelServer}
+                  disabled={serverPhase === 'saving'}
+                >
+                  <Text style={[styles.modalBtnText, { color: theme.textSoft }]}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: theme.accent }, serverPhase !== 'idle' && styles.buttonDisabled]}
+                  onPress={handleVerifyServer}
+                  disabled={serverPhase !== 'idle'}
+                >
+                  <Text style={[styles.modalBtnText, { color: modalTextColor }]}>
+                    {serverPhase === 'saving' ? '保存中...' : serverPhase === 'verifying' ? '验证中...' : '验证并保存'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+        <AgreementModal
+          visible={Boolean(registrationAgreement || pendingAgreement || agreementLoading || agreementError)}
+          agreement={registrationAgreement || pendingAgreement?.agreement || null}
+          loading={agreementLoading}
+          error={agreementError}
+          theme={theme}
+          onRetry={handleRegister}
+          onCancel={() => {
+            if (pendingAgreement) {
+              onAgreementClose?.();
+              // AC-06: an existing user who refuses or backs out must leave the
+              // login flow; this is intentionally not the registration cancel path.
+              BackHandler.exitApp();
+              return;
+            }
+            setRegistrationAgreement(null);
+            setAgreementError('');
+          }}
+          onSubmit={registrationAgreement ? submitRegistration : async () => {
+            const result = await onAcceptAgreement?.();
+            return result || { success: false, message: '协议提交失败，请重试' };
+          }}
+        />
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    paddingHorizontal: 30,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#66CCFF',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    marginBottom: 30,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 25,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  activeTab: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: 15,
+    color: '#999',
+    fontWeight: '500',
+  },
+  activeTabText: {
+    color: '#66CCFF',
+    fontWeight: '600',
+  },
+  formScrollView: {
+    flex: 1,
+  },
+  formContainer: {
+    paddingBottom: 30,
+  },
+  label: {
+    fontSize: 14,
+    color: '#555',
+    marginBottom: 6,
+    marginLeft: 4,
+  },
+  input: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    marginLeft: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    marginRight: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#66CCFF',
+    borderColor: '#66CCFF',
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+    lineHeight: 16,
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  button: {
+    backgroundColor: '#66CCFF',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 8,
+    shadowColor: '#66CCFF',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  registerButton: {
+    backgroundColor: '#88EDFF',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  bottomActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 20,
+  },
+  actionLink: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  actionLinkText: {
+    fontSize: 14,
+    color: '#66CCFF',
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '85%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalDesc: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    gap: 12,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  modalBtnCancel: {
+    backgroundColor: '#f0f0f0',
+  },
+  modalBtnDanger: {
+    backgroundColor: '#FF6B6B',
+  },
+  modalBtnPrimary: {
+    backgroundColor: '#66CCFF',
+  },
+  modalBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+});

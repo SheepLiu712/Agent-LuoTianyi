@@ -25,21 +25,28 @@ def test_init_sql_db_migrates_existing_events_table_with_character_column(tmp_pa
     db_path = tmp_path / "legacy.db"
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            "CREATE TABLE events (id VARCHAR PRIMARY KEY, event_type VARCHAR NOT NULL, title VARCHAR NOT NULL)"
-        )
-        conn.commit()
+        conn.executescript("""
+            CREATE TABLE events (
+                id VARCHAR NOT NULL PRIMARY KEY, event_type VARCHAR NOT NULL, title VARCHAR NOT NULL,
+                description TEXT, user_id VARCHAR, date_type VARCHAR, date_mmdd VARCHAR,
+                start_datetime DATETIME, end_datetime DATETIME, duration_minutes INTEGER,
+                trigger_conditions TEXT, is_recurring BOOLEAN, is_personal BOOLEAN, target_user_id VARCHAR,
+                source VARCHAR, source_url VARCHAR, source_platform VARCHAR, is_active BOOLEAN,
+                created_at DATETIME, updated_at DATETIME
+            );
+            INSERT INTO events (id, event_type, title) VALUES ('concert-1', 'concert', 'Existing concert');
+            """)
     finally:
         conn.close()
 
     init_sql_db(str(tmp_path), "legacy.db")
     conn = sqlite3.connect(db_path)
     try:
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()]
+        event = conn.execute("SELECT title, character FROM events WHERE id = 'concert-1'").fetchone()
     finally:
         conn.close()
 
-    assert "character" in columns
+    assert event == ("Existing concert", "luotianyi")
 
 
 def test_init_sql_db_migrates_existing_notifications_table_with_character_column(tmp_path):

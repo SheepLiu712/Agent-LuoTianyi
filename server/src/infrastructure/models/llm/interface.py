@@ -6,6 +6,7 @@ src.llm.llm_api_interface.py
 
 import asyncio
 import json
+import math
 import os
 import random
 import time
@@ -18,6 +19,7 @@ from openai import OpenAI
 
 from src.infrastructure.models.response_parsing import extract_openai_response
 from src.utils.logger import get_logger
+from src.utils.owned_operation import complete_owned
 
 
 class LLMContentInspectionError(Exception):
@@ -56,6 +58,9 @@ def _is_content_inspection_failure(error: Any) -> bool:
 
 class LLMAPIInterface(ABC):
     default_parameters: Dict[str, Any] = {}
+
+    def stream_response(self, prompt: str, params: Dict[str, Any], **kwargs):
+        raise NotImplementedError("该模型接口不支持流式输出")
 
     @abstractmethod
     async def generate_response(
@@ -125,7 +130,9 @@ class OpenAIAPIInterface(LLMAPIInterface):
             del os.environ["SSL_CERT_FILE"]
             self._ssl_cert_file_removed = True
         try:
-            self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
+            self.client = OpenAI(
+                base_url=self.base_url, api_key=self.api_key, timeout=self.request_timeout, max_retries=0
+            )
             self.logger.info(f"OpenAI客户端初始化完成，模型: {self.model}")
         except Exception as e:
             self.logger.error(f"初始化OpenAI客户端失败: {e}")
@@ -134,6 +141,25 @@ class OpenAIAPIInterface(LLMAPIInterface):
             if self._ssl_cert_file_removed:
                 os.environ["SSL_CERT_FILE"] = self._ssl_cert_file
         return self.client
+
+    def stream_response(self, prompt: str, params: Dict[str, Any], enable_thinking=False, use_json=False):
+        from .streaming import stream_completion
+
+        payload = {
+            **self.default_parameters,
+            **params,
+            "model": self.model,
+            "messages": [{"role": "system", "content": prompt}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self.can_enable_thinking:
+            payload["enable_thinking"] = enable_thinking
+        if use_json and self.can_use_json:
+            payload["response_format"] = {"type": "json_object"}
+        return stream_completion(
+            self.base_url.rstrip("/") + "/chat/completions", self.api_key, payload, self.request_timeout
+        )
 
     async def generate_response(
         self, prompt: str, params: Dict[str, Any], enable_thinking: bool = False, use_json: bool = False, **kwargs
@@ -167,7 +193,9 @@ class OpenAIAPIInterface(LLMAPIInterface):
                     )
 
                 # 放入线程池执行
-                ret = await asyncio.to_thread(_do_request, [{"role": "system", "content": prompt}], use_json)
+                ret = await complete_owned(
+                    asyncio.to_thread(_do_request, [{"role": "system", "content": prompt}], use_json)
+                )
 
                 elapsed = time.time() - st_time
                 extracted = self._extract_content(ret, elapsed=elapsed)
@@ -202,6 +230,13 @@ class OpenAIAPIInterface(LLMAPIInterface):
         self.model = self.config.get("model", "Pro/deepseek-ai/DeepSeek-V3")
         self.max_retries = self.config.get("max_retries", 3)
         self.retry_delay = self.config.get("retry_delay", 0.5)
+        self.request_timeout = self.config.get("request_timeout", 120.0)
+        if type(self.max_retries) is not int or self.max_retries < 1:
+            raise ValueError("max_retries is the positive total attempt count")
+        if not math.isfinite(self.retry_delay) or self.retry_delay < 0:
+            raise ValueError("retry_delay must be finite and nonnegative")
+        if not math.isfinite(self.request_timeout) or self.request_timeout <= 0:
+            raise ValueError("request_timeout must be positive and finite")
         self.can_enable_thinking = self.config.get("can_enable_thinking", False)
         self.can_use_json = self.config.get("can_use_json", False)
 
@@ -246,6 +281,7 @@ class OpenAIAPIInterface(LLMAPIInterface):
             "top_p": self.default_parameters.get("top_p"),
             "max_retries": self.max_retries,
             "retry_delay": self.retry_delay,
+            "request_timeout": self.request_timeout,
         }
 
 
@@ -254,6 +290,20 @@ class RequestsAPIInterface(LLMAPIInterface):
         self.config = config
         self.logger = get_logger(__name__)
         self._init_parameters()
+
+    def stream_response(self, prompt: str, params: Dict[str, Any], enable_thinking=False, use_json=False):
+        from .streaming import stream_completion
+
+        payload = {
+            **self.payload,
+            **params,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if use_json:
+            payload["response_format"] = {"type": "json_object"}
+        return stream_completion(self.url, self.api_key, payload, self.request_timeout)
 
     async def generate_response(self, prompt: str, use_json: bool = False, **kwargs) -> str:
         # 实现调用SiliconFlow API生成响应的逻辑
@@ -270,9 +320,11 @@ class RequestsAPIInterface(LLMAPIInterface):
                 st_time = time.time()
 
                 def _do_request():
-                    return requests.post(self.url, headers=self.headers, json=self.payload, timeout=10)
+                    return requests.post(
+                        self.url, headers=self.headers, json=self.payload, timeout=self.request_timeout
+                    )
 
-                ret = await asyncio.to_thread(_do_request)
+                ret = await complete_owned(asyncio.to_thread(_do_request))
                 if _is_content_inspection_failure(ret):
                     raise LLMContentInspectionError(_stringify_error_payload(ret.json()))
                 elapsed = time.time() - st_time
@@ -326,6 +378,13 @@ class RequestsAPIInterface(LLMAPIInterface):
 
         self.max_retries = self.config.get("max_retries", 3)
         self.retry_delay = self.config.get("retry_delay", 0.5)
+        self.request_timeout = self.config.get("request_timeout", 120.0)
+        if type(self.max_retries) is not int or self.max_retries < 1:
+            raise ValueError("max_retries is the positive total attempt count")
+        if not math.isfinite(self.retry_delay) or self.retry_delay < 0:
+            raise ValueError("retry_delay must be finite and nonnegative")
+        if not math.isfinite(self.request_timeout) or self.request_timeout <= 0:
+            raise ValueError("request_timeout must be positive and finite")
 
     def _extract_content(self, response: requests.Response, elapsed: float = 0.0) -> Dict[str, Any]:
         """提取响应内容、token 用量和响应用时
@@ -400,6 +459,7 @@ class RequestsAPIInterface(LLMAPIInterface):
             "top_p": self.top_p,
             "max_retries": self.max_retries,
             "retry_delay": self.retry_delay,
+            "request_timeout": self.request_timeout,
         }
 
 

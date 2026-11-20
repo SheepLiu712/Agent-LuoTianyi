@@ -8,7 +8,6 @@ type DashboardSummary = {
   pipeline: Record<string, LatencySummary>;
   logs: Record<string, number>;
   recent_logs: LogEvent[];
-  slow_spans: PipelineSpan[];
 };
 
 type LatencySummary = {
@@ -94,9 +93,12 @@ type LlmInterfaceConfig = {
   [key: string]: unknown;
 };
 
+type ModelKind = 'llm' | 'vlm' | 'audio';
+type InterfaceKind = 'available_llms' | 'available_vlms' | 'available_audio_models';
+
 type ModuleBinding = {
   path: string;
-  kind: 'llm' | 'vlm';
+  kind: ModelKind;
   interface_name: string;
   prompt_name?: string;
   enable_thinking?: boolean;
@@ -110,17 +112,65 @@ type ClientModelType = {
   id: string;
   name: string;
   description: string;
-  model_kind: 'llm' | 'vlm';
+  model_kind: ModelKind;
   requires_json: boolean;
   requires_thinking: boolean;
 };
 
+type ComponentStartup = {
+  speaking_enabled: boolean;
+  vector_store_enabled: boolean;
+};
+
+function componentStartupValues(values?: Partial<ComponentStartup>): ComponentStartup {
+  return { speaking_enabled: values?.speaking_enabled ?? true, vector_store_enabled: values?.vector_store_enabled ?? true };
+}
+
 type LlmConfigInfo = {
   available_llms: Record<string, LlmInterfaceConfig>;
   available_vlms: Record<string, LlmInterfaceConfig>;
+  available_audio_models: Record<string, LlmInterfaceConfig>;
+  call_transport: { enabled?: boolean; realtime_speech?: Record<string, unknown>; [key: string]: unknown };
+  call_setup_timeout: number | string;
   client_model_types: ClientModelType[];
   module_bindings: ModuleBinding[];
+  component_startup: ComponentStartup;
 };
+
+type LlmConfigPatch = Omit<Partial<LlmConfigInfo>, 'component_startup'> & {
+  component_startup?: Partial<ComponentStartup>;
+};
+
+const modelPanels = [
+  {
+    title: '模型 Interface（供应商接口）',
+    Editor: LlmInterfacesDraftEditor,
+    select: ({ available_llms, available_vlms, available_audio_models }: LlmConfigInfo) =>
+      ({ available_llms, available_vlms, available_audio_models }),
+  },
+  {
+    title: '客户端模型需求',
+    Editor: ClientModelTypesDraftEditor,
+    select: ({ client_model_types }: LlmConfigInfo) => ({ client_model_types }),
+  },
+  {
+    title: '实时音频模型配置',
+    Editor: RealtimeSpeechDraftEditor,
+    select: ({ call_transport, call_setup_timeout }: LlmConfigInfo) => ({ call_transport, call_setup_timeout }),
+  },
+  {
+    title: '模型 module（调用模块）绑定',
+    Editor: LlmModuleBindingDraftEditor,
+    select: ({ module_bindings }: LlmConfigInfo) => ({ module_bindings }),
+  },
+  {
+    title: '组件启动',
+    Editor: ComponentStartupDraftEditor,
+    select: ({ component_startup }: LlmConfigInfo) => ({ component_startup }),
+  },
+] as const;
+
+type ModelPanelTitle = typeof modelPanels[number]['title'];
 
 function validateClientModelTypes(
   types: ClientModelType[],
@@ -149,8 +199,8 @@ function validateClientModelTypes(
     if (!name) {
       errors.push(`类型「${typeId}」缺少显示名称`);
     }
-    if (typeItem.model_kind !== 'llm' && typeItem.model_kind !== 'vlm') {
-      errors.push(`类型「${typeId}」的模型类型必须是 LLM 或 VLM`);
+    if (typeItem.model_kind !== 'llm' && typeItem.model_kind !== 'vlm' && typeItem.model_kind !== 'audio') {
+      errors.push(`类型「${typeId}」的模型类型必须是 LLM、VLM 或音频模型`);
     }
   });
   (bindings || []).forEach((binding) => {
@@ -164,7 +214,7 @@ function validateClientModelTypes(
     }
     if (!requirement) return;
     if (requirement.model_kind !== binding.kind) {
-      errors.push(`模块绑定 ${binding.path} 与客户端类型 ${boundType} 的 LLM/VLM 类型不一致`);
+      errors.push(`模块绑定 ${binding.path} 与客户端类型 ${boundType} 的模型类型不一致`);
     }
     if (binding.use_json && !requirement.requires_json) {
       errors.push(`模块绑定 ${binding.path} 要求 JSON，但客户端类型 ${boundType} 未声明`);
@@ -176,36 +226,6 @@ function validateClientModelTypes(
   return errors;
 }
 
-type LlmCall = {
-  id: number;
-  ts: string;
-  trace_id?: string;
-  user_id?: string;
-  module_name: string;
-  interface_name?: string;
-  model_name?: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  latency_ms: number;
-  success: number;
-  error_type?: string;
-  error_message?: string;
-  metadata?: Record<string, unknown>;
-};
-
-type PipelineSpan = {
-  id: number;
-  trace_id: string;
-  user_id?: string;
-  topic_id?: string;
-  span_name: string;
-  start_ts: string;
-  duration_ms: number;
-  status: string;
-  metadata?: Record<string, unknown>;
-};
-
 type LogEvent = {
   id: number;
   ts: string;
@@ -213,30 +233,6 @@ type LogEvent = {
   logger_name: string;
   message: string;
   traceback?: string;
-};
-
-type TraceSummary = {
-  trace_id: string;
-  user_id?: string;
-  topic_id?: string;
-  start_ts?: string;
-  end_ts?: string;
-  duration_ms: number;
-  span_count: number;
-  total_span_ms: number;
-  max_span_ms: number;
-  llm_call_count: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  total_llm_latency_ms: number;
-  failed_llm_calls: number;
-};
-
-type TraceDetail = {
-  summary: TraceSummary;
-  spans: PipelineSpan[];
-  llm_calls: LlmCall[];
 };
 
 type DynamicAdminPost = {
@@ -283,69 +279,12 @@ type DynamicAdminComment = {
   cursor?: string;
 };
 
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'dynamics' | 'invite_codes' | 'config' | 'logs';
-
-type LlmStatsTab = {
-  id: 'seven_days' | 'one_day' | 'recent';
-  label: string;
-  subtitle: string;
-  url: string;
-  metricTitle: string;
-  tokenDetail: string;
-  showTimeBuckets: boolean;
-};
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'dynamics' | 'invite_codes' | 'config' | 'logs';
 
 type LocalActionStatus = {
   tone: 'info' | 'success' | 'error';
   message: string;
 };
-
-type LlmChartMetric = {
-  id: 'call_count' | 'total_tokens' | 'avg_total_tokens' | 'avg_prompt_tokens' | 'avg_completion_tokens' | 'avg_latency_ms' | 'failed_calls';
-  label: string;
-  field: string;
-  format: 'number' | 'ms';
-};
-
-const llmStatsTabs: LlmStatsTab[] = [
-  {
-    id: 'seven_days',
-    label: '7日平均',
-    subtitle: '最近 7 日 LLM 调用量、Token 与耗时',
-    url: '/admin/api/llm/summary?days=7&bucket_hours=2',
-    metricTitle: '7 日调用',
-    tokenDetail: '7 日累计',
-    showTimeBuckets: true,
-  },
-  {
-    id: 'one_day',
-    label: '1日平均',
-    subtitle: '最近 24 小时 LLM 调用量、Token 与耗时',
-    url: '/admin/api/llm/summary?days=1&bucket_hours=2',
-    metricTitle: '1 日调用',
-    tokenDetail: '1 日累计',
-    showTimeBuckets: true,
-  },
-  {
-    id: 'recent',
-    label: '最近平均',
-    subtitle: '最近 50 次 LLM 调用的平均表现',
-    url: '/admin/api/llm/summary?recent_limit=50',
-    metricTitle: '最近调用',
-    tokenDetail: '最近 50 次累计',
-    showTimeBuckets: false,
-  },
-];
-
-const llmChartMetrics: LlmChartMetric[] = [
-  { id: 'call_count', label: '调用次数', field: 'call_count', format: 'number' },
-  { id: 'total_tokens', label: 'Token 数', field: 'total_tokens', format: 'number' },
-  { id: 'avg_total_tokens', label: '平均 Token', field: 'avg_total_tokens', format: 'number' },
-  { id: 'avg_prompt_tokens', label: '平均 Prompt', field: 'avg_prompt_tokens', format: 'number' },
-  { id: 'avg_completion_tokens', label: '平均 Completion', field: 'avg_completion_tokens', format: 'number' },
-  { id: 'avg_latency_ms', label: '平均耗时', field: 'avg_latency_ms', format: 'ms' },
-  { id: 'failed_calls', label: '失败次数', field: 'failed_calls', format: 'number' },
-];
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin' });
@@ -450,10 +389,6 @@ function formatSecretCategory(secret: SecretInfo) {
     return 'LLM API Key';
   }
   return '自定义';
-}
-
-function formatChartValue(value: number, metric: LlmChartMetric) {
-  return metric.format === 'ms' ? formatMs(value) : formatNumber(value);
 }
 
 function AdminGate() {
@@ -568,9 +503,8 @@ function App({ onLogout }: { onLogout: () => void }) {
         </div>
         <nav className="nav">
           <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}>首页</button>
-          <button className={page === 'llm' ? 'active' : ''} onClick={() => setPage('llm')}>LLM 统计</button>
+          <button className={page === 'llm' ? 'active' : ''} onClick={() => setPage('llm')}>用量趋势</button>
           <button className={page === 'pipeline' ? 'active' : ''} onClick={() => setPage('pipeline')}>链路耗时</button>
-          <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
           <button className={page === 'dynamics' ? 'active' : ''} onClick={() => setPage('dynamics')}>动态管理</button>
           <button className={page === 'config' ? 'active' : ''} onClick={() => setPage('config')}>服务配置</button>
           <button className={page === 'invite_codes' ? 'active' : ''} onClick={() => setPage('invite_codes')}>邀请码管理</button>
@@ -582,7 +516,6 @@ function App({ onLogout }: { onLogout: () => void }) {
         {page === 'dashboard' && <DashboardPage />}
         {page === 'llm' && <LlmPage />}
         {page === 'pipeline' && <PipelinePage />}
-        {page === 'traces' && <TracePage />}
         {page === 'dynamics' && <DynamicsPage />}
         {page === 'invite_codes' && <InviteCodesPage />}
         {page === 'config' && <ConfigPage />}
@@ -692,7 +625,6 @@ function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
 
 function DashboardPage() {
   const { data, error, loading } = usePolling<DashboardSummary>('/admin/api/dashboard?days=1');
-  const slowSpans = data?.slow_spans || [];
   const recentLogs = data?.recent_logs || [];
 
   return (
@@ -705,10 +637,7 @@ function DashboardPage() {
         <MetricCard title="Warnings" value={formatNumber(data?.logs?.warning_count)} detail="最近 24 小时" tone="warning" />
         <MetricCard title="Errors" value={formatNumber(data?.logs?.error_count)} detail="最近 24 小时" tone="danger" />
       </section>
-      <section className="two-column">
-        <Panel title="慢 Span">
-          <SpanTable rows={slowSpans} compact />
-        </Panel>
+      <section>
         <Panel title="最近异常">
           <LogTable rows={recentLogs} compact />
         </Panel>
@@ -717,41 +646,105 @@ function DashboardPage() {
   );
 }
 
+type UsageRow = { ts: string; online: number | null; online_peak: number | null; calls: number; tokens: number };
+type UsageSummary = {
+  rows: UsageRow[]; bucket_seconds: number;
+  totals: { calls: number; tokens: number; online_peak: number | null };
+  latest_population: { sampled_at: string; scope_count: number } | null;
+};
+
+function TimeRange({ value, onChange, all = false }: {
+  value: string; onChange: (value: string) => void; all?: boolean;
+}) {
+  return <div className="sub-tabs" aria-label="统计时间范围">
+    {([['24h', '最近24小时'], ['7d', '最近7天'], ...(all ? [['all', '所有数据']] : [])]).map(([key, label]) =>
+      <button key={key} className={value === key ? 'active' : ''} onClick={() => onChange(key)}>{label}</button>)}
+  </div>;
+}
+
 function LlmPage() {
-  const [activeTabId, setActiveTabId] = useState<LlmStatsTab['id']>('seven_days');
-  const activeTab = llmStatsTabs.find((tab) => tab.id === activeTabId) || llmStatsTabs[0];
-  const { data, error, loading } = usePolling<LlmSummary>(activeTab.url);
-  return (
-    <>
-      <PageHeader title="LLM 统计" subtitle={activeTab.subtitle} />
-      <div className="sub-tabs">
-        {llmStatsTabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={tab.id === activeTabId ? 'active' : ''}
-            onClick={() => setActiveTabId(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <StatusBar loading={loading} error={error} />
-      <section className="metric-grid">
-        <MetricCard title={activeTab.metricTitle} value={formatNumber(data?.totals?.call_count)} detail={`${formatNumber(data?.totals?.total_tokens)} tokens`} />
-        <MetricCard title="平均 Token" value={formatNumber(data?.totals?.avg_total_tokens)} detail={`${formatNumber(data?.totals?.avg_prompt_tokens)} prompt / ${formatNumber(data?.totals?.avg_completion_tokens)} completion`} />
-        <MetricCard title="Prompt Tokens" value={formatNumber(data?.totals?.prompt_tokens)} detail={activeTab.tokenDetail} />
-        <MetricCard title="平均耗时" value={formatMs(data?.totals?.avg_latency_ms)} detail={`${formatNumber(data?.totals?.failed_calls)} failed`} />
-      </section>
-      <Panel title="模块统计">
-        <LlmModuleTable rows={data?.by_module || []} />
-      </Panel>
-      {activeTab.showTimeBuckets && (
-        <Panel title="分时趋势">
-          <LlmTimeBucketChart rows={data?.time_buckets || []} />
-        </Panel>
-      )}
-    </>
-  );
+  const [window, setWindow] = useState('24h');
+  const [hover, setHover] = useState<number | null>(null);
+  const { data, error, loading } = usePolling<UsageSummary>(`/admin/api/metrics/usage?window=${window}`, 60000);
+  const { data: modules } = usePolling<LlmSummary>(`/admin/api/llm/summary?days=${window === '24h' ? 1 : 7}`, 60000);
+  const latest = data?.latest_population;
+  const stale = latest && Date.now() - Date.parse(latest.sampled_at) > 10 * 60 * 1000;
+  const selected = hover === null ? null : data?.rows[hover];
+  return <>
+    <PageHeader title="用量趋势" subtitle="在线规模、LLM 调用量和 Token 用量 · 北京时间 UTC+8" />
+    <TimeRange value={window} onChange={value => { setWindow(value); setHover(null); }} />
+    <StatusBar loading={loading} error={error} />
+    <section className="metric-grid">
+      <MetricCard title="当前在线估计" value={latest ? formatNumber(latest.scope_count) : '—'}
+        detail={latest ? `${stale ? '采样已过期 · ' : ''}${formatShanghaiTime(latest.sampled_at)}` : '暂无采样'} />
+      <MetricCard title="在线峰值" value={data?.totals.online_peak == null ? '—' : formatNumber(data.totals.online_peak)} detail="所选范围的采样峰值" />
+      <MetricCard title="LLM 调用总量" value={formatNumber(data?.totals.calls)} detail="所选时间范围" />
+      <MetricCard title="Token 总量" value={formatNumber(data?.totals.tokens)} detail="所选时间范围" />
+    </section>
+    <Panel title="分时趋势">
+      <p className="metrics-note">在线规模按用户和角色去重，包含断线保留及回收中的 Stage。每5分钟采样，缺失处断线；
+        {window === '24h' ? '调用与 Token 按5分钟累计。' : '在线按小时取有效样本平均，调用与 Token 按小时累计。'}</p>
+      <div className="usage-readout" aria-live="polite">{selected ? <>
+        {formatShanghaiTime(selected.ts)} · 在线 {selected.online == null ? '—' : formatNumber(selected.online)}
+        {window === '7d' && selected.online_peak != null ? `（峰值 ${selected.online_peak}）` : ''}
+        {' · '}调用 {formatNumber(selected.calls)} · Token {formatNumber(selected.tokens)}
+      </> : '移动到任一图表，查看同一时间的三项指标'}</div>
+      {(['online', 'calls', 'tokens'] as const).map(metric => <UsageChart key={metric} rows={data?.rows || []}
+        metric={metric} selected={hover} onSelect={setHover} />)}
+    </Panel>
+    <Panel title="模块统计"><div className="table-overflow"><LlmModuleTable rows={modules?.by_module || []} /></div></Panel>
+  </>;
+}
+
+function UsageChart({ rows, metric, selected, onSelect }: {
+  rows: UsageRow[]; metric: 'online' | 'calls' | 'tokens'; selected: number | null; onSelect: (index: number | null) => void;
+}) {
+  const titles = { online: '在线规模（估计）', calls: 'LLM 调用次数', tokens: 'Token 用量' };
+  const [compact, setCompact] = useState(() => globalThis.matchMedia('(max-width: 760px)').matches);
+  useEffect(() => {
+    const media = globalThis.matchMedia('(max-width: 760px)');
+    const update = () => setCompact(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  const width = compact ? 420 : 960, height = 160, left = 55, right = 25, top = 14, bottom = 34;
+  const maximum = Math.max(1, ...rows.map(row => row[metric] ?? 0));
+  const x = (index: number) => left + index / Math.max(1, rows.length - 1) * (width - left - right);
+  const y = (value: number) => top + (1 - value / maximum) * (height - top - bottom);
+  let connected = false;
+  const path = rows.map((row, index) => {
+    const value = row[metric];
+    if (value == null) { connected = false; return ''; }
+    const command = connected ? 'L' : 'M'; connected = true;
+    return `${command}${x(index)},${y(value)}`;
+  }).join(' ');
+  return <div className="usage-chart">
+    <h3>{titles[metric]}</h3>
+    {!rows.length ? <p className="empty-state">暂无时段数据</p> : <svg viewBox={`0 0 ${width} ${height}`}
+      role="img" aria-label={titles[metric]} tabIndex={0}
+      onKeyDown={event => { if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+        event.preventDefault(); onSelect(Math.max(0, Math.min(rows.length - 1, (selected ?? 0) + (event.key === 'ArrowRight' ? 1 : -1))));
+      } }}
+      onMouseMove={event => { const box = event.currentTarget.getBoundingClientRect();
+        const local = (event.clientX - box.left) / box.width * width;
+        onSelect(Math.max(0, Math.min(rows.length - 1, Math.round((local - left) / (width - left - right) * (rows.length - 1)))));
+      }}>
+      {[0, .5, 1].map(ratio => <g key={ratio}>
+        <line className="chart-grid-line" x1={left} x2={width - right} y1={y(maximum * ratio)} y2={y(maximum * ratio)} />
+        <text className="chart-y-label" x={left - 8} y={y(maximum * ratio) + 4} textAnchor="end">{formatNumber(maximum * ratio)}</text>
+      </g>)}
+      <path className="chart-line" fill="none" d={path} />
+      {rows.map((row, index) => row[metric] != null &&
+        (index === 0 || rows[index - 1][metric] == null) &&
+        (index === rows.length - 1 || rows[index + 1][metric] == null)
+        ? <circle key={row.ts} className="chart-point" cx={x(index)} cy={y(row[metric]!)} r="3" /> : null)}
+      {(compact ? [0, .5, 1] : [0, .25, .5, .75, 1]).map(ratio => { const index = Math.round(ratio * (rows.length - 1)); return <text
+        key={ratio} className="chart-x-label" x={x(index)} y={height - 8} textAnchor="middle">
+        {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(rows[index].ts))}
+      </text>; })}
+      {selected != null && selected < rows.length && <line className="usage-cursor" x1={x(selected)} x2={x(selected)} y1={top} y2={height - bottom} />}
+    </svg>}
+  </div>;
 }
 
 function LlmModuleTable({ rows }: { rows: Array<Record<string, string | number | null>> }) {
@@ -796,228 +789,40 @@ function LlmModuleTable({ rows }: { rows: Array<Record<string, string | number |
   );
 }
 
-function LlmTimeBucketChart({ rows }: { rows: Array<Record<string, string | number>> }) {
-  const [activeMetricId, setActiveMetricId] = useState<LlmChartMetric['id']>('call_count');
-  const metric = llmChartMetrics.find((item) => item.id === activeMetricId) || llmChartMetrics[0];
-  const values = rows.map((row) => Number(row[metric.field] || 0));
-  const maxValue = Math.max(...values, 0);
-  const chartWidth = 960;
-  const chartHeight = 300;
-  const padding = { top: 24, right: 28, bottom: 54, left: 64 };
-  const plotWidth = chartWidth - padding.left - padding.right;
-  const plotHeight = chartHeight - padding.top - padding.bottom;
-  const scaleY = (value: number) => {
-    if (maxValue <= 0) {
-      return padding.top + plotHeight;
-    }
-    return padding.top + plotHeight - (value / maxValue) * plotHeight;
-  };
-  const points = rows.map((row, index) => {
-    const x = padding.left + (rows.length <= 1 ? plotWidth / 2 : (index / (rows.length - 1)) * plotWidth);
-    const y = scaleY(Number(row[metric.field] || 0));
-    return { x, y, row };
-  });
-  const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
-  const total = values.reduce((sum, value) => sum + value, 0);
-  const average = values.length ? total / values.length : 0;
-
-  return (
-    <div className="llm-chart-panel">
-      <div className="metric-switch">
-        {llmChartMetrics.map((item) => (
-          <button
-            key={item.id}
-            className={item.id === activeMetricId ? 'active' : ''}
-            onClick={() => setActiveMetricId(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {rows.length === 0 ? (
-        <div className="empty-state">暂无时段数据</div>
-      ) : (
-        <>
-          <div className="line-chart-wrap">
-            <svg className="line-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${metric.label}分时趋势`}>
-              <line className="chart-axis" x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotHeight} />
-              <line className="chart-axis" x1={padding.left} y1={padding.top + plotHeight} x2={padding.left + plotWidth} y2={padding.top + plotHeight} />
-              {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-                const y = padding.top + plotHeight - ratio * plotHeight;
-                const value = maxValue * ratio;
-                return (
-                  <g key={ratio}>
-                    <line className="chart-grid-line" x1={padding.left} y1={y} x2={padding.left + plotWidth} y2={y} />
-                    <text className="chart-y-label" x={padding.left - 10} y={y + 4} textAnchor="end">
-                      {formatChartValue(value, metric)}
-                    </text>
-                  </g>
-                );
-              })}
-              {polylinePoints && <polyline className="chart-line" points={polylinePoints} />}
-              {points.map((point, index) => (
-                <g key={String(point.row.bucket_start || index)}>
-                  <circle className="chart-point" cx={point.x} cy={point.y} r="4">
-                    <title>{`${String(point.row.bucket_label || point.row.bucket_start)}: ${formatChartValue(Number(point.row[metric.field] || 0), metric)}`}</title>
-                  </circle>
-                  <text className="chart-x-label" x={point.x} y={padding.top + plotHeight + 24} textAnchor="middle">
-                    {String(point.row.bucket_start || '').replace(':00', '')}
-                  </text>
-                </g>
-              ))}
-            </svg>
-          </div>
-          <div className="chart-summary">
-            <span>峰值 {formatChartValue(maxValue, metric)}</span>
-            <span>平均 {formatChartValue(average, metric)}</span>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+type LatencyGroups = {
+  since: string | null; until: string;
+  groups: Array<{ id: string; title: string; outcomes: Record<string, number>;
+    rows: Array<LatencySummary & { key: string; label: string }> }>;
+};
 
 function PipelinePage() {
-  const { data, error, loading } = usePolling<Record<string, LatencySummary>>('/admin/api/pipeline/latency?days=7');
-  const { data: spans } = usePolling<PipelineSpan[]>('/admin/api/pipeline/spans?limit=100&slow=true');
-  const summaryRows = useMemo(() => Object.entries(data || {}), [data]);
-
-  return (
-    <>
-      <PageHeader title="链路耗时" subtitle="TopicPlanner、TopicReplier 和 TTS 首包延迟" />
-      <StatusBar loading={loading} error={error} />
-      <Panel title="7 日耗时分布">
-        <table>
-          <thead>
-            <tr>
-              <th>Span</th>
-              <th>Count</th>
-              <th>Avg</th>
-              <th>P50</th>
-              <th>P90</th>
-              <th>P99</th>
-              <th>Max</th>
-            </tr>
-          </thead>
-          <tbody>
-            {summaryRows.map(([name, row]) => (
-              <tr key={name}>
-                <td>{name}</td>
-                <td>{formatNumber(row.count)}</td>
-                <td>{formatMs(row.avg_ms)}</td>
-                <td>{formatMs(row.p50_ms)}</td>
-                <td>{formatMs(row.p90_ms)}</td>
-                <td>{formatMs(row.p99_ms)}</td>
-                <td>{formatMs(row.max_ms)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
-      <Panel title="慢 Span 明细" className="scroll-panel">
-        <SpanTable rows={spans || []} />
-      </Panel>
-    </>
-  );
-}
-
-function TracePage() {
-  const { data, error, loading } = usePolling<TraceSummary[]>('/admin/api/traces?days=7&limit=200');
-  const traces = data || [];
-  const [selectedTrace, setSelectedTrace] = useState<string | null>(null);
-  const [traceQuery, setTraceQuery] = useState('');
-  const visibleTraces = useMemo(() => {
-    const query = traceQuery.trim().toLowerCase();
-    if (!query) {
-      return traces;
-    }
-    return traces.filter((trace) => trace.trace_id.toLowerCase().includes(query));
-  }, [traceQuery, traces]);
-
-  useEffect(() => {
-    if (!selectedTrace && traces.length > 0) {
-      setSelectedTrace(traces[0].trace_id);
-    }
-  }, [selectedTrace, traces]);
-
-  function submitTraceSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextTrace = traceQuery.trim();
-    if (nextTrace) {
-      setSelectedTrace(nextTrace);
-    }
-  }
-
-  const detailUrl = selectedTrace ? `/admin/api/traces/${encodeURIComponent(selectedTrace)}` : null;
-  const { data: detail, error: detailError, loading: detailLoading } = usePolling<TraceDetail>(detailUrl);
-  const summary = detail?.summary || traces.find((trace) => trace.trace_id === selectedTrace);
-
-  return (
-    <>
-      <PageHeader title="链路追踪" subtitle="按 trace_id 汇总同一轮链路的耗时、Span 和 LLM Token" />
-      <StatusBar loading={loading} error={error} />
-      <section className="trace-layout">
-        <Panel title="最近 Trace" className="scroll-panel trace-list-panel">
-          <form className="trace-search" onSubmit={submitTraceSearch}>
-            <input
-              value={traceQuery}
-              onChange={(event) => setTraceQuery(event.target.value)}
-              placeholder="搜索或输入 trace_id"
-            />
-            <button type="submit">查看</button>
-          </form>
-          <table>
-            <thead>
-              <tr>
-                <th>Trace</th>
-                <th>Duration</th>
-                <th>Spans</th>
-                <th>LLM</th>
-                <th>Tokens</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleTraces.map((trace) => (
-                <tr
-                  key={trace.trace_id}
-                  className={trace.trace_id === selectedTrace ? 'selected-row' : ''}
-                  onClick={() => setSelectedTrace(trace.trace_id)}
-                >
-                  <td className="mono">{trace.trace_id}</td>
-                  <td>{formatMs(trace.duration_ms)}</td>
-                  <td>{formatNumber(trace.span_count)}</td>
-                  <td>{formatNumber(trace.llm_call_count)}</td>
-                  <td>{formatNumber(trace.total_tokens)}</td>
-                  <td>{formatShanghaiTime(trace.end_ts || trace.start_ts)}</td>
-                </tr>
-              ))}
-              {visibleTraces.length === 0 && (
-                <tr>
-                  <td colSpan={6}>没有匹配的 trace</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </Panel>
-        <div>
-          <StatusBar loading={detailLoading} error={detailError} />
-          <section className="metric-grid trace-metrics">
-            <MetricCard title="链路耗时" value={formatMs(summary?.duration_ms)} detail={`${formatNumber(summary?.span_count)} spans`} />
-            <MetricCard title="LLM Token" value={formatNumber(summary?.total_tokens)} detail={`${formatNumber(summary?.prompt_tokens)} prompt / ${formatNumber(summary?.completion_tokens)} completion`} />
-            <MetricCard title="LLM 耗时和调用" value={formatMs(summary?.total_llm_latency_ms)} detail={`${formatNumber(summary?.llm_call_count)} calls`} />
-            <MetricCard title="失败调用" value={formatNumber(summary?.failed_llm_calls)} detail={summary?.topic_id || 'topic_id -'} tone={summary?.failed_llm_calls ? 'danger' : undefined} />
-          </section>
-          <Panel title="Span 明细">
-            <SpanTable rows={detail?.spans || []} />
-          </Panel>
-          <Panel title="LLM 调用明细">
-            <LlmCallTable rows={detail?.llm_calls || []} />
-          </Panel>
-        </div>
-      </section>
-    </>
-  );
+  const [window, setWindow] = useState('24h');
+  const { data, error, loading } = usePolling<LatencyGroups>(`/admin/api/metrics/latency?window=${window}`, 60000);
+  const notes: Record<string, string> = {
+    chat: '总耗时从本批最早输入准备完成算起，结束于首段文本被服务端输出层接纳；不代表客户端收到。',
+    call: 'ACK 表示客户端确认接纳音频。说话结束估计到供应商判停发生在 ACK 总耗时之前。检索可能与模型生成重叠，各行的样本范围也可能不同。',
+    tts: '首包以 worker 生成有效音频为准。排队包含线程池、合成锁和 worker 等待；无首包的请求不填零。',
+    stage_chat: '完整回收包含停止任务、维护和上下文关闭；90秒预算仅针对维护。',
+    stage_call: '同次回收的多次停止或清理先累计再统计；清理包含部分停止任务，不能将所有行直接相加。',
+  };
+  const outcomeLabels: Record<string, string> = { success: '成功', error: '失败', cancelled: '取消', incomplete: '未完成', pending: '处理中', timeout: '超时', empty: '无音频', worker_lost: 'worker中断' };
+  return <>
+    <PageHeader title="链路耗时" subtitle="聊天、通话、TTS 与 Stage 回收 · 各阶段仅统计有效样本" />
+    <TimeRange value={window} onChange={setWindow} all />
+    <StatusBar loading={loading} error={error} />
+    {data && <p className="metrics-note">{data.since ? formatShanghaiTime(data.since) : '暂无记录'} 至 {formatShanghaiTime(data.until)} · UTC+8
+      {window === 'all' && ' · 所有数据指指标库当前保留的数据'}</p>}
+    {data?.groups.map(group => <Panel key={group.id} title={group.title}>
+      <p className="metrics-note">{notes[group.id]}</p>
+      <p className="metrics-outcomes">{group.id === 'call'
+        ? `全部轮次 ${Object.values(group.outcomes).reduce((sum, count) => sum + count, 0)} · 已收到首包 ACK ${group.outcomes.success ?? 0} · 已结束且无 ACK ${group.outcomes.incomplete ?? 0} · 待确认 ${group.outcomes.pending ?? 0}`
+        : Object.entries(group.outcomes).map(([key, count]) => `${outcomeLabels[key] || key} ${count}`).join(' · ') || '暂无请求记录'}</p>
+      <div className="table-overflow"><table><thead><tr><th>环节</th><th>样本数</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th></tr></thead>
+        <tbody>{group.rows.map(row => <tr key={row.key}><td>{row.label}</td><td>{row.count}</td>
+          {(['avg_ms', 'p50_ms', 'p90_ms', 'p99_ms'] as const).map(field => <td key={field}>{row.count ? formatMs(row[field]) : '—'}</td>)}
+        </tr>)}</tbody></table></div>
+    </Panel>)}
+  </>;
 }
 
 function DynamicsPage() {
@@ -1550,7 +1355,8 @@ function ConfigPage() {
   const { data: secrets, error: secretError, loading: secretLoading } = usePolling<SecretStatus>(`/admin/api/secrets/status?nonce=${secretRefreshNonce}`, 10000);
   const { data: validation, error: validationError, loading: validationLoading } = usePolling<RuntimeValidation>('/admin/api/config/validation', 10000);
   const { data: qqCredentialStatus, error: qqCredentialError, loading: qqCredentialLoading } = usePolling<QQMusicCredentialStatus>('/admin/api/qq-music/credential/status', 3000);
-  const [llmDraft, setLlmDraft] = useState<LlmConfigInfo | null>(null);
+  const [savedConfig, setSavedConfig] = useState<LlmConfigInfo | null>(null);
+  const [panelDrafts, setPanelDrafts] = useState<Partial<Record<ModelPanelTitle, Partial<LlmConfigInfo>>>>({});
   const [llmLoading, setLlmLoading] = useState(true);
   const [secretUpdates, setSecretUpdates] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1558,15 +1364,15 @@ function ConfigPage() {
   const [runtimeOverride, setRuntimeOverride] = useState<RuntimeStatus | null>(null);
   const [qqCredentialOverride, setQqCredentialOverride] = useState<QQMusicCredentialStatus | null>(null);
   const [qrImageNonce, setQrImageNonce] = useState(0);
-  const [llmApplyStatus, setLlmApplyStatus] = useState<LocalActionStatus | null>(null);
-  const [llmApplying, setLlmApplying] = useState(false);
+  const [llmApplyStatus, setLlmApplyStatus] = useState<(LocalActionStatus & { panel: ModelPanelTitle }) | null>(null);
+  const [applyingPanel, setApplyingPanel] = useState<ModelPanelTitle | null>(null);
   const [newSecretKey, setNewSecretKey] = useState('');
   const [newSecretValue, setNewSecretValue] = useState('');
 
   async function loadLlmConfig() {
     setLlmLoading(true);
     try {
-      setLlmDraft(await fetchJson<LlmConfigInfo>('/admin/api/llm/config'));
+      setSavedConfig(await fetchJson<LlmConfigInfo>('/admin/api/llm/config'));
       setActionError(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -1734,44 +1540,70 @@ function ConfigPage() {
     }
   }
 
-  async function applyLlmConfig() {
-    if (!llmDraft) {
-      return;
-    }
-    const clientModelErrors = validateClientModelTypes(
-      llmDraft.client_model_types || [],
-      llmDraft.module_bindings || [],
-    );
-    if (clientModelErrors.length > 0) {
-      const message = `配置未写入：${clientModelErrors[0]}`;
-      setActionError(message);
-      setLlmApplyStatus({ tone: 'error', message });
-      setActionMessage(null);
-      return;
-    }
-    setLlmApplying(true);
-    setLlmApplyStatus({ tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
-    try {
-      const result = await postJson<{ ok: boolean; validation: RuntimeValidation; runtime: RuntimeStatus; written: boolean; restarted: boolean }>('/admin/api/llm/config/apply', llmDraft);
-      if (!result.ok) {
-        const errors = result.validation.items.filter((item) => item.status === 'error' && item.scope !== 'world');
-        const message = `配置未写入：${errors[0]?.message || '核心配置校验失败'}`;
-        setActionError(message);
-        setLlmApplyStatus({ tone: 'error', message });
-        setActionMessage(null);
+  function updatePanelDraft(panel: ModelPanelTitle, draft?: Partial<LlmConfigInfo>) {
+    setPanelDrafts(previous => ({ ...previous, [panel]: draft }));
+    setLlmApplyStatus(previous => previous?.panel === panel ? null : previous);
+  }
+
+  async function applyLlmConfig(panel: ModelPanelTitle, patch: LlmConfigPatch) {
+    if (!savedConfig) return;
+    if (panel === '组件启动') {
+      const saved = componentStartupValues(savedConfig.component_startup);
+      const current = { ...saved, ...patch.component_startup };
+      const changed = Object.fromEntries(
+        (['speaking_enabled', 'vector_store_enabled'] as const)
+          .filter(key => current[key] !== saved[key])
+          .map(key => [key, current[key]]),
+      );
+      if (Object.keys(changed).length === 0) {
+        updatePanelDraft(panel);
+        setLlmApplyStatus({ panel, tone: 'info', message: '组件启动设置未变化，无需写入' });
         return;
       }
-      const message = result.restarted ? '配置已写入，runtime 已重启' : '配置已写入，runtime 当前未启动';
-      setActionError(null);
-      setActionMessage(message);
-      setLlmApplyStatus({ tone: 'success', message });
-      await loadLlmConfig();
+      patch = { component_startup: changed };
+    }
+    const candidate = { ...savedConfig, ...patch,
+      component_startup: { ...savedConfig.component_startup, ...patch.component_startup } };
+    const errors = validateClientModelTypes(candidate.client_model_types, candidate.module_bindings);
+    if ('call_setup_timeout' in patch) {
+      const raw = patch.call_setup_timeout;
+      const timeout = Number(raw);
+      if (raw === undefined || String(raw).trim() === '' || !Number.isFinite(timeout) || timeout <= 0) {
+        errors.push('通话建立总时限必须是正的有限秒数');
+      } else {
+        patch = { ...patch, call_setup_timeout: timeout };
+      }
+    }
+    if (errors.length) {
+      setLlmApplyStatus({ panel, tone: 'error', message: `配置未写入：${errors[0]}` });
+      return;
+    }
+    setApplyingPanel(panel);
+    setLlmApplyStatus({ panel, tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
+    try {
+      const result = await postJson<{ ok: boolean; config: LlmConfigInfo; validation: RuntimeValidation; restarted: boolean; runtime: RuntimeStatus }>(
+        '/admin/api/llm/config/apply', patch,
+      );
+      if (!result.ok) {
+        const error = result.validation.items.find(item => item.status === 'error' && item.scope !== 'world');
+        setLlmApplyStatus({ panel, tone: 'error', message: `配置未写入：${error?.message || '核心配置校验失败'}` });
+        return;
+      }
+      setSavedConfig(result.config);
+      updatePanelDraft(panel);
+      const actual = result.runtime;
+      if (actual) setRuntimeOverride(actual);
+      const ready = actual?.state === 'running' && actual.running;
+      const failed = ['failed', 'blocked'].includes(actual?.state || '');
+      const message = ready ? '配置已写入，runtime 当前运行中'
+        : failed ? `配置已写入，runtime 当前状态：${actual.state}；请查看配置检查和 last_error`
+        : `配置已写入，runtime 当前状态：${actual?.state || '未知'}；尚未确认运行就绪`;
+      setLlmApplyStatus({ panel, tone: failed ? 'error' : ready ? 'success' : 'info', message });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setActionError(message);
-      setLlmApplyStatus({ tone: 'error', message: `配置写入失败：${message}` });
+      setLlmApplyStatus({ panel, tone: 'error', message: `配置写入失败：${message}` });
     } finally {
-      setLlmApplying(false);
+      setApplyingPanel(null);
     }
   }
 
@@ -1788,7 +1620,7 @@ function ConfigPage() {
 
   return (
     <>
-      <PageHeader title="服务配置" subtitle="运行时启停、环境变量、资源和 LLM/VLM 配置检查" />
+      <PageHeader title="服务配置" subtitle="运行时启停、环境变量、资源和模型配置检查" />
       <StatusBar loading={runtimeLoading || secretLoading || validationLoading || qqCredentialLoading || llmLoading} error={runtimeError || secretError || validationError || qqCredentialError || actionError} />
       {actionMessage && <div className="status">{actionMessage}</div>}
       <section className="metric-grid">
@@ -1803,7 +1635,7 @@ function ConfigPage() {
           <button disabled={runtimeBusy} onClick={() => void runtimeAction('restart')}>重启</button>
           <button disabled={runtimeBusy} onClick={() => void runtimeAction('stop')}>停止</button>
         </div>
-        {runtime?.last_error && <pre className="error-block">{runtime.last_error}</pre>}
+        {effectiveRuntime?.last_error && <pre className="error-block">{effectiveRuntime.last_error}</pre>}
       </Panel>
       <Panel title="环境变量 / Secrets">
         <div className="secret-list">
@@ -1826,7 +1658,7 @@ function ConfigPage() {
         <div className="secret-add-row">
           <input value={newSecretKey} onChange={(event) => setNewSecretKey(event.target.value.toUpperCase())} placeholder="NEW_LLM_API_KEY" />
           <input value={newSecretValue} onChange={(event) => setNewSecretValue(event.target.value)} placeholder="API key" type="password" />
-          <button onClick={() => void addSecret()}>新增 LLM API Key</button>
+          <button onClick={() => void addSecret()}>新增模型 API Key</button>
         </div>
         <div className="action-row">
           <button onClick={() => void saveSecrets()}>保存 Secrets</button>
@@ -1843,22 +1675,28 @@ function ConfigPage() {
           </div>
         )}
       </Panel>
-      <Panel title="LLM Interfaces">
-        <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
-      </Panel>
-      <Panel title="客户端模型需求">
-        <ClientModelTypesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
-      </Panel>
-      <Panel title="LLMModule / VLMModule 绑定">
-        <LlmModuleBindingDraftEditor
-          draft={llmDraft}
-          onChange={setLlmDraft}
-          onApply={() => void applyLlmConfig()}
-          onReload={() => void loadLlmConfig()}
-          applyStatus={llmApplyStatus}
-          applying={llmApplying}
-        />
-      </Panel>
+      {modelPanels.map(({ title, Editor, select }) => {
+        const draft = savedConfig && { ...savedConfig, ...panelDrafts[title] };
+        const applying = applyingPanel === title;
+        return (
+          <Panel key={title} title={title}>
+            <fieldset className="model-panel-fields" disabled={applying}>
+              <Editor draft={draft} onChange={next => updatePanelDraft(title, select(next))} />
+            </fieldset>
+            <div className="action-row">
+              <button disabled={!draft || applyingPanel !== null} onClick={() => draft && void applyLlmConfig(title, select(draft))}>
+                {applying ? '修改中...' : '修改'}
+              </button>
+              <button className="secondary-button" disabled={!draft || applying} onClick={() => updatePanelDraft(title)}>
+                放弃草稿
+              </button>
+            </div>
+            {llmApplyStatus?.panel === title && (
+              <div className={`inline-status ${llmApplyStatus.tone}`}>{llmApplyStatus.message}</div>
+            )}
+          </Panel>
+        );
+      })}
       <Panel title="配置检查">
         <ValidationTable rows={validationItems} />
       </Panel>
@@ -1878,7 +1716,7 @@ function LlmInterfacesDraftEditor({
   }
   const currentDraft = draft;
 
-  function updateInterfaces(kind: 'available_llms' | 'available_vlms', next: Record<string, LlmInterfaceConfig>) {
+  function updateInterfaces(kind: InterfaceKind, next: Record<string, LlmInterfaceConfig>) {
     onChange({ ...currentDraft, [kind]: next });
   }
 
@@ -1886,8 +1724,87 @@ function LlmInterfacesDraftEditor({
     <div className="llm-config-editor">
       <InterfaceEditor title="LLM Interfaces" kind="available_llms" rows={currentDraft.available_llms} onChange={updateInterfaces} />
       <InterfaceEditor title="VLM Interfaces" kind="available_vlms" rows={currentDraft.available_vlms} onChange={updateInterfaces} />
+      <InterfaceEditor title="音频模型 Interface" kind="available_audio_models" rows={currentDraft.available_audio_models} onChange={updateInterfaces} />
     </div>
   );
+}
+
+function ComponentStartupDraftEditor({ draft, onChange }: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+}) {
+  if (!draft) return <div className="empty-state">暂无组件启动配置</div>;
+  const values = componentStartupValues(draft.component_startup);
+  function update(key: keyof ComponentStartup, value: boolean) {
+    onChange({ ...draft!, component_startup: { ...values, [key]: value } });
+  }
+  return <div className="llm-config-editor">
+    <div className="interface-flags">
+      <label><input type="checkbox" checked={values.speaking_enabled}
+        onChange={event => update('speaking_enabled', event.target.checked)} />启用语音合成（TTS）</label>
+      <label><input type="checkbox" checked={values.vector_store_enabled}
+        onChange={event => update('vector_store_enabled', event.target.checked)} />启用长期记忆向量库</label>
+    </div>
+    <p>默认均开启。关闭语音合成仍保留文字和表情，不代表演唱静音；关闭向量库仍保存 SQL 正本，重新启用不会自动回填。</p>
+    <p>点击“修改”只保存本面板有变化的开关；运行中的服务将请求重启，请以实际运行时状态确认是否就绪。</p>
+  </div>;
+}
+
+function RealtimeSpeechDraftEditor({ draft, onChange }: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+}) {
+  if (!draft) return <div className="empty-state">暂无实时音频配置</div>;
+  const currentDraft = draft;
+  const transport = draft.call_transport;
+  const speech = transport.realtime_speech || {};
+  function updateSpeech(field: string, value: unknown) {
+    onChange({ ...currentDraft, call_transport: { ...transport, realtime_speech: { ...speech, [field]: value } } });
+  }
+  const limits = [
+    ['close_timeout_seconds', '关闭超时（秒）', 5],
+    ['cleanup_timeout_seconds', '清理超时（秒）', 2],
+    ['write_queue_size', '发送队列容量', 32],
+    ['event_queue_size', '事件队列容量', 64],
+    ['max_audio_frame_bytes', '单帧音频上限（字节）', 65536],
+  ] as const;
+  return <div className="llm-config-editor">
+    <div className="interface-editor">
+      <h3>实时音频模型 Interface（阿里云）</h3>
+      <div className="interface-card realtime-fields">
+        {[
+          ['model', '模型名称'], ['api_key', 'API Key 或 $环境变量名'],
+          ['endpoint', 'WebSocket 地址（wss://）'], ['workspace_id', '工作空间 ID'],
+        ].map(([key, label]) => <label key={key}>{label}
+          <input value={String(speech[key] || '')} onChange={(event) => updateSpeech(key, event.target.value)} />
+        </label>)}
+      </div>
+      <p>连接地址与工作空间 ID 至少填写一项；填写连接地址时优先使用该地址。</p>
+    </div>
+    <div className="interface-editor">
+      <h3>实时音频模型 module（通话会话）</h3>
+      <div className="interface-flags">
+        <label><input type="checkbox" checked={Boolean(transport.enabled)} onChange={(event) =>
+          onChange({ ...currentDraft, call_transport: { ...transport, enabled: event.target.checked } })} />启用通话</label>
+        <label><input type="checkbox" checked={Boolean(speech.enabled)} onChange={(event) =>
+          updateSpeech('enabled', event.target.checked)} />启用实时音频模型</label>
+      </div>
+      <p>通话使用上方实时音频接口，需要同时启用两个开关。当前实时音频由服务端执行。</p>
+      <label>通话建立总时限（秒）
+        <input type="number" min={0.001} step="any" value={String(currentDraft.call_setup_timeout ?? 10)}
+          onChange={(event) => onChange({ ...currentDraft, call_setup_timeout: event.target.value })} />
+      </label>
+      <p>连接、模型就绪、源聊天切换及响铃共用这一总时限；明确连接或鉴权失败会立即结束。
+        旧连接和会话初始化超时配置不再限制生产拨号，修改后沿用现有重启流程。</p>
+      <div className="interface-card realtime-fields">
+        {limits.map(([key, label, defaultValue]) => <label key={key}>{label}
+          <input type="number" min={key.endsWith('_seconds') ? 0.001 : 1}
+            step={key.endsWith('_seconds') ? 'any' : 1}
+            value={Number(speech[key] ?? defaultValue)} onChange={(event) => updateSpeech(key, event.target.valueAsNumber)} />
+        </label>)}
+      </div>
+    </div>
+  </div>;
 }
 
 function ClientModelTypesDraftEditor({
@@ -1965,11 +1882,12 @@ function ClientModelTypesDraftEditor({
               <select
                 value={typeItem.model_kind}
                 onChange={(event) =>
-                  updateType(tIndex, { model_kind: event.target.value as 'llm' | 'vlm' })
+                  updateType(tIndex, { model_kind: event.target.value as ModelKind })
                 }
               >
                 <option value="llm">LLM</option>
                 <option value="vlm">VLM</option>
+                <option value="audio">音频模型</option>
               </select>
             </label>
             <label>
@@ -2003,17 +1921,9 @@ function ClientModelTypesDraftEditor({
 function LlmModuleBindingDraftEditor({
   draft,
   onChange,
-  onApply,
-  onReload,
-  applyStatus,
-  applying,
 }: {
   draft: LlmConfigInfo | null;
   onChange: (draft: LlmConfigInfo) => void;
-  onApply: () => void;
-  onReload: () => void;
-  applyStatus: LocalActionStatus | null;
-  applying: boolean;
 }) {
   if (!draft) {
     return <div className="empty-state">暂无模块绑定</div>;
@@ -2021,9 +1931,7 @@ function LlmModuleBindingDraftEditor({
   const currentDraft = draft;
   const llmNames = Object.keys(currentDraft.available_llms);
   const vlmNames = Object.keys(currentDraft.available_vlms);
-  const clientTypeNames = (currentDraft.client_model_types || []).map(
-    (item) => item.id,
-  );
+  const audioNames = Object.keys(currentDraft.available_audio_models);
 
   function updateBindings(next: ModuleBinding[]) {
     onChange({ ...currentDraft, module_bindings: next });
@@ -2035,14 +1943,10 @@ function LlmModuleBindingDraftEditor({
         bindings={currentDraft.module_bindings}
         llmNames={llmNames}
         vlmNames={vlmNames}
-        clientTypeNames={clientTypeNames}
+        audioNames={audioNames}
+        clientTypes={currentDraft.client_model_types}
         onChange={updateBindings}
       />
-      <div className="action-row">
-        <button disabled={applying} onClick={onApply}>{applying ? '修改中...' : '修改'}</button>
-        <button className="secondary-button" disabled={applying} onClick={onReload}>放弃草稿</button>
-      </div>
-      {applyStatus && <div className={`inline-status ${applyStatus.tone}`}>{applyStatus.message}</div>}
     </div>
   );
 }
@@ -2054,9 +1958,9 @@ function InterfaceEditor({
   onChange,
 }: {
   title: string;
-  kind: 'available_llms' | 'available_vlms';
+  kind: InterfaceKind;
   rows: Record<string, LlmInterfaceConfig>;
-  onChange: (kind: 'available_llms' | 'available_vlms', next: Record<string, LlmInterfaceConfig>) => void;
+  onChange: (kind: InterfaceKind, next: Record<string, LlmInterfaceConfig>) => void;
 }) {
   function updateName(oldName: string, newName: string) {
     const trimmed = newName.trim();
@@ -2083,10 +1987,10 @@ function InterfaceEditor({
 
   function addInterface() {
     let index = Object.keys(rows).length + 1;
-    let name = `${kind === 'available_llms' ? 'llm' : 'vlm'}_${index}`;
+    let name = `${kind === 'available_llms' ? 'llm' : kind === 'available_vlms' ? 'vlm' : 'audio'}_${index}`;
     while (rows[name]) {
       index += 1;
-      name = `${kind === 'available_llms' ? 'llm' : 'vlm'}_${index}`;
+      name = `${kind === 'available_llms' ? 'llm' : kind === 'available_vlms' ? 'vlm' : 'audio'}_${index}`;
     }
     onChange(kind, {
       ...rows,
@@ -2116,20 +2020,27 @@ function InterfaceEditor({
       </div>
       {Object.entries(rows).map(([name, item]) => (
         <div className="interface-card" key={name}>
-          <input className="interface-name-input" defaultValue={name} onBlur={(event) => updateName(name, event.target.value)} />
+          <input className="interface-name-input" defaultValue={name} onBlur={(event) => {
+            const nextName = event.target.value.trim() || name;
+            event.target.value = nextName;
+            updateName(name, nextName);
+          }} />
           <input className="interface-type-input" value={String(item.api_type || '')} onChange={(event) => updateField(name, 'api_type', event.target.value)} placeholder="api_type" />
           <input className="interface-model-input" value={String(item.model || '')} onChange={(event) => updateField(name, 'model', event.target.value)} placeholder="model" />
           <input className="interface-key-input" value={String(item.api_key || '')} onChange={(event) => updateField(name, 'api_key', event.target.value)} placeholder="$API_KEY" />
           <input className="interface-url-input" value={String(item.base_url || '')} onChange={(event) => updateField(name, 'base_url', event.target.value)} placeholder="base_url" />
-          <div className="interface-flags">
+          {kind !== 'available_audio_models' && <div className="interface-flags">
             <label><input type="checkbox" checked={Boolean(item.can_enable_thinking)} onChange={(event) => updateField(name, 'can_enable_thinking', event.target.checked)} /> thinking</label>
             <label><input type="checkbox" checked={Boolean(item.can_use_json)} onChange={(event) => updateField(name, 'can_use_json', event.target.checked)} /> json</label>
-          </div>
-          <textarea
+          </div>}
+          {kind === 'available_audio_models' ? <>
+            <label>最大输出 token 数<input type="number" min="1" step="1" value={Number(item.max_tokens ?? 2048)} onChange={(event) => updateField(name, 'max_tokens', event.target.valueAsNumber)} /></label>
+            <label>温度<input type="number" step="any" value={Number(item.temperature ?? 0.1)} onChange={(event) => updateField(name, 'temperature', event.target.valueAsNumber)} /></label>
+          </> : <textarea
             value={String(item.default_params_text || JSON.stringify(item.default_params || {}, null, 2))}
             onChange={(event) => updateDefaultParams(name, event.target.value)}
             placeholder="default_params JSON"
-          />
+          />}
           <button className="danger-button" onClick={() => removeInterface(name)}>删除</button>
         </div>
       ))}
@@ -2142,13 +2053,15 @@ function ModuleBindingEditor({
   bindings,
   llmNames,
   vlmNames,
-  clientTypeNames,
+  audioNames,
+  clientTypes,
   onChange,
 }: {
   bindings: ModuleBinding[];
   llmNames: string[];
   vlmNames: string[];
-  clientTypeNames: string[];
+  audioNames: string[];
+  clientTypes: ClientModelType[];
   onChange: (bindings: ModuleBinding[]) => void;
 }) {
   function updateBinding(index: number, patch: Partial<ModuleBinding>) {
@@ -2165,7 +2078,7 @@ function ModuleBindingEditor({
 
   return (
     <div className="module-binding-editor">
-      <h3>LLMModule / VLMModule 绑定</h3>
+      <h3>文本、视觉与音频模型模块绑定</h3>
       <div className="module-binding-table">
       <table>
         <thead>
@@ -2182,7 +2095,8 @@ function ModuleBindingEditor({
         </thead>
         <tbody>
           {bindings.map((binding, index) => {
-            const names = binding.kind === 'llm' ? llmNames : vlmNames;
+            const names = { llm: llmNames, vlm: vlmNames, audio: audioNames }[binding.kind];
+            const clientTypeNames = clientTypes.filter((item) => item.model_kind === binding.kind).map((item) => item.id);
             const options = names.includes(binding.interface_name) ? names : [binding.interface_name, ...names].filter(Boolean);
             return (
               <tr key={`${binding.kind}-${binding.path}`}>
@@ -2197,6 +2111,7 @@ function ModuleBindingEditor({
                 <td className="module-check-cell">
                   <input
                     type="checkbox"
+                    disabled={binding.kind === 'audio'}
                     checked={Boolean(binding.enable_thinking)}
                     onChange={(event) => updateBinding(index, { enable_thinking: event.target.checked })}
                   />
@@ -2315,66 +2230,6 @@ function Panel({ title, children, className }: { title: string; children: React.
       <h2>{title}</h2>
       <div className="panel-content">{children}</div>
     </section>
-  );
-}
-
-function SpanTable({ rows, compact = false }: { rows: PipelineSpan[]; compact?: boolean }) {
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Span</th>
-          <th>Duration</th>
-          {!compact && <th>Trace</th>}
-          <th>Status</th>
-          {!compact && <th>Time</th>}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.span_name}</td>
-            <td>{formatMs(row.duration_ms)}</td>
-            {!compact && <td className="mono">{row.trace_id}</td>}
-            <td><span className={`pill ${row.status}`}>{row.status}</span></td>
-            {!compact && <td>{formatShanghaiTime(row.start_ts)}</td>}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function LlmCallTable({ rows }: { rows: LlmCall[] }) {
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Module</th>
-          <th>Model</th>
-          <th>Latency</th>
-          <th>Total</th>
-          <th>Prompt</th>
-          <th>Completion</th>
-          <th>Status</th>
-          <th>Time</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.id}>
-            <td>{row.module_name}</td>
-            <td>{row.model_name || '-'}</td>
-            <td>{formatMs(row.latency_ms)}</td>
-            <td>{formatNumber(row.total_tokens)}</td>
-            <td>{formatNumber(row.prompt_tokens)}</td>
-            <td>{formatNumber(row.completion_tokens)}</td>
-            <td><span className={`pill ${row.success ? 'success' : 'error'}`}>{row.success ? 'success' : 'error'}</span></td>
-            <td>{formatShanghaiTime(row.ts)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 

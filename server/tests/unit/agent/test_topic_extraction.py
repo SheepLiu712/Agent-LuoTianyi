@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from src.agent.skills.cognitive.text_preprocessing import TextPreprocessingSkill
+from src.agent.skills.cognitive.jargon_recognition import JargonRecognitionSkill
 from src.agent.skills.cognitive.topic_extraction import TopicExtractionSkill
 from src.agent.skills.contracts import TopicExtraction
 
@@ -18,7 +18,7 @@ def skill(response=None, error=None):
     extractor = TopicExtractionSkill(
         {"llm_module": {"prompt_name": "topic_extraction_prompt"}},
         service,
-        understanding=TextPreprocessingSkill(song_names=("权御天下",)),
+        understanding=JargonRecognitionSkill(song_names=("权御天下",)),
     )
     return extractor, llm, service
 
@@ -103,6 +103,6 @@ async def test_task_cancellation_is_not_swallowed():
 @pytest.mark.asyncio
 async def test_missing_model_config_has_no_singing_or_raw_input_recall():
     service = SimpleNamespace(register_llm_module=Mock())
-    extractor = TopicExtractionSkill({}, service, understanding=TextPreprocessingSkill())
+    extractor = TopicExtractionSkill({}, service, understanding=JargonRecognitionSkill())
     assert await extractor.extract("唱歌") == TopicExtraction()
     service.register_llm_module.assert_not_called()

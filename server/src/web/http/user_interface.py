@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import time
 from typing import TYPE_CHECKING
@@ -9,11 +10,16 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.application.user.account import PasswordDecryptionError, decrypt_password, generate_keys, get_public_key_pem
+from src.application.user.agreement_service import AgreementAcceptanceError
+from src.application.user.call_capability import get_call_capability
+from src.application.user.registration_service import AGREEMENT_UPGRADE_DETAIL, RegistrationError
 from src.application.user.user_conversation_helper import UserConversationHelper
 from src.domain.agent import MediaRef
 from src.infrastructure.media import MediaResolutionError, MediaResolver
+from src.web.http.errors import agreement_error_response
 from src.web.http.rate_limits import enforce_rate_limit
 from src.web.http.types import (
+    AgreementAcceptRequest,
     AutoLoginRequest,
     DynamicCommentCreateRequest,
     DynamicCommentListRequest,
@@ -27,6 +33,7 @@ from src.web.http.types import (
     PreferenceOverwriteRequest,
     RegisterRequest,
     ResetAccountRequest,
+    UserDataResetRequest,
 )
 
 if TYPE_CHECKING:
@@ -98,34 +105,26 @@ class UserInterface:
         """
         if request is not None:
             enforce_rate_limit(request, "auth_auto_login", req.username)
-        auth_result = await self._run_auth_work(
-            server_runtime.database_manager.credential_service.authenticate_auto_login,
+        identity = await self._run_auth_work(
+            server_runtime.database_manager.credential_service.authenticate_auto_login_identity,
             req.username,
             req.token,
         )
-        if auth_result:
-            user_uuid = auth_result["user_uuid"]
-            elapsed_from_last_login = auth_result["elapsed_from_last_login"]
-            seconds_since_midnight = self._seconds_since_midnight()
-            if elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight:
-                if server_runtime.stage_manager is None:
-                    raise RuntimeError("StageManager is required for login dispatch")
-                server_runtime.stage_manager.record_login(
-                    user_uuid,
-                    server_runtime.agent_runtime.default_character_id,
-                    elapsed_from_last_login=elapsed_from_last_login,
-                )
-            background_tasks.add_task(
-                server_runtime.database_manager.conversation_service.prefill_buffer,
-                user_uuid,
+        if identity is None:
+            raise HTTPException(status_code=401, detail="登录失败，自动登录验证未通过")
+        blocked = self._agreement_required_response(server_runtime, identity["user_uuid"])
+        if blocked is not None:
+            return blocked
+        auth_result = await self._run_auth_work(
+            functools.partial(
+                server_runtime.database_manager.credential_service._rotate_authenticated_session,
+                username=req.username,
+                state=identity,
             )
-            return {
-                "message": "登录成功",
-                "user_id": req.username,
-                "login_token": auth_result["login_token"],
-                "message_token": auth_result["message_token"],
-            }
-        raise HTTPException(status_code=401, detail="登录失败，自动登录验证未通过")
+        )
+        if auth_result is None:
+            raise HTTPException(status_code=401, detail="登录失败，自动登录验证未通过")
+        return self._complete_login(req.username, auth_result, background_tasks, server_runtime, include_message=True)
 
     async def register(
         self,
@@ -136,16 +135,26 @@ class UserInterface:
         """用户注册"""
         if request is not None:
             enforce_rate_limit(request, "auth_register", req.username)
-        decrypted_password = self.decrypt_user_password(req.password)
-        success, msg = await self._run_auth_work(
-            server_runtime.database_manager.credential_service.register_user,
-            req.username,
-            decrypted_password,
-            req.invite_code,
-        )
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-        return {"message": "注册成功", "user_id": req.username}
+        try:
+            decrypted_password = self.decrypt_user_password(req.password)
+        except HTTPException as error:
+            # 服务端换钥后旧客户端仍能用旧公钥生成密文，只有到这里才会失败；
+            # 给稳定 code 让客户端刷新公钥后重试（同一 request_id，保持幂等）。
+            return agreement_error_response(400, str(error.detail), code="PASSWORD_DECRYPT_FAILED")
+        try:
+            return await self._run_auth_work(
+                functools.partial(
+                    server_runtime.registration_service.register,
+                    username=req.username,
+                    password=decrypted_password,
+                    invite_code=req.invite_code,
+                    registration_request_id=req.registration_request_id,
+                    agreement_version=req.agreement_version,
+                    accepted=req.accepted,
+                )
+            )
+        except RegistrationError as error:
+            return agreement_error_response(error.status_code, error.detail, code=error.code, **error.extra)
 
     async def reset_account(
         self,
@@ -167,6 +176,44 @@ class UserInterface:
             raise HTTPException(status_code=400, detail=msg)
         return {"message": "重置成功", "username": req.new_username}
 
+    async def reset_user_data(
+        self,
+        req: UserDataResetRequest,
+        token: str,
+        server_runtime: ServerRuntime,
+    ):
+        """Delete only data owned by the authenticated user, retaining account credentials."""
+        credentials = server_runtime.database_manager.credential_service
+        if credentials is None:
+            raise RuntimeError("CredentialService is required for user data reset")
+        valid, user_id = await self._run_auth_work(credentials.check_message_token, req.username, token)
+        if not valid or user_id is None:
+            raise HTTPException(status_code=401, detail="消息令牌无效或不属于该用户")
+        reset_service = server_runtime.user_reset_service
+        if reset_service is None:
+            raise RuntimeError("UserResetService is required for user data reset")
+        try:
+            report = await reset_service.reset(user_id)
+        except RuntimeError as error:
+            if str(error) in {"USER_DATA_RESET_IN_PROGRESS", "USER_INTERACTION_BUSY"}:
+                raise HTTPException(status_code=409, detail={"code": str(error), "retryable": True}) from error
+            raise HTTPException(status_code=500, detail={"code": "USER_DATA_RESET_FAILED"}) from error
+        payload = {
+            "ok": report.success,
+            "steps": [
+                {
+                    "name": step.name,
+                    "success": step.success,
+                    "deleted_count": step.deleted_count,
+                    "error": step.error,
+                }
+                for step in report.steps
+            ],
+        }
+        if not report.success:
+            raise HTTPException(status_code=500, detail={"code": "USER_DATA_RESET_FAILED", **payload})
+        return payload
+
     async def login(
         self,
         req: LoginRequest,
@@ -178,33 +225,137 @@ class UserInterface:
         if request is not None:
             enforce_rate_limit(request, "auth_login", req.username)
         decrypted_password = self.decrypt_user_password(req.password)
-        auth_result = await self._run_auth_work(
-            server_runtime.database_manager.credential_service.authenticate_password_login,
+        identity = await self._run_auth_work(
+            server_runtime.database_manager.credential_service.authenticate_password_identity,
             req.username,
             decrypted_password,
         )
-        if auth_result:
-            user_uuid = auth_result["user_uuid"]
-            background_tasks.add_task(
-                server_runtime.database_manager.conversation_service.prefill_buffer,
-                user_uuid,
+        if identity is None:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        state, stored_password, replacement_password = identity
+        blocked = self._agreement_required_response(server_runtime, state["user_uuid"])
+        if blocked is not None:
+            return blocked
+        auth_result = await self._run_auth_work(
+            functools.partial(
+                server_runtime.database_manager.credential_service._rotate_authenticated_session,
+                username=req.username,
+                state=state,
+                expected_password=stored_password,
+                replacement_password=replacement_password,
             )
-            elapsed_from_last_login = auth_result["elapsed_from_last_login"]
-            seconds_since_midnight = self._seconds_since_midnight()
-            if elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight:
-                if server_runtime.stage_manager is None:
-                    raise RuntimeError("StageManager is required for login dispatch")
-                server_runtime.stage_manager.record_login(
-                    user_uuid,
-                    server_runtime.agent_runtime.default_character_id,
-                    elapsed_from_last_login=elapsed_from_last_login,
+        )
+        if auth_result is None:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        return self._complete_login(req.username, auth_result, background_tasks, server_runtime)
+
+    async def accept_agreement(
+        self,
+        req: AgreementAcceptRequest,
+        server_runtime: ServerRuntime,
+        request: Request,
+    ):
+        username = req.credential.username
+        if request is not None:
+            bucket = "auth_login" if req.credential.kind == "password" else "auth_auto_login"
+            enforce_rate_limit(request, bucket, username)
+        credentials = server_runtime.database_manager.credential_service
+        if req.credential.kind == "password":
+            password = self.decrypt_user_password(req.credential.password)
+            identity = await self._run_auth_work(credentials.authenticate_password_identity, username, password)
+        else:
+            identity = await self._run_auth_work(
+                credentials.authenticate_auto_login_identity, username, req.credential.token
+            )
+        if identity is None:
+            raise HTTPException(status_code=401, detail="身份验证失败")
+        try:
+            accepted_at = await self._run_auth_work(
+                functools.partial(
+                    self._accept_agreement,
+                    server_runtime.agreement_service,
+                    credentials,
+                    username,
+                    identity,
+                    req.credential.kind,
+                    req.agreement_version,
+                    req.accepted,
                 )
-            return {
-                "login_token": auth_result["login_token"],
-                "message_token": auth_result["message_token"],
-                "user_id": req.username,
-            }
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+            )
+        except AgreementAcceptanceError as error:
+            return agreement_error_response(error.status_code, error.detail, code=error.code, **error.extra)
+        return {"agreement_version": req.agreement_version, "accepted_at": accepted_at}
+
+    @staticmethod
+    def _accept_agreement(
+        agreement_service,
+        credentials,
+        username: str,
+        identity,
+        credential_kind: str,
+        version: str,
+        accepted: bool,
+    ) -> str:
+        db = credentials.new_session()
+        try:
+            if credential_kind == "password":
+                state, stored_password, _replacement_password = identity
+            else:
+                state = identity
+                stored_password = None
+            if not credentials.lock_current_agreement_identity(
+                db,
+                username=username,
+                identity=state,
+                credential_kind=credential_kind,
+                expected_password=stored_password,
+            ):
+                db.rollback()
+                raise HTTPException(status_code=401, detail="身份验证失败")
+            return agreement_service.accept(db, user_uuid=state["user_uuid"], version=version, accepted=accepted)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    @staticmethod
+    def _agreement_required_response(server_runtime: ServerRuntime, user_uuid: str):
+        db = server_runtime.database_manager.credential_service.new_session()
+        try:
+            eligible = server_runtime.agreement_service.is_login_eligible(db, user_uuid)
+        finally:
+            db.close()
+        if not eligible:
+            return agreement_error_response(
+                403,
+                AGREEMENT_UPGRADE_DETAIL,
+                code="AGREEMENT_REQUIRED",
+                agreement_version=server_runtime.agreement_service.current_version,
+            )
+        return None
+
+    def _complete_login(self, username, auth_result, background_tasks, server_runtime, *, include_message=False):
+        user_uuid = auth_result["user_uuid"]
+        background_tasks.add_task(server_runtime.database_manager.conversation_service.prefill_buffer, user_uuid)
+        elapsed_from_last_login = auth_result["elapsed_from_last_login"]
+        seconds_since_midnight = self._seconds_since_midnight()
+        if elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight:
+            if server_runtime.stage_manager is None:
+                raise RuntimeError("StageManager is required for login dispatch")
+            server_runtime.stage_manager.record_login(
+                user_uuid,
+                server_runtime.agent_runtime.default_character_id,
+                elapsed_from_last_login=elapsed_from_last_login,
+            )
+        result = {
+            "login_token": auth_result["login_token"],
+            "message_token": auth_result["message_token"],
+            "user_id": username,
+        }
+        if include_message:
+            result["message"] = "登录成功"
+        return result
 
     @staticmethod
     def _seconds_since_midnight() -> float:
@@ -263,6 +414,17 @@ class UserInterface:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
         capped_count = min(max(1, count), 200)
         return await self.user_conversation_helper.handle_history_request(user_uuid, capped_count, end_index)
+
+    async def get_call_capability(
+        self, token: str, character_id: str, server_runtime: "ServerRuntime"
+    ) -> dict[str, object]:
+        """Return a token-authenticated, non-mutating call readiness projection."""
+        credentials = self.database_manager.credential_service
+        user_uuid = await self._run_auth_work(credentials.authenticate_message_token, token)
+        if user_uuid is None:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        view = get_call_capability(server_runtime, character_id)
+        return {"available": view.available, "character_id": view.character_id, "reason": view.reason}
 
     async def get_audio(self, token: str, message_uuid: str):
         """Stream one authenticated user's audio conversation media."""

@@ -1,4 +1,4 @@
-import { fetchCurrentAgreement } from '../hooks/useAuth';
+import { fetchCurrentAgreement } from '../features/account/useAuth';
 import { parseAgreementPayload } from '../utils/agreement';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -10,7 +10,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
-jest.mock('../utils/voice_playback_manager', () => ({
+jest.mock('../features/chat/voice_playback_manager', () => ({
   voicePlaybackManager: {},
 }));
 

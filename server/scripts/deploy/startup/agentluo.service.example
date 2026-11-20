@@ -1,0 +1,27 @@
+[Unit]
+Description=AgentLuo Server
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@SERVER_DIR@
+ExecStart=/bin/bash "@SERVER_DIR@/scripts/deploy/startup/start_linux.sh"
+Environment="HOME=@SERVICE_HOME@"
+Environment="PATH=@SERVER_DIR@/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-@INSTANCE_ENV_FILE@
+UMask=0077
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=120
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

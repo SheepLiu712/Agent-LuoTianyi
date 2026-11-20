@@ -91,6 +91,7 @@ class CitywalkSessionResult:
     destination_reason: str = ""
     poi_details: List[Dict[str, Any]] = field(default_factory=list)
     diary_text: str = ""
+    province: str = ""
 
 
 @dataclass

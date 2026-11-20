@@ -50,7 +50,7 @@ def test_fetch_current_agreement_accepts_valid_payload():
 
 
 def test_fetch_current_agreement_rejects_non_object_payload():
-    assert make_api(["invalid"]).fetch_current_agreement() == (False, "Failed to load agreement", {})
+    assert make_api(["invalid"]).fetch_current_agreement() == (False, "用户协议加载失败，请重试", {})
 
 
 def test_fetch_current_agreement_rejects_invalid_fields():
@@ -59,4 +59,4 @@ def test_fetch_current_agreement_rejects_invalid_fields():
         "blocks": [{"font_size": 16, "align": "left", "runs": [{"text": "正文"}]}],
     }
 
-    assert make_api(invalid).fetch_current_agreement() == (False, "Failed to load agreement", {})
+    assert make_api(invalid).fetch_current_agreement() == (False, "用户协议加载失败，请重试", {})

@@ -5,11 +5,13 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from support.chat_connection import StubChatConnection
+from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
-from src.adapter.websocket import WebSocketAdapter
-from src.stage import DueEvent, StageManager
-from src.web.websocket.service import WebSocketConnection
+from src.adapter.websocket.chat import WebSocketAdapter
+from src.agent.context import ConversationMode
+from src.stage import DueEvent
 
 
 class Socket:
@@ -18,7 +20,8 @@ class Socket:
 
 
 class ContextFactory:
-    async def create(self, interaction_id: str, *, user_id: str):
+    async def create(self, interaction_id: str, *, mode: ConversationMode, user_id: str):
+        assert mode is ConversationMode.CHAT
         return SimpleNamespace(
             identity=SimpleNamespace(
                 interaction_id=interaction_id,
@@ -88,6 +91,8 @@ def event(
         is_personal=is_personal,
         target_user_id=target_user_id,
         is_notified=is_notified,
+        title=event_id,
+        description=f"{event_id}的具体内容",
     )
 
 
@@ -156,13 +161,15 @@ class RecordingAgent:
             execution_id=context.execution_id,
             plan_id=plan.plan_id,
             status=d.ExecutionStatus.COMPLETED,
-            action_results=(d.ActionResult(
-                action_id=action.action_id,
-                status=d.ActionExecutionStatus.COMPLETED,
-                error_code=None,
-                irreversible_effect_committed=False,
-                effect_ref=None,
-            ),),
+            action_results=(
+                d.ActionResult(
+                    action_id=action.action_id,
+                    status=d.ActionExecutionStatus.COMPLETED,
+                    error_code=None,
+                    irreversible_effect_committed=False,
+                    effect_ref=None,
+                ),
+            ),
             output_started=False,
             error_code=None,
             retryable=False,
@@ -170,15 +177,15 @@ class RecordingAgent:
 
 
 async def connected_manager(provider: DueEvents, agent: RecordingAgent, **stage_config):
-    manager = StageManager(
+    manager = make_stage_manager(
         get_agent=lambda _: agent,
         adapter=WebSocketAdapter(),
         get_context_factory=lambda _: ContextFactory(),
         due_event_provider=provider,
         config={"stage": {"proactive_idle_seconds": 0.01, **stage_config}},
     )
-    stage = await manager.connect(
-        WebSocketConnection(Socket(), "user", "用户"),
+    stage = await manager._test_chat_adapter._open(
+        StubChatConnection(Socket(), "user", "用户"),
         "luotianyi",
     )
     return manager, stage
@@ -195,14 +202,16 @@ async def wait_until(predicate, timeout: float = 1.0) -> None:
 @pytest.mark.asyncio
 async def test_regular_login_filters_before_claim_and_merges_supported_due_events():
     # Given: a first login today has supported, unsupported, mismatched and notified candidates.
-    provider = DueEvents((
-        event("holiday"),
-        event("birthday", event_type="birthday", is_personal=True, target_user_id="user"),
-        event("unsupported", event_type="general"),
-        event("other-character", character_id="miku"),
-        event("other-user", is_personal=True, target_user_id="other"),
-        event("notified", is_notified=True),
-    ))
+    provider = DueEvents(
+        (
+            event("holiday"),
+            event("birthday", event_type="birthday", is_personal=True, target_user_id="user"),
+            event("unsupported", event_type="general"),
+            event("other-character", character_id="miku"),
+            event("other-user", is_personal=True, target_user_id="other"),
+            event("notified", is_notified=True),
+        )
+    )
     agent = RecordingAgent()
     manager, _stage = await connected_manager(provider, agent, login_reminder_wait=0.01)
 
@@ -223,7 +232,7 @@ async def test_periodic_scan_waits_for_idle_and_selects_one_candidate_per_stream
     provider = DueEvents((event("first"), event("second")))
     agent = RecordingAgent()
     manager, stage = await connected_manager(provider, agent, proactive_idle_seconds=0.03)
-    monkeypatch.setattr("src.stage.chat_stage.random.choice", lambda values: values[-1])
+    monkeypatch.setattr("src.stage.chat.chat_stage.random.choice", lambda values: values[-1])
 
     # When: scans run before and after the Stage reaches the effective idle threshold.
     assert await manager.scan_due_events() == 0

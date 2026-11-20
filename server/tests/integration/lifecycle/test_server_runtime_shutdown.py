@@ -1,8 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
+from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor
 from src.server_runtime import ServerRuntime
-from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 
 
 def test_server_runtime_shutdown_releases_agent_skills_before_database():
@@ -26,6 +26,7 @@ def test_server_runtime_shutdown_releases_agent_skills_before_database():
         observability=SimpleNamespace(),
         client_llm_executor=ClientLLMExecutor(),
         agreement_service=SimpleNamespace(),
+        registration_service=SimpleNamespace(),
         owns_observability=False,
     )
 

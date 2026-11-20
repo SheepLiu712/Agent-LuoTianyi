@@ -1,7 +1,7 @@
 """角色回复生成器只消费已经规范化的用户上下文。"""
 
 from src.agent.context.models import UserContextSnapshot, UserPreferences
-from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
+from src.agent.skills.cognitive._reply_resources import ReplyResources
 
 
 def test_reply_generator_renders_typed_preferences():
@@ -15,7 +15,7 @@ def test_reply_generator_renders_typed_preferences():
         )
     )
 
-    rendered = CharacterReplyGenerator._build_preference_context(context)
+    rendered = ReplyResources._build_preference_context(context)
 
     assert "用户希望你是他的：伙伴" in rendered
     assert "用户希望你的表达风格偏向：简洁" in rendered

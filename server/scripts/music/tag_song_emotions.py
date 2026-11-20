@@ -15,6 +15,7 @@ if str(SERVER_ROOT) not in sys.path:
 from src.agent.skills.expression.singing import SingingBackend
 from src.infrastructure.models.service import LLMService
 from src.utils.helpers import load_config
+from src.utils.server_paths import ServerPaths
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,7 +60,8 @@ async def tag_songs(
 def main() -> None:
     args = parse_args()
     os.chdir(SERVER_ROOT)
-    config = load_config(args.config)
+    paths = ServerPaths.from_environment()
+    config = paths.resolve_config(load_config(str(paths.resolve(args.config))))
     llm_service = LLMService(config.get("llm_service", {}))
     singing_config = config.get("agent_runtime", {}).get("skills", {}).get("singing", {})
     singing = SingingBackend(singing_config, llm_service=llm_service)

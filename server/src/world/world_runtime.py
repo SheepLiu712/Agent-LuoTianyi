@@ -81,7 +81,9 @@ class WorldRuntime:
             if self.learn_sing_songs_tasks and self._task_enabled("qq_music_credential_refresh")
             else None
         )
-        self.vcpedia_new_song_task = VCPediaNewSongTask(self.config.get("song_knowledge", {}))
+        self.vcpedia_new_song_task = (
+            VCPediaNewSongTask(self.config.get("song_knowledge", {})) if self._task_enabled("song_knowledge") else None
+        )
         self.bili_event_update_tasks = self._build_bili_event_update_tasks()
         self.bili_event_update_task = self.bili_event_update_tasks[0] if self.bili_event_update_tasks else None
         self.dynamic_interaction_task = (
@@ -94,8 +96,16 @@ class WorldRuntime:
             else None
         )
         self.diary_tasks = self._build_diary_tasks()
-        self.proactive_topic_check_task = ProactiveTopicCheckTask(self.config.get("proactive_topic_check", {}))
-        self.expired_event_cleanup_task = ExpiredEventCleanupTask(self.config.get("expired_event_cleanup", {}))
+        self.proactive_topic_check_task = (
+            ProactiveTopicCheckTask(self.config.get("proactive_topic_check", {}))
+            if self._task_enabled("proactive_topic_check")
+            else None
+        )
+        self.expired_event_cleanup_task = (
+            ExpiredEventCleanupTask(self.config.get("expired_event_cleanup", {}))
+            if self._task_enabled("expired_event_cleanup")
+            else None
+        )
 
         self.tasks: List["WorldTask"] = [
             *self.citywalk_tasks,
@@ -114,6 +124,10 @@ class WorldRuntime:
             if hasattr(task, "ensure_dependencies"):
                 task.ensure_dependencies()
 
+        if self.citywalk_tasks and not self.server_runtime.agent_runtime.vector_store.enabled:
+            for task in self.citywalk_tasks:
+                task.citywalk_service = None
+            self.logger.warning("Citywalk requested but skipped: vector projection is disabled")
         self._register_clock_actions()
         self._modules_initialized = True
 
@@ -147,8 +161,6 @@ class WorldRuntime:
             raise RuntimeError(f"WorldRuntime dependencies are missing: {', '.join(missing)}")
         if not self._modules_initialized:
             raise RuntimeError("WorldRuntime dependencies are missing: initialized modules")
-        if not self.tasks:
-            raise RuntimeError("WorldRuntime dependency is missing: tasks")
         for task in self.tasks:
             if task is None:
                 raise RuntimeError("WorldRuntime dependency is missing: task")
@@ -285,4 +297,7 @@ class WorldRuntime:
 
     def _task_enabled(self, config_key: str) -> bool:
         cfg = self.config.get(config_key, {})
-        return bool(cfg.get("enabled", True))
+        enabled = cfg.get("enabled", True)
+        if type(enabled) is not bool:
+            raise TypeError(f"world.{config_key}.enabled 必须是布尔值")
+        return enabled

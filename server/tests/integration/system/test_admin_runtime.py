@@ -7,18 +7,18 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from src.infrastructure.observability import ObservabilityService
 from src.application.admin import qq_music_credential_refresh as qq_refresh_module
-from src.web.admin.admin_interface import _collect_llm_api_key_names
 from src.application.admin.admin_shell import init_admin_shell, shutdown_admin_shell
 from src.application.admin.auth import AdminAuthError, AdminAuthService
-from src.infrastructure.config.store import ConfigStore
-from src.infrastructure.config.validation import RuntimeConfigValidator
-from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
 from src.application.admin.qq_music_credential_refresh import QQMusicCredentialRefreshService
 from src.application.admin.runtime_supervisor import RuntimeSupervisor
+from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.store import ConfigStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
+from src.infrastructure.observability import ObservabilityService
 from src.utils.helpers import apply_env_variables
+from src.web.admin.admin_interface import _collect_llm_api_key_names
 
 
 def minimal_config(tmp_path: Path) -> dict:
@@ -73,10 +73,28 @@ def minimal_config(tmp_path: Path) -> dict:
             "event_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
             "memory_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
         },
-        "chat_session_manager": {"conversation_service": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
         "infrastructure": {},
         "agent_runtime": {
             "skills": {
+                "jargon_recognition": {
+                    "song_entity_linker": {
+                        "songname_file": str(tmp_path / "song_name_keywords.txt"),
+                        "lyric_file": str(tmp_path / "song_lyric_keywords.txt"),
+                    }
+                },
+                "memory_write": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                "cognitive_maintenance": {
+                    "user_profile": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                    "conversation_compaction": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                },
+                "topic_extraction": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                "reply": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
+                "knowledge": {
+                    "song_database": {
+                        "db_folder": str(tmp_path),
+                        "db_file": "knowledge_db.db",
+                    }
+                },
                 "singing": {
                     "song_emotion_tagger": {
                         "llm": {"name": "main"},
@@ -95,7 +113,7 @@ def minimal_config(tmp_path: Path) -> dict:
                     }
                 },
                 "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
-                "diary": {"diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
+                "dynamic": {"diary_composer": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
             },
             "character_registry": {
                 "characters": {
@@ -104,27 +122,6 @@ def minimal_config(tmp_path: Path) -> dict:
                         "llm_tone_mapping_file": str(tmp_path / "tone.json"),
                     }
                 }
-            },
-            "agent": {
-                "preprocessing": {
-                    "song_entity_linker": {
-                        "songname_file": str(tmp_path / "song_name_keywords.txt"),
-                        "lyric_file": str(tmp_path / "song_lyric_keywords.txt"),
-                    }
-                },
-                "memory": {
-                    "memory_writer": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                    "user_profile": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                },
-                "topic_extractor": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                "main_chat": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                "date_detector": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
-                "song_knowledge": {
-                    "song_database": {
-                        "db_folder": str(tmp_path),
-                        "db_file": "knowledge_db.db",
-                    }
-                },
             },
         },
         "world": {
@@ -276,6 +273,38 @@ def test_validator_uses_custom_llm_api_keys_without_hardcoded_provider_keys(tmp_
     secret_names = {item["name"] for item in result["items"] if item["name"].startswith("secret.")}
     assert secret_names == {"secret.JWT_SECRET", "secret.AMAP_KEY"}
     assert _collect_llm_api_key_names(config) == {"CUSTOM_CHAT_API_KEY", "CUSTOM_VISION_API_KEY"}
+
+
+@pytest.mark.parametrize(
+    "kind, collection",
+    [
+        ("llm", "available_llms"),
+        ("vlm", "available_vlms"),
+        ("audio", "available_audio_models"),
+    ],
+)
+@pytest.mark.parametrize("key_name", ["CUSTOM_MODEL_API_KEY", "QWEN_API_KEY"])
+def test_validator_rejects_unresolved_referenced_model_key(tmp_path, monkeypatch, kind, collection, key_name):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    monkeypatch.delenv(key_name, raising=False)
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    config = minimal_config(tmp_path)
+    config["llm_service"][collection] = {
+        "custom": {
+            "api_type": "openai",
+            "model": "custom-model",
+            "base_url": "https://example.invalid/v1",
+            "api_key": f"${key_name}",
+        }
+    }
+
+    result = validator.validate(apply_env_variables(copy.deepcopy(config)))
+
+    assert result["core_ok"] is False
+    item = next(item for item in result["items"] if item["name"] == f"{kind}.custom")
+    assert item["status"] == "error"
+    assert "api_key 环境变量未解析" in item["message"]
 
 
 def test_supervisor_blocks_start_when_core_validation_fails(tmp_path, monkeypatch):
@@ -463,10 +492,62 @@ def test_access_log_filter_redacts_fallback_message():
     assert "REDACTED" in record.getMessage()
 
 
+@pytest.mark.parametrize("legacy", [-1, True, None, "bad", float("nan")])
+def test_legacy_qwen_setup_limits_do_not_block_production_validation(tmp_path, monkeypatch, legacy):
+    monkeypatch.setenv("JWT_SECRET", "offline-jwt")
+    monkeypatch.setenv("AMAP_KEY", "offline-amap")
+    config = minimal_config(tmp_path)
+    config["call_transport"] = {
+        "enabled": True,
+        "realtime_speech": {
+            "enabled": True,
+            "api_key": "offline",
+            "model": "qwen3.5-omni-realtime",
+            "endpoint": "wss://provider.invalid/realtime",
+            "connect_timeout_seconds": legacy,
+            "session_timeout_seconds": legacy,
+        },
+    }
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    assert validator.validate(config)["core_ok"] is True
+
+
+@pytest.mark.parametrize("value", [0, -1, True, None, "30", float("nan"), float("inf")])
+def test_invalid_call_setup_apply_does_not_write_or_restart(tmp_path, monkeypatch, value):
+    from src.web.admin import admin_interface
+
+    monkeypatch.setenv("JWT_SECRET", "offline-jwt")
+    monkeypatch.setenv("AMAP_KEY", "offline-amap")
+    config = minimal_config(tmp_path)
+    store = ConfigStore(tmp_path / "config.json", root_dir=tmp_path)
+    store.write_raw(config, backup=False)
+    before = store.path.read_bytes()
+    secrets = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secrets)
+    observability = ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})
+    supervisor = RuntimeSupervisor(
+        config_store=store, secret_store=secrets, validator=validator, observability=observability
+    )
+    shell = SimpleNamespace(
+        config_store=store, secret_store=secrets, validator=validator, runtime_supervisor=supervisor
+    )
+    monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
+    try:
+        result = asyncio.run(admin_interface.apply_llm_config({"call_setup_timeout": value}))
+        assert result["ok"] is False
+        assert result["written"] is False and result["restarted"] is False
+        assert store.path.read_bytes() == before
+        assert not (tmp_path / "backups").exists()
+        assert supervisor.status()["state"] == "stopped"
+        assert supervisor.status()["last_started_at"] is None
+    finally:
+        observability.close()
+
+
 def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
     config = minimal_config(tmp_path)
     view = build_llm_config_view(config)
-    assert any(binding["path"] == "agent_runtime.agent.main_chat.llm_module" for binding in view["module_bindings"])
+    assert any(binding["path"] == "agent_runtime.skills.reply.llm_module" for binding in view["module_bindings"])
 
     payload = {
         "available_llms": {
@@ -484,23 +565,21 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
             {
                 **binding,
                 "interface_name": (
-                    "main2"
-                    if binding["path"] == "agent_runtime.agent.main_chat.llm_module"
-                    else binding["interface_name"]
+                    "main2" if binding["path"] == "agent_runtime.skills.reply.llm_module" else binding["interface_name"]
                 ),
                 "enable_thinking": binding["path"]
                 in {
-                    "agent_runtime.agent.main_chat.llm_module",
+                    "agent_runtime.skills.reply.llm_module",
                     "agent_runtime.skills.image_understanding.vlm_module",
                 },
                 "use_json": binding["path"]
                 in {
-                    "agent_runtime.agent.main_chat.llm_module",
+                    "agent_runtime.skills.reply.llm_module",
                     "agent_runtime.skills.image_understanding.vlm_module",
                 },
                 "params": (
                     {"temperature": 0.1}
-                    if binding["path"] == "agent_runtime.agent.main_chat.llm_module"
+                    if binding["path"] == "agent_runtime.skills.reply.llm_module"
                     else (
                         {"max_tokens": 512}
                         if binding["path"] == "agent_runtime.skills.image_understanding.vlm_module"
@@ -516,7 +595,7 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
 
     assert "main2" in next_config["llm_service"]["available_llms"]
     assert "default_params_text" not in next_config["llm_service"]["available_llms"]["main2"]
-    main_chat_llm = next_config["agent_runtime"]["agent"]["main_chat"]["llm_module"]["llm"]
+    main_chat_llm = next_config["agent_runtime"]["skills"]["reply"]["llm_module"]["llm"]
     assert main_chat_llm["name"] == "main2"
     assert main_chat_llm["enable_thinking"] is True
     assert main_chat_llm["use_json"] is True
@@ -605,5 +684,190 @@ def test_qq_music_credential_refresh_runs_in_background(tmp_path, monkeypatch):
     assert status["state"] == "success"
     assert status["success"] is True
     assert credential_file.exists()
-    assert legacy_file.exists()
+    assert not legacy_file.exists()
     assert learner.qq_credential_valid is True
+
+
+def test_audio_model_secret_references_are_visible():
+    config = {
+        "llm_service": {"available_audio_models": {"audio": {"api_key": "$AUDIO_MODEL_KEY"}}},
+        "call_transport": {"realtime_speech": {"api_key": "$REALTIME_MODEL_KEY"}},
+    }
+    assert _collect_llm_api_key_names(config) == {"AUDIO_MODEL_KEY", "REALTIME_MODEL_KEY"}
+
+
+@pytest.mark.parametrize("characters", [None, {"luotianyi": {"server_config_path": "missing/tts.yaml"}}])
+def test_validator_allows_disabled_speaking_without_tts_resources(tmp_path, monkeypatch, characters):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"] = {"enabled": False}
+    if characters is not None:
+        config["agent_runtime"]["skills"]["speaking"]["characters"] = characters
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    tts_items = [item for item in result["items"] if item["name"].startswith("resource.tts")]
+    assert len(tts_items) == 1
+    assert tts_items[0]["status"] == "disabled"
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_validator_rejects_non_boolean_speaking_enabled(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"]["enabled"] = value
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(
+        item["status"] == "error" and "agent_runtime.skills.speaking.enabled" in item["message"]
+        for item in result["items"]
+    )
+
+
+@pytest.mark.parametrize("speaking", [{}, {"enabled": True}])
+def test_validator_enabled_or_omitted_speaking_still_requires_tts_resources(tmp_path, monkeypatch, speaking):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["skills"]["speaking"] = speaking
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == "resource.tts" and item["status"] == "error" for item in result["items"])
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "false", [], {}])
+def test_validator_rejects_non_boolean_vector_enabled(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": value}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == "agent_runtime.vector_store.enabled" and item["status"] == "error" for item in result["items"])
+
+
+def test_validator_reports_disabled_vectors_without_embedding_configuration(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": False}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    assert any(item["name"] == "resource.vector_store" and item["status"] == "disabled" for item in result["items"])
+
+
+def test_citywalk_disabled_does_not_require_amap_but_jwt_stays_required(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.delenv("AMAP_KEY", raising=False)
+    config = minimal_config(tmp_path)
+    config["world"]["citywalk"]["enabled"] = False
+    config["world"]["citywalk"]["characters"] = {"luotianyi": {"enabled": True}}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    assert not any(item["name"] == "secret.AMAP_KEY" and item["status"] == "error" for item in result["items"])
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    assert validator.validate(config)["core_ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_secrets_required_status_matches_citywalk_condition(tmp_path, monkeypatch):
+    from src.web.admin import admin_interface
+
+    config = minimal_config(tmp_path)
+    config["world"]["citywalk"]["enabled"] = False
+    store = ConfigStore(tmp_path / "config.json", root_dir=tmp_path)
+    store.write_raw(config)
+    secrets = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secrets)
+    shell = SimpleNamespace(config_store=store, secret_store=secrets, validator=validator)
+    monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
+
+    status = await admin_interface.secrets_status()
+
+    assert status["JWT_SECRET"]["required"] is True
+    assert status.get("AMAP_KEY", {}).get("required", False) is False
+    config["world"]["citywalk"]["enabled"] = True
+    store.write_raw(config)
+    assert (await admin_interface.secrets_status())["AMAP_KEY"]["required"] is True
+
+
+@pytest.mark.parametrize("task,value", [("citywalk", "false"), ("auto_song_learner", 0), ("qq_music_credential_refresh", 1), ("song_knowledge", None), ("bili_dynamic_fetcher", []), ("dynamic_interaction", {}), ("diary", "false"), ("proactive_topic_check", 0), ("expired_event_cleanup", 1)])
+def test_validator_rejects_non_boolean_world_task_enabled(tmp_path, monkeypatch, task, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["world"].setdefault(task, {})["enabled"] = value
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == f"world.{task}.enabled" and item["status"] == "error" for item in result["items"])
+
+
+def test_mixed_citywalk_warning_preserves_requested_enabled_and_amap_requirement(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["agent_runtime"]["vector_store"] = {"enabled": False}
+    config["world"]["citywalk"] = {"enabled": True, "amap": {"api_key": "test"}}
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    result = validator.validate(config)
+
+    assert result["core_ok"] is True
+    warning = next(item for item in result["items"] if item["name"] == "citywalk.vector_projection")
+    assert warning["status"] == "warning"
+    assert validator.apply_world_disablements(config, result)["world"]["citywalk"]["enabled"] is True
+    monkeypatch.delenv("AMAP_KEY")
+    assert validator.validate(config)["core_ok"] is False
+
+
+def test_explicit_disabled_world_does_not_read_bili_or_qq_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    config = minimal_config(tmp_path)
+    config["world"]["citywalk"]["enabled"] = False
+    config["world"]["bili_dynamic_fetcher"]["enabled"] = False
+    config["world"]["auto_song_learner"]["enabled"] = False
+    config["world"]["bili_dynamic_fetcher"]["bili_cookie_file"] = str(tmp_path / "do-not-read-cookie")
+    config["world"]["auto_song_learner"]["qq_credential_file"] = str(tmp_path / "do-not-read-qq")
+    original = Path.exists
+    def guarded(self):
+        if self.name.startswith("do-not-read"):
+            pytest.fail("disabled task credential path was inspected")
+        return original(self)
+    monkeypatch.setattr(Path, "exists", guarded)
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+    assert validator.validate(config)["core_ok"] is True
+
+
+@pytest.mark.parametrize("world,path", [([], "world"), ({"citywalk": []}, "world.citywalk")])
+def test_invalid_new_world_switch_container_is_a_validation_error(tmp_path, monkeypatch, world, path):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    config = minimal_config(tmp_path)
+    config["world"] = world
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=SecretStore(tmp_path / "secrets.local.env"))
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    assert any(item["name"] == path and item["status"] == "error" for item in result["items"])
+    assert validator.required_secret_keys(config) == ["JWT_SECRET", "AMAP_KEY"]

@@ -1,70 +1,42 @@
+import json
+
 import pytest
 
-from src.web.websocket import WSEventType, WSMessage
-from src.web.websocket.service import WebSocketConnection, WebSocketService
-
-
-class FakeWebSocket:
-    def __init__(self):
-        self.sent = []
-
-    async def send_json(self, event):
-        self.sent.append(event)
-
-
-def _message(client_msg_id="msg-1"):
-    return WSMessage(
-        event_type=WSEventType.USER_TEXT.value,
-        payload={"message": "hello"},
-        client_msg_id=client_msg_id,
-    )
-
-
-def _connection(*, negative_ack=False):
-    connection = WebSocketConnection(FakeWebSocket(), user_uuid="user-1", user_name="alice")
-    if negative_ack:
-        connection.capabilities.add("negative_ack_v1")
-    return connection
+from src.adapter.websocket.chat import WebSocketAdapter
+from tests.integration.websocket.test_adapter_network_boundary import _Manager
 
 
 @pytest.mark.asyncio
-async def test_positive_and_overload_ack_payloads_are_explicit():
-    service = WebSocketService()
-    connection = _connection(negative_ack=True)
-    event = _message()
-
-    await service.send_ack_event(connection, event)
-    await service.send_nack_event(
-        connection,
-        event,
-        code="OVERLOADED",
-        message="chat ingress queue is full",
-        retryable=True,
+@pytest.mark.parametrize("negative_ack", [False, True])
+async def test_raw_input_ack_and_overload_respect_negotiated_capability(negative_ack):
+    adapter = WebSocketAdapter()
+    manager = _Manager()
+    adapter.initialize(manager)
+    connection = await adapter.open(
+        user_id="user",
+        connection_id=object(),
+        capabilities=frozenset({"negative_ack_v1"}) if negative_ack else frozenset(),
     )
-
-    assert connection.websocket.sent[0]["payload"]["ok"] is True
-    assert connection.websocket.sent[1]["payload"] == {
-        "ok": False,
-        "received_event_type": WSEventType.USER_TEXT.value,
-        "code": "OVERLOADED",
-        "message": "chat ingress queue is full",
-        "retryable": True,
-    }
-
-
-@pytest.mark.asyncio
-async def test_client_without_negative_ack_capability_receives_server_error():
-    service = WebSocketService()
-    connection = _connection()
-    event = _message()
-
-    await service.send_nack_event(
-        connection,
-        event,
-        code="OVERLOADED",
-        message="chat ingress queue is full",
-        retryable=True,
-    )
-
-    assert connection.websocket.sent[0]["type"] == WSEventType.SERVER_ERROR.value
-    assert "ok" not in connection.websocket.sent[0]["payload"]
+    ready = await adapter.next_output(connection)
+    adapter.complete_output(connection, ready.delivery_id)
+    message = {"type": "user_text", "client_msg_id": "one", "payload": {"message": "hello"}}
+    try:
+        await adapter.receive(connection, json.dumps(message))
+        accepted = await adapter.next_output(connection)
+        assert json.loads(accepted.message)["payload"]["ok"] is True
+        adapter.complete_output(connection, accepted.delivery_id)
+        manager.stage.available = False
+        message["client_msg_id"] = "two"
+        await adapter.receive(connection, json.dumps(message))
+        rejected = await adapter.next_output(connection)
+        body = json.loads(rejected.message)
+        assert body["type"] == ("server_ack" if negative_ack else "error")
+        assert body["payload"]["code"] == "OVERLOADED"
+        assert body["payload"]["retryable"] is True
+        assert body["reply_to"] == "two"
+        if negative_ack:
+            assert body["payload"]["ok"] is False
+        else:
+            assert "ok" not in body["payload"]
+    finally:
+        await adapter.close()

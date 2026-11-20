@@ -1,4 +1,4 @@
-import { formatVoiceDuration, voiceBubbleWidth } from '../utils/voice_gesture';
+import { formatVoiceDuration, voiceBubbleWidth } from '../features/chat/voice_gesture';
 
 describe('voice duration formatting and bubble sizing', () => {
   it.each([

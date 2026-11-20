@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional
 
 import requests
 
+from src.utils.server_paths import resolve_server_path
+
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
@@ -18,7 +20,7 @@ from src.world.get_new_songs.source_extraction import (  # noqa: E402
     merge_missing,
 )
 from src.world.get_new_songs.text_conversion import convert_text  # noqa: E402
-from src.world.get_new_songs.wiki_api import fetch_wikitext, user_agent  # noqa: E402
+from src.world.get_new_songs.wiki_api import WikiAPIError, fetch_wikitext, user_agent  # noqa: E402
 from src.world.get_new_songs.wikitext_parser import parse_extraction  # noqa: E402
 
 
@@ -39,9 +41,9 @@ class VCPediaFetcher:
         self.llm_client = None
 
         # Define directories to search
-        self.data_dir = Path(config.get("data_dir", "data/crawled_data"))
+        self.data_dir = resolve_server_path(config.get("data_dir", "data/crawled_data"))
         # Default save directory
-        self.default_save_dir = Path(crawler_config.get("output_dir", "data/crawled_data"))
+        self.default_save_dir = resolve_server_path(crawler_config.get("output_dir", "data/crawled_data"))
 
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": user_agent()})
@@ -159,8 +161,17 @@ class VCPediaFetcher:
     def _fetch_page(self, page_name: str) -> Optional[str]:
         try:
             return fetch_wikitext(self.base_url, page_name, self.session.get, 10)
+        except WikiAPIError as exc:
+            log = self.logger.info if exc.code == "missingtitle" else self.logger.warning
+            log("VCPedia fetch page=%s reason=%s", page_name, exc.code)
+            return None
         except Exception as exc:
-            self.logger.error(f"Error fetching {page_name}: {exc}")
+            self.logger.error(
+                "VCPedia fetch page=%s reason=%s status=%s",
+                page_name,
+                type(exc).__name__,
+                getattr(getattr(exc, "response", None), "status_code", None),
+            )
             return None
 
 

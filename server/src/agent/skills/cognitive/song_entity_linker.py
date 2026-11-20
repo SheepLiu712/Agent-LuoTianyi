@@ -7,6 +7,8 @@ from typing import List
 
 from flashtext import KeywordProcessor
 
+from src.utils.server_paths import resolve_server_path
+
 
 class SongEntityLinker:
     """Fast song-name and lyric entity linker.
@@ -30,12 +32,10 @@ class SongEntityLinker:
         self.songname_file = (
             songname_file
             or configured_songname_file
-            or str(Path(__file__).resolve().parents[3] / "res" / "knowledge" / "song_name_keywords.txt")
+            or str(resolve_server_path("data/knowledge/song_name_keywords.txt"))
         )
         self.lyric_file = (
-            lyric_file
-            or configured_lyric_file
-            or str(Path(__file__).resolve().parents[3] / "res" / "knowledge" / "song_lyric_keywords.txt")
+            lyric_file or configured_lyric_file or str(resolve_server_path("data/knowledge/song_lyric_keywords.txt"))
         )
         self._load_keywords_from_file()
         for song_name in song_names:
@@ -58,9 +58,7 @@ class SongEntityLinker:
         # 带歌曲触发词的书名号内容是比词库子串更强的候选。最终能否演唱仍由
         # SingingBackend 校验；这里保留完整标题，避免“《死别》”被链接成“《别》”。
         quoted_titles = (
-            [title.strip() for title in re.findall(r"《([^》]+)》", user_input) if title.strip()]
-            if triggered
-            else []
+            [title.strip() for title in re.findall(r"《([^》]+)》", user_input) if title.strip()] if triggered else []
         )
 
         results = []
