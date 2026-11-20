@@ -55,7 +55,7 @@ def agreement_http(tmp_path, monkeypatch):
     monkeypatch.setattr(user_interface_module, "enforce_rate_limit", lambda *args, **kwargs: None)
     runtime = SimpleNamespace(
         database_manager=manager,
-        agreement_service=AgreementService(V1, {}, {"user-2"}),
+        agreement_service=AgreementService(V1, {}, {"user-2"}, require_acceptance=True),
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         stage_manager=SimpleNamespace(record_login=lambda *args, **kwargs: logins.append((args, kwargs))),
     )
@@ -182,7 +182,7 @@ def test_exempt_user_still_requires_valid_credentials_but_needs_no_signature(agr
 
 def test_version_change_requires_a_new_signature_on_the_next_login(agreement_http):
     assert accept_password(agreement_http.client, V1).status_code == 200
-    agreement_http.runtime.agreement_service = AgreementService(V2, {}, set())
+    agreement_http.runtime.agreement_service = AgreementService(V2, {}, set(), require_acceptance=True)
 
     response = login(agreement_http.client)
 
@@ -192,7 +192,7 @@ def test_version_change_requires_a_new_signature_on_the_next_login(agreement_htt
 
 def test_signatures_are_isolated_by_version_and_keep_their_first_time(agreement_http):
     first = accept_password(agreement_http.client, V1)
-    agreement_http.runtime.agreement_service = AgreementService(V2, {}, set())
+    agreement_http.runtime.agreement_service = AgreementService(V2, {}, set(), require_acceptance=True)
     second = accept_password(agreement_http.client, V2)
 
     session = agreement_http.manager.open_sql_session()
@@ -223,7 +223,7 @@ def test_reset_keeps_signature_but_changes_the_credentials_used_for_acceptance(a
 
 def test_removing_exemption_restores_login_gate_without_revoking_existing_session(agreement_http):
     first = login(agreement_http.client, username="exempt")
-    agreement_http.runtime.agreement_service = AgreementService(V1, {}, set())
+    agreement_http.runtime.agreement_service = AgreementService(V1, {}, set(), require_acceptance=True)
     blocked = login(agreement_http.client, username="exempt")
 
     assert first.status_code == 200
@@ -247,3 +247,22 @@ def test_signature_write_failure_rolls_back_without_issuing_a_login(agreement_ht
         assert session.query(AgreementSignature).count() == 0
     finally:
         session.close()
+
+
+def test_default_disabled_policy_allows_unsigned_login_but_still_authenticates(agreement_http):
+    agreement_http.runtime.agreement_service = AgreementService(V1, {})
+    assert login(agreement_http.client, password="wrong").status_code == 401
+    assert login(agreement_http.client).status_code == 200
+    token = agreement_http.manager.credential_service.update_auth_token("alice")
+    assert agreement_http.client.post("/auth/auto_login", json={"username": "alice", "token": token}).status_code == 200
+    assert (
+        agreement_http.client.post("/auth/auto_login", json={"username": "alice", "token": "invalid"}).status_code
+        == 401
+    )
+    session = agreement_http.manager.open_sql_session()
+    try:
+        assert session.query(AgreementSignature).count() == 0
+    finally:
+        session.close()
+    agreement_http.runtime.agreement_service = AgreementService(V1, {}, require_acceptance=True)
+    assert login(agreement_http.client).status_code == 403

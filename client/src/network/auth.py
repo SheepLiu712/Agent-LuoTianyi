@@ -102,8 +102,13 @@ class AccountRequest:
             if self.action == "login":
                 return api.login(self.username, self.password, self.remember)
             if self.action == "register":
-                ok, message = api.register(self.username, self.password, self.invite)
-                return ok, message, {}
+                ok, message, policy = api.fetch_agreement_policy()
+                if not ok:
+                    return False, message, {}
+                if policy["require_acceptance"]:
+                    return False, "请阅读并同意用户协议", {"code": "AGREEMENT_REQUIRED"}
+                outcome = api.register_with_agreement(self.username, self.password, self.invite)
+                return outcome.ok, outcome.message, {"code": outcome.code}
             if self.action == "reset":
                 ok, message = api.reset_account(self.invite, self.username, self.password)
                 return ok, message, {}
@@ -331,6 +336,17 @@ class AuthApi:
         if resp.status_code == 200:
             return True, "Reset Successful"
         return False, _error_detail(resp, "重置失败，请稍后重试")
+
+    def fetch_agreement_policy(self) -> tuple[bool, str, dict]:
+        response = self.session.get(f"{self.base_url}/auth/agreement/policy", verify=self.verify_ssl, timeout=15)
+        data = response.json()
+        if (
+            response.status_code != 200
+            or not isinstance(data, dict)
+            or type(data.get("require_acceptance")) is not bool
+        ):
+            return False, "无法获取注册策略，请稍后重试", {}
+        return True, "", data
 
     def fetch_current_agreement(self) -> Tuple[bool, str, dict]:
         """获取当前的用户协议。"""

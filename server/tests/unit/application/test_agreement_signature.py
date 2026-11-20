@@ -137,7 +137,7 @@ def test_signatures_are_per_user_and_per_version(session):
 
 
 def test_agreement_service_reports_current_version():
-    service = AgreementService("terms-2026-10-v1", {})
+    service = AgreementService("terms-2026-10-v1", {}, require_acceptance=True)
 
     assert service.current_version == "terms-2026-10-v1"
     assert service.is_current("terms-2026-10-v1") is True

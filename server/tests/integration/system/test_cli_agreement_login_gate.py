@@ -83,7 +83,7 @@ def cli_agreement_server(tmp_path, monkeypatch):
     interface.generate_rsa_keys()
     runtime = SimpleNamespace(
         database_manager=manager,
-        agreement_service=AgreementService(V1, {}, {"cli-exempt"}),
+        agreement_service=AgreementService(V1, {}, {"cli-exempt"}, require_acceptance=True),
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         stage_manager=SimpleNamespace(record_login=lambda *args, **kwargs: None),
         user_interface=interface,

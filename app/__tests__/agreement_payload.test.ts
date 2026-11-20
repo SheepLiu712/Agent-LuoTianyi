@@ -1,4 +1,4 @@
-import { fetchCurrentAgreement } from '../features/account/useAuth';
+import { fetchAgreementPolicy, fetchCurrentAgreement } from '../features/account/useAuth';
 import { parseAgreementPayload } from '../utils/agreement';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -126,5 +126,18 @@ describe('协议响应校验', () => {
       message: '用户协议加载失败，请重试',
     });
     expect(requestSignal.aborted).toBe(true);
+  });
+});
+
+
+describe('服务端签署策略', () => {
+  it.each([false, true])('使用服务端的布尔开关 %s', async (required) => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ require_acceptance: required }));
+    expect(await fetchAgreementPolicy()).toEqual({ success: true, required });
+  });
+
+  it.each([null, {}, { require_acceptance: 'false' }])('无效策略不能被当成关闭 %#', async (payload) => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(payload));
+    expect(await fetchAgreementPolicy()).toMatchObject({ success: false });
   });
 });

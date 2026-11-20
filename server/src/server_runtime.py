@@ -128,6 +128,7 @@ class ServerRuntime:
                     agreement_service.current_version,
                     agreement_service._docs,
                     set(exempt_user_uuids),
+                    require_acceptance=config.get("user_agreements", {}).get("require_acceptance", False),
                 )
             finally:
                 agreement_session.close()

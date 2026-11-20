@@ -103,6 +103,35 @@ class RegistrationService:
         accepted: Optional[bool] = None,
     ) -> dict:
         """完成一次注册提交；返回可直接回给客户端的成功响应。"""
+        if (
+            not self._agreements.require_acceptance
+            and registration_request_id is None
+            and agreement_version is None
+            and accepted is None
+        ):
+            ok, message = self._credentials.register_user(username, password, invite_code)
+            if not ok:
+                raise RegistrationError(message)
+            return {"message": "注册成功", "user_id": username}
+        return self._register_with_agreement(
+            username=username,
+            password=password,
+            invite_code=invite_code,
+            registration_request_id=registration_request_id,
+            agreement_version=agreement_version,
+            accepted=accepted,
+        )
+
+    def _register_with_agreement(
+        self,
+        *,
+        username: str,
+        password: str,
+        invite_code: str,
+        registration_request_id: Optional[str],
+        agreement_version: Optional[str],
+        accepted: Optional[bool],
+    ) -> dict:
         self._require_agreement_input(registration_request_id, agreement_version, accepted)
 
         db = self._credentials.new_session()

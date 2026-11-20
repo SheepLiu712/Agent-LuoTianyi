@@ -14,3 +14,8 @@ def test_user_agreement_whitelist_rejects_invalid_values():
     )
 
     assert invalid[0].status == "error"
+
+
+def test_acceptance_policy_rejects_string_false_to_avoid_accidental_enforcement():
+    items = RuntimeConfigValidator._validate_user_agreement_config({"user_agreements": {"require_acceptance": "false"}})
+    assert any(item.name == "config.user_agreements.require_acceptance" and item.status == "error" for item in items)

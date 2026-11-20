@@ -124,10 +124,9 @@ class LoginDialog(QDialog):
         if server_url is None:
             identity = getattr(self.binder, "on_registration_server_identity", None)
             server_url = identity() if identity else ""
-        if (
-            pending.get("username") == username
-            and pending.get("server_url") == registration_resume.normalize_server_url(server_url)
-        ):
+        if pending.get("username") == username and pending.get(
+            "server_url"
+        ) == registration_resume.normalize_server_url(server_url):
             self._clear_pending_registration_best_effort()
             self._pending_context = None
             self._pending_login_confirmation_username = None
@@ -183,6 +182,15 @@ class LoginDialog(QDialog):
             success, message = self.binder.apply_account_result(request, result)
         except Exception as exc:
             success, message = False, str(exc)
+        if not success and request.action == "register" and result[2].get("code") == "AGREEMENT_REQUIRED":
+            self._open_registration_agreement(
+                request.username,
+                request.password,
+                request.invite,
+                None,
+                registration_resume.normalize_server_url(request.base_url),
+            )
+            return
         if not success and request.action == "login" and result[2].get("code") == "AGREEMENT_REQUIRED":
             outcome = self._sign_existing_user(
                 mode="password",
@@ -202,6 +210,7 @@ class LoginDialog(QDialog):
             self._settle_pending_registration(request.username, request.base_url)
             self.accept()
         elif request.action == "register":
+            self.l_username.setText(request.username)
             QMessageBox.information(self, "成功", "注册成功，请登录")
             self.tabs.setCurrentIndex(0)
         elif request.action == "reset":
@@ -553,6 +562,12 @@ class LoginDialog(QDialog):
             )
             return
 
+        if not pending:
+            self._start_account("register", self.r_btn, username=username, password=password, invite=invite)
+            return
+        self._open_registration_agreement(username, password, invite, pending, server_url)
+
+    def _open_registration_agreement(self, username, password, invite, pending, server_url):
         request_id = registration_resume.request_id_for(username, resume_pending=bool(pending))
         resume_version = ""
         if pending and pending.get("username") == username and pending.get("registration_request_id") == request_id:

@@ -61,9 +61,9 @@ def cross_client(tmp_path, monkeypatch):
         interface.generate_rsa_keys()
         runtime = SimpleNamespace(
             database_manager=manager,
-            agreement_service=AgreementService(current_version, {}),
+            agreement_service=AgreementService(current_version, {}, require_acceptance=True),
             registration_service=RegistrationService(
-                agreement_service=AgreementService(current_version, {}),
+                agreement_service=AgreementService(current_version, {}, require_acceptance=True),
                 credential_service=manager.credential_service,
             ),
             agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
