@@ -57,6 +57,7 @@ class StimulusKind(str, Enum):
     DEVICE_CONNECTED = "device_connected"
     DEVICE_DISCONNECTED = "device_disconnected"
     PROACTIVE_PROMPT_DUE = "proactive_prompt_due"
+    PROACTIVE_SPEECH_DUE = "proactive_speech_due"
     INTERACTION_DEADLINE = "interaction_deadline"
     INTERACTION_ENDING = "interaction_ending"
     DYNAMIC_OBSERVED = "dynamic_observed"
@@ -90,6 +91,7 @@ class StimulusSource(str, Enum):
     DEVICE = "device"
     WORLD = "world"
     STAGE = "stage"
+    AGENT = "agent"
 
 
 class DynamicTargetKind(str, Enum):
@@ -318,6 +320,18 @@ class ProactivePromptDue(Stimulus):
         _require_nonblank_string(self.dedup_key)
         _require_tuple_of(self.fact_refs, EvidenceRef)
         _require_tuple_of(self.events, EventReminder)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProactiveSpeechDue(Stimulus):
+    """角色在沉默后决定主动发言；generation 用于拒绝过期的计时结果。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.PROACTIVE_SPEECH_DUE
+    generation: int
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_nonnegative_int(self.generation)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
