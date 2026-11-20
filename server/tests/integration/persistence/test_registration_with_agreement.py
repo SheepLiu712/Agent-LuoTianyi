@@ -6,6 +6,7 @@ from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from src.application.user import registration_service
 from src.application.user.agreement_service import AgreementService, first_signed_at
@@ -358,3 +359,168 @@ def test_accepted_time_uses_injected_clock_and_second_precision(env):
 
     row = snapshot(env.manager)["signatures"][0]
     assert row.accepted_at == "2027-01-01T07:59:59+08:00"
+
+
+def test_replay_after_account_reset_does_not_accept_new_credentials(env):
+    """账号重置后，用新用户名/新密码无法确认原注册操作（spec：不能以当前凭据替代原操作）。"""
+    service = env.build()
+    submit(service, registration_request_id="req-reset")
+
+    ok, _ = env.manager.credential_service.reset_account(INVITE, "renamed", "brand-new-password")
+    assert ok is True
+
+    with pytest.raises(RegistrationRequestConflictError):
+        submit(
+            service,
+            username="renamed",
+            password="brand-new-password",
+            registration_request_id="req-reset",
+        )
+
+
+def test_concurrent_same_request_id_different_content_returns_conflict(env, monkeypatch):
+    """并发同 ID、不同内容：恢复阶段发现的冲突要作为 409 返回，而不是原始数据库异常（500）。"""
+    service = env.build()
+    submit(service, username="newbie", registration_request_id="req-conflict")
+
+    calls = 0
+    original_replay = service._replay
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        return None if calls == 1 else original_replay(db, **kwargs)
+
+    def fail_with_integrity(*args, **kwargs):
+        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    monkeypatch.setattr(service._credentials, "create_account_with_invite", fail_with_integrity)
+
+    with pytest.raises(RegistrationRequestConflictError):
+        submit(service, username="other", registration_request_id="req-conflict")
+
+
+def test_replay_after_password_only_reset_is_unverifiable(env):
+    """只重置密码（用户名不变）时，新密码不能证明原注册操作；原密码仍可确认原结果。"""
+    service = env.build()
+    submit(service, registration_request_id="req-pw-reset")
+
+    ok, _ = env.manager.credential_service.reset_account(INVITE, "newbie", "brand-new-password")
+    assert ok is True
+
+    with pytest.raises(RegistrationRequestUnverifiableError):
+        submit(service, password="brand-new-password", registration_request_id="req-pw-reset")
+
+    replay = submit(service, password="plain-password", registration_request_id="req-pw-reset")
+    assert replay == {"message": "注册成功", "user_id": "newbie"}
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["requests"]) == 1
+
+
+def test_same_request_id_race_replays_the_committed_result(env, monkeypatch):
+    service = env.build()
+    first = submit(service, registration_request_id="req-race")
+    original_replay = service._replay
+    calls = 0
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_replay(db, **kwargs)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    second = submit(service, registration_request_id="req-race")
+
+    assert second == first
+    assert calls == 2
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["signatures"]) == 1
+    assert len(state["requests"]) == 1
+    assert state["invite"].is_used is True
+
+
+def test_concurrent_same_request_id_unique_violation_replays_committed_result(env, monkeypatch):
+    """另一方已提交、本事务撞唯一约束时，应返回原成功结果而不是抛 IntegrityError（HTTP 500）。"""
+    service = env.build()
+    first = submit(service, registration_request_id="req-race-500")
+
+    calls = 0
+    original_replay = service._replay
+
+    def hide_first_replay(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_replay(db, **kwargs)
+
+    def fail_with_unique_violation(*args, **kwargs):
+        raise IntegrityError("UNIQUE constraint failed: users.username", None, None)
+
+    monkeypatch.setattr(service, "_replay", hide_first_replay)
+    monkeypatch.setattr(service._credentials, "create_account_with_invite", fail_with_unique_violation)
+
+    second = submit(service, registration_request_id="req-race-500")
+
+    assert second == first
+    state = snapshot(env.manager)
+    assert len(state["users"]) == 1
+    assert len(state["signatures"]) == 1
+    assert len(state["requests"]) == 1
+
+
+def test_two_requests_competing_for_one_invite_code_leave_exactly_one_account(env):
+    service = env.build()
+    submit(service)
+
+    with pytest.raises(RegistrationError):
+        submit(env.build(), username="second", registration_request_id="req-2")
+
+    state = snapshot(env.manager)
+    assert [user.username for user in state["users"]] == ["newbie"]
+    assert state["invite"].user_id == state["users"][0].uuid
+
+
+def test_existing_schema_one_registration_records_survive_upgrade(env):
+    service = env.build()
+    submit(service)
+    # Reproduce the persisted schema from feat/user_agreement before this PR.
+    with sql_database.engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE registration_requests DROP COLUMN password_fingerprint")
+    sql_database.init_sql_db(env.manager.config["sql_db_folder"], env.manager.config["sql_db_file"])
+    state = snapshot(env.manager)
+    assert len(state["users"]) == len(state["signatures"]) == len(state["requests"]) == 1
+    assert state["requests"][0].password_fingerprint is None
+    with pytest.raises(RegistrationRequestUnverifiableError):
+        submit(service)
+    # Old records are not assigned invented credentials; fresh registrations still work.
+    assert (
+        submit(service, username="second", invite_code="INVITE-BBBB", registration_request_id="req-new")["user_id"]
+        == "second"
+    )
+
+
+def test_existing_dev_database_gets_agreement_tables_before_registration(env):
+    with sql_database.engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE registration_requests")
+        connection.exec_driver_sql("DROP TABLE agreement_signatures")
+        connection.exec_driver_sql("DROP TABLE agreement_versions")
+    sql_database.init_sql_db(env.manager.config["sql_db_folder"], env.manager.config["sql_db_file"])
+    with env.manager.open_sql_session() as session:
+        session.add(
+            AgreementVersion(
+                version=V1,
+                title="协议",
+                format="agreement.richtext.v1",
+                content_json="[]",
+                content_sha256="0" * 64,
+                created_at="2026-10-10T14:30:25+08:00",
+            )
+        )
+        session.commit()
+    assert submit(env.build())["user_id"] == "newbie"

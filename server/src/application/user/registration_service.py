@@ -135,6 +135,7 @@ class RegistrationService:
                 RegistrationRequest(
                     registration_request_id=registration_request_id,
                     user_uuid=user_uuid,
+                    password_fingerprint=self._credentials.password_fingerprint(password),
                     agreement_version=agreement_version,
                     response_json=json.dumps(payload, ensure_ascii=False),
                     created_at=accepted_at,
@@ -266,6 +267,8 @@ class RegistrationService:
         user = db.query(User).filter(User.uuid == request.user_uuid).first()
         if user is None:
             raise RegistrationRequestUnverifiableError()
+        if json.loads(request.response_json).get("user_id") != username:
+            raise RegistrationRequestConflictError()
         if user.username != username:
             raise RegistrationRequestConflictError()
         if request.agreement_version != agreement_version:
@@ -277,7 +280,9 @@ class RegistrationService:
         if owned_invite is None:
             raise RegistrationRequestConflictError()
 
-        if not self._credentials.verify_password(password, user.password or ""):
+        if not request.password_fingerprint or not self._credentials.password_matches_fingerprint(
+            password, request.password_fingerprint
+        ):
             raise RegistrationRequestUnverifiableError()
 
         return json.loads(request.response_json)

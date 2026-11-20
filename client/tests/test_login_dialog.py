@@ -22,6 +22,7 @@ def qapp():
 @dataclass(frozen=True)
 class _AccountResultRequest:
     action: str
+    base_url: str = "https://keyboard-test.invalid"
     username: str = ""
     password: str = ""
     invite: str = ""

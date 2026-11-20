@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Mapping, Optional
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -39,8 +39,10 @@ from .agreement_dialog import (
 from .signing_gate import STATUS_LOAD_FAILED, STATUS_SUBMITTING, SigningGate
 
 COLOR_DISABLED = "#D1D5DB"
+# 签署窗口自己的滚动条配色（与白底对比度 4.76:1；只读查阅窗口保持原样式，不在本 PR 内改动）。
+COLOR_SCROLL_HANDLE = "#64748b"
+COLOR_SCROLL_HANDLE_HOVER = "#475569"
 TEXT_REJECT = "不同意，返回注册"
-TEXT_REJECT_READONLY = "关闭"
 
 TICK_INTERVAL_MS = 100
 
@@ -93,12 +95,13 @@ class AgreementSignDialog(QDialog):
         self._load_signals.finished.connect(self._on_load_finished)
         self._load_request_id = 0
         self._load_in_flight = False
-        self._document_payload: Optional[Mapping[str, Any]] = None
         self.submit_token = ""
-        self._allow_close = False
         self.gate = SigningGate()
         self.version: str = ""
         self.last_error: str = ""
+        self._pending_anchor: Optional[tuple] = None
+        self._anchor_restoring = False
+        self._reject_text = reject_text
 
         self.setWindowTitle("用户协议")
         self.setModal(True)
@@ -110,6 +113,12 @@ class AgreementSignDialog(QDialog):
         self._timer = QTimer(self)
         self._timer.setInterval(TICK_INTERVAL_MS)
         self._timer.timeout.connect(self._on_tick)
+
+        # 重排补偿要等布局算完，0ms 单次定时器让同一次事件循环内连续 resize 只补偿最后结果。
+        self._anchor_restore_timer = QTimer(self)
+        self._anchor_restore_timer.setSingleShot(True)
+        self._anchor_restore_timer.setInterval(0)
+        self._anchor_restore_timer.timeout.connect(self._restore_scroll_anchor)
 
         if document is not None:
             self.set_document(document)
@@ -149,45 +158,39 @@ class AgreementSignDialog(QDialog):
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.view.setStyleSheet(
             f"QTextEdit {{ background: transparent; color: {COLOR_TEXT}; border: none; }}"
-            "QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }"
-            "QScrollBar::handle:vertical { background: #cbd5e1; min-height: 40px; border-radius: 2px; }"
+            "QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }"
+            f"QScrollBar::handle:vertical {{ background: {COLOR_SCROLL_HANDLE}; min-height: 40px;"
+            " border-radius: 3px; }"
+            f"QScrollBar::handle:vertical:hover {{ background: {COLOR_SCROLL_HANDLE_HOVER}; }}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
         self.view.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.view.verticalScrollBar().rangeChanged.connect(lambda *_: self._on_scroll())
         column.addWidget(self.view, 1)
+        self.view.installEventFilter(self)
         return body
 
     def _build_actions(self) -> QWidget:
         actions = QWidget()
         column = QVBoxLayout(actions)
-        column.setContentsMargins(BODY_SIDE_MARGIN, 0, BODY_SIDE_MARGIN, 16)
+        column.setContentsMargins(BODY_SIDE_MARGIN, 8, BODY_SIDE_MARGIN, 16)
         column.setSpacing(8)
 
-        self.hint_label = QLabel("")
-        self.hint_label.setStyleSheet(f"font-size: 12px; color: {COLOR_MUTED};")
-        column.addWidget(self.hint_label)
-
+        # 顺序与草图一致：正文 → 分隔线 → 提示 → 按钮（提示不再紧贴正文）。
         divider = QFrame()
         divider.setFixedHeight(1)
         divider.setStyleSheet(f"background-color: {COLOR_DIVIDER}; border: none;")
         column.addWidget(divider)
 
+        self.hint_label = QLabel("")
+        self.hint_label.setFixedHeight(18)  # 常驻占位：显隐不改变正文可视高度，避免拖动滚动条时页面回退
+        self.hint_label.setStyleSheet(f"font-size: 12px; color: {COLOR_MUTED};")
+        column.addWidget(self.hint_label)
+
         row = QHBoxLayout()
         row.setSpacing(10)
 
-        self.retry_btn = QPushButton(TEXT_RETRY)
-        self.retry_btn.setMinimumHeight(44)
-        self.retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.retry_btn.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: 8px; font-size: 14px; padding: 10px 16px;"
-            f" background-color: {COLOR_SECONDARY_BG}; color: {COLOR_TEXT}; }}"
-            "QPushButton:focus { outline: none; }"
-        )
-        self.retry_btn.clicked.connect(self.reload_document)
-        self.retry_btn.setVisible(False)
-
-        self.reject_btn = QPushButton(TEXT_REJECT)
+        self.reject_btn = QPushButton(self._reject_text)
         self.reject_btn.setMinimumHeight(44)
         self.reject_btn.setMinimumWidth(150)
         self.reject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -196,7 +199,7 @@ class AgreementSignDialog(QDialog):
             f" background-color: {COLOR_SECONDARY_BG}; color: {COLOR_TEXT}; }}"
             "QPushButton:focus { outline: none; }"
         )
-        self.reject_btn.clicked.connect(self.reject)
+        self.reject_btn.clicked.connect(self._on_reject_clicked)
 
         self.confirm_btn = QPushButton("")
         self.confirm_btn.setMinimumHeight(44)
@@ -204,10 +207,8 @@ class AgreementSignDialog(QDialog):
         self.confirm_btn.clicked.connect(self._on_confirm_clicked)
 
         row.addWidget(self.reject_btn)
-        row.addWidget(self.retry_btn)
         row.addWidget(self.confirm_btn, 1)
         column.addLayout(row)
-        self._reject_text = TEXT_REJECT
         return actions
 
     # ── 公共接口 ─────────────────────────────────────────────────
@@ -217,13 +218,11 @@ class AgreementSignDialog(QDialog):
 
     def set_document(self, payload: Mapping[str, Any]) -> None:
         """装载一份协议正文；换版或重新打开都会重置阅读计时与"到过底部"。"""
-        self._document_payload = payload
         self.version = str(payload.get("version", "") or "")
         self.setWindowTitle(str(payload.get("title", "") or "用户协议"))
         self.version_label.setText(f"版本：{self.version}" if self.version else "")
         self.view.setDocument(render_agreement_document(payload, self.font().family()))
         self._set_error("")
-        self.retry_btn.setVisible(False)
         self.gate.begin_loading()
         self.gate.mark_loaded()
         # 异步正文可能在窗口已经显示且仍处于前台时返回；加载重置门禁后要从此刻继续累计。
@@ -239,12 +238,9 @@ class AgreementSignDialog(QDialog):
         self.gate.begin_loading()
         self._set_error("")
         self._refresh_actions()
-        self.retry_btn.setVisible(False)
         self._load_request_id += 1
         self._load_in_flight = True
-        self._thread_pool.start(
-            _LoadTask(self._load_request_id, self._load_document, self._load_signals)
-        )
+        self._thread_pool.start(_LoadTask(self._load_request_id, self._load_document, self._load_signals))
         return True
 
     def begin_submit(self) -> None:
@@ -253,22 +249,18 @@ class AgreementSignDialog(QDialog):
         self._set_error("")
         self._refresh_actions()
 
-    def finish_submit(
-        self, success: bool, message: str = "", *, close: bool = False
-    ) -> None:
+    def finish_submit(self, success: bool, message: str = "", *, close: bool = False) -> None:
         """提交结果：成功关闭窗口；失败恢复可操作状态并保留本窗口的阅读状态。"""
         if success:
             self._timer.stop()
-            self._allow_close = True
             self.accept()
             return
         if close:
             self._timer.stop()
-            self._allow_close = True
+            self.gate.end_submit()
             self.reject()
             return
         self.gate.end_submit()
-        self._allow_close = False
         self.last_error = message
         self._set_error(message or "提交失败，请重试")
         self._refresh_actions()
@@ -293,14 +285,93 @@ class AgreementSignDialog(QDialog):
         self.gate.tick(self._clock())
         self._refresh_actions()
 
+    # ── 重排时保持阅读位置（scroll anchoring）────────────────────
+    #
+    # 与 CSS scroll anchoring（Chrome 56+ 默认开启）同一思路：滚动位置是像素值，宽度变化
+    # 引起重排后，视口上方行数变化会把正在读的段落顶走。这里把"顶部可见段落 + 段内偏移"
+    # 当作锚点，重排后按锚点重新算滚动量。停在顶部/底部是用户的明确意图，保持不动。
+    #
+    # 锚点必须在重排**之前**取：Qt 的 resize 先到子控件、再到对话框，等对话框 resizeEvent
+    # 时 QTextEdit 已按新宽度排完，读到的"顶部段落"已是漂移后的结果。所以在 view 上装
+    # 事件过滤器，在它处理 Resize 之前抓锚点。
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt 命名
+        if watched is self.view and event.type() == event.Type.Resize:
+            anchor = self._capture_scroll_anchor()
+            if anchor is not None:
+                self._pending_anchor = anchor
+                self._anchor_restore_timer.start()
+        return super().eventFilter(watched, event)
+
+    def _capture_scroll_anchor(self) -> Optional[tuple]:
+        view = self.view
+        bar = view.verticalScrollBar()
+        if not view.isVisible() or bar.maximum() <= 0:
+            return None
+        value = bar.value()
+        if value <= 0:
+            return ("top",)
+        if value >= bar.maximum():
+            return ("bottom",)
+        block = view.cursorForPosition(QPoint(0, 1)).block()
+        if not block.isValid():
+            return None
+        rect = view.document().documentLayout().blockBoundingRect(block)
+        height = rect.height()
+        offset = 0.0 if height <= 0 else min(max((value - rect.top()) / height, 0.0), 1.0)
+        return ("block", block.blockNumber(), offset)
+
+    def _restore_scroll_anchor(self) -> None:
+        anchor = self._pending_anchor
+        self._pending_anchor = None
+        if anchor is None:
+            return
+        # 恢复期间不把门禁喂给滚动状态：重排的中间瞬态会让 value 暂时等于 maximum，
+        # 若照常 observe_scroll，"改窗口宽度"就会被误判成"读过底部"。
+        self._anchor_restoring = True
+        try:
+            # 先强制排版再算目标，避免用重排前的旧尺寸把读者顶到（或夹到）底部。
+            self.view.document().documentLayout().documentSize()
+            bar = self.view.verticalScrollBar()
+            if anchor[0] == "top":
+                bar.setValue(0)
+            elif anchor[0] == "bottom":
+                bar.setValue(bar.maximum())
+            else:
+                _, block_number, offset = anchor
+                block = self.view.document().findBlockByNumber(block_number)
+                if block.isValid():
+                    rect = self.view.document().documentLayout().blockBoundingRect(block)
+                    target = rect.top() + offset * rect.height()
+                    bar.setValue(max(0, min(int(round(target)), bar.maximum())))
+        finally:
+            self._anchor_restoring = False
+            # 重排可能让正文从"需要滚动"变成"一屏完整可见"（或相反），
+            # 补一次最终尺寸的判定，并刷新按钮状态；过程中的临时值仍被跳过。
+            bar = self.view.verticalScrollBar()
+            self.gate.observe_scroll(bar.value(), bar.maximum())
+            self._refresh_actions()
+
     def _on_scroll(self, *_args) -> None:
         self._sync_scroll_state()
         self._refresh_actions()
 
     def _sync_scroll_state(self) -> None:
         bar = self.view.verticalScrollBar()
-        # 先让布局算完尺寸，再判定"一屏放得下"：重排前不能提前认定已读到底部。
-        self.view.document().adjustSize()
+        # 只强制排版，不改变文档宽度。此前用 adjustSize()：它会把文档宽度设成"不换行的理想宽度"，
+        # 于是窗口缩放时不再重排（右侧留白/窄窗裁切），且滚动中反复改文档尺寸会让滚动范围与真实
+        # 内容高度不一致（滚到底后仍差一截、继续下滑先超出再弹回）。
+        self.view.document().documentLayout().documentSize()
+        if self._anchor_restoring:
+            # 锚点恢复正在写入滚动位置，此时的值不代表用户意图。
+            return
+        if self._pending_anchor is not None:
+            if self._anchor_restore_timer.isActive():
+                # 重排/锚点补偿排期中：不判定阅读状态，交给补偿完成后的用户操作。
+                return
+            # 补偿定时器已被停掉（窗口隐藏/关闭等）：清掉残留锚点，
+            # 否则之后的滚动会一直被跳过，"到过底部"再也记不到。
+            self._pending_anchor = None
         self.gate.observe_scroll(bar.value(), bar.maximum())
 
     def _on_confirm_clicked(self) -> None:
@@ -309,12 +380,18 @@ class AgreementSignDialog(QDialog):
         self.begin_submit()
         self.submit_requested.emit(self.version)
 
+    def _on_reject_clicked(self) -> None:
+        # 加载失败时复用左侧按钮作为重试；关闭仍可用标题栏，符合 AC-07。
+        if self.gate.status == STATUS_LOAD_FAILED:
+            self.reload_document()
+            return
+        self.reject()
+
     def _refresh_actions(self) -> None:
         status = self.gate.status
         self.confirm_btn.setText(self.gate.confirm_text)
         self.hint_label.setText(self.gate.hint_text)
-        self.hint_label.setVisible(bool(self.gate.hint_text))
-        self.retry_btn.setVisible(status == STATUS_LOAD_FAILED)
+        self.reject_btn.setText(TEXT_RETRY if status == STATUS_LOAD_FAILED else self._reject_text)
         self.reject_btn.setEnabled(status != "submitting")
         self.confirm_btn.setEnabled(self.gate.can_confirm)
         enabled_color = COLOR_PRIMARY if self.gate.can_confirm else COLOR_DISABLED
@@ -339,11 +416,7 @@ class AgreementSignDialog(QDialog):
             self.set_document(result)
             return
         # 与只读窗口同一个加载契约：loader 返回 (ok, detail, payload)。
-        ok, detail, payload = (
-            result
-            if isinstance(result, tuple) and len(result) == 3
-            else (False, "", None)
-        )
+        ok, detail, payload = result if isinstance(result, tuple) and len(result) == 3 else (False, "", None)
         if not ok or not isinstance(payload, Mapping):
             self._fail_load(str(detail) if detail else "")
             return
@@ -358,21 +431,17 @@ class AgreementSignDialog(QDialog):
 
     def reject(self) -> None:  # noqa: N802 - Qt 命名
         # 提交期间禁止 Esc/代码调用 reject；否则后台结果可能串到后续注册窗口。
-        if self.gate.status == STATUS_SUBMITTING and not self._allow_close:
+        if self.gate.status == STATUS_SUBMITTING:
             return
+        self._timer.stop()
         super().reject()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
-        if self.gate.status == STATUS_SUBMITTING and not self._allow_close:
+        if self.gate.status == STATUS_SUBMITTING:
             event.ignore()
             return
         self._timer.stop()
         super().closeEvent(event)
 
 
-__all__ = [
-    "AgreementSignDialog",
-    "COLOR_DISABLED",
-    "TEXT_REJECT",
-    "TEXT_REJECT_READONLY",
-]
+__all__ = ["AgreementSignDialog", "COLOR_DISABLED", "TEXT_REJECT"]

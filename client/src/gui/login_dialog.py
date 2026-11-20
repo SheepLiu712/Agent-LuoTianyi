@@ -47,9 +47,7 @@ class _RegisterTask(QRunnable):
             outcome = self._submit()
         except Exception as error:  # noqa: BLE001 - 统一转成可显示的结果
             # 请求是否已被服务端接纳未知：必须保留同一 request ID 供核验，不能开新请求。
-            outcome = RegisterOutcome(
-                False, str(error), code="REGISTRATION_RESULT_UNKNOWN"
-            )
+            outcome = RegisterOutcome(False, str(error), code="REGISTRATION_RESULT_UNKNOWN")
         self._signals.finished.emit(self._token, outcome)
 
 
@@ -70,6 +68,7 @@ class LoginDialog(QDialog):
         # 密码和邀请码绝不写入 registration_resume 的跨进程记录。
         self._pending_context: dict | None = None
         self._pending_login_confirmation_username: str | None = None
+        self._resuming_registration = False
         self._active_register_token: str | None = None
         self.last_existing_agreement_result: ExistingAgreementResult | None = None
 
@@ -105,14 +104,34 @@ class LoginDialog(QDialog):
 
         cred = credential.load_credentials()
         if cred:
-            username, token, do_auto_login, saved_url = (
-                cred if len(cred) >= 4 else (*cred, None)
-            )
+            username, token, do_auto_login, saved_url = cred if len(cred) >= 4 else (*cred, None)
             self.l_auto_login.setChecked(do_auto_login)
             self.l_username.setText(username or "")
             self.saved_token = token
             if saved_url:
                 self.custom_base_url = saved_url
+
+    def _clear_pending_registration_best_effort(self) -> None:
+        try:
+            registration_resume.clear_pending()
+        except OSError as error:
+            self.logger.warning(f"Failed to clear pending registration: {error}")
+
+    def _settle_pending_registration(self, username: str, server_url: str | None = None) -> None:
+        pending = registration_resume.load_pending()
+        if not pending:
+            return
+        if server_url is None:
+            identity = getattr(self.binder, "on_registration_server_identity", None)
+            server_url = identity() if identity else ""
+        if (
+            pending.get("username") == username
+            and pending.get("server_url") == registration_resume.normalize_server_url(server_url)
+        ):
+            self._clear_pending_registration_best_effort()
+            self._pending_context = None
+            self._pending_login_confirmation_username = None
+            self._resuming_registration = False
 
     def _start_account(self, action, button, child=None, **values):
         if self._account_closed or self._account_operation.busy:
@@ -166,7 +185,9 @@ class LoginDialog(QDialog):
             success, message = False, str(exc)
         if not success and request.action == "login" and result[2].get("code") == "AGREEMENT_REQUIRED":
             outcome = self._sign_existing_user(
-                mode="password", username=request.username, password=request.password,
+                mode="password",
+                username=request.username,
+                password=request.password,
                 version=result[2].get("agreement_version", ""),
             )
             self.last_existing_agreement_result = outcome
@@ -178,12 +199,7 @@ class LoginDialog(QDialog):
         if not success:
             QMessageBox.critical(child or self, "请求失败", message)
         elif request.action == "login":
-            pending = registration_resume.load_pending()
-            if (pending and pending.get("confirmation_required") == "same_user_login"
-                    and pending.get("username") == request.username
-                    and pending.get("server_url") == registration_resume.normalize_server_url(request.base_url)):
-                registration_resume.clear_pending()
-                self._pending_login_confirmation_username = None
+            self._settle_pending_registration(request.username, request.base_url)
             self.accept()
         elif request.action == "register":
             QMessageBox.information(self, "成功", "注册成功，请登录")
@@ -217,18 +233,13 @@ class LoginDialog(QDialog):
 
     def try_auto_login(self) -> bool:
         try:
-            if (
-                self.l_auto_login.isChecked()
-                and self.saved_token
-                and self.l_username.text()
-            ):
+            if self.l_auto_login.isChecked() and self.saved_token and self.l_username.text():
                 self.logger.info("Attempting auto login...")
                 detailed = getattr(self.binder, "on_auto_login_with_details", None)
                 if detailed:
-                    success, message, data = detailed(
-                        self.l_username.text(), self.saved_token
-                    )
+                    success, message, data = detailed(self.l_username.text(), self.saved_token)
                     if success:
+                        self._settle_pending_registration(self.l_username.text())
                         self.logger.info("Auto login successful")
                         return True
                     if data.get("code") == "AGREEMENT_REQUIRED":
@@ -248,10 +259,9 @@ class LoginDialog(QDialog):
                         ret = False
                     ret = False
                 else:
-                    ret = self.binder.on_auto_login(
-                        self.l_username.text(), self.saved_token
-                    )
+                    ret = self.binder.on_auto_login(self.l_username.text(), self.saved_token)
                 if ret:
+                    self._settle_pending_registration(self.l_username.text())
                     self.logger.info("Auto login successful")
                     return True
                 else:
@@ -417,16 +427,12 @@ class LoginDialog(QDialog):
             if accepted:
                 try:
                     if mode == "password":
-                        logged_in, login_message, login_details = (
-                            self.binder.on_login_with_details(
-                                username, password or "", self.l_auto_login.isChecked()
-                            )
+                        logged_in, login_message, login_details = self.binder.on_login_with_details(
+                            username, password or "", self.l_auto_login.isChecked()
                         )
                     else:
-                        logged_in, login_message, login_details = (
-                            self.binder.on_auto_login_with_details(
-                                username, token or ""
-                            )
+                        logged_in, login_message, login_details = self.binder.on_auto_login_with_details(
+                            username, token or ""
                         )
                 except Exception as error:  # noqa: BLE001 - keep the modal retryable
                     logged_in, login_message, login_details = (
@@ -442,9 +448,7 @@ class LoginDialog(QDialog):
                 }:
                     result["submitting"] = False
                     result.pop("terminal", None)
-                    dialog.finish_submit(
-                        False, login_message or "用户协议已更新，请重新阅读"
-                    )
+                    dialog.finish_submit(False, login_message or "用户协议已更新，请重新阅读")
                     dialog.reload_document()
                     return
                 result["ok"] = bool(logged_in)
@@ -459,9 +463,7 @@ class LoginDialog(QDialog):
                         self.l_auto_login.setChecked(False)
                         credential.save_credentials(username, None, False)
                     result["terminal"] = ExistingAgreementResult.RETURN_TO_LOGIN
-                    dialog.finish_submit(
-                        False, login_message or "登录失败，请重试", close=True
-                    )
+                    dialog.finish_submit(False, login_message or "登录失败，请重试", close=True)
                     return
                 # 429/5xx/network failures remain retryable and must not poison a later reject.
                 result.pop("terminal", None)
@@ -488,6 +490,7 @@ class LoginDialog(QDialog):
         dialog.submit_requested.connect(submit)
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         if accepted and result["ok"]:
+            self._settle_pending_registration(username)
             return ExistingAgreementResult.LOGGED_IN
         if result.get("terminal") is ExistingAgreementResult.RETURN_TO_LOGIN:
             return ExistingAgreementResult.RETURN_TO_LOGIN
@@ -512,9 +515,7 @@ class LoginDialog(QDialog):
         # 本地校验通过后才打开协议窗口：此时不建账号、不占用邀请码。
         pending = registration_resume.load_pending()
         identity = getattr(self.binder, "on_registration_server_identity", None)
-        server_url = registration_resume.normalize_server_url(
-            identity() if identity else ""
-        )
+        server_url = registration_resume.normalize_server_url(identity() if identity else "")
         if pending and not pending.get("server_url"):
             QMessageBox.warning(
                 self,
@@ -552,16 +553,19 @@ class LoginDialog(QDialog):
             )
             return
 
-        request_id = registration_resume.request_id_for(
-            username, resume_pending=bool(pending)
-        )
+        request_id = registration_resume.request_id_for(username, resume_pending=bool(pending))
         resume_version = ""
-        if (
-            pending
-            and pending.get("username") == username
-            and pending.get("registration_request_id") == request_id
-        ):
+        if pending and pending.get("username") == username and pending.get("registration_request_id") == request_id:
             resume_version = pending.get("agreement_version", "")
+        # N12：恢复是在确认上一次未成功的提交，必须让用户知道要用原账号信息，而不是新建注册。
+        self._resuming_registration = bool(resume_version)
+        if self._resuming_registration:
+            QMessageBox.information(
+                self,
+                "继续上次注册",
+                "上次注册结果尚未确认，需要再次提交确认。\n"
+                "请使用上次注册时的用户名和密码；如果提示无法确认，请用原账号登录。",
+            )
         self._submit_context = {
             "username": username,
             "password": password,
@@ -581,11 +585,16 @@ class LoginDialog(QDialog):
             accepted = dialog.exec() == QDialog.DialogCode.Accepted
         finally:
             self._sign_dialog = None
+            dialog.deleteLater()
         if not accepted:
             # 不同意只回注册表单：输入保留，不创建账号、不消耗邀请码、不退出客户端。
             return
-        registration_resume.clear_pending()
-        QMessageBox.information(self, "成功", "注册成功，请登录")
+        self._clear_pending_registration_best_effort()
+        if self._resuming_registration:
+            # N12：恢复成功对应的是原账号，不是这次输入的新内容。
+            QMessageBox.information(self, "成功", "已确认上次注册成功，请使用原账号登录")
+        else:
+            QMessageBox.information(self, "成功", "注册成功，请登录")
         self.l_username.setText(username)
         self.tabs.setCurrentIndex(0)
 
@@ -593,7 +602,7 @@ class LoginDialog(QDialog):
         """协议正文加载器；与只读窗口共用 (ok, detail, payload) 契约。"""
         fetch = getattr(self.binder, "on_fetch_agreement", None)
         if fetch is None:
-            return False, "当前客户端未接线协议接口", None
+            return False, "协议加载功能暂时不可用", None
         return fetch()
 
     def _start_registration_submit(self, agreement_version: str) -> None:
@@ -625,9 +634,7 @@ class LoginDialog(QDialog):
         )
         dialog.submit_token = flow_token
 
-    def _register_with_agreement(
-        self, context: dict, agreement_version: str
-    ) -> RegisterOutcome:
+    def _register_with_agreement(self, context: dict, agreement_version: str) -> RegisterOutcome:
         submit = getattr(self.binder, "on_register_with_agreement", None)
         outcome = (
             submit(
@@ -650,24 +657,19 @@ class LoginDialog(QDialog):
             )
         return outcome
 
-    def _on_register_finished(self, token: str, outcome) -> None:
+    def _on_register_finished(self, token: str, outcome: RegisterOutcome) -> None:
         dialog = self._sign_dialog
-        if (
-            dialog is None
-            or token != self._active_register_token
-            or getattr(dialog, "submit_token", "") != token
-        ):
+        if dialog is None or token != self._active_register_token or getattr(dialog, "submit_token", "") != token:
             return
         if not isinstance(outcome, RegisterOutcome):
-            outcome = RegisterOutcome(
-                bool(outcome and outcome[0]), str(outcome[1]) if outcome else ""
-            )
+            outcome = RegisterOutcome(bool(outcome and outcome[0]), str(outcome[1]) if outcome else "")
         if outcome.ok:
             self._pending_context = None
             dialog.finish_submit(True)
             return
         if outcome.code == "AGREEMENT_CHANGED":
             # 服务端已换版：提示重读并拉取最新正文，阅读计时与"到过底部"随之重置。
+            self._resuming_registration = False
             # 这是已确认的无副作用结果，旧 V1 请求不再作为新版本提交使用。
             registration_resume.clear_pending()
             context = self._submit_context
@@ -683,15 +685,12 @@ class LoginDialog(QDialog):
             # 冲突意味着该 ID 已绑定另一组原提交内容；只提供明确放弃入口，默认保留。
             dialog.finish_submit(
                 False,
-                outcome.message
-                or "注册请求不一致，请用原用户名、密码和邀请码核验；不会创建新请求",
+                outcome.message or "注册请求不一致，请用原用户名、密码和邀请码核验；不会创建新请求",
             )
             self._offer_conflict_discard(dialog, self._submit_context or {})
             return
         if outcome.code == "REGISTRATION_REQUEST_UNVERIFIABLE":
-            self._pending_login_confirmation_username = (
-                self._submit_context or {}
-            ).get("username")
+            self._pending_login_confirmation_username = (self._submit_context or {}).get("username")
             context = self._submit_context or {}
             registration_resume.save_pending(
                 context.get("request_id", ""),
@@ -700,10 +699,11 @@ class LoginDialog(QDialog):
                 context.get("server_url", ""),
                 confirmation_required="same_user_login",
             )
-            dialog.finish_submit(
-                False,
-                "原注册结果无法核验，请使用同一用户名和密码登录确认；不会创建替代账号。",
-            )
+            message = "原注册结果无法核验，请使用同一用户名和密码登录确认。"
+            dialog.finish_submit(False, message, close=True)
+            self.l_username.setText(str(context.get("username", "")))
+            self.tabs.setCurrentIndex(0)
+            QMessageBox.information(self, "请先登录确认", message)
             return
         if outcome.code == "REGISTRATION_RESULT_UNKNOWN":
             # 网络异常不代表服务端未接纳：保留同一 ID，要求用户用原信息核验。
@@ -729,6 +729,10 @@ class LoginDialog(QDialog):
             # 未知 code、409、429、5xx 及不可核验结果必须保留原 ID。
             registration_resume.clear_pending()
             self._pending_context = None
+            self._resuming_registration = False
+            dialog.finish_submit(False, outcome.message, close=True)
+            QMessageBox.critical(self, "注册失败", outcome.message)
+            return
         dialog.finish_submit(False, outcome.message)
 
     def _offer_conflict_discard(self, dialog, context: dict) -> None:
@@ -745,12 +749,8 @@ class LoginDialog(QDialog):
             "清除本地记录不代表旧注册失败，不会撤销已创建账号，也不会退还邀请码。\n"
             "确认放弃后，本次窗口将关闭；下次注册需重新阅读协议。"
         )
-        keep_button = box.addButton(
-            "保留记录，稍后核验", QMessageBox.ButtonRole.RejectRole
-        )
-        discard_button = box.addButton(
-            "确认放弃本地恢复", QMessageBox.ButtonRole.DestructiveRole
-        )
+        keep_button = box.addButton("保留记录，稍后核验", QMessageBox.ButtonRole.RejectRole)
+        discard_button = box.addButton("确认放弃本地恢复", QMessageBox.ButtonRole.DestructiveRole)
         box.setDefaultButton(keep_button)
         box.exec()
         if box.clickedButton() is not discard_button:
@@ -804,9 +804,7 @@ class LoginDialog(QDialog):
         layout.addWidget(confirm_input)
 
         btn = QPushButton("确认重置")
-        btn.setStyleSheet(
-            "font-size: 14px; padding: 8px; background-color: #FF6B6B; color: white; border-radius: 5px;"
-        )
+        btn.setStyleSheet("font-size: 14px; padding: 8px; background-color: #FF6B6B; color: white; border-radius: 5px;")
         layout.addWidget(btn)
 
         def do_reset():
@@ -853,9 +851,7 @@ class LoginDialog(QDialog):
         layout.addWidget(url_input)
 
         btn = QPushButton("验证并保存")
-        btn.setStyleSheet(
-            "font-size: 14px; padding: 8px; background-color: #66CCFF; color: white; border-radius: 5px;"
-        )
+        btn.setStyleSheet("font-size: 14px; padding: 8px; background-color: #66CCFF; color: white; border-radius: 5px;")
         layout.addWidget(btn)
 
         def do_verify():

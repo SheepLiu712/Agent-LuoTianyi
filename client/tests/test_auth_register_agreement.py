@@ -19,9 +19,7 @@ class FakeResponse:
 
 @pytest.fixture
 def api(monkeypatch):
-    monkeypatch.setattr(
-        auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: "ciphertext"
-    )
+    monkeypatch.setattr(auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: "ciphertext")
     instance = AuthApi("https://example.invalid", session=SimpleNamespace())
     instance.base_url = "https://example.invalid"
     instance.verify_ssl = True
@@ -164,9 +162,7 @@ def test_legacy_register_still_returns_tuple(api):
 
 
 def test_encryption_failure_returns_outcome(monkeypatch):
-    monkeypatch.setattr(
-        auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: None
-    )
+    monkeypatch.setattr(auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: None)
     instance = AuthApi("https://example.invalid", session=SimpleNamespace())
     instance.base_url = "https://example.invalid"
     instance.verify_ssl = True
@@ -201,9 +197,7 @@ def test_login_required_preserves_stable_agreement_error_details(api):
 
 
 def test_accept_agreement_password_sends_only_protocol_credential(api, monkeypatch):
-    monkeypatch.setattr(
-        auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: "ciphertext"
-    )
+    monkeypatch.setattr(auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: "ciphertext")
     api._next_response = FakeResponse(
         200,
         {"agreement_version": "terms-v1", "accepted_at": "2026-10-10T14:30:25+08:00"},
@@ -249,11 +243,7 @@ def test_accept_agreement_reports_changed_version_and_identity_failure(api):
         },
     )
     ok, message, data = api.accept_agreement("newbie", "v1", password="pw")
-    assert (
-        ok is False
-        and data["code"] == "AGREEMENT_CHANGED"
-        and data["agreement_version"] == "v2"
-    )
+    assert ok is False and data["code"] == "AGREEMENT_CHANGED" and data["agreement_version"] == "v2"
 
     api._next_response = FakeResponse(401, {"detail": "身份验证失败"})
     ok, message, data = api.accept_agreement("newbie", "v1", password="pw")
@@ -261,14 +251,33 @@ def test_accept_agreement_reports_changed_version_and_identity_failure(api):
 
 
 def test_login_and_auto_login_error_details_keep_legacy_shapes(api):
-    api._next_response = FakeResponse(
-        403, {"detail": "待签", "code": "AGREEMENT_REQUIRED", "agreement_version": "v1"}
-    )
+    api._next_response = FakeResponse(403, {"detail": "待签", "code": "AGREEMENT_REQUIRED", "agreement_version": "v1"})
     login_ok, login_message, login_details = api.login("newbie", "pw")
     assert login_ok is False and login_details["code"] == "AGREEMENT_REQUIRED"
 
-    api._next_response = FakeResponse(
-        403, {"detail": "待签", "code": "AGREEMENT_REQUIRED", "agreement_version": "v1"}
-    )
+    api._next_response = FakeResponse(403, {"detail": "待签", "code": "AGREEMENT_REQUIRED", "agreement_version": "v1"})
     auto_ok, auto_details = api.auto_login("newbie", "token")
     assert auto_ok is False and auto_details["code"] == "AGREEMENT_REQUIRED"
+
+
+def test_key_rotation_retries_registration_with_original_request_id(api, monkeypatch):
+    encrypted = iter(["old-key-cipher", "new-key-cipher"])
+    monkeypatch.setattr(auth_module.encrypt_pwd, "encrypt_password", lambda *a, **k: next(encrypted))
+    responses = iter(
+        [
+            FakeResponse(400, {"detail": "密码解密失败", "code": "PASSWORD_DECRYPT_FAILED"}),
+            FakeResponse(200, {"message": "注册成功", "user_id": "newbie"}),
+        ]
+    )
+
+    def post(url, json=None, **kwargs):
+        api.sent.append({"url": url, "json": json})
+        return next(responses)
+
+    api.session = SimpleNamespace(post=post)
+    result = api.register_with_agreement(
+        "newbie", "pw", "INVITE", registration_request_id="req-rotation", agreement_version="v1", accepted=True
+    )
+    assert result.ok
+    assert [item["json"]["password"] for item in api.sent] == ["old-key-cipher", "new-key-cipher"]
+    assert all(item["json"]["registration_request_id"] == "req-rotation" for item in api.sent)
