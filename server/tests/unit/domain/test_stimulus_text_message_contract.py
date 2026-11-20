@@ -76,6 +76,7 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "DEVICE_CONNECTED": "device_connected",
         "DEVICE_DISCONNECTED": "device_disconnected",
         "PROACTIVE_PROMPT_DUE": "proactive_prompt_due",
+        "PROACTIVE_SPEECH_DUE": "proactive_speech_due",
         "INTERACTION_DEADLINE": "interaction_deadline",
         "INTERACTION_ENDING": "interaction_ending",
         "DYNAMIC_OBSERVED": "dynamic_observed",
@@ -106,6 +107,7 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "DEVICE": "device",
         "WORLD": "world",
         "STAGE": "stage",
+        "AGENT": "agent",
     }
 
 
