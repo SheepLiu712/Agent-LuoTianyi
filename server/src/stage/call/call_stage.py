@@ -979,7 +979,8 @@ class CallStage:
     def _accept_transcript(self, event):
         self._awaiting_transcript.discard(event.item_id)
         if not event.text.strip():
-            self._proactive_empty_turns.add(self._turn_for_item(event.item_id))
+            if (seq := self._item_turns.get(event.item_id)) is not None:
+                self._proactive_empty_turns.add(seq)
             self._restore_proactive_reply()
             self._release_user_speaking(event.item_id, invalid=True)
             self._schedule_output()
