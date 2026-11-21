@@ -1280,6 +1280,8 @@ class CallStage:
             timing.finish("interrupted")
 
     def _playback_barriers(self, plan: d.ActionPlan) -> tuple[str, ...]:
+        if all(isinstance(action, d.RequestCallSpeech) for action in plan.actions):
+            return ()
         pending = (key for key, r in self._responses.items() if not r.playback_completed and not r.failed)
         if len(plan.actions) == 1 and isinstance(plan.actions[0], d.Say):
             current = self._segment_models.get(plan.actions[0].call_delivery.response_id)
@@ -1379,6 +1381,7 @@ class CallStage:
             with reply_timing_scope(self._reply_timings.get(plan.origin_request_id)):
                 report = await self._agent.realize_action_plan(plan, context, _OutputSink(self, context, turn_seq))
             await self._handle_plan_result(plan, report, turn_seq, execution_token, retried, response_ids)
+            await self._send_proactive_actions(plan, report, execution_token)
             self._record_proactive_reply(plan, report, turn_seq, proactive_generation)
         except asyncio.CancelledError:
             if turn_seq is not None:
@@ -1397,6 +1400,12 @@ class CallStage:
                 self._finish_user_turn(turn_seq)
             self._refresh_silence_task()
             self._finish_pending_end_if_ready()
+
+    async def _send_proactive_actions(self, plan, report, token):
+        if report.status is d.ExecutionStatus.COMPLETED and not token.is_cancelled:
+            for action in plan.actions:
+                if isinstance(action, d.RequestCallSpeech):
+                    await self._provider.push(InstructionText(action.instruction, "silence"))
 
     def _restore_proactive_reply(self):
         latest = max(self._turns.keys() - self._proactive_empty_turns, default=0)

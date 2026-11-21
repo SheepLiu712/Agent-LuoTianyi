@@ -676,3 +676,14 @@ async def test_anonymous_failed_done_retains_provider_error():
         assert "event-error" in str(caught.value.__cause__)
     finally:
         await session.close()
+
+@pytest.mark.asyncio
+async def test_agent_proactive_call_requests_model_once_without_user_response(call_setup):
+    stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.03})
+    try:
+        await _eventually(lambda: len([e for e in socket.sent if e["type"] == "response.create"]) == 2)
+        await send_reply(socket, response_id="proactive", text="还想聊聊什么？", item_id=None)
+        await asyncio.sleep(0.12)
+        assert len([e for e in socket.sent if e["type"] == "response.create"]) == 2
+    finally:
+        await finish_call(stage)
