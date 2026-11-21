@@ -31,5 +31,6 @@ class _ReplyAttempt:
     report: d.HandlingReport | None = None
     interrupted: bool = False
     has_committed_plan: bool = False
+    has_reply_plan: bool = False
     execution_failed: bool = False
     timing: object | None = None

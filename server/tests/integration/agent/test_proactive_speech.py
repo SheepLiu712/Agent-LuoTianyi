@@ -13,7 +13,7 @@ from src.agent.handlers.action.proactive import MarkTopicSharedHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.proactive_speech import ProactiveSpeechHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.domain.stage.due_events import DueEvent
+from src.domain.agent.due_events import DueEvent
 from tests.integration.agent.test_topic_reply_pipeline import context, pipeline
 
 
@@ -121,7 +121,9 @@ async def test_failed_reply_does_not_mark_event_shared():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("values", [[], [event(target_user_id="other")], [event(character_id="other")], [event(is_notified=True)]])
+@pytest.mark.parametrize(
+    "values", [[], [event(target_user_id="other")], [event(character_id="other")], [event(is_notified=True)]]
+)
 async def test_no_eligible_event_uses_context_without_disclosing_private_event(values):
     events = Events(values)
     prompt, result = await generate(events)

@@ -744,3 +744,57 @@ async def test_proactive_waits_for_all_reply_plans_and_never_repeats_without_inp
         generation_gate.set()
         realization_gate.set()
         await cleanup(stage, adapter)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_reply", [True, False])
+async def test_background_maintenance_settlement_arms_only_a_real_reply(with_reply):
+    maintenance_started, maintenance_release = asyncio.Event(), asyncio.Event()
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            return await ending_plan(request, sink)
+        if not isinstance(request.stimulus, d.InteractionDeadline):
+            return report(request)
+        emitted = []
+        if with_reply:
+            spoken = plan(request)
+            await sink.emit(spoken)
+            emitted.append(spoken.plan_id)
+        maintenance = replace(
+            plan(request, ordinal=len(emitted)),
+            actions=(
+                d.CognitiveMaintenance(
+                    action_id="maintenance",
+                    reason=d.MaintenanceReason.COMPACTION_THRESHOLD,
+                ),
+            ),
+        )
+        await sink.emit(maintenance)
+        emitted.append(maintenance.plan_id)
+        return report(request, consumed=[i.stimulus_id for i in request.interaction.pending_stimuli], plans=emitted)
+
+    async def realize(value, context, sink):
+        if (
+            isinstance(value.actions[0], d.CognitiveMaintenance)
+            and value.actions[0].reason is d.MaintenanceReason.COMPACTION_THRESHOLD
+        ):
+            maintenance_started.set()
+            await maintenance_release.wait()
+        return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
+
+    stage, agent, adapter, _, _ = await setup(RecordingAgent(handle, realize), {"proactive_idle_seconds": 0.02})
+    try:
+        stage.stimulus_input_sink.submit(stimulus())
+        await asyncio.wait_for(maintenance_started.wait(), 1)
+        await asyncio.sleep(0.04)
+        assert not stage._proactive_timer.running
+        maintenance_release.set()
+        await asyncio.sleep(0.08)
+        requests = []
+        while not agent.requests.empty():
+            requests.append(agent.requests.get_nowait())
+        assert sum(isinstance(r.stimulus, d.ProactiveSpeechDue) for r in requests) == int(with_reply)
+    finally:
+        maintenance_release.set()
+        await cleanup(stage, adapter)

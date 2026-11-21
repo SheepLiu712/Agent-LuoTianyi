@@ -225,8 +225,6 @@ class AgentRuntime:
                 FirstLoginHandler(
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
-                    skills=reply_skills,
-                    reply=self.reply_delivery,
                 ),
             ),
             (
@@ -439,7 +437,6 @@ class AgentRuntime:
         """记录运行时外部依赖，并检查角色私有技能。"""
         self.llm_service = llm_service
         self.database_manager = database_manager
-        self._topic_events = EventStoreDueEventProvider(database_manager.event_store)
         self.media_resolver = media_resolver
         self.ensure_dependencies()
 

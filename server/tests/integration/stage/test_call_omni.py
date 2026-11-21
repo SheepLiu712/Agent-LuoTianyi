@@ -677,6 +677,7 @@ async def test_anonymous_failed_done_retains_provider_error():
     finally:
         await session.close()
 
+
 @pytest.mark.asyncio
 async def test_agent_proactive_call_requests_model_once_without_user_response(call_setup):
     stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.03})
@@ -685,5 +686,17 @@ async def test_agent_proactive_call_requests_model_once_without_user_response(ca
         await send_reply(socket, response_id="proactive", text="还想聊聊什么？", item_id=None)
         await asyncio.sleep(0.12)
         assert len([e for e in socket.sent if e["type"] == "response.create"]) == 2
+    finally:
+        await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_late_final_transcript_still_arms_proactive_after_reply_realized(call_setup):
+    stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.04})
+    try:
+        await send_reply(socket, response_id="late", text="听到了。", item_id="late-user")
+        await _eventually(lambda: not stage._generating and bool(stage._proactive_realized_turns))
+        await stage._on_omni_event(TranscriptFinal("late-user", "你好"))
+        await _eventually(lambda: len([e for e in socket.sent if e["type"] == "response.create"]) == 2)
     finally:
         await finish_call(stage)
