@@ -168,7 +168,10 @@ async def test_return_login_remains_disabled_after_stage_connection():
     # Given: a long-absence login is recorded and a real Stage is connected.
     requests = []
 
-    class RecordingAgent:
+    class RecordingAgent(Agent):
+        def __init__(self):
+            super().__init__(character_id="luotianyi")
+
         def is_handle_interruptible(self, interaction_id, request_id=None):
             return True
 

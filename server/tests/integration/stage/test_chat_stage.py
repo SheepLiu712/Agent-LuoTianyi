@@ -120,8 +120,9 @@ async def ending_plan(request, sink):
     return report(request, plans=(value.plan_id,))
 
 
-class RecordingAgent:
+class RecordingAgent(Agent):
     def __init__(self, handle=None, realize=None):
+        super().__init__(character_id="luotianyi")
         self.requests = asyncio.Queue()
         self.executions = asyncio.Queue()
         self.handle = handle
@@ -575,7 +576,9 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
                 (
                     d.ActionKind.SAY,
                     SayHandler(
-                        "luotianyi", SimpleNamespace(enabled=True), PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
+                        "luotianyi",
+                        SimpleNamespace(enabled=True),
+                        PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}}),
                     ),
                 )
             ]
@@ -695,3 +698,49 @@ async def test_termination_waits_background_cleanup_before_ending_and_context_cl
     result = await asyncio.wait_for(stop, 1)
     assert result.resources_released and stage.context.closed and ending == [True]
     await adapter.detach_stage_binding(stage)
+
+
+@pytest.mark.asyncio
+async def test_proactive_waits_for_all_reply_plans_and_never_repeats_without_input():
+    generation_gate, realization_gate = asyncio.Event(), asyncio.Event()
+    active = asyncio.Event()
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.InteractionEnding):
+            return await ending_plan(request, sink)
+        if isinstance(request.stimulus, d.InteractionDeadline):
+            value = plan(request)
+            await sink.emit(value)
+            await generation_gate.wait()
+            return report(
+                request, consumed=[s.stimulus_id for s in request.interaction.pending_stimuli], plans=[value.plan_id]
+            )
+        return report(request)
+
+    async def realize(value, context, sink):
+        if isinstance(value.actions[0], d.Say):
+            active.set()
+            await realization_gate.wait()
+        return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
+
+    stage, agent, adapter, _, _ = await setup(RecordingAgent(handle, realize), {"proactive_idle_seconds": 0.02})
+    try:
+        stage.stimulus_input_sink.submit(stimulus())
+        await asyncio.wait_for(active.wait(), 1)
+        await asyncio.sleep(0.04)
+        assert not stage._proactive_timer.running
+        generation_gate.set()
+        await asyncio.sleep(0.04)
+        assert not stage._proactive_timer.running
+        realization_gate.set()
+        await asyncio.sleep(0.08)
+        requests = []
+        while not agent.requests.empty():
+            requests.append(agent.requests.get_nowait())
+        assert sum(isinstance(r.stimulus, d.ProactiveSpeechDue) for r in requests) == 1
+        await asyncio.sleep(0.05)
+        assert agent.requests.empty()
+    finally:
+        generation_gate.set()
+        realization_gate.set()
+        await cleanup(stage, adapter)
