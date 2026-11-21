@@ -100,6 +100,7 @@ def completed_report(
 
 class ReplyingAgent(Agent):
     def __init__(self) -> None:
+        super().__init__(character_id="luotianyi")
         self.text_interaction_ids: list[str] = []
 
     def is_handle_interruptible(self, interaction_id: str, request_id: str | None = None) -> bool:
