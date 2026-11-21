@@ -1402,16 +1402,19 @@ class CallStage:
             self._refresh_proactive_timer()
             self._finish_pending_end_if_ready()
 
+    async def _send_proactive_actions(self, plan, report, token):
+        if report.status is d.ExecutionStatus.COMPLETED and not token.is_cancelled:
+            for action in plan.actions:
+                if isinstance(action, d.RequestCallSpeech):
+                    await self._provider.push(InstructionText(action.instruction, "silence"))
+
     def _restore_proactive_reply(self):
         latest = max(self._turns.keys() - self._proactive_empty_turns, default=0)
         self._proactive_reply_ready = latest in self._proactive_realized_turns
         self._refresh_proactive_timer()
 
     async def _settle_proactive_plan(self, plan, report, turn_seq, token, generation):
-        if report.status is d.ExecutionStatus.COMPLETED and not token.is_cancelled:
-            for action in plan.actions:
-                if isinstance(action, d.RequestCallSpeech):
-                    await self._provider.push(InstructionText(action.instruction, "silence"))
+        await self._send_proactive_actions(plan, report, token)
         if report.status is not d.ExecutionStatus.COMPLETED:
             self._proactive_reply_failed = True
         if (
