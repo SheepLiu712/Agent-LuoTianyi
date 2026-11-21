@@ -1,0 +1,546 @@
+extends PanelContainer
+signal log_requested
+signal feedback_requested
+const Session = preload("res://src/session/account_session.gd")
+const ServerAddress = preload("res://src/domain/server_address.gd")
+const HistoryRow = preload("res://scenes/ui/components/login_account_row.tscn")
+const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const LoginStyle = preload("res://src/ui/login_style.gd")
+const ModalStack = preload("res://src/ui/modal_stack.gd")
+const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
+const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
+const STALE_CA_MESSAGE := "当前版本过低，请更新最新版本"
+@export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
+var _password_drafts := {"password":"", "confirm":""}
+var _password_carets := {"password":0, "confirm":0}
+var _session: Node
+var _fields: Dictionary = {}
+var _initialized := false
+var _mode := "login"
+var _busy := false
+var _checking_server := false
+var _probing := false
+var _syncing := false
+var _manual_password := false
+var _removing := ""
+var _menu_trigger: RefCounted
+var _history_trigger: RefCounted
+var _ime_suppressed := false
+var _ime_sync_queued := false
+var _ime_control: RefCounted
+var _ui_style: RefCounted
+@onready var _form: VBoxContainer = %Form
+@onready var _remember: CheckBox = %Remember
+@onready var _automatic: CheckBox = %AutoLogin
+@onready var _submit: Button = %Submit
+@onready var _status: Label = %Status
+
+func setup(session: Node, ui_style: RefCounted = null) -> void:
+	_session = session
+	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_login_style):
+		_ui_style.style_changed.disconnect(_apply_login_style)
+	_ui_style = ui_style
+	if _ui_style != null:
+		_ui_style.style_changed.connect(_apply_login_style)
+	if is_node_ready():
+		_apply_login_style()
+		_initialize()
+
+func _ready() -> void:
+	_apply_login_style()
+	_menu_trigger = preload("res://src/ui/popup_trigger.gd").new(%MenuButton,%MenuPopup)
+	_history_trigger = preload("res://src/ui/popup_trigger.gd").new(%HistoryButton,%HistoryPopup)
+	%MenuButton.pressed.connect(_open_menu)
+	%MenuPopup.visibility_changed.connect(func(): %MenuButton.set_pressed_no_signal(%MenuPopup.visible))
+	%Logs.pressed.connect(func(): %MenuPopup.hide(); log_requested.emit())
+	%Feedback.pressed.connect(func(): %MenuPopup.hide(); feedback_requested.emit())
+	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe]: button.disabled = true
+	%RemoveAccountDialog.visibility_changed.connect(func(): _apply_login_style.call_deferred())
+	if _session != null: _initialize()
+
+func _apply_login_style() -> void:
+	var crystal: bool = _ui_style != null and _ui_style.has_method("is_crystal") and _ui_style.is_crystal()
+	LoginStyle.apply_account_view(self, crystal)
+
+func _present_login_error(message: String) -> void:
+	var crystal: bool = _ui_style != null and _ui_style.has_method("is_crystal") and _ui_style.is_crystal()
+	ErrorDialog.present(self, message, "提示", true, crystal)
+
+func _initialize() -> void:
+	if _initialized: return
+	_initialized = true
+	_ime_control = input_service.create_ime_controller()
+	_fields = {"server":%Server,"username":%Username,"password":%Password,"confirm":%Confirm,"invite":%Invite}
+	for name in ["username","password","confirm","invite"]:
+		_fields[name].text_submitted.connect(func(_text): _send())
+	for name in ["password","confirm"]:
+		_fields[name].text_changed.connect(func(value): _password_changed(name,value))
+		_fields[name].focus_entered.connect(_queue_ime_sync)
+		_fields[name].focus_exited.connect(_queue_ime_sync)
+	_fields.username.text_changed.connect(_username_changed)
+	_submit.pressed.connect(_send)
+	%SetServer.pressed.connect(_open_server)
+	%RegisterLink.pressed.connect(func(): select_mode("register"))
+	%ResetLink.pressed.connect(func(): select_mode("reset"))
+	%BackToLogin.pressed.connect(func(): select_mode("login"))
+	%UsePassword.pressed.connect(func(): _manual_password = true; _apply_mode(); %Password.grab_focus())
+	%HistoryButton.pressed.connect(_open_history)
+	_remember.toggled.connect(func(_pressed): _options_changed(false))
+	_automatic.toggled.connect(func(_pressed): _options_changed(true))
+	%ServerSave.pressed.connect(_save_server)
+	%ServerProbe.pressed.connect(_probe_server)
+	%Server.text_submitted.connect(func(_text): _save_server())
+	%ServerDefault.pressed.connect(func(): %Server.text = Session.DEFAULT_SERVER)
+	%ServerCancel.pressed.connect(_cancel_server)
+	%ServerClose.pressed.connect(_cancel_server)
+	%ServerDialog.close_requested.connect(_cancel_server)
+	%RemoveAccountDialog.confirmed.connect(_remove_record)
+	resized.connect(_layout_form)
+	_layout_form()
+	_session.changed.connect(_update_state)
+	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe]: button.disabled = false
+	_sync_selected()
+	if _session.get_login_defaults().storage_error:
+		push_warning("Login storage was not ready")
+	_queue_ime_sync()
+
+func _exit_tree() -> void:
+	_set_ime_active(true)
+
+func select_mode(mode: String) -> void:
+	if _busy or mode not in ["login","register","reset"]: return
+	_mode = mode
+	_clear_secrets()
+	%FeedbackAddress.hide()
+	_set_status("")
+	_manual_password = false
+	_apply_mode()
+
+func _apply_mode() -> void:
+	var login := _mode == "login"
+	var signed_in: bool = not _session.get_session().is_empty()
+	var saved: bool = login and not _manual_password and _remembered().get("remember", false)
+	_apply_mode_visibility(login, saved, signed_in)
+	_apply_mode_copy()
+	_apply_submit_text()
+	_sync_status_area()
+	_update_focus_chain()
+	_queue_ime_sync()
+
+func _apply_mode_visibility(login: bool, saved: bool, signed_in: bool) -> void:
+	%AvatarBlock.visible = login
+	%AvatarGap.visible = login
+	%BackToLogin.visible = not login
+	%ModeTitle.visible = not login
+	%ModeHelp.visible = _mode == "reset"
+	%Confirm.visible = not login
+	%Invite.visible = not login
+	%Password.visible = not saved
+	%SavedLogin.visible = saved
+	%HistoryButton.visible = login
+	%Options.visible = login
+	var footer_visible := login and not signed_in
+	%Footer.visible = footer_visible
+	%Footer.get_parent().visible = footer_visible
+	_form.visible = not signed_in
+
+func _apply_mode_copy() -> void:
+	%ModeTitle.text = "注册账号" if _mode == "register" else "忘记密码"
+	%Username.placeholder_text = "新用户名" if _mode == "reset" else "用户名"
+	%Password.placeholder_text = "新密码" if _mode == "reset" else "密码"
+	%Confirm.placeholder_text = "确认新密码" if _mode == "reset" else "确认密码"
+	%Invite.placeholder_text = "已使用的邀请码" if _mode == "reset" else "邀请码"
+
+func _apply_submit_text() -> void:
+	var submit_texts := {
+		"login": "登录中" if _busy else "登录",
+		"register": "注册中" if _busy else "注册",
+		"reset": "重置中" if _busy else "重置账号",
+	}
+	_submit.text = submit_texts.get(_mode, "登录")
+
+## Tab 由登录表单优先接管：发布版里依赖 focus_next 时仍可能被窗口的
+## 空间导航带到右侧历史账号按钮，这里直接计算并抓取目标焦点。
+func _input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if not event is InputEventKey or not event.pressed or event.echo:
+		return
+	if event.keycode != KEY_TAB and event.physical_keycode != KEY_TAB:
+		_reinforce_password_ime()
+		return
+	var order := _focus_order()
+	if order.size() < 2:
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	var index := order.find(focused)
+	if index == -1:
+		return
+	get_viewport().set_input_as_handled()
+	var step := -1 if event.shift_pressed else 1
+	order[(index + step + order.size()) % order.size()].grab_focus()
+	_queue_ime_sync()
+
+func _focus_order() -> Array[Control]:
+	var order: Array[Control] = []
+	if _fields.is_empty(): return order
+	if _fields.username.is_visible_in_tree(): order.append(_fields.username)
+	for name in ["password","confirm","invite"]:
+		var field: LineEdit = _fields[name]
+		if field.is_visible_in_tree(): order.append(field)
+	if %UsePassword.is_visible_in_tree() and not %UsePassword.disabled: order.append(%UsePassword)
+	for control in [_automatic,_remember,_submit,%HistoryButton]:
+		if control.is_visible_in_tree() and not control.disabled: order.append(control)
+	return order
+
+## 显式同步 focus_next/previous，保留键盘与辅助功能的常规导航语义。
+func _update_focus_chain() -> void:
+	var order := _focus_order()
+	if order.size() < 2: return
+	for index in order.size():
+		var next: Control = order[(index+1)%order.size()]
+		var previous: Control = order[(index-1+order.size())%order.size()]
+		order[index].focus_next = order[index].get_path_to(next)
+		order[index].focus_previous = order[index].get_path_to(previous)
+
+func _queue_ime_sync() -> void:
+	if _ime_sync_queued: return
+	_ime_sync_queued = true
+	_sync_ime.call_deferred()
+
+## 密码字段只接受 ASCII。桌面端在焦点进入密码框时断开输入法上下文，
+## 避免中文候选窗出现；离开密码框后恢复，不影响聊天等中文输入。
+func _sync_ime() -> void:
+	_ime_sync_queued = false
+	if _fields.is_empty(): return
+	var focused: Control = get_viewport().gui_get_focus_owner()
+	var password_focused: bool = focused != null and (focused == _fields.password or focused == _fields.confirm) and focused.is_visible_in_tree()
+	_set_ime_active(not password_focused)
+
+func _set_ime_active(active: bool) -> void:
+	var suppressed := not active
+	if suppressed == _ime_suppressed: return
+	input_service.set_ime_active(active)
+	if _ime_control != null:
+		var result: Dictionary = _ime_control.set_english(suppressed)
+		if not result.get("ok", false):
+			push_warning("Input method switch failed: %s" % result.get("error", "UNKNOWN"))
+	_ime_suppressed = suppressed
+
+## 某些 TSF 输入法会在按键时自行切回中文；密码框每次按键前重新确认英文布局。
+func _reinforce_password_ime() -> void:
+	if _ime_control == null or _fields.is_empty():
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused == _fields.password or focused == _fields.confirm:
+		_ime_control.set_english(true)
+
+func _remembered() -> Dictionary:
+	for entry in _session.get_history():
+		if entry.username == _fields.username.text: return entry
+	return {}
+
+func _sync_selected() -> void:
+	_syncing = true
+	var defaults: Dictionary = _session.get_login_defaults()
+	_fields.username.text = defaults.username
+	_fields.server.text = defaults.server
+	_remember.set_pressed_no_signal(defaults.remember)
+	_automatic.set_pressed_no_signal(defaults.auto_login)
+	_clear_secrets()
+	_manual_password = false
+	_syncing = false
+	_apply_mode()
+
+func _username_changed(_text: String) -> void:
+	if _syncing or _busy or _mode != "login": return
+	var entry := _remembered()
+	_remember.set_pressed_no_signal(entry.get("remember",false))
+	_automatic.set_pressed_no_signal(entry.get("auto_login",false))
+	_password_drafts.password = ""
+	_password_carets.password = 0
+	_fields.password.clear()
+	_manual_password = false
+	_apply_mode()
+
+func _options_changed(automatic_source: bool) -> void:
+	if _syncing or _busy: return
+	if automatic_source and _automatic.button_pressed: _remember.set_pressed_no_signal(true)
+	if not automatic_source and not _remember.button_pressed: _automatic.set_pressed_no_signal(false)
+	var entry := _remembered()
+	if entry.get("remember",false):
+		var result: Dictionary = _session.set_login_options(entry.username, _remember.button_pressed, _automatic.button_pressed)
+		if not result.ok:
+			_remember.set_pressed_no_signal(entry.remember)
+			_automatic.set_pressed_no_signal(entry.auto_login)
+			push_warning("set_login_options failed: %s" % result.code)
+	_apply_mode()
+
+func _send() -> void:
+	if _busy: return
+	var operation := _mode
+	if not _validate_passwords(operation):
+		return
+	%FeedbackAddress.hide()
+	_sync_status_area()
+	var response: Dictionary
+	if operation == "login" and %SavedLogin.visible:
+		response = await _session.login_saved(_fields.username.text)
+	else:
+		var fields := {"username":_fields.username.text,"password":_fields.password.text}
+		if operation == "register": fields.invite_code = _fields.invite.text
+		elif operation == "reset": fields = {"new_username":_fields.username.text,"new_password":_fields.password.text,"invite_code":_fields.invite.text}
+		response = await _session.perform(operation, _session.get_login_defaults().server, fields, _remember.button_pressed if operation == "login" else false, _automatic.button_pressed if operation == "login" else false)
+	_present_response(operation, response)
+	_apply_mode()
+func _update_state(state: Dictionary) -> void:
+	_apply_busy_state(state)
+	if state.code in ["SERVER_CHANGED","ACCOUNT_SELECTED","ACCOUNT_REMOVED","LOGGED_OUT"]: _sync_selected()
+	if state.phase == "signed_in": _clear_secrets()
+	if not _checking_server or state.code == "SERVER_CHANGED":
+		_report_state(state)
+	_apply_mode()
+
+func _apply_busy_state(state: Dictionary) -> void:
+	_busy = state.phase == "busy"
+	for name in ["username","password","confirm","invite","server"]: _fields[name].editable = not _busy
+	for button in [_submit,_remember,_automatic,%BackToLogin,%RegisterLink,%ResetLink,%HistoryButton,%UsePassword,%SetServer,%ServerSave,%ServerDefault,%ServerProbe]: button.disabled = _busy or _probing
+
+func _report_state(state: Dictionary) -> void:
+	if _is_error_code(state.code):
+		_show_error(state.code, 0, str(state.get("detail", "")))
+	elif state.code == "PENDING":
+		_set_status("")
+	else:
+		_set_status(_error_text(state.code, 0, str(state.get("detail", ""))))
+	if state.storage_error:
+		push_warning("Account storage failed during %s" % state.phase)
+
+func _open_menu() -> void:
+	if not _menu_trigger.should_open(): return
+	%HistoryPopup.hide()
+	var available := get_window().get_visible_rect().size
+	var bottom: Vector2 = %MenuButton.get_global_transform_with_canvas() * Vector2(0,%MenuButton.size.y)
+	_popup(%MenuPopup, Vector2(available.x-192,bottom.y+6), Vector2i(168,152))
+	(%Logs if %SetServer.disabled else %SetServer).grab_focus.call_deferred()
+
+func _popup(window: Window, position: Vector2, requested: Vector2i) -> void:
+	var available := get_window().get_visible_rect().size
+	var extent := Vector2i(mini(requested.x,int(available.x)-16),mini(requested.y,int(available.y)-16))
+	position = position.clamp(Vector2(8,8), (available-Vector2(extent)-Vector2(8,8)).max(Vector2(8,8)))
+	window.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	window.content_scale_size = Vector2i.ZERO
+	window.content_scale_factor = 1
+	window.popup(Rect2i(Vector2i(position),extent))
+
+func _open_history() -> void:
+	if _busy: return
+	if not _history_trigger.should_open(): return
+	%MenuPopup.hide()
+	for child in %HistoryRows.get_children():
+		if child != %HistoryEmpty:
+			%HistoryRows.remove_child(child)
+			child.queue_free()
+	var history: Array = _session.get_history()
+	%HistoryEmpty.visible = history.is_empty()
+	for entry in history:
+		var row := HistoryRow.instantiate()
+		row.get_node("%Choose").text = entry.username
+		row.get_node("%Choose").pressed.connect(func(): %HistoryPopup.hide(); _session.select_account(entry.username))
+		row.get_node("%Remove").pressed.connect(func():
+			%HistoryPopup.hide()
+			_removing = entry.username
+			%RemoveAccountDialog.dialog_text = "移除“%s”的本机账号记录和已记住的登录状态？不会删除服务器账号或聊天、语音缓存。" % entry.username
+			%RemoveAccountDialog.popup_centered())
+		%HistoryRows.add_child(row)
+	var anchor: Control = %Username.get_parent().get_parent()
+	_popup(%HistoryPopup, anchor.get_global_transform_with_canvas() * Vector2(0,anchor.size.y+6), Vector2i(int(anchor.size.x),mini(280,maxi(64,history.size()*48+16))))
+
+func _remove_record() -> void:
+	var response: Dictionary = _session.remove_account(_removing)
+	_removing = ""
+	if not response.ok: push_warning("remove_account failed: %s" % response.code)
+
+func _open_server() -> void:
+	%MenuPopup.hide()
+	if _busy: return
+	%Server.text = _session.get_login_defaults().server
+	%ServerStatus.text = "验证连接成功后才使用新地址。"
+	%ProbeResult.text = ""
+	%ProbeResult.visible = false
+	_apply_probe_state()
+	%ServerDialog.exclusive = false
+	ModalWindowLayout.present(%ServerDialog, %ServerDialog/Panel, null, 260, Vector2i(416, 300))
+	ModalStack.activate(%ServerDialog)
+	%Server.grab_focus()
+
+func _save_server() -> void:
+	if _busy or _probing: return
+	%ServerStatus.text = "正在验证服务器…"
+	_checking_server = true
+	var response: Dictionary = await _session.set_server(%Server.text)
+	_checking_server = false
+	if not %ServerDialog.visible: return
+	if response.ok: %ServerDialog.hide()
+	else:
+		var message := _error_text(response.code, response.get("status", 0), str(response.get("detail", "")))
+		%ServerStatus.text = message
+		if _should_auto_probe(response):
+			await _probe_server(message)
+
+## 只有链路层失败才补测；账号/参数错误不需要再打一次公网基线。
+static func _should_auto_probe(response: Dictionary) -> bool:
+	return int(response.get("status", 0)) == 0 and str(response.get("code", "")) in [
+		"NETWORK_ERROR", "TIMEOUT", "PUBLIC_KEY_ERROR"]
+
+func _probe_server(status_text: String = "验证连接成功后才使用新地址。") -> void:
+	if _probing or _busy or _checking_server: return
+	var address := ServerAddress.normalize(%Server.text)
+	if address.is_empty():
+		%ProbeResult.text = "公网基线：未测试\n目标服务器：地址无效"
+		%ProbeResult.visible = true
+		return
+	_probing = true
+	_apply_probe_state()
+	%ServerStatus.text = "正在测试网络连通性…"
+	var result: Dictionary = await _session.probe_connectivity(address)
+	_probing = false
+	_apply_probe_state()
+	if not %ServerDialog.visible or bool(result.get("cancelled", false)): return
+	%ServerStatus.text = _probe_status_text(result, status_text)
+	var baseline: Dictionary = result.get("baseline", {})
+	var target: Dictionary = result.get("target", {})
+	%ProbeResult.text = "公网基线：%s\n目标服务器：%s" % [_probe_text(baseline), _probe_text(target)]
+	%ProbeResult.visible = true
+
+func _apply_probe_state() -> void:
+	for button in [%ServerProbe, %ServerSave, %ServerDefault]:
+		button.disabled = _busy or _probing
+	%ServerCancel.disabled = _busy
+
+func _cancel_server() -> void:
+	if _busy and %ServerDialog.visible: _session.cancel()
+	_session.cancel_probe()
+	%ServerDialog.hide()
+
+func report_feedback_result(error: Error) -> void:
+	if error == OK: return
+	%FeedbackAddress.show()
+	_set_status("")
+	_present_login_error("浏览器没有打开，请手动复制下面的地址。")
+
+func _layout_form() -> void:
+	%FormMargin.theme_type_variation = &"LoginCompactMargin" if size.x < 440 else &"LoginFormMargin"
+
+func _clear_secrets() -> void:
+	_password_drafts = {"password":"", "confirm":""}
+	_password_carets = {"password":0, "confirm":0}
+	for field in ["password","confirm","invite"]: _fields[field].clear()
+
+func _password_changed(field: String, value: String) -> void:
+	if _ascii_password(value):
+		_password_drafts[field] = value
+		_password_carets[field] = _fields[field].caret_column
+		if _status.text == PASSWORD_HINT:
+			_set_status("")
+	else:
+		_fields[field].text = _password_drafts[field]
+		_fields[field].caret_column = _password_carets[field]
+		# 直接回退输入会让用户以为按键失效；在页面上说明只接受英文符号。
+		_set_status(PASSWORD_HINT)
+
+static func _ascii_password(value: String) -> bool:
+	for index in value.length():
+		var code := value.unicode_at(index)
+		if code < 32 or code > 126: return false
+	return true
+
+static func _error_text(code: String, status: int = 0, detail: String = "") -> String:
+	if _is_ca_expiry_failure(detail):
+		return STALE_CA_MESSAGE
+	if _is_tls_failure(detail):
+		return "服务器证书校验失败，连接已到达服务器但证书未被信任。请检查系统时间、代理或安全软件；可在“设置服务器”中测试连通性，或稍后重试。"
+	return {"OK":"登录成功。", "LOGGED_OUT":"已退出登录。", "PENDING":"正在处理…", "CANCELLED":"请求已取消。",
+		"AUTH_REJECTED":"用户名或密码错误，或自动登录凭据已失效。", "INVALID_INPUT":"请填写完整信息并检查服务器地址。",
+		"TIMEOUT":"连接超时，请稍后重试。", "NETWORK_ERROR":"无法连接服务器，请检查地址和网络。",
+		"PUBLIC_KEY_ERROR":"无法连接服务器，请检查网络或服务器地址。", "ENCRYPTION_ERROR":"登录暂时无法完成，请稍后重试。",
+		"INVALID_RESPONSE":"服务器响应异常，请稍后重试。", "CREDENTIAL_UNAVAILABLE":"无法读取自动登录凭据，请重新登录。",
+		"HTTP_ERROR":"服务器暂时无法处理，请稍后重试。",
+		"NO_SAVED_LOGIN":"请使用密码登录。", "SERVER_CHANGED":"服务器已更新。", "CHECKING_SERVER":"正在验证服务器…", "INSECURE_SERVER":"该地址未启用 HTTPS，已拒绝发送账号信息。", "ACCOUNT_SELECTED":"", "ACCOUNT_REMOVED":"本机账号记录已移除。", "OPTIONS_CHANGED":"", "STORAGE_ERROR":"", "BUSY":"正在处理中，请稍候。"}.get(code, "操作未完成，请重试。")
+
+static func _is_tls_failure(detail: String) -> bool:
+	return detail == "RESULT_TLS_HANDSHAKE_ERROR" \
+		or detail.contains("MBEDTLS_ERR_X509_CERT_VERIFY_FAILED")
+
+## mbedTLS 只暴露 -9984，不区分根缺失、根过期和主机名错误；固定 CA 生效时，
+## 证书链被拒说明本机客户端的 CA 快照已经落后于服务器证书链。
+static func _is_ca_expiry_failure(detail: String) -> bool:
+	if not _is_tls_failure(detail):
+		return false
+	return not str(ProjectSettings.get_setting("network/tls/certificate_bundle_override", "")).strip_edges().is_empty()
+
+## 探测结果比单次登录失败更能说明失败发生在链路哪一段。
+static func _probe_status_text(result: Dictionary, fallback: String) -> String:
+	var target: Dictionary = result.get("target", {})
+	if str(target.get("stage", "")) == "INSECURE":
+		return "服务器地址必须使用 HTTPS；仅本机回环地址允许明文 HTTP。"
+	if str(target.get("stage", "")) != "TLS":
+		return fallback
+	if _is_ca_expiry_failure(str(target.get("detail", ""))):
+		return STALE_CA_MESSAGE
+	if bool(result.get("baseline", {}).get("ok", false)):
+		return "服务器证书校验失败：公网正常，目标服务器 TLS 握手未通过。请检查系统时间、代理/安全软件或服务器证书。"
+	return "目标服务器 TLS 证书校验失败。请检查系统时间、代理/安全软件或服务器证书。"
+
+static func _probe_text(entry: Dictionary) -> String:
+	var stage := str(entry.get("stage", "UNKNOWN"))
+	var elapsed := int(entry.get("duration_ms", 0))
+	if stage == "INVALID":
+		return "地址无效"
+	var status := int(entry.get("http_status", 0))
+	if stage == "HTTP" and status >= 400:
+		return "服务器响应异常 %d %dms" % [status, elapsed]
+	var label: String = {"HTTP":"正常", "DNS":"DNS 解析失败", "TCP":"连接失败", "TLS":"TLS 证书校验失败",
+		"TIMEOUT":"连接超时", "CANCELLED":"已取消", "SKIPPED":"已跳过",
+		"INSECURE":"必须使用 HTTPS"}.get(stage, "连接失败")
+	return "%s %dms" % [label, elapsed]
+
+func _is_error_code(code: String) -> bool:
+	return code in ["AUTH_REJECTED","INVALID_INPUT","INSECURE_SERVER","TIMEOUT","NETWORK_ERROR","PUBLIC_KEY_ERROR","ENCRYPTION_ERROR","INVALID_RESPONSE","CREDENTIAL_UNAVAILABLE","HTTP_ERROR","NO_SAVED_LOGIN","BUSY"]
+
+func _set_status(text: String) -> void:
+	_status.text = text
+	_sync_status_area()
+
+func _sync_status_area() -> void:
+	_status.visible = not _status.text.is_empty()
+	%StatusArea.visible = _status.visible or %FeedbackAddress.visible
+
+func _show_error(code: String, status: int = 0, detail: String = "") -> void:
+	var message := _error_text(code, status, detail)
+	_set_status("")
+	_present_login_error(message)
+
+func _validate_passwords(operation: String) -> bool:
+	for name in (["password"] if operation == "login" else ["password","confirm"]):
+		if not _ascii_password(_fields[name].text):
+			_set_status("")
+			_present_login_error(PASSWORD_HINT)
+			return false
+	if operation != "login" and _fields.password.text != _fields.confirm.text:
+		_set_status("")
+		_present_login_error("两次输入的密码不一致。")
+		return false
+	return true
+
+func _present_response(operation: String, response: Dictionary) -> void:
+	if response.ok:
+		_clear_secrets()
+		if operation != "login":
+			select_mode("login")
+			_set_status("注册成功，请登录。" if operation == "register" else "账号重置成功，请使用新账号登录。")
+	elif not response.storage_error:
+		if _is_error_code(response.code):
+			_show_error(response.code, response.get("status",0), str(response.get("detail", "")))
+		else:
+			_set_status(_error_text(response.code, 0, str(response.get("detail", ""))))

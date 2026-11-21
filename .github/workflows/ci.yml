@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       docs_only: ${{ steps.scope.outputs.docs_only }}
+      client_godot: ${{ steps.scope.outputs.client_godot }}
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
@@ -51,6 +52,34 @@ jobs:
           mkdir "$RUNNER_TEMP/link-checker"
           tar -xzf "$archive" --directory "$RUNNER_TEMP/link-checker" --wildcards --no-anchored 'lychee' --strip-components=1
           PATH="$RUNNER_TEMP/link-checker:$PATH" python .github/scripts/docs_ci.py check "$BASE_SHA"
+
+  godot-static:
+    needs: changes
+    if: needs.changes.outputs.client_godot == 'true'
+    name: godot-static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: client-godot/tests/requirements-complexity.txt
+      - run: python -m pip install -r client-godot/tests/requirements-complexity.txt
+      - name: 依赖边界与文档契约
+        run: |
+          python client-godot/tests/test_dependency_boundaries.py
+          python client-godot/tests/test_review_documentation.py
+      - name: 门禁与构建提示自检
+        run: |
+          python client-godot/tests/test_check_gate.py
+          python client-godot/tests/test_build_prompt.py
+          python client-godot/tests/test_complexity_check.py
+      - name: 圈复杂度门禁
+        run: python client-godot/scripts/check_complexity.py
 
   server-lint:
     needs: changes

@@ -1,0 +1,239 @@
+[gd_scene format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+[ext_resource type="Script" path="res://src/ui/settings_window.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/window_chrome.tscn" id="window_chrome"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/toast_overlay.tscn" id="toast_overlay"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="Decision"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/profile_page.tscn" id="profile_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/preferences_page.tscn" id="preferences_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/model_page.tscn" id="model_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/audio_settings_page.tscn" id="audio_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/style_page.tscn" id="style_page"]
+
+[sub_resource type="ButtonGroup" id="SettingsTabs"]
+allow_unpress = false
+
+[node name="SettingsWindow" type="Window"]
+title = "设置"
+size = Vector2i(880, 760)
+visible = false
+transient = true
+min_size = Vector2i(720, 640)
+force_native = true
+theme = ExtResource("theme")
+script = ExtResource("script")
+window_system = ExtResource("isolation_window_system")
+
+[node name="Body" type="PanelContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"WindowShellSurface"
+
+[node name="Column" type="VBoxContainer" parent="Body"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PagesArea" type="Control" parent="Body/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Pages" type="HBoxContainer" parent="Body/Column/PagesArea"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="Sidebar" type="VBoxContainer" parent="Body/Column/PagesArea/Pages"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Heading" type="Label" parent="Body/Column/PagesArea/Pages/Sidebar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsNavHeading"
+text = "偏好与配置"
+vertical_alignment = 1
+
+[node name="NavMargin" type="MarginContainer" parent="Body/Column/PagesArea/Pages/Sidebar"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+
+[node name="NavRow" type="HBoxContainer" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="GuideRail" type="Panel" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow"]
+custom_minimum_size = Vector2(1, 0)
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"SettingsNavRail"
+
+[node name="NavColumn" type="VBoxContainer" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="ProfileTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsNavItem"
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+text = "个人资料"
+alignment = 0
+
+[node name="PreferencesTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsNavItem"
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+text = "相处模式"
+alignment = 0
+
+[node name="ModelsTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsNavItem"
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+text = "模型配置"
+alignment = 0
+
+[node name="AudioTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsNavItem"
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+text = "缓存与导入"
+alignment = 0
+
+[node name="StyleTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar/NavMargin/NavRow/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsNavItem"
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+text = "风格外观"
+alignment = 0
+
+[node name="Content" type="ScrollContainer" parent="Body/Column/PagesArea/Pages"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="PageMargin" type="MarginContainer" parent="Body/Column/PagesArea/Pages/Content"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="Sections" type="VBoxContainer" parent="Body/Column/PagesArea/Pages/Content/PageMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 40
+
+[node name="ProfilePage" parent="Body/Column/PagesArea/Pages/Content/PageMargin/Sections" instance=ExtResource("profile_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PreferencesPage" parent="Body/Column/PagesArea/Pages/Content/PageMargin/Sections" instance=ExtResource("preferences_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ModelPage" parent="Body/Column/PagesArea/Pages/Content/PageMargin/Sections" instance=ExtResource("model_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="AudioPage" parent="Body/Column/PagesArea/Pages/Content/PageMargin/Sections" instance=ExtResource("audio_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="StylePage" parent="Body/Column/PagesArea/Pages/Content/PageMargin/Sections" instance=ExtResource("style_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="BusyBlocker" type="Control" parent="Body/Column/PagesArea"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+focus_mode = 2
+
+[node name="Footer" type="VBoxContainer" parent="Body/Column"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="FooterSeparator" type="HSeparator" parent="Body/Column/Footer"]
+layout_mode = 2
+
+[node name="Actions" type="HBoxContainer" parent="Body/Column/Footer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="LogoutButton" type="Button" parent="Body/Column/Footer/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsDangerButton"
+text = "退出登录"
+
+[node name="Spacer" type="Control" parent="Body/Column/Footer/Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CloseSettings" type="Button" parent="Body/Column/Footer/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(88, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "关闭"
+
+[node name="SaveAll" type="Button" parent="Body/Column/Footer/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(128, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsPrimaryButton"
+text = "保存全部修改"
+
+[node name="UnsavedDialog" parent="." instance=ExtResource("Decision")]
+unique_name_in_owner = true
+title = "设置尚未保存"
+dialog_text = "可以保存全部修改后关闭，或放弃本窗口尚未保存的修改。"
+ok_button_text = "放弃修改"
+cancel_button_text = "取消"
+destructive_action = true
+show_save = true
+
+[node name="Chrome" parent="." instance=ExtResource("window_chrome")]
+unique_name_in_owner = true
+
+[node name="SaveToast" parent="." instance=ExtResource("toast_overlay")]
+unique_name_in_owner = true

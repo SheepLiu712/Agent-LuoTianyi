@@ -1,0 +1,143 @@
+[gd_scene format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+[ext_resource type="Script" path="res://src/ui/image_window.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/window_chrome.tscn" id="window_chrome"]
+[ext_resource type="Shader" path="res://assets/ui/image_backdrop.gdshader" id="backdrop_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_backdrop"]
+shader = ExtResource("backdrop_shader")
+
+[node name="ImageWindow" type="Window"]
+title = "图片预览"
+size = Vector2i(900, 720)
+visible = false
+transient = true
+min_size = Vector2i(600, 460)
+force_native = true
+theme = ExtResource("theme")
+script = ExtResource("script")
+window_system = ExtResource("isolation_window_system")
+
+[node name="Body" type="PanelContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"WindowShellSurface"
+
+[node name="Column" type="VBoxContainer" parent="Body"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ImageScroll" type="ScrollContainer" parent="Body/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Stage" type="MarginContainer" parent="Body/Column/ImageScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="Backdrop" type="ColorRect" parent="Body/Column/ImageScroll/Stage"]
+unique_name_in_owner = true
+visible = false
+material = SubResource("ShaderMaterial_backdrop")
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="Picture" type="TextureRect" parent="Body/Column/ImageScroll/Stage"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ImageError" type="Label" parent="Body/Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "图片暂时无法读取，请重试。"
+horizontal_alignment = 1
+
+[node name="RetryImage" type="Button" parent="Body/Column"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "重试读取图片"
+
+[node name="Feedback" type="Label" parent="Body/Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="Toolbar" type="HBoxContainer" parent="Body/Column"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ZoomLabel" type="Label" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.30980393, 0.40392157, 0.45882353, 1)
+
+[node name="ZoomOut" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+tooltip_text = "缩小图片"
+theme_type_variation = &"SettingsButton"
+text = "－"
+
+[node name="ZoomIn" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+tooltip_text = "放大图片"
+theme_type_variation = &"SettingsButton"
+text = "＋"
+
+[node name="FitImage" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "适应窗口"
+
+[node name="OriginalSize" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "原始比例"
+
+[node name="ConfirmImage" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"PrimaryButton"
+text = "发送图片"
+
+[node name="CloseImage" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "关闭"
+
+[node name="Chrome" parent="." instance=ExtResource("window_chrome")]
+unique_name_in_owner = true

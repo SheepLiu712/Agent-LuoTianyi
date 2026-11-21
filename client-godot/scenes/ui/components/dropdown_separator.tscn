@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="1_theme"]
+
+[node name="DropdownSeparator" type="HSeparator"]
+theme = ExtResource("1_theme")

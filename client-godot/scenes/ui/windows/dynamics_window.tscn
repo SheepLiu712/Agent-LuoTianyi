@@ -1,0 +1,124 @@
+[gd_scene format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+[ext_resource type="Resource" path="res://resources/platform/dynamics.tres" id="isolation_settings"]
+[ext_resource type="Script" path="res://src/ui/dynamics_window.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/window_chrome.tscn" id="window_chrome"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="Discard"]
+
+[node name="DynamicsWindow" type="Window"]
+title = "天依的动态"
+size = Vector2i(1000, 780)
+visible = false
+min_size = Vector2i(900, 640)
+force_native = true
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+settings = ExtResource("isolation_settings")
+window_system = ExtResource("isolation_window_system")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"WindowShellSurface"
+
+[node name="Column" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Toolbar" type="HBoxContainer" parent="Panel/Column"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Unread" type="Label" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.1882353, 0.27058825, 0.3254902, 1)
+theme_override_font_sizes/font_size = 20
+
+[node name="Publish" type="Button" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsPrimaryButton"
+text = "发布动态"
+
+[node name="Refresh" type="Button" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(88, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "刷新"
+
+[node name="ReadAll" type="Button" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "全部已读"
+
+[node name="NoticeBanner" type="PanelContainer" parent="Panel/Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"StatusBannerSurface"
+
+[node name="Notice" type="Label" parent="Panel/Column/NoticeBanner"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3
+
+[node name="Split" type="HSplitContainer" parent="Panel/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="Left" type="VBoxContainer" parent="Panel/Column/Split"]
+custom_minimum_size = Vector2(270, 0)
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ListScroll" type="ScrollContainer" parent="Panel/Column/Split/Left"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ListMargin" type="MarginContainer" parent="Panel/Column/Split/Left/ListScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_right = 8
+
+[node name="List" type="VBoxContainer" parent="Panel/Column/Split/Left/ListScroll/ListMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="Right" type="PanelContainer" parent="Panel/Column/Split"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(330, 0)
+layout_mode = 2
+theme_type_variation = &"DynamicsDetailSurface"
+
+[node name="Empty" type="Label" parent="Panel/Column/Split/Right"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.41960785, 0.50980395, 0.5647059, 1)
+text = "选择一条动态"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Chrome" parent="." instance=ExtResource("window_chrome")]
+unique_name_in_owner = true
+
+[node name="DiscardDialog" parent="." instance=ExtResource("Discard")]
+unique_name_in_owner = true
+destructive_action = true

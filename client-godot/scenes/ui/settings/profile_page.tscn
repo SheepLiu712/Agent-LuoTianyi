@@ -1,0 +1,108 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/profile_page.gd" id="1_profile"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[node name="ProfilePage" type="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme = ExtResource("2_theme")
+script = ExtResource("1_profile")
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"SettingsPageTitle"
+text = "个人资料"
+
+[node name="ProfileCard" type="PanelContainer" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"SettingsCard"
+
+[node name="Content" type="VBoxContainer" parent="Column/ProfileCard"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Column/ProfileCard/Content"]
+layout_mode = 2
+theme_type_variation = &"SettingsCardTitle"
+text = "账号与头像"
+
+[node name="Row" type="HBoxContainer" parent="Column/ProfileCard/Content"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Preview" type="TextureRect" parent="Column/ProfileCard/Content/Row"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_avatar")
+custom_minimum_size = Vector2(96, 96)
+layout_mode = 2
+size_flags_vertical = 0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Info" type="VBoxContainer" parent="Column/ProfileCard/Content/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="AccountLabel" type="Label" parent="Column/ProfileCard/Content/Row/Info"]
+layout_mode = 2
+theme_type_variation = &"SettingsFieldLabel"
+text = "当前账号"
+
+[node name="Account" type="Label" parent="Column/ProfileCard/Content/Row/Info"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "—"
+
+[node name="Hint" type="Label" parent="Column/ProfileCard/Content/Row/Info"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "支持 PNG、JPG、WebP，单张不超过 6 MB。选好后立即生效，只保存在本机。"
+autowrap_mode = 3
+
+[node name="Actions" type="HBoxContainer" parent="Column/ProfileCard/Content/Row/Info"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PickButton" type="Button" parent="Column/ProfileCard/Content/Row/Info/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "选择本地图片"
+
+[node name="ResetButton" type="Button" parent="Column/ProfileCard/Content/Row/Info/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+text = "恢复默认头像"
+
+[node name="Result" type="Label" parent="Column/ProfileCard/Content"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+autowrap_mode = 3
+
+[node name="FileDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "选择头像图片"
+size = Vector2i(720, 480)
+ok_button_text = "使用这张图片"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.png,*.jpg,*.jpeg,*.webp ; 图片")
+use_native_dialog = true

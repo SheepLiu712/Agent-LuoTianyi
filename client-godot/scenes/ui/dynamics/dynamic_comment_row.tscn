@@ -1,0 +1,64 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamic_comment_row.gd" id="1_comment"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[node name="DynamicCommentRow" type="VBoxContainer"]
+theme = ExtResource("2_theme")
+theme_override_constants/separation = 8
+script = ExtResource("1_comment")
+
+[node name="Line" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Avatar" type="TextureRect" parent="Line"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_avatar")
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+size_flags_vertical = 0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Content" type="VBoxContainer" parent="Line"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="Author" type="Label" parent="Line/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.1882353, 0.27058825, 0.3254902, 1)
+theme_override_font_sizes/font_size = 14
+
+[node name="Body" type="RichTextLabel" parent="Line/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+fit_content = true
+scroll_active = false
+selection_enabled = true
+
+[node name="Footer" type="HBoxContainer" parent="Line/Content"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Time" type="Label" parent="Line/Content/Footer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.30980393, 0.40392157, 0.45882353, 1)
+theme_override_font_sizes/font_size = 12
+
+[node name="Reply" type="Button" parent="Line/Content/Footer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+theme_type_variation = &"InlineLinkButton"
+text = "回复"
+
+[node name="Sep" type="HSeparator" parent="."]
+layout_mode = 2

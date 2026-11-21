@@ -1,0 +1,156 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/chat_workspace.gd" id="1_workspace"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_at.svg" id="icon_nav_at"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_chat.svg" id="icon_nav_chat"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_scroll.svg" id="icon_nav_scroll"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_settings.svg" id="icon_nav_settings"]
+[ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="3_avatar"]
+[ext_resource type="PackedScene" path="res://scenes/ui/chat/chat_view.tscn" id="4_chat"]
+
+[sub_resource type="Gradient" id="WorkspaceGradient"]
+colors = PackedColorArray(0.965, 0.976, 0.988, 1, 0.965, 0.976, 0.988, 1)
+
+[sub_resource type="GradientTexture2D" id="WorkspaceBackdrop"]
+resource_local_to_scene = true
+gradient = SubResource("WorkspaceGradient")
+fill_to = Vector2(1, 1)
+
+[node name="ChatWorkspace" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_workspace")
+
+[node name="Background" type="TextureRect" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("WorkspaceBackdrop")
+expand_mode = 1
+
+[node name="Navigation" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 80.0
+grow_vertical = 2
+theme_type_variation = &"NavigationRail"
+
+[node name="Items" type="VBoxContainer" parent="Navigation"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="NavChat" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+toggle_mode = true
+button_pressed = true
+text = "聊天"
+icon = ExtResource("icon_nav_chat")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="ActiveMark" type="ColorRect" parent="Navigation/Items/NavChat"]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = -8.0
+offset_top = -12.0
+offset_right = -5.0
+offset_bottom = 12.0
+mouse_filter = 2
+color = Color(0.4, 0.8, 1, 1)
+
+[node name="NavDynamics" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+text = "动态"
+icon = ExtResource("icon_nav_at")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="DynamicsUnread" type="Panel" parent="Navigation/Items/NavDynamics"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -15.0
+offset_top = 9.0
+offset_right = -9.0
+offset_bottom = 15.0
+mouse_filter = 2
+theme_type_variation = &"NavigationUnreadDot"
+
+[node name="NavSettings" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+text = "设置"
+icon = ExtResource("icon_nav_settings")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="Spacer" type="Control" parent="Navigation/Items"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="NavLogs" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+theme_type_variation = &"NavigationButton"
+text = "日志"
+icon = ExtResource("icon_nav_scroll")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="Split" type="HSplitContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 96.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="AvatarPanel" parent="Split" instance=ExtResource("3_avatar")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(290, 0)
+layout_mode = 2
+
+[node name="ChatView" parent="Split" instance=ExtResource("4_chat")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(440, 0)
+layout_mode = 2
+size_flags_horizontal = 3
