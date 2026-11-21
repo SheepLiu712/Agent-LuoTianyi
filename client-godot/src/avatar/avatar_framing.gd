@@ -3,8 +3,11 @@ var _settings: Resource
 func _init(settings: Resource = null) -> void:
 	_settings = settings if settings != null else preload("res://src/storage/settings_store.gd").new()
 
-var _zoom := 1.2
-var _offset := Vector2.ZERO
+const DEFAULT_ZOOM := 1.2
+const DEFAULT_OFFSET := Vector2(-0.02280702, 0.109756045)
+
+var _zoom := DEFAULT_ZOOM
+var _offset := DEFAULT_OFFSET
 
 
 func zoom_by(factor: float) -> void:
@@ -19,8 +22,8 @@ func pan_by(delta: Vector2, panel_size: Vector2) -> void:
 
 
 func reset() -> void:
-	_zoom = 1.2
-	_offset = Vector2.ZERO
+	_zoom = DEFAULT_ZOOM
+	_offset = DEFAULT_OFFSET
 
 
 func get_transform(panel: Vector2, canvas: Vector2) -> Transform2D:
