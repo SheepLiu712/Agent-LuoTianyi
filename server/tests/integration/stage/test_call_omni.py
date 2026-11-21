@@ -47,6 +47,8 @@ from src.domain.call.omni import (
     ReplyFinished,
     ReplySegment,
     ReplyStarted,
+    SpeechStarted,
+    SpeechStopped,
     TranscriptFinal,
 )
 from src.infrastructure.models.realtime_speech.config import AliyunRealtimeSpeechConfig
@@ -481,6 +483,80 @@ async def test_silence_emits_once_after_realization_without_waiting_for_playback
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("already_spoken", [False, True])
+async def test_empty_transcript_resumes_only_an_unused_proactive_opportunity(call_setup, monkeypatch, already_spoken):
+    received = []
+    monkeypatch.setattr(CallStage, "_on_speech_due", lambda self, stimulus: received.append(stimulus))
+    stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.05})
+    try:
+        if already_spoken:
+            await _eventually(lambda: len(received) == 1)
+        else:
+            await _eventually(lambda: stage._proactive_timer.running)
+        await stage._on_omni_event(SpeechStarted("noise"))
+        await stage._on_omni_event(SpeechStopped("noise"))
+        await asyncio.sleep(0.08)
+        assert len(received) == int(already_spoken)
+        await stage._on_omni_event(TranscriptFinal("noise", ""))
+        await asyncio.sleep(0.12)
+        assert len(received) == 1
+    finally:
+        await finish_call(stage)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("order", [("one", "two"), ("two", "one")])
+async def test_final_transcript_order_preserves_latest_completed_reply_timer(call_setup, monkeypatch, order):
+    received = []
+    monkeypatch.setattr(CallStage, "_on_speech_due", lambda self, stimulus: received.append(stimulus))
+    stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.05})
+    try:
+        await send_reply(socket, response_id="first", text="第一轮。", item_id="one")
+        await _eventually(lambda: 1 in stage._proactive_realized_turns)
+        await send_reply(socket, response_id="second", text="第二轮。", item_id="two")
+        await _eventually(lambda: 2 in stage._proactive_realized_turns)
+        await stage._on_omni_event(TranscriptFinal(order[0], "有效话语"))
+        await asyncio.sleep(0.08)
+        assert not received
+        await stage._on_omni_event(TranscriptFinal(order[1], "有效话语"))
+        await _eventually(lambda: len(received) == 1)
+        await asyncio.sleep(0.12)
+        assert len(received) == 1
+    finally:
+        await finish_call(stage)
+
+
+@pytest.mark.asyncio
+async def test_proactive_waits_for_pending_tool_result(call_setup, monkeypatch):
+    received = []
+    monkeypatch.setattr(CallStage, "_on_speech_due", lambda self, stimulus: received.append(stimulus))
+    retrieval = Retrieval(block=True)
+    stage, socket, _, _ = await create_stage(call_setup, retrieval=retrieval, config={"proactive_idle_seconds": 0.05})
+    try:
+        await send_reply(socket, response_id="lookup", text="我想想。", item_id=None, done=False)
+        await socket.server_event(
+            {
+                "type": "response.function_call_arguments.done",
+                "response_id": "lookup",
+                "call_id": "pending",
+                "name": "lookup_call_memory",
+                "arguments": '{"query":"旧事"}',
+            }
+        )
+        await asyncio.wait_for(retrieval.started.wait(), 1)
+        await socket.server_event({"type": "response.done", "response": {"id": "lookup", "status": "completed"}})
+        await asyncio.sleep(0.12)
+        assert not received
+        assert len([e for e in socket.sent if e["type"] == "response.create"]) == 1
+        retrieval.gate.set()
+        await _eventually(lambda: len(received) == 1)
+        assert any(e["type"] == "conversation.item.create" for e in socket.sent)
+    finally:
+        retrieval.gate.set()
+        await finish_call(stage)
+
+
+@pytest.mark.asyncio
 async def test_streamed_tone_tags_are_not_spoken_and_survive_delta_boundaries():
     socket = FakeAliyunWebSocket()
     session = await _open_owned_session(socket)
@@ -503,6 +579,7 @@ async def test_streamed_tone_tags_are_not_spoken_and_survive_delta_boundaries():
         ]
     finally:
         await session.close()
+
 
 @pytest.mark.asyncio
 async def test_endpoint_estimate_ignores_silence_and_audio_after_reported_end(monkeypatch):
@@ -532,6 +609,7 @@ async def test_endpoint_estimate_ignores_silence_and_audio_after_reported_end(mo
     finally:
         await session.close()
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["completed", "cancelled"])
 async def test_anonymous_empty_done_keeps_next_spoken_turn_usable(status):
@@ -560,10 +638,13 @@ async def test_anonymous_failed_done_retains_provider_error():
     socket = FakeAliyunWebSocket()
     session = await _open_owned_session(socket)
     try:
-        await socket.server_event({
-            "type": "response.done", "event_id": "event-error",
-            "response": {"id": "", "status": "failed", "status_details": {"error": {"code": "invalid_value"}}},
-        })
+        await socket.server_event(
+            {
+                "type": "response.done",
+                "event_id": "event-error",
+                "response": {"id": "", "status": "failed", "status_details": {"error": {"code": "invalid_value"}}},
+            }
+        )
         with pytest.raises(RuntimeError, match="receive failed") as caught:
             await asyncio.wait_for(anext(session.events()), 2)
         assert "invalid_value" in str(caught.value.__cause__)

@@ -955,6 +955,7 @@ class CallStage:
                 item_id=event.item_id,
             )
             self._proactive_timer.stop_timer()
+            self._proactive_reply_ready = False
         elif isinstance(event, ReplyFinished):
             call_latency("reply.generation_finished", self.call_id, response_id=event.response_id)
             self._generating.discard(event.response_id)
@@ -985,14 +986,12 @@ class CallStage:
             return
         self._completed_items.add(event.item_id)
         self._proactive_timer.get_user_stimulus()
-        self._proactive_reply_ready = False
         self._proactive_reply_failed = False
         seq = self._turn_for_item(event.item_id)
+        self._proactive_reply_ready = max(self._turns) in self._proactive_realized_turns
+        self._refresh_proactive_timer()
         turn = self._turns[seq]
         turn.semantic = event.text
-        if seq in self._proactive_realized_turns and seq == max(self._turns):
-            self._proactive_reply_ready = True
-            self._refresh_proactive_timer()
         turn.recognized_at = self._monotonic()
         call_latency(
             "turn.final", self.call_id, turn_seq=seq, item_id=event.item_id, measurement="final_transcript_received"
@@ -1936,8 +1935,12 @@ class CallStage:
             raise
 
     def _interrupt(self, item_id=None) -> None:
+        # Speech activity may end with an empty transcript. Preserve the completed
+        # reply until valid input or a new model reply supersedes it.
+        self._proactive_reply_ready = item_id is not None and (
+            self._proactive_reply_ready or self._proactive_timer.running
+        )
         self._proactive_timer.stop_timer()
-        self._proactive_reply_ready = False
         self._interrupt_reply_timings()
         self._record_metric(
             CallMetricName.INTERRUPT,
