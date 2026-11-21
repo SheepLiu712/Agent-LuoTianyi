@@ -527,6 +527,31 @@ async def test_final_transcript_order_preserves_latest_completed_reply_timer(cal
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("noise_final_first", [False, True])
+async def test_late_valid_transcript_with_later_empty_activity(call_setup, monkeypatch, noise_final_first):
+    received = []
+    monkeypatch.setattr(CallStage, "_on_speech_due", lambda self, stimulus: received.append(stimulus))
+    stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.05})
+    try:
+        await send_reply(socket, response_id="first", text="第一轮。", item_id="one")
+        await _eventually(lambda: 1 in stage._proactive_realized_turns)
+        await stage._on_omni_event(SpeechStarted("noise"))
+        await stage._on_omni_event(SpeechStopped("noise"))
+        events = [TranscriptFinal("one", "有效话语"), TranscriptFinal("noise", "")]
+        if noise_final_first:
+            events.reverse()
+        await stage._on_omni_event(events[0])
+        await asyncio.sleep(0.08)
+        assert not received
+        await stage._on_omni_event(events[1])
+        await _eventually(lambda: len(received) == 1)
+        await asyncio.sleep(0.12)
+        assert len(received) == 1
+    finally:
+        await finish_call(stage)
+
+
+@pytest.mark.asyncio
 async def test_proactive_waits_for_pending_tool_result(call_setup, monkeypatch):
     received = []
     monkeypatch.setattr(CallStage, "_on_speech_due", lambda self, stimulus: received.append(stimulus))

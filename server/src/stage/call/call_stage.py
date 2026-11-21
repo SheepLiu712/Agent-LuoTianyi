@@ -349,6 +349,7 @@ class CallStage:
         self._proactive_reply_ready = False
         self._proactive_realized_turns: set[int] = set()
         self._proactive_reply_failed = False
+        self._proactive_empty_turns: set[int] = set()
         self._time_limit_task: asyncio.Task[Any] | None = None
         self._time_limit_changed = asyncio.Event()
         self._warning = CallWarning()
@@ -979,6 +980,8 @@ class CallStage:
     def _accept_transcript(self, event):
         self._awaiting_transcript.discard(event.item_id)
         if not event.text.strip():
+            self._proactive_empty_turns.add(self._turn_for_item(event.item_id))
+            self._restore_proactive_reply()
             self._release_user_speaking(event.item_id, invalid=True)
             self._schedule_output()
             return
@@ -988,8 +991,7 @@ class CallStage:
         self._proactive_timer.get_user_stimulus()
         self._proactive_reply_failed = False
         seq = self._turn_for_item(event.item_id)
-        self._proactive_reply_ready = max(self._turns) in self._proactive_realized_turns
-        self._refresh_proactive_timer()
+        self._restore_proactive_reply()
         turn = self._turns[seq]
         turn.semantic = event.text
         turn.recognized_at = self._monotonic()
@@ -1399,6 +1401,11 @@ class CallStage:
             self._refresh_proactive_timer()
             self._finish_pending_end_if_ready()
 
+    def _restore_proactive_reply(self):
+        latest = max(self._turns.keys() - self._proactive_empty_turns, default=0)
+        self._proactive_reply_ready = latest in self._proactive_realized_turns
+        self._refresh_proactive_timer()
+
     async def _settle_proactive_plan(self, plan, report, turn_seq, token, generation):
         if report.status is d.ExecutionStatus.COMPLETED and not token.is_cancelled:
             for action in plan.actions:
@@ -1412,8 +1419,7 @@ class CallStage:
             and any(isinstance(action, d.Say) for action in plan.actions)
         ):
             self._proactive_reply_ready = True
-            if turn_seq is not None:
-                self._proactive_realized_turns.add(turn_seq)
+            self._proactive_realized_turns.add(turn_seq if turn_seq is not None else 0)
 
     async def _handle_plan_result(self, plan, report, turn_seq, token, retried, response_ids):
         if any(isinstance(action, d.LookupCallMemory) for action in plan.actions):
