@@ -347,6 +347,7 @@ class CallStage:
             monotonic=monotonic,
         )
         self._proactive_reply_ready = False
+        self._proactive_realized_turns: set[int] = set()
         self._time_limit_task: asyncio.Task[Any] | None = None
         self._time_limit_changed = asyncio.Event()
         self._warning = CallWarning()
@@ -953,6 +954,7 @@ class CallStage:
                 item_id=event.item_id,
             )
             self._proactive_timer.stop_timer()
+            self._proactive_reply_ready = False
         elif isinstance(event, ReplyFinished):
             call_latency("reply.generation_finished", self.call_id, response_id=event.response_id)
             self._generating.discard(event.response_id)
@@ -983,8 +985,9 @@ class CallStage:
             return
         self._completed_items.add(event.item_id)
         self._proactive_timer.get_user_stimulus()
-        self._proactive_reply_ready = False
         seq = self._turn_for_item(event.item_id)
+        self._proactive_reply_ready = max(self._turns) in self._proactive_realized_turns
+        self._refresh_silence_task()
         turn = self._turns[seq]
         turn.semantic = event.text
         turn.recognized_at = self._monotonic()
@@ -1379,12 +1382,7 @@ class CallStage:
                 for action in plan.actions:
                     if isinstance(action, d.RequestCallSpeech):
                         await self._provider.push(InstructionText(action.instruction, "silence"))
-            if (
-                report.status is d.ExecutionStatus.COMPLETED
-                and proactive_generation == self._generation
-                and any(isinstance(action, d.Say) for action in plan.actions)
-            ):
-                self._proactive_reply_ready = True
+            self._record_proactive_reply(plan, report, turn_seq, proactive_generation)
         except asyncio.CancelledError:
             if turn_seq is not None:
                 self._turns[turn_seq].status = CallReplyStatus.INTERRUPTED
@@ -1402,6 +1400,16 @@ class CallStage:
                 self._finish_user_turn(turn_seq)
             self._refresh_silence_task()
             self._finish_pending_end_if_ready()
+
+    def _record_proactive_reply(self, plan, report, turn_seq, generation):
+        if (
+            report.status is d.ExecutionStatus.COMPLETED
+            and generation == self._generation
+            and any(isinstance(action, d.Say) for action in plan.actions)
+        ):
+            self._proactive_reply_ready = True
+            if turn_seq is not None:
+                self._proactive_realized_turns.add(turn_seq)
 
     async def _handle_plan_result(self, plan, report, turn_seq, token, retried, response_ids):
         if any(isinstance(action, d.LookupCallMemory) for action in plan.actions):
@@ -1922,8 +1930,12 @@ class CallStage:
             raise
 
     def _interrupt(self, item_id=None) -> None:
+        # Speech activity may end with an empty transcript. Preserve the completed
+        # reply until valid input or a new model reply supersedes it.
+        self._proactive_reply_ready = item_id is not None and (
+            self._proactive_reply_ready or self._proactive_timer.running
+        )
         self._proactive_timer.stop_timer()
-        self._proactive_reply_ready = False
         self._interrupt_reply_timings()
         self._record_metric(
             CallMetricName.INTERRUPT,
