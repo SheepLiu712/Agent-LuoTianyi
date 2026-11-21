@@ -1381,10 +1381,7 @@ class CallStage:
             with reply_timing_scope(self._reply_timings.get(plan.origin_request_id)):
                 report = await self._agent.realize_action_plan(plan, context, _OutputSink(self, context, turn_seq))
             await self._handle_plan_result(plan, report, turn_seq, execution_token, retried, response_ids)
-            if report.status is d.ExecutionStatus.COMPLETED and not execution_token.is_cancelled:
-                for action in plan.actions:
-                    if isinstance(action, d.RequestCallSpeech):
-                        await self._provider.push(InstructionText(action.instruction, "silence"))
+            await self._send_proactive_actions(plan, report, execution_token)
             self._record_proactive_reply(plan, report, turn_seq, proactive_generation)
         except asyncio.CancelledError:
             if turn_seq is not None:
@@ -1403,6 +1400,12 @@ class CallStage:
                 self._finish_user_turn(turn_seq)
             self._refresh_silence_task()
             self._finish_pending_end_if_ready()
+
+    async def _send_proactive_actions(self, plan, report, token):
+        if report.status is d.ExecutionStatus.COMPLETED and not token.is_cancelled:
+            for action in plan.actions:
+                if isinstance(action, d.RequestCallSpeech):
+                    await self._provider.push(InstructionText(action.instruction, "silence"))
 
     def _restore_proactive_reply(self):
         latest = max(self._turns.keys() - self._proactive_empty_turns, default=0)
