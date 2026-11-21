@@ -1,6 +1,6 @@
 # AgentLuo Godot Windows 客户端
 
-AgentLuo 的独立 Windows x64 桌面客户端，使用 Godot 4.7.1 构建。当前源码版本为 `0.2.0.0`，版本号以 `release.json` 为准。
+AgentLuo 的独立 Windows x64 桌面客户端，使用 Godot 4.7.1 构建。当前源码版本为 `0.2.0.1`，版本号以 `release.json` 为准。
 
 客户端包含 Live2D 角色、WebSocket 文字聊天、流式语音播放、本地聊天历史、私人动态、设置和日志。它尚未替换旧 Python 客户端，也不会导入旧客户端的凭据或聊天记录。
 
@@ -63,7 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 导出完成后可以单独校验：
 
 ```powershell
-python .\tests\verify_release_archive.py .\artifacts\agentluo-0.2.0.0.zip .\dist\agentluo-0.2.0.0
+python .\tests\verify_release_archive.py .\artifacts\agentluo-0.2.0.1.zip .\dist\agentluo-0.2.0.1
 ```
 
 该命令检查 ZIP 条目、CRC、版本、许可文件和三份 DLL 的 SHA-256。构建脚本中的 `--headless --quit-after 3` 只验证程序能启动，不代表界面、GPU 或实机运行正常。
@@ -71,7 +71,7 @@ python .\tests\verify_release_archive.py .\artifacts\agentluo-0.2.0.0.zip .\dist
 ## 生成单文件 EXE
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_single.ps1 -Version 0.2.0.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_single.ps1 -Version 0.2.0.1
 ```
 
 脚本读取已有的 `dist/agentluo-<版本>`，用 .NET Framework 的 `csc.exe` 把整个目录压缩进一个自解压 EXE，默认输出到桌面。首次启动时解压到 `%LOCALAPPDATA%\AgentLuo-Single\<启动器版本>`，然后运行其中的 `agentluo.exe`；用户数据仍写入 `%APPDATA%\AgentLuo-Godot`。
@@ -235,7 +235,7 @@ CI 中的 `godot-static` 作业只运行上述 Python 静态检查，不启动 G
 
 ## 版本与发布状态
 
-`release.json` 是版本的唯一来源，当前为 `0.2.0.0`。`dist/` 中存在 2026-11-17 构建的 `agentluo-0.2.0.0` 目录，`artifacts/` 中有对应的 ZIP；两者都早于 2026-11-18 的源码修改，不能作为当前源码的发布证据。发布前需要重新运行 `scripts/build.ps1`。
+`release.json` 是版本的唯一来源，当前为 `0.2.0.1`。`dist/` 和 `artifacts/` 中存在 2026-11-18 的 `0.2.0.1` 构建，以及 2026-11-21 的带时间戳构建；这些产物都早于当前源码的最后修改，不能作为当前源码的发布证据。发布前需要重新运行 `scripts/build.ps1`。
 
 ## 相关文档
 
