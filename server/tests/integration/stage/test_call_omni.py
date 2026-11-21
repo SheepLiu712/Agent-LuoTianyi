@@ -652,6 +652,7 @@ async def test_anonymous_failed_done_retains_provider_error():
     finally:
         await session.close()
 
+
 @pytest.mark.asyncio
 async def test_agent_proactive_call_requests_model_once_without_user_response(call_setup):
     stage, socket, _, _ = await create_stage(call_setup, config={"proactive_idle_seconds": 0.03})
