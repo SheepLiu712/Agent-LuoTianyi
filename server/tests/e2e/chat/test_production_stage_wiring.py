@@ -10,6 +10,7 @@ from support.stage_manager import make_stage_manager
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode, RecalledMemoryContext
+from src.agent.facade import Agent
 from src.web.websocket.service import (
     WebSocketConnection,
     WebSocketService,
@@ -97,7 +98,7 @@ def completed_report(
     )
 
 
-class ReplyingAgent:
+class ReplyingAgent(Agent):
     def __init__(self) -> None:
         self.text_interaction_ids: list[str] = []
 
