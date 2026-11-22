@@ -29,6 +29,8 @@ _types = {
         d.AnswerCall,
         d.FinalizeCall,
         d.LookupCallMemory,
+        d.RequestCallSpeech,
+        d.MarkTopicShared,
         CallConfirmedSegment,
         d.MaintenanceReason,
         d.PreprocessedInput,

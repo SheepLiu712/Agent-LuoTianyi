@@ -1,20 +1,18 @@
-"""真实事件存储、聊天调度和回复提示词之间的提醒内容传递。"""
+"""真实事件存储进入角色主动话题，不再通过 Stage 到期提醒入口。"""
 
+from dataclasses import replace
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
-
+from support.routing_support import Sink, request
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.context import UserContextSnapshot
-from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+from src.agent.handlers.stimulus.proactive_speech import ProactiveSpeechHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
-from tests.integration.agent.test_topic_reply_pipeline import Conversation, pipeline
+from tests.integration.agent.test_topic_reply_pipeline import context, pipeline
 from tests.integration.persistence import test_memory_write_skill as memory_write_tests
-from tests.integration.stage.test_proactive_due_dispatch import RecordingAgent, connected_manager, wait_until
 
 setup = memory_write_tests.setup
 
@@ -25,26 +23,6 @@ CASES = [
     ("birthday", "用户的生日", "这是用户的二十五岁生日。", "今天是用户的生日"),
     ("anniversary", "相识一周年", "去年今天第一次和用户聊天。", "今天是相识一周年"),
 ]
-
-
-class ReplyingAgent(RecordingAgent):
-    def __init__(self, skills):
-        super().__init__()
-        handler = FirstLoginHandler(prepared_names=(), prepared_speech=None, skills=skills)
-        self.agent = Agent(
-            character_id="luotianyi",
-            stimulus_router=StimulusRouter(
-                [
-                    (d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),
-                ]
-            ),
-        )
-
-    async def handle_stimulus(self, request, sink, *, context=None):
-        self.stimuli.append(request.stimulus)
-        context.conversation = Conversation()
-        context.user = SimpleNamespace(read=UserContextSnapshot)
-        return await self.agent.handle_stimulus(request, sink, context=context)
 
 
 async def add_reminder(store, case):
@@ -59,35 +37,51 @@ async def add_reminder(store, case):
             "source": "system",
             "start_datetime": now - timedelta(days=1) if kind in {"travel", "new_song"} else now,
             "is_personal": kind in {"birthday", "anniversary"},
-            "target_user_id": "user" if kind in {"birthday", "anniversary"} else None,
+            "target_user_id": "u" if kind in {"birthday", "anniversary"} else None,
         }
     )
+
+
+async def generate(store):
+    skills, _, calls = pipeline(attempts=(), queries=())
+    handler = ProactiveSpeechHandler(skills=skills, events=EventStoreDueEventProvider(store))
+    agent = Agent(
+        character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.PROACTIVE_SPEECH_DUE, handler)])
+    )
+    req = request()
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    req = replace(
+        req,
+        stimulus=d.ProactiveSpeechDue(
+            stimulus_id="due",
+            schema_version=1,
+            occurred_at=now,
+            source=d.StimulusSource.AGENT,
+            target_character_ids=("luotianyi",),
+            user_id="u",
+            ephemeral=True,
+            generation=1,
+        ),
+        interaction=replace(req.interaction, pending_stimuli=(), now=now),
+    )
+    sink = Sink()
+    report = await agent.handle_stimulus(req, sink, context=context())
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    return calls["replier"], sink.values
 
 
 @pytest.mark.parametrize("case", CASES)
 async def test_event_details_reach_real_reply_prompt_without_memory_guessing(setup, case):
     store = setup.database.event_store
     event_id = await add_reminder(store, case)
-    skills, _, calls = pipeline(attempts=(), queries=())
-    agent = ReplyingAgent(skills)
-    manager, stage = await connected_manager(EventStoreDueEventProvider(store), agent)
-    try:
-        assert await stage.dispatch_due_events(merge_all=True)
-        await wait_until(lambda: "replier" in calls)
-        prompt = calls["replier"]
-        assert case[3] in prompt["reply_topic"]
-        assert case[2] in prompt["extra_knowledge"]
-        assert "有一项到期提醒" not in prompt["reply_topic"]
-        assert "recall" not in calls
-        assert agent.stimuli[0].events[0].event_id == event_id
-    finally:
-        await manager.close()
+    prompt, plans = await generate(store)
+    assert case[3] in prompt["reply_topic"]
+    assert case[2] in prompt["extra_knowledge"]
+    assert plans[0].actions[-1].event_id == event_id
 
 
-async def test_merged_reminders_keep_each_event_and_exclude_other_users(setup):
+async def test_other_users_event_is_not_used_as_topic(setup):
     store = setup.database.event_store
-    for case in CASES:
-        await add_reminder(store, case)
     await store.add_event(
         {
             "character": "luotianyi",
@@ -100,19 +94,10 @@ async def test_merged_reminders_keep_each_event_and_exclude_other_users(setup):
             "target_user_id": "other",
         }
     )
-    skills, _, calls = pipeline(attempts=(), queries=())
-    agent = ReplyingAgent(skills)
-    manager, stage = await connected_manager(EventStoreDueEventProvider(store), agent)
-    try:
-        assert await stage.dispatch_due_events(merge_all=True)
-        await wait_until(lambda: "replier" in calls)
-        for _, _, description, topic in CASES:
-            assert topic in calls["replier"]["reply_topic"]
-            assert description in calls["replier"]["extra_knowledge"]
-        assert len(agent.stimuli[0].events) == 5
-        assert "不得进入提示词" not in calls["replier"]["extra_knowledge"]
-    finally:
-        await manager.close()
+    prompt, plans = await generate(store)
+    assert "上下文" in prompt["reply_topic"]
+    assert "不得进入提示词" not in str(prompt)
+    assert not any(isinstance(a, d.MarkTopicShared) for p in plans for a in p.actions)
 
 
 async def test_due_events_use_beijing_calendar_day_at_utc_date_boundary(setup):

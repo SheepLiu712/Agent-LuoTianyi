@@ -23,7 +23,6 @@ from src.infrastructure.observability import CallMetrics, ObservabilityService, 
 from src.infrastructure.observability.population import PopulationSampler
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.database.sql_database import User
-from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.stage import StageManager, WorldStage
 from src.utils.logger import (
     get_logger,
@@ -202,10 +201,6 @@ class ServerRuntime:
                 _host_context=resolved_host_context,
             )
 
-            event_store = database_manager.event_store
-            if event_store is None:
-                raise RuntimeError("EventStore is required for due-event dispatch")
-
             if (
                 database_manager.call_sessions is None
                 or database_manager.call_maintenance_batches is None
@@ -224,7 +219,6 @@ class ServerRuntime:
                 call_output_sink=call_output_sink,
                 detach_stage_binding=runtime.chat_adapter.detach_stage_binding,
                 get_context_factory=agent_runtime.context_factories.__getitem__,
-                due_event_provider=EventStoreDueEventProvider(event_store),
                 call_sessions=database_manager.call_sessions,
                 conversation_service=database_manager.conversation_service,
                 call_maintenance_batches=database_manager.call_maintenance_batches,

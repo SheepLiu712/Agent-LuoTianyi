@@ -20,6 +20,8 @@ class ActionKind(str, Enum):
     ANSWER_CALL = "answer_call"
     LOOKUP_CALL_MEMORY = "lookup_call_memory"
     FINALIZE_CALL = "finalize_call"
+    REQUEST_CALL_SPEECH = "request_call_speech"
+    MARK_TOPIC_SHARED = "mark_topic_shared"
 
 
 class OutputDelivery(str, Enum):

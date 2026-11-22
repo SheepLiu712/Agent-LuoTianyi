@@ -8,6 +8,7 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode, ConversationSnapshot, RecalledMemoryContext, UserContextSnapshot
+from src.agent.facade import Agent
 from src.domain.stage.lifecycle import StageEndReason
 from src.stage import ChatStage
 from support.chat_connection import StubChatConnection
@@ -91,8 +92,9 @@ def plan(request, *, ordinal=0, thinking=False):
     )
 
 
-class RecordingAgent:
+class RecordingAgent(Agent):
     def __init__(self, handle=None, realize=None):
+        super().__init__(character_id="luotianyi")
         self.requests = asyncio.Queue()
         self.executions = asyncio.Queue()
         self.handle = handle
