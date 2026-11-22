@@ -1,9 +1,9 @@
-"""筛选当日高活跃用户并投递日记规划事实。"""
+"""筛选前一日高活跃用户并投递日记规划事实。"""
 
 from __future__ import annotations
 
 import random
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -17,9 +17,9 @@ from src.world.types.world_task import WorldTask
 from src.world.world_settlements import FactHandlingOutcome, FactPlanOutcome
 
 if TYPE_CHECKING:
-    from src.stage.world_stage import WorldStage
     from src.infrastructure.persistence.database import DatabaseManager
     from src.server_runtime import ServerRuntime
+    from src.stage.world_stage import WorldStage
     from src.world.world_settlements import WorldSettlementRouter
 
 
@@ -42,7 +42,7 @@ class _DiarySettlement:
 
 
 class DiaryTask(WorldTask):
-    """在午夜选择符合条件且当天尚无日记的用户并投递事实。"""
+    """在午夜选择前一天符合条件且尚无该日日记的用户并投递事实。"""
 
     base_task_name = "diary"
 
@@ -82,10 +82,10 @@ class DiaryTask(WorldTask):
             raise RuntimeError(f"DiaryTask dependencies are missing: {', '.join(missing)}")
 
     async def run_once(self) -> WorldTaskResult:
-        """投递本地当天的日记规划事实，并汇总当前已收到的结算。"""
+        """投递本地前一天的日记规划事实，并汇总当前已收到的结算。"""
         self.ensure_dependencies()
         now = datetime.now(self.timezone)
-        local_date = now.date()
+        local_date = now.date() - timedelta(days=1)
         active_users = self._find_active_users(local_date.isoformat())
         selected_users = (
             random.sample(active_users, self.max_users_per_run)
