@@ -43,7 +43,7 @@ export type AgreementCredential =
   | { kind: 'password'; username: string; password: string; autoLogin?: boolean }
   | { kind: 'auto_login'; username: string; token: string };
 export interface PendingAgreement {
-  agreement: AgreementPayload;
+  agreement: AgreementPayload | null;
   credential: AgreementCredential;
   registration?: { username: string; password: string; confirmPassword: string; inviteCode: string; requestId: string };
   phase?: 'sign' | 'login';
@@ -169,7 +169,7 @@ export function useAuth() {
           const body: any = await response.json().catch(() => ({}));
           if (body.code === 'AGREEMENT_REQUIRED') {
             const agreement = await getCurrentAgreementForAuth();
-            if (agreement) setPendingAgreement({ agreement, credential: { kind: 'auto_login', username, token } });
+            setPendingAgreement({ agreement, credential: { kind: 'auto_login', username, token } });
             return 'invalid';
           }
         }
@@ -288,7 +288,7 @@ export function useAuth() {
         const code = result.code || result.detail?.code;
         if (response.status === 403 && code === 'AGREEMENT_REQUIRED') {
           const agreement = await getCurrentAgreementForAuth();
-          if (agreement) setPendingAgreement({ agreement, credential: { kind: 'password', username, password, autoLogin }, phase: 'sign' });
+          setPendingAgreement({ agreement, credential: { kind: 'password', username, password, autoLogin }, phase: 'sign' });
           return { success: false, message: '请阅读并同意用户协议', code, agreement: agreement || undefined };
         }
         return { success: false, message: typeof result.detail === 'string' ? result.detail : '登录失败', code, status: response.status };
@@ -421,6 +421,13 @@ export function useAuth() {
     }
   }, []);
 
+  const retryAgreement = useCallback(async () => {
+    const pending = pendingAgreement;
+    if (!pending) return;
+    const agreement = await getCurrentAgreementForAuth();
+    setPendingAgreement(current => current === pending ? { ...pending, agreement } : current);
+  }, [pendingAgreement]);
+
   const acceptAgreement = useCallback(async (pending: PendingAgreement): Promise<AuthResult> => {
     try {
       if (pending.phase === 'login') {
@@ -434,6 +441,7 @@ export function useAuth() {
         }
         return resumed;
       }
+      if (!pending.agreement) return { success: false, message: '用户协议加载失败，请重试' };
       let credential: AgreementCredential = pending.credential;
       if (pending.credential.kind === 'password') {
         const encrypted = await encryptPassword(pending.credential.password);
@@ -456,7 +464,7 @@ export function useAuth() {
           return { success: false, message: '登录凭据已失效，请重新登录', code };
         }
         const agreement = failure === 'version_changed' ? await getCurrentAgreementForAuth() || undefined : undefined;
-        if (agreement) setPendingAgreement({ ...pending, agreement, phase: 'sign' });
+        if (failure === 'version_changed') setPendingAgreement({ ...pending, agreement: agreement || null, phase: 'sign' });
         return { success: false, message: typeof body.detail === 'string' ? body.detail : '协议提交失败，请重试', code, agreement };
       }
       const signedPending = { ...pending, phase: 'login' as const };
@@ -492,6 +500,7 @@ export function useAuth() {
     login,
     register,
     pendingAgreement,
+    retryAgreement,
     acceptAgreement,
     dismissAgreement,
     logout,

@@ -9,12 +9,10 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }),
 }));
 
-jest.mock('../features/account/RichAgreement', () => ({
-  RichAgreement: () => 'AgreementBody',
-}));
 
 jest.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
+  Platform: { OS: 'ios' },
   AppState: {
     currentState: 'active',
     addEventListener: jest.fn((_event: string, listener: (state: string) => void) => {
@@ -99,6 +97,19 @@ describe('AgreementModal 真实组件行为', () => {
     expect(submit).toHaveBeenCalledTimes(1);
   });
 
+  it('下载重试成功且容器尺寸不变时，短正文无需额外滚动', async () => {
+    let tree!: ReactTestRenderer;
+    const props = { visible: true, theme: THEMES.light, onRetry: jest.fn(), onSubmit: jest.fn(), onCancel: jest.fn() };
+    act(() => { tree = create(<AgreementModal {...props} agreement={null} loading={false} error="加载失败" />); });
+    const reader = tree.root.findAllByType(VIEW).find(item => item.props.onLayout);
+    act(() => reader?.props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
+    act(() => { tree.update(<AgreementModal {...props} agreement={agreement} loading={false} />); });
+    act(() => tree.root.findByType(SCROLL).props.onContentSizeChange(100, 100));
+    await advance(5000);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('未到底时即使前台满五秒也不能提交', async () => {
     const submit = jest.fn().mockResolvedValue({ success: true });
     let tree!: ReactTestRenderer;
@@ -157,11 +168,24 @@ describe('AgreementModal 真实组件行为', () => {
       await Promise.resolve();
     });
     expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(false);
+    expect(tree.root.findAllByType(TEXT).some(node => node.props.children === '协议提交失败，请重试')).toBe(true);
 
     const reject = jest.fn().mockRejectedValue(new Error('network'));
     act(() => { tree.update(<AgreementModal visible agreement={agreement} loading={false} theme={THEMES.light} onRetry={jest.fn()} onSubmit={reject} onCancel={cancel} />); });
     await act(async () => button(tree, '我已阅读并同意用户协议').props.onPress());
     expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(false);
+  });
+
+  it('同一渲染帧内连续点击只提交一次', async () => {
+    const submit = jest.fn().mockImplementation(() => new Promise(() => {}));
+    let tree!: ReactTestRenderer;
+    act(() => { tree = renderModal(submit); });
+    markShortDocument(tree);
+    await advance(5000);
+    const press = button(tree, '我已阅读并同意用户协议').props.onPress;
+    act(() => { void press(); void press(); });
+    expect(submit).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
   });
 
   it('安全区底部留白，遮罩点击不穿透，协议正文仍为只读入口', () => {

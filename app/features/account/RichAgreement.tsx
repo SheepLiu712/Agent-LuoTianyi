@@ -20,7 +20,7 @@
  */
 
 import React from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextStyle, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextStyle, View } from 'react-native';
 
 import { AndroidJustifiedText } from './AndroidJustifiedText';
 import {
@@ -134,11 +134,11 @@ export function RichAgreement({ data, theme }: RichAgreementProps) {
     return null;
   }
   return (
-    <ScrollView>
+    <View>
       {data.blocks.map((block, index) => (
         <BlockView key={index} block={block} textColor={theme.text} />
       ))}
-    </ScrollView>
+    </View>
   );
 }
 

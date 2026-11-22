@@ -25,14 +25,15 @@ interface LoginScreenProps {
   resetAccount: (username: string, password: string, inviteCode: string) => Promise<void>;
   onLogin: (username: string, password: string, autoLogin: boolean) => Promise<{ success: boolean; message: string }>;
   onRegister: (username: string, password: string, confirmPassword: string, inviteCode: string, requestId?: string, agreementVersion?: string) => Promise<{ success: boolean; message: string; code?: string; agreement?: AgreementPayload }>;
-  pendingAgreement?: { agreement: AgreementPayload; credential: { kind: 'password' | 'auto_login'; username: string; password?: string; token?: string; autoLogin?: boolean } } | null;
+  pendingAgreement?: { agreement: AgreementPayload | null; credential: { kind: 'password' | 'auto_login'; username: string; password?: string; token?: string; autoLogin?: boolean } } | null;
   onAcceptAgreement?: () => Promise<{ success: boolean; message: string }>;
+  onRetryAgreement?: () => Promise<void>;
   onAgreementClose?: () => void;
 }
 
 type TabType = 'login' | 'register';
 
-export default function LoginScreen({ onLogin, onRegister, resetAccount, pendingAgreement, onAcceptAgreement, onAgreementClose }: LoginScreenProps) {
+export default function LoginScreen({ onLogin, onRegister, resetAccount, pendingAgreement, onAcceptAgreement, onAgreementClose, onRetryAgreement }: LoginScreenProps) {
   const insets = useSafeAreaInsets();
   const systemScheme = useColorScheme();
   const [activeTab, setActiveTab] = useState<TabType>('login');
@@ -562,9 +563,9 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount, pending
           visible={Boolean(registrationAgreement || pendingAgreement || agreementLoading || agreementError)}
           agreement={registrationAgreement || pendingAgreement?.agreement || null}
           loading={agreementLoading}
-          error={agreementError}
+          error={agreementError || (pendingAgreement && !pendingAgreement.agreement && !agreementLoading ? '用户协议加载失败，请重试' : '')}
           theme={theme}
-          onRetry={handleRegister}
+          onRetry={pendingAgreement ? async () => { setAgreementLoading(true); try { await onRetryAgreement?.(); } finally { setAgreementLoading(false); } } : handleRegister}
           onCancel={() => {
             if (pendingAgreement) {
               onAgreementClose?.();

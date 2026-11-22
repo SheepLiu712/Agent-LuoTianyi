@@ -27,6 +27,8 @@ export function AgreementModal({
   const [elapsed, setElapsed] = useState(0);
   const [atBottom, setAtBottom] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  useEffect(() => { setSubmitError(''); }, [visible]);
   const elapsedRef = useRef(0);
   const activeSince = useRef<number | null>(null);
   const submittingRef = useRef(false);
@@ -47,7 +49,7 @@ export function AgreementModal({
     elapsedRef.current = 0;
     setElapsed(0); setAtBottom(false); setSubmitting(false); submittingRef.current = false;
     activeSince.current = null;
-    setContentHeight(0); setViewportHeight(0);
+    setContentHeight(0);
   }, [visible, agreement?.version]);
 
   useEffect(() => () => {
@@ -94,12 +96,14 @@ export function AgreementModal({
     : !(atBottom || shortDocument) ? '请阅读至协议底部' : '';
 
   const submit = async () => {
-    if (!ready) return;
+    if (!ready || submittingRef.current) return;
+    setSubmitError('');
     submittingRef.current = true;
     setSubmitting(true);
     try {
       const result = await onSubmit();
       if (result.success) return;
+      setSubmitError(result.message || '协议提交失败，请重试');
       setSubmitting(false);
       submittingRef.current = false;
       if (result.code === 'AGREEMENT_CHANGED' && result.agreement) {
@@ -107,6 +111,7 @@ export function AgreementModal({
         setElapsed(0); setAtBottom(false);
       }
     } catch {
+      setSubmitError('协议提交失败，请重试');
       setSubmitting(false);
       submittingRef.current = false;
     }
@@ -130,8 +135,9 @@ export function AgreementModal({
               <View style={styles.center}><Text style={[styles.error, { color: theme.dangerText }]}>{error}</Text><TouchableOpacity style={[styles.retry, { backgroundColor: theme.surfaceAlt }]} onPress={onRetry}><Text style={{ color: theme.text }}>重试</Text></TouchableOpacity></View>
             ) : (
               <ScrollView
-                onScroll={handleScroll} scrollEventThrottle={250}
-                onContentSizeChange={(_width: number, height: number) => { setContentHeight(height); if (height <= viewportHeight + 2) setAtBottom(true); }}
+                key={`${visible}:${agreement?.version}`}
+                onScroll={handleScroll} onScrollEndDrag={handleScroll} onMomentumScrollEnd={handleScroll} scrollEventThrottle={16}
+                onContentSizeChange={(_width: number, height: number) => { setContentHeight(height); }}
                 showsVerticalScrollIndicator
               >
                 <RichAgreement data={agreement} theme={theme} />
@@ -139,6 +145,7 @@ export function AgreementModal({
             )}
           </View>
           <View style={styles.actions}>
+            {submitError ? <Text accessibilityRole="alert" style={[styles.error, { color: theme.dangerText }]}>{submitError}</Text> : null}
             <Text style={[styles.helper, { color: theme.textMuted }]}>{helper}</Text>
             <View style={styles.buttons}>
               <TouchableOpacity style={[styles.button, { backgroundColor: theme.surfaceAlt }]} disabled={submitting} onPress={handleCancel}><Text style={{ color: theme.text }}>不同意并退出</Text></TouchableOpacity>
@@ -153,15 +160,15 @@ export function AgreementModal({
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(31,41,55,0.72)', justifyContent: 'center', padding: 18 },
-  card: { maxHeight: '92%', borderRadius: 16, overflow: 'hidden' },
-  header: { padding: 18, borderBottomWidth: 1 },
+  card: { height: '92%', borderRadius: 16, overflow: 'hidden' },
+  header: { flexShrink: 0, padding: 18, borderBottomWidth: 1 },
   title: { fontSize: 22, fontWeight: '700' },
   version: { marginTop: 5, fontSize: 12 },
-  reader: { flex: 1, minHeight: 240, paddingHorizontal: 16 },
+  reader: { flex: 1, minHeight: 0, paddingHorizontal: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   error: { textAlign: 'center', fontSize: 14 },
   retry: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: 8 },
-  actions: { paddingHorizontal: 16, paddingTop: 12 },
+  actions: { flexShrink: 0, paddingHorizontal: 16, paddingTop: 12 },
   helper: { minHeight: 20, textAlign: 'center', fontSize: 13 },
   buttons: { flexDirection: 'row', gap: 10, marginTop: 8 },
   button: { flex: 1, minHeight: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 9, paddingHorizontal: 8 },

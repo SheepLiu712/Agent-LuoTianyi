@@ -22,6 +22,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -133,7 +134,7 @@ export default function AgreementScreen({ onClose, theme }: Props) {
                 {`版本：${data.version}`}
               </Text>
             ) : null}
-            <RichAgreement data={data} theme={theme} />
+            <ScrollView><RichAgreement data={data} theme={theme} /></ScrollView>
           </>
         )}
       </View>

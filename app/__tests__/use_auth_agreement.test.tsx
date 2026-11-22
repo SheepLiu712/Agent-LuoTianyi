@@ -61,6 +61,27 @@ describe('useAuth 协议签署消费者', () => {
 
   afterEach(() => { global.fetch = originalFetch; });
 
+  it.each(['password', 'auto_login'])('正文下载失败保留 %s 身份，重试恢复签署入口', async kind => {
+    if (kind === 'auto_login') {
+      storage.getItem.mockImplementation(async key => key === 'auto_login' ? 'true' : key === 'saved_username' ? 'alice' : null);
+      secureStore.getItemAsync.mockResolvedValue('token');
+    }
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(json(403, { code: 'AGREEMENT_REQUIRED' }))
+      .mockResolvedValueOnce(json(503, { detail: 'offline' }))
+      .mockResolvedValueOnce(json(200, agreement));
+    const current = await renderHook();
+    if (kind === 'password') await act(async () => { await current().login('alice', 'pw', false); });
+    expect(current().pendingAgreement?.agreement).toBeNull();
+    expect(current().pendingAgreement?.credential.kind).toBe(kind);
+    expect(secureStore.deleteItemAsync).not.toHaveBeenCalled();
+    await act(async () => { await current().retryAgreement(); });
+    expect(current().pendingAgreement?.agreement?.version).toBe('v2');
+    expect(current().pendingAgreement?.credential.username).toBe('alice');
+    expect((global.fetch as jest.Mock).mock.calls.filter(call => String(call[0]).endsWith('/auth/agreement/accept'))).toHaveLength(0);
+    act(() => current.unmount());
+  });
+
   it('密码登录门禁创建真实 pending，签署后 401 关闭 pending', async () => {
     global.fetch = jest.fn()
       .mockResolvedValueOnce(json(403, { code: 'AGREEMENT_REQUIRED', detail: 'upgrade' }))
@@ -109,7 +130,7 @@ describe('useAuth 协议签署消费者', () => {
     await act(async () => { await current().acceptAgreement(current().pendingAgreement!); });
 
     expect(current().pendingAgreement?.phase).toBe('sign');
-    expect(current().pendingAgreement?.agreement.version).toBe('v3');
+    expect(current().pendingAgreement?.agreement?.version).toBe('v3');
   });
 
   it('自动登录协议门禁保留 token，明确 401 才清除凭据', async () => {
