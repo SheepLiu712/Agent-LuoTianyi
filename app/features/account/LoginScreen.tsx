@@ -123,6 +123,16 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount, pending
     }
   };
 
+  const loadRegistrationAgreement = async () => {
+    setAgreementError('');
+    setAgreementLoading(true);
+    const agreement = await (await import('./useAuth')).fetchCurrentAgreement();
+    setAgreementLoading(false);
+    if (!agreement.success) { setAgreementError(agreement.message); return; }
+    if (!registrationSubmitVersion.current) registrationSubmitVersion.current = agreement.data.version;
+    setRegistrationAgreement(agreement.data);
+  };
+
   const handleRegister = async () => {
     Keyboard.dismiss();
     if (!regUsername.trim() || !regPassword.trim() || !inviteCode.trim()) {
@@ -141,6 +151,11 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount, pending
       setActiveTab('login');
       setLoginUsername(savedResume.username);
       Alert.alert('请先登录确认', '检测到原注册结果待确认，请先登录确认原注册结果。');
+      return;
+    }
+    if (savedResume?.state === 'unknown' && savedResume.username !== regUsername) {
+      setLoading(false);
+      Alert.alert('请先确认原注册结果', `请使用原用户名“${savedResume.username}”、密码和邀请码重试，确认结果后才能注册其他账号。`);
       return;
     }
     if (!savedResume) {
@@ -164,21 +179,17 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount, pending
       }
     }
     setLoading(false);
-    setAgreementLoading(true);
     const restoredRequestId = savedResume && savedResume.username === regUsername && savedResume.state === 'unknown'
       ? savedResume.requestId
       : '';
-    if (identity !== registrationIdentity.current) {
+    if (restoredRequestId || identity !== registrationIdentity.current || !registrationRequestId.current) {
       registrationIdentity.current = identity;
       registrationRequestId.current = restoredRequestId || `app-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     }
-    const agreement = await (await import('./useAuth')).fetchCurrentAgreement();
-    setAgreementLoading(false);
-    if (!agreement.success) { setAgreementError(agreement.message); return; }
     registrationSubmitVersion.current = restoredRequestId && savedResume?.state === 'unknown'
       ? savedResume.agreementVersion
-      : agreement.data.version;
-    setRegistrationAgreement(agreement.data);
+      : '';
+    await loadRegistrationAgreement();
   };
 
   const submitRegistration = async () => {
@@ -193,13 +204,12 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount, pending
       registrationSubmitVersion.current || registrationAgreement.version,
     );
     const changedAgreement = result.agreement;
-    if (!result.success && changedAgreement) {
-      setRegistrationAgreement(changedAgreement);
-      if (result.code === 'AGREEMENT_CHANGED') {
-        registrationRequestId.current = `app-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        registrationSubmitVersion.current = changedAgreement.version;
-        registrationIdentity.current = '';
-      }
+    if (!result.success && result.code === 'AGREEMENT_CHANGED') {
+      registrationRequestId.current = `app-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      registrationSubmitVersion.current = changedAgreement?.version || '';
+      registrationIdentity.current = '';
+      setRegistrationAgreement(changedAgreement || null);
+      setAgreementError(changedAgreement ? '' : '用户协议已更新，请重新阅读。新版协议加载失败，请重试');
     }
     if (!result.success && result.code === 'REGISTRATION_REQUEST_CONFLICT') {
       const conflictRequestId = registrationRequestId.current;
@@ -565,7 +575,7 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount, pending
           loading={agreementLoading}
           error={agreementError || (pendingAgreement && !pendingAgreement.agreement && !agreementLoading ? '用户协议加载失败，请重试' : '')}
           theme={theme}
-          onRetry={pendingAgreement ? async () => { setAgreementLoading(true); try { await onRetryAgreement?.(); } finally { setAgreementLoading(false); } } : handleRegister}
+          onRetry={pendingAgreement ? async () => { setAgreementLoading(true); try { await onRetryAgreement?.(); } finally { setAgreementLoading(false); } } : loadRegistrationAgreement}
           onCancel={() => {
             if (pendingAgreement) {
               onAgreementClose?.();

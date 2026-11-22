@@ -1262,6 +1262,52 @@ def test_server_failure_retry_reuses_pending_request_id(dialog, app, status_code
     assert len(dialog.binder.calls) == 2
 
 
+@pytest.mark.parametrize(
+    "first_outcome",
+    [
+        RegisterOutcome(False, "请求超时", code="NETWORK_ERROR"),
+        RegisterOutcome(False, "服务暂不可用", status_code=503),
+    ],
+)
+def test_unknown_result_then_not_sent_keeps_original_request_for_same_window_retry(dialog, app, first_outcome):
+    """AC-06：重试公钥获取失败不能证明前一次注册未提交，须继续确认原请求。"""
+    from PySide6.QtCore import QThreadPool
+
+    FakeSignDialog.next_result = QDialog.DialogCode.Rejected
+    dialog.widget.fill_register_form()
+    register_and_wait(dialog.widget)
+    sign = FakeSignDialog.last_instance
+    dialog.widget._sign_dialog = sign
+    request_id = dialog.widget._submit_context["request_id"]
+
+    for outcome in (
+        first_outcome,
+        RegisterOutcome(False, "公钥获取失败，尚未发送注册请求", code="REGISTRATION_NOT_SENT"),
+    ):
+        dialog.binder.outcome = outcome
+        dialog.widget._start_registration_submit("terms-2026-10-v1")
+        assert QThreadPool.globalInstance().waitForDone(5000)
+        app.processEvents()
+        assert registration_resume.load_pending()["registration_request_id"] == request_id
+
+    # 旧结果仍未知，不能修改密码后用新请求注册。
+    dialog.widget.r_password.setText("changed")
+    dialog.widget.r_confirm_password.setText("changed")
+    register_and_wait(dialog.widget)
+    assert dialog.messages.warnings
+    assert len(dialog.binder.calls) == 2
+    assert registration_resume.load_pending()["registration_request_id"] == request_id
+
+    dialog.binder.outcome = RegisterOutcome(True, "注册成功")
+    dialog.widget._start_registration_submit("terms-2026-10-v1")
+    assert QThreadPool.globalInstance().waitForDone(5000)
+    app.processEvents()
+    assert len(dialog.binder.calls) == 3
+    assert all(call == dialog.binder.calls[0] for call in dialog.binder.calls)
+    assert dialog.binder.calls[-1]["registration_request_id"] == request_id
+    assert sign.submissions[-1][0] is True
+
+
 def test_non_resume_success_keeps_original_message(dialog):
     """没有未决记录时仍是普通注册成功文案，不误报"已确认上次注册"。"""
     dialog.widget.fill_register_form()

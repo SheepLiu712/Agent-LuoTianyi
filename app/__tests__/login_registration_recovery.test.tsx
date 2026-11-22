@@ -75,6 +75,7 @@ describe('LoginScreen 注册恢复真实消费者', () => {
   beforeEach(() => {
     storage.clear();
     require('../features/account/useAuth').fetchAgreementPolicy.mockResolvedValue({ success: true, required: true });
+    require('../features/account/useAuth').fetchCurrentAgreement.mockResolvedValue({ success: true, data: agreement });
     agreementSubmit = undefined;
     latestModal = undefined;
     (globalThis as any).__lastAlertButtons = undefined;
@@ -109,14 +110,31 @@ describe('LoginScreen 注册恢复真实消费者', () => {
     expect(register).toHaveBeenCalledWith('alice', 'pw', 'pw', 'invite', 'R1', 'v1');
   });
 
-  it('never_sent V1 遇当前 V2 创建新 ID 并提交 V2', async () => {
+  it('旧版 never_sent 不能证明未发送，当前 V2 仍先重放原 ID 和 V1', async () => {
     storage.set('registration_resume:v1:https%3A%2F%2Fserver.example', JSON.stringify({ server: 'https://server.example', requestId: 'OLD', username: 'alice', agreementVersion: 'v1', state: 'never_sent', createdAt: 1 }));
     const register = jest.fn().mockResolvedValue({ success: false, message: 'retry' });
     const tree = renderPage(register);
     await fillAndOpen(tree, 'alice');
     await act(async () => latestModal?.props.onSubmit());
-    expect(register.mock.calls[0][5]).toBe('v2');
-    expect(register.mock.calls[0][4]).not.toBe('OLD');
+    expect(register).toHaveBeenCalledWith('alice', 'pw', 'pw', 'invite', 'OLD', 'v1');
+  });
+
+  it.each([true, false])('未决注册更换用户名时阻止新提交，签署开关为 %s', async required => {
+    require('../features/account/useAuth').fetchAgreementPolicy.mockResolvedValue({ success: true, required });
+    const key = 'registration_resume:v1:https%3A%2F%2Fserver.example';
+    const record = JSON.stringify({ server: 'https://server.example', requestId: 'R1', username: 'alice', agreementVersion: 'v1', state: 'unknown', createdAt: 1 });
+    storage.set(key, record);
+    const register = jest.fn();
+    const tree = renderPage(register);
+    await fillAndOpen(tree, 'bob');
+    expect(register).not.toHaveBeenCalled();
+    expect(latestModal?.props.visible).toBe(false);
+    expect(storage.get(key)).toBe(record);
+    expect(require('react-native').Alert.alert).toHaveBeenCalledWith('请先确认原注册结果', expect.stringContaining('alice'));
+    act(() => input(tree, '请输入用户名').props.onChangeText('alice'));
+    await act(async () => registerSubmitButton(tree).props.onPress());
+    expect(latestModal?.props.visible).toBe(true);
+    act(() => tree.unmount());
   });
 
   it('AGREEMENT_CHANGED 后更新协议、生成新 ID，并在下一次确认提交 V2', async () => {
@@ -129,6 +147,33 @@ describe('LoginScreen 注册恢复真实消费者', () => {
     await act(async () => latestModal?.props.onSubmit());
     expect(register.mock.calls[1][5]).toBe('v3');
     expect(register.mock.calls[1][4]).not.toBe(firstId);
+  });
+
+  it('换版后正文下载失败立即撤下旧正文，重试下载后提交新 ID 和版本', async () => {
+    const register = jest.fn().mockResolvedValueOnce({ success: false, code: 'AGREEMENT_CHANGED', message: 'changed' })
+      .mockResolvedValue({ success: false, message: 'retry' });
+    const tree = renderPage(register);
+    await fillAndOpen(tree, 'alice');
+    await act(async () => latestModal?.props.onSubmit());
+    const oldId = register.mock.calls[0][4];
+    expect(latestModal?.props.agreement).toBeNull();
+    expect(latestModal?.props.error).toContain('新版协议加载失败');
+    await act(async () => latestModal?.props.onSubmit());
+    expect(register).toHaveBeenCalledTimes(1);
+
+    const fetchAgreement = require('../features/account/useAuth').fetchCurrentAgreement;
+    fetchAgreement.mockResolvedValueOnce({ success: false, message: '下载失败' });
+    await act(async () => latestModal?.props.onRetry());
+    expect(latestModal?.props.agreement).toBeNull();
+    expect(latestModal?.props.error).toBe('下载失败');
+    fetchAgreement.mockResolvedValueOnce({ success: true, data: { ...agreement, version: 'v3' } });
+    await act(async () => latestModal?.props.onRetry());
+    expect(latestModal?.props.agreement.version).toBe('v3');
+    expect(latestModal?.props.error).toBeFalsy();
+    await act(async () => latestModal?.props.onSubmit());
+    expect(register.mock.calls[1][5]).toBe('v3');
+    expect(register.mock.calls[1][4]).not.toBe(oldId);
+    act(() => tree.unmount());
   });
 
   it('冲突取消保留表单；确认仅清相同 pending ID，过期 confirmation 不清新 ID', async () => {

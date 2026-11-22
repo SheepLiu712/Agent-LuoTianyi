@@ -49,6 +49,7 @@ describe('useAuth 协议签署消费者', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (encryptPassword as jest.Mock).mockImplementation(async (value: string) => ({ ok: true, encrypted: `encrypted:${value}` }));
     storageValues = new Map();
     storage.getItem.mockImplementation(async key => storageValues.get(key) ?? null);
     storage.setItem.mockImplementation(async (key, value) => { storageValues.set(key, value); });
@@ -182,6 +183,84 @@ describe('useAuth 协议签署消费者', () => {
     expect(sent.registration_request_id).toBe('r1');
     expect(sent.agreement_version).toBe('v1');
     expect(await loadRegistrationResume('https://one.test')).toBeNull();
+  });
+
+  it.each(['unknown', 'never_sent'])('跨 hook 恢复 %s 时拒绝另一身份、新 ID、新版本及无协议字段覆盖', async state => {
+    const key = 'registration_resume:v1:https%3A%2F%2Fone.test';
+    const record = JSON.stringify({ server: 'https://one.test', requestId: 'r1', username: 'alice', agreementVersion: 'v1', state, createdAt: 1 });
+    storageValues.set(key, record);
+    global.fetch = jest.fn();
+    const current = await renderHook();
+    for (const [username, requestId, version] of [
+      ['bob', 'r2', 'v1'], ['alice', 'r2', 'v1'], ['alice', 'r1', 'v2'], ['bob', undefined, undefined],
+    ]) {
+      const result = await current().register(username!, 'pw', 'pw', 'invite', requestId, version);
+      expect(result.code).toBe('REGISTRATION_RESULT_PENDING');
+    }
+    expect(encryptPassword).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(storageValues.get(key)).toBe(record);
+    act(() => current.unmount());
+  });
+
+  it('请求发出且尚无响应时已持久化未决记录，重建 hook 仍能确认原提交', async () => {
+    let finish!: (response: Response) => void;
+    global.fetch = jest.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce(json(200, { message: '注册成功', user_id: 'alice' }));
+    const first = await renderHook();
+    let submitting!: Promise<unknown>;
+    await act(async () => {
+      submitting = first().register('alice', 'pw', 'pw', 'invite', 'r1', 'v1');
+      await Promise.resolve();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(await loadRegistrationResume('https://one.test')).toMatchObject({ requestId: 'r1', username: 'alice', agreementVersion: 'v1', state: 'unknown' });
+    const persisted = storageValues.get('registration_resume:v1:https%3A%2F%2Fone.test')!;
+    expect(persisted).not.toContain('password');
+    expect(persisted).not.toContain('invite');
+    act(() => first.unmount());
+
+    // 用全新 hook 模拟进程重建：原内存身份锁已经丢失，仅持久化记录仍存在。
+    const restarted = await renderHook();
+    const blocked = await restarted().register('alice', 'pw', 'pw', 'invite', 'r2', 'v2');
+    expect(blocked.code).toBe('REGISTRATION_RESULT_PENDING');
+    let restored!: { success: boolean };
+    await act(async () => { restored = await restarted().register('alice', 'pw', 'pw', 'invite', 'r1', 'v1'); });
+    expect(restored.success).toBe(true);
+    const body = JSON.parse((global.fetch as jest.Mock).mock.calls[1][1].body);
+    expect(body).toMatchObject({ registration_request_id: 'r1', agreement_version: 'v1', username: 'alice' });
+    expect(await loadRegistrationResume('https://one.test')).toBeNull();
+    // 收束被丢弃客户端的请求，不把它的迟到失败重新写成恢复记录。
+    await act(async () => { finish(json(503, { detail: 'offline' })); await submitting; });
+    expect(await loadRegistrationResume('https://one.test')).toBeNull();
+    act(() => restarted.unmount());
+  });
+
+  it.each([400, 422])('初次注册明确收到 %s 拒绝后允许更正表单重新提交', async status => {
+    global.fetch = jest.fn().mockResolvedValueOnce(json(status, { detail: 'invalid input' }))
+      .mockResolvedValueOnce(json(200, { message: '注册成功' }));
+    const current = await renderHook();
+    await act(async () => { await current().register('alice', 'pw', 'pw', 'invalid', 'r1', 'v1'); });
+    expect(await loadRegistrationResume('https://one.test')).toBeNull();
+    await act(async () => { await current().register('alice', 'pw', 'pw', 'corrected', 'r2', 'v1'); });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(await loadRegistrationResume('https://one.test')).toBeNull();
+    act(() => current.unmount());
+  });
+
+  it('注册返回换版但正文下载失败时仍返回换版错误码并结束原请求恢复', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(json(409, { code: 'AGREEMENT_CHANGED', detail: '用户协议已更新，请重新阅读' }))
+      .mockResolvedValueOnce(json(503, { detail: 'offline' }));
+    const current = await renderHook();
+    const result = await current().register('alice', 'pw', 'pw', 'invite', 'r1', 'v1');
+    expect(result).toMatchObject({ success: false, code: 'AGREEMENT_CHANGED' });
+    expect(result.agreement).toBeUndefined();
+    expect(await loadRegistrationResume('https://one.test')).toBeNull();
+    expect((global.fetch as jest.Mock).mock.calls.map(call => call[0])).toEqual([
+      'https://one.test/auth/register', 'https://one.test/auth/agreement',
+    ]);
+    act(() => current.unmount());
   });
 
   it('注册 CONFLICT 和其他确定但未知的 4xx 不会静默清除恢复记录', async () => {

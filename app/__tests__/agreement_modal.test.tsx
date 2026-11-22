@@ -150,6 +150,35 @@ describe('AgreementModal 真实组件行为', () => {
     expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(true);
   });
 
+  it('换版响应不带正文时使旧阅读失效，下载新版后须重新阅读五秒', async () => {
+    const submit = jest.fn().mockResolvedValue({ success: false, code: 'AGREEMENT_CHANGED', message: '用户协议已更新，请重新阅读' });
+    let tree!: ReactTestRenderer;
+    act(() => { tree = renderModal(submit); });
+    markShortDocument(tree);
+    await advance(5000);
+    await act(async () => button(tree, '我已阅读并同意用户协议').props.onPress());
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(true);
+    expect(button(tree, '重试')).toBeDefined();
+    expect(tree.root.findAllByType(SCROLL)).toHaveLength(0);
+    await advance(10000);
+    await act(async () => button(tree, '我已阅读并同意用户协议').props.onPress());
+    expect(submit).toHaveBeenCalledTimes(1);
+    act(() => tree.update(<AgreementModal visible agreement={{ ...agreement, version: 'v2' }} loading={false} theme={THEMES.light} onRetry={jest.fn()} onSubmit={submit} onCancel={jest.fn()} />));
+    markShortDocument(tree);
+    await advance(4750);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(true);
+    await advance(250);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(false);
+    // 关闭窗口后服务端允许重新启用历史版本，失效标记不能跨次打开保留。
+    act(() => tree.update(<AgreementModal visible={false} agreement={agreement} loading={false} theme={THEMES.light} onRetry={jest.fn()} onSubmit={submit} onCancel={jest.fn()} />));
+    act(() => tree.update(<AgreementModal visible agreement={agreement} loading={false} theme={THEMES.light} onRetry={jest.fn()} onSubmit={submit} onCancel={jest.fn()} />));
+    markShortDocument(tree);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(true);
+    await advance(5000);
+    expect(button(tree, '我已阅读并同意用户协议').props.disabled).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('提交失败保留阅读状态，提交中阻止按钮与 Android 返回，reject 也恢复操作', async () => {
     let resolve!: (value: { success: boolean }) => void;
     const submit = jest.fn().mockImplementation(() => new Promise((r) => { resolve = r; }));

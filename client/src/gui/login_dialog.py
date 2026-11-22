@@ -589,6 +589,8 @@ class LoginDialog(QDialog):
         dialog = self._sign_dialog
         if not context or dialog is None:
             return
+        # 本次未发送只能否定本次请求，不能清除同一窗口内先前提交的未知结果。
+        context["had_pending_before_submit"] = bool(context.get("resumed_from_disk") or self._pending_context)
         # 未决请求恢复必须重放原协议版本；没有原版本时才使用当前窗口版本。
         submit_version = context.get("resume_agreement_version") or agreement_version
         registration_resume.save_pending(
@@ -693,7 +695,7 @@ class LoginDialog(QDialog):
             return
         if outcome.code == "REGISTRATION_NOT_SENT":
             context = self._submit_context or {}
-            if not context.get("resumed_from_disk", False):
+            if not context.get("resumed_from_disk", False) and not context.get("had_pending_before_submit", False):
                 registration_resume.clear_pending()
                 self._pending_context = None
             dialog.finish_submit(False, outcome.message or "注册请求尚未发送，请重试")

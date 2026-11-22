@@ -28,7 +28,13 @@ export function AgreementModal({
   const [atBottom, setAtBottom] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  useEffect(() => { setSubmitError(''); }, [visible]);
+  const [invalidatedVersion, setInvalidatedVersion] = useState<string | null>(null);
+  const versionInvalid = Boolean(agreement && agreement.version === invalidatedVersion);
+  const readerError = error || (versionInvalid ? '用户协议已更新，请重试获取最新协议' : '');
+  useEffect(() => {
+    setSubmitError('');
+    if (!visible) setInvalidatedVersion(null);
+  }, [visible]);
   const elapsedRef = useRef(0);
   const activeSince = useRef<number | null>(null);
   const submittingRef = useRef(false);
@@ -57,7 +63,7 @@ export function AgreementModal({
   }, []);
 
   useEffect(() => {
-    if (!visible || loading || error || !agreement) return;
+    if (!visible || loading || readerError || !agreement) return;
     if (appState.current === 'active') activeSince.current = performance.now();
     const timer = setInterval(() => {
       if (activeSince.current === null) return;
@@ -70,26 +76,26 @@ export function AgreementModal({
       clearInterval(timer);
       settleActiveInterval(false);
     };
-  }, [visible, loading, error, agreement, settleActiveInterval]);
+  }, [visible, loading, readerError, agreement, settleActiveInterval]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       appState.current = next;
-      if (next === 'active' && visible && !loading && !error && agreement) {
+      if (next === 'active' && visible && !loading && !readerError && agreement) {
         if (activeSince.current === null) activeSince.current = performance.now();
       } else {
         settleActiveInterval();
       }
     });
     return () => sub.remove();
-  }, [visible, loading, error, agreement, settleActiveInterval]);
+  }, [visible, loading, readerError, agreement, settleActiveInterval]);
 
   const handleScroll = useCallback((event: any) => {
     const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
     if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 2) setAtBottom(true);
   }, []);
   const shortDocument = contentHeight > 0 && viewportHeight > 0 && contentHeight <= viewportHeight + 2;
-  const ready = visible && !loading && !error && Boolean(agreement) && (atBottom || shortDocument) && elapsed >= REQUIRED_SECONDS && !submitting;
+  const ready = visible && !loading && !readerError && Boolean(agreement) && (atBottom || shortDocument) && elapsed >= REQUIRED_SECONDS && !submitting;
   const remaining = Math.max(0, Math.ceil(REQUIRED_SECONDS - elapsed));
   const helper = elapsed < REQUIRED_SECONDS
     ? `请继续阅读，还需 ${remaining} 秒`
@@ -106,8 +112,10 @@ export function AgreementModal({
       setSubmitError(result.message || '协议提交失败，请重试');
       setSubmitting(false);
       submittingRef.current = false;
-      if (result.code === 'AGREEMENT_CHANGED' && result.agreement) {
+      if (result.code === 'AGREEMENT_CHANGED') {
+        setInvalidatedVersion(agreement?.version || null);
         elapsedRef.current = 0;
+        activeSince.current = appState.current === 'active' ? performance.now() : null;
         setElapsed(0); setAtBottom(false);
       }
     } catch {
@@ -131,8 +139,8 @@ export function AgreementModal({
             <Text style={[styles.version, { color: theme.textMuted }]}>{agreement ? `版本：${agreement.version}` : ''}</Text>
           </View>
           <View style={styles.reader} onLayout={(e) => { setViewportHeight(e.nativeEvent.layout.height); }}>
-            {loading ? <View style={styles.center}><ActivityIndicator color={theme.accent} /><Text style={{ color: theme.textMuted }}>协议加载中…</Text></View> : error ? (
-              <View style={styles.center}><Text style={[styles.error, { color: theme.dangerText }]}>{error}</Text><TouchableOpacity style={[styles.retry, { backgroundColor: theme.surfaceAlt }]} onPress={onRetry}><Text style={{ color: theme.text }}>重试</Text></TouchableOpacity></View>
+            {loading ? <View style={styles.center}><ActivityIndicator color={theme.accent} /><Text style={{ color: theme.textMuted }}>协议加载中…</Text></View> : readerError ? (
+              <View style={styles.center}><Text style={[styles.error, { color: theme.dangerText }]}>{readerError}</Text><TouchableOpacity style={[styles.retry, { backgroundColor: theme.surfaceAlt }]} onPress={onRetry}><Text style={{ color: theme.text }}>重试</Text></TouchableOpacity></View>
             ) : (
               <ScrollView
                 key={`${visible}:${agreement?.version}`}

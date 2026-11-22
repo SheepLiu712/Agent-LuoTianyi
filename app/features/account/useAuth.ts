@@ -1,7 +1,7 @@
 import { AgreementPayload, parseAgreementPayload } from '../../utils/agreement';
-import { loadRegistrationResume, markRegistrationSameUserLogin, markRegistrationUnknown, saveRegistrationResume, clearRegistrationResume } from '../../utils/registration_resume';
+import { loadRegistrationResume, markRegistrationSameUserLogin, markRegistrationUnknown, clearRegistrationResume } from '../../utils/registration_resume';
 import { classifyAgreementSubmitFailure } from '../../utils/agreement_failure';
-import { authFetch, isUnknownRegistrationResult } from '../../utils/auth_request';
+import { authFetch } from '../../utils/auth_request';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -331,18 +331,29 @@ export function useAuth() {
     registrationRequestId?: string,
     agreementVersion?: string,
   ): Promise<AuthResult> => {
+    const serverUrl = server_config.BASE_URL;
     try {
       if (!username.trim()) return { success: false, message: '用户名不能为空' };
       if (!password.trim()) return { success: false, message: '密码不能为空' };
       if (password !== confirmPassword) return { success: false, message: '两次密码不一致' };
       if (!inviteCode.trim()) return { success: false, message: '邀请码不能为空' };
 
-      const existing = await loadRegistrationResume(server_config.BASE_URL);
+      const existing = await loadRegistrationResume(serverUrl);
       if (existing?.state === 'same_user_login') {
         return {
           success: false,
           code: 'LOGIN_CONFIRMATION_REQUIRED',
           message: '原注册结果无法核验，请先使用原账号登录确认；确认前不能创建新账号',
+        };
+      }
+      if (existing?.state === 'unknown' && (
+        existing.requestId !== registrationRequestId || existing.username !== username ||
+        existing.agreementVersion !== agreementVersion
+      )) {
+        return {
+          success: false,
+          code: 'REGISTRATION_RESULT_PENDING',
+          message: '注册结果尚未确认，请先使用原用户名、密码和邀请码重试',
         };
       }
 
@@ -354,24 +365,17 @@ export function useAuth() {
       }
 
       // 发送注册请求
-      const resumeKey = registrationRequestId ? `${server_config.BASE_URL}\u0000${registrationRequestId}` : '';
+      const resumeKey = registrationRequestId ? `${serverUrl}\u0000${registrationRequestId}` : '';
       const lockedIdentity = `${username}\u0000${password}\u0000${inviteCode}\u0000${agreementVersion || ''}`;
       if (resumeKey && registrationIdentityLock.current[resumeKey] && registrationIdentityLock.current[resumeKey] !== lockedIdentity) {
         return { success: false, message: '注册结果尚未确认，请先使用原用户名、密码和邀请码重试' };
       }
       if (resumeKey) registrationIdentityLock.current[resumeKey] = lockedIdentity;
       if (registrationRequestId && agreementVersion) {
-        if (!existing || existing.requestId !== registrationRequestId) {
-          await saveRegistrationResume({
-            server: server_config.BASE_URL,
-            requestId: registrationRequestId,
-            username,
-            agreementVersion,
-            state: 'never_sent',
-          });
-        }
+        // 必须先持久化未决状态；请求到达后立即结束进程也能恢复原提交。
+        await markRegistrationUnknown(serverUrl, registrationRequestId, username, agreementVersion);
       }
-      const response = await authFetch(`${server_config.BASE_URL}/auth/register`, {
+      const response = await authFetch(`${serverUrl}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -386,36 +390,26 @@ export function useAuth() {
       try {
         result = await response.json();
       } catch {
-        if (registrationRequestId && agreementVersion) {
-          await markRegistrationUnknown(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
-        }
         return { success: false, message: '注册结果未确认，请使用原信息重试' };
       }
       if (!response.ok) {
-        if (isUnknownRegistrationResult(response.status)) {
-          if (registrationRequestId && agreementVersion) {
-            await markRegistrationUnknown(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
-          }
-        }
         const code = result.code || result.detail?.code;
-        if (code === 'AGREEMENT_CHANGED') {
-          await clearRegistrationResume(server_config.BASE_URL);
+        if (code === 'AGREEMENT_CHANGED' || (!existing && [400, 422].includes(response.status))) {
+          // 首次请求被明确拒绝时允许更正表单；既有未决请求仍须保留原恢复信息。
+          await clearRegistrationResume(serverUrl);
           if (resumeKey) delete registrationIdentityLock.current[resumeKey];
         } else if (code === 'REGISTRATION_REQUEST_UNVERIFIABLE' && registrationRequestId && agreementVersion) {
-          await markRegistrationSameUserLogin(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
+          await markRegistrationSameUserLogin(serverUrl, registrationRequestId, username, agreementVersion);
         }
         return { success: false, message: typeof result.detail === 'string' ? result.detail : '注册失败', code, agreement: code === 'AGREEMENT_CHANGED' ? await getCurrentAgreementForAuth() || undefined : undefined };
       }
 
       if (registrationRequestId && agreementVersion && result?.message) {
-        await clearRegistrationResume(server_config.BASE_URL);
+        await clearRegistrationResume(serverUrl);
         if (resumeKey) delete registrationIdentityLock.current[resumeKey];
       }
       return { success: true, message: '注册成功，请登录' };
     } catch (e) {
-      if (registrationRequestId && agreementVersion) {
-        await markRegistrationUnknown(server_config.BASE_URL, registrationRequestId, username, agreementVersion);
-      }
       addDebugTrace('auth', 'register error', { error: String(e) });
       return { success: false, message: '注册失败，请联系管理员' };
     }

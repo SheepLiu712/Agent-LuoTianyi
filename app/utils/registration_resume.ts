@@ -53,7 +53,8 @@ export async function loadRegistrationResume(server: string): Promise<Registrati
       typeof value.agreementVersion !== 'string' ||
       !['never_sent', 'unknown', 'same_user_login'].includes(value.state || '')
     ) return null;
-    return value as RegistrationResumeRecord;
+    // 旧版在发出请求前写入 never_sent；进程结束后无法断定请求是否已到达服务器。
+    return { ...value, state: value.state === 'never_sent' ? 'unknown' : value.state } as RegistrationResumeRecord;
   } catch {
     return null;
   }

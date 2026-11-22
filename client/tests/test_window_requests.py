@@ -6,11 +6,11 @@ from unittest.mock import Mock
 
 import pytest
 import requests
-from PySide6.QtCore import QCoreApplication, QEvent, QTimer, Qt
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton
 from src.gui import login_dialog as dialog_module
 from src.gui.binder import AgentBinder
 from src.gui.login_dialog import LoginDialog
@@ -170,6 +170,7 @@ def account_window(qapp, monkeypatch):
 
         monkeypatch.setattr(requests.Session, "send", send)
         monkeypatch.setattr(dialog_module.credential, "load_credentials", lambda: None)
+        monkeypatch.setattr(dialog_module.registration_resume, "load_pending", lambda: None)
         monkeypatch.setattr(dialog_module.QMessageBox, "critical", lambda *args: None)
         monkeypatch.setattr(dialog_module.QMessageBox, "information", lambda *args: None)
         network = NetworkClient("https://window-test.invalid")
@@ -217,7 +218,7 @@ def account_window(qapp, monkeypatch):
     qapp.processEvents()
 
 
-@pytest.mark.parametrize("action", ["login", "reset", "server"])
+@pytest.mark.parametrize("action", ["login", "register", "reset", "server"])
 def test_account_actions_keep_http_off_gui_single_flight_and_allow_manual_retry(account_window, qapp, action):
     window, network, state, saves, key = account_window()
     ui_thread = threading.get_ident()
@@ -226,6 +227,16 @@ def test_account_actions_keep_http_off_gui_single_flight_and_allow_manual_retry(
         window.l_username.setText("test-user")
         window.l_password.setText("test-password")
         button = window.l_btn
+    elif action == "register":
+        window.tabs.setCurrentIndex(1)
+        for field, text in (
+            (window.r_username, "test-user"),
+            (window.r_password, "test-password"),
+            (window.r_confirm_password, "test-password"),
+            (window.r_invite, "test-invite"),
+        ):
+            field.setText(text)
+        button = window.r_btn
     else:
         opened = []
 
@@ -263,12 +274,14 @@ def test_account_actions_keep_http_off_gui_single_flight_and_allow_manual_retry(
     QTest.qWait(50)
     assert heartbeat == [True]
     assert not button.isEnabled()
-    assert len(state["calls"]) == (1 if action == "server" else 2)
+    requests_per_attempt = {"server": 1, "register": 3}.get(action, 2)
+    assert len(state["calls"]) == requests_per_attempt
     assert all(thread != ui_thread for _, _, thread in state["calls"])
     assert all(session is not network.session for session, _, _ in state["calls"])
     if action != "server":
-        assert state["calls"][0][0] is state["calls"][1][0]
-        body = json.loads(state["calls"][1][1].body)
+        account_calls = [call for call in state["calls"] if not call[1].url.endswith("/auth/agreement/policy")]
+        assert account_calls[0][0] is account_calls[1][0]
+        body = json.loads(account_calls[1][1].body)
         encrypted = body.get("password") or body.get("new_password")
         assert (
             key.decrypt(
@@ -284,11 +297,16 @@ def test_account_actions_keep_http_off_gui_single_flight_and_allow_manual_retry(
         state["status"] = 200
         previous = len(state["calls"])
         QTest.mouseClick(button, Qt.MouseButton.LeftButton)
-        wait_for(lambda: len(state["calls"]) == previous + 2)
+        wait_for(lambda: len(state["calls"]) == previous + requests_per_attempt)
         if action == "login":
             wait_for(lambda: not window.isVisible())
             assert saves == [ui_thread]
             network.ws_transport.start.assert_called_once()
+        elif action == "register":
+            wait_for(lambda: window.tabs.currentIndex() == 0)
+            assert window.l_username.text() == "test-user"
+            assert saves == []
+            network.ws_transport.start.assert_not_called()
         else:
             wait_for(lambda: not child.isVisible())
             assert window.l_username.text() == "test-user"
