@@ -93,12 +93,31 @@ class AccountRequest:
     password: str = field(default="", repr=False)
     invite: str = field(default="", repr=False)
     remember: bool = False
+    agreement_version: str = ""
+    token: str | None = field(default=None, repr=False)
 
     def execute(self, cancelled: Event) -> tuple[bool, str, dict]:
         if cancelled.is_set():
             return False, "Request cancelled", {}
         with HttpClientFactory.create_session() as session:
             api = AuthApi(self.base_url, session=session, cancelled=cancelled)
+            if self.action == "agreement_login":
+                accepted = api.accept_agreement(
+                    self.username,
+                    self.agreement_version,
+                    password=None if self.token is not None else self.password,
+                    token=self.token,
+                )
+                if not accepted[0] or cancelled.is_set():
+                    return accepted if not cancelled.is_set() else (False, "Request cancelled", {})
+                if self.token is not None:
+                    ok, data = api.auto_login(self.username, self.token)
+                    return (
+                        ok,
+                        "登录成功" if ok else data.get("message", "登录失败"),
+                        data,
+                    )
+                return api.login(self.username, self.password, self.remember)
             if self.action == "login":
                 return api.login(self.username, self.password, self.remember)
             if self.action == "register":

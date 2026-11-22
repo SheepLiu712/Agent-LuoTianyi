@@ -1,25 +1,25 @@
 import uuid
 from enum import Enum
 
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
-    QVBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QMessageBox,
+    QPushButton,
     QTabWidget,
+    QVBoxLayout,
     QWidget,
-    QCheckBox,
 )
-from PySide6.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
 
-from .agreement_sign_dialog import AgreementSignDialog
-from .binder import AgentBinder
 from ..network.auth import RegisterOutcome
 from ..safety import credential
 from ..utils import registration_resume
 from ..utils.logger import get_logger
+from .agreement_sign_dialog import AgreementSignDialog
+from .binder import AgentBinder
 from .window_operation import WindowOperation
 
 
@@ -413,78 +413,26 @@ class LoginDialog(QDialog):
         if not version:
             QMessageBox.critical(self, "登录失败", "服务器未返回协议版本")
             return ExistingAgreementResult.RETURN_TO_LOGIN
-        dialog = AgreementSignDialog(self, load_document=self._load_agreement)
+        # 自动登录发生在登录窗口显示之前；签署窗口此时必须是独立可见窗口。
+        dialog = AgreementSignDialog(self if self.isVisible() else None, load_document=self._load_agreement)
         dialog.set_reject_text("不同意并退出")
-        result = {"ok": False, "submitting": False}
+        operation = WindowOperation(dialog)
+        result = {"ok": False}
 
-        def submit(agreement_version: str) -> None:
-            if result["submitting"]:
+        def completed(request, outcome):
+            if request.context != self.binder.account_context():
+                dialog.finish_submit(False, "账号或服务器已变更，请重新登录", close=True)
+                result["terminal"] = ExistingAgreementResult.RETURN_TO_LOGIN
                 return
-            result["submitting"] = True
-            try:
-                accepted, message, details = self.binder.on_accept_agreement(
-                    username,
-                    agreement_version,
-                    password=password if mode == "password" else None,
-                    token=token if mode == "auto_login" else None,
-                )
-            except Exception as error:  # noqa: BLE001 - keep the modal retryable
-                result["submitting"] = False
-                result.pop("terminal", None)
-                dialog.finish_submit(False, str(error) or "网络错误，请重试")
-                return
-            if accepted:
-                try:
-                    if mode == "password":
-                        logged_in, login_message, login_details = self.binder.on_login_with_details(
-                            username, password or "", self.l_auto_login.isChecked()
-                        )
-                    else:
-                        logged_in, login_message, login_details = self.binder.on_auto_login_with_details(
-                            username, token or ""
-                        )
-                except Exception as error:  # noqa: BLE001 - keep the modal retryable
-                    logged_in, login_message, login_details = (
-                        False,
-                        str(error) or "网络错误，请重试",
-                        {},
-                    )
-                login_details = login_details if isinstance(login_details, dict) else {}
-                login_code = login_details.get("code")
-                if not logged_in and login_code in {
-                    "AGREEMENT_REQUIRED",
-                    "AGREEMENT_CHANGED",
-                }:
-                    result["submitting"] = False
-                    result.pop("terminal", None)
-                    dialog.finish_submit(False, login_message or "用户协议已更新，请重新阅读")
-                    dialog.reload_document()
-                    return
-                result["ok"] = bool(logged_in)
-                result["submitting"] = False
-                if logged_in:
-                    result.pop("terminal", None)
-                    dialog.finish_submit(True)
-                    return
-                if login_details.get("status_code") == 401:
-                    if mode == "auto_login":
-                        self.saved_token = None
-                        self.l_auto_login.setChecked(False)
-                        credential.save_credentials(username, None, False)
-                    result["terminal"] = ExistingAgreementResult.RETURN_TO_LOGIN
-                    dialog.finish_submit(False, login_message or "登录失败，请重试", close=True)
-                    return
-                # 429/5xx/network failures remain retryable and must not poison a later reject.
-                result.pop("terminal", None)
-                dialog.finish_submit(False, login_message or "网络错误，请重试")
-                return
-            elif details.get("code") == "AGREEMENT_CHANGED":
-                result["submitting"] = False
-                result.pop("terminal", None)
+            success, message, details = outcome
+            if success:
+                success, message = self.binder.apply_account_result(request, outcome)
+                result["ok"] = success
+                dialog.finish_submit(success, message)
+            elif details.get("code") in {"AGREEMENT_CHANGED", "AGREEMENT_REQUIRED"}:
                 dialog.finish_submit(False, "用户协议已更新，请重新阅读")
-                dialog.reload_document()
+                dialog.reload_document("用户协议已更新，请重新阅读")
             elif details.get("status_code") == 401:
-                result["submitting"] = False
                 if mode == "auto_login":
                     self.saved_token = None
                     self.l_auto_login.setChecked(False)
@@ -492,12 +440,28 @@ class LoginDialog(QDialog):
                 result["terminal"] = ExistingAgreementResult.RETURN_TO_LOGIN
                 dialog.finish_submit(False, message, close=True)
             else:
-                result["submitting"] = False
-                result.pop("terminal", None)
-                dialog.finish_submit(False, message)
+                dialog.finish_submit(False, message or "网络错误，请重试")
 
+        def submit(agreement_version: str) -> None:
+            if operation.busy:
+                return
+            request = self.binder.prepare_account_request(
+                "agreement_login",
+                username=username,
+                password=password or "",
+                token=token if mode == "auto_login" else None,
+                remember=mode == "auto_login" or self.l_auto_login.isChecked(),
+                agreement_version=agreement_version,
+            )
+            operation.start(request)
+
+        operation.completed.connect(completed)
         dialog.submit_requested.connect(submit)
-        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            operation.close()
+            dialog.deleteLater()
         if accepted and result["ok"]:
             self._settle_pending_registration(username)
             return ExistingAgreementResult.LOGGED_IN
@@ -694,7 +658,7 @@ class LoginDialog(QDialog):
                 context["resumed_from_disk"] = False
             self._pending_context = None
             dialog.finish_submit(False, "用户协议已更新，请重新阅读")
-            dialog.reload_document()
+            dialog.reload_document("用户协议已更新，请重新阅读")
             return
         if outcome.code == "REGISTRATION_REQUEST_CONFLICT":
             # 冲突意味着该 ID 已绑定另一组原提交内容；只提供明确放弃入口，默认保留。

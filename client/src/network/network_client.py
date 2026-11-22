@@ -3,14 +3,13 @@ import re
 from dataclasses import dataclass, field, fields
 from typing import Callable, List, Tuple
 
-from . import AuthApi, WsTransport
-from .auth import RegisterOutcome
-from .auth import AccountRequest
-from .dynamics import DynamicRequest
-from ..types import ConversationItem
-from ..utils.logger import get_logger
-from ..utils.http_client import HttpClientFactory
 from ..safety import credential
+from ..types import ConversationItem
+from ..utils.http_client import HttpClientFactory
+from ..utils.logger import get_logger
+from . import AuthApi, WsTransport
+from .auth import AccountRequest, RegisterOutcome
+from .dynamics import DynamicRequest
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _CONVERSATION_ITEM_FIELDS = {field.name for field in fields(ConversationItem)}
@@ -217,9 +216,19 @@ class NetworkClient:
         invite: str = "",
         remember: bool = False,
         server_url: str | None = None,
+        agreement_version: str = "",
+        token: str | None = None,
     ) -> AccountRequest:
         return AccountRequest(
-            self.account_context(), action, server_url or self.base_url, username, password, invite, remember
+            self.account_context(),
+            action,
+            server_url or self.base_url,
+            username,
+            password,
+            invite,
+            remember,
+            agreement_version,
+            token,
         )
 
     def apply_account_result(self, request: AccountRequest, result: tuple) -> tuple[bool, str]:
@@ -229,7 +238,7 @@ class NetworkClient:
         success, message, data = result
         if not success:
             return False, message
-        if request.action == "login":
+        if request.action in {"login", "agreement_login"}:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")

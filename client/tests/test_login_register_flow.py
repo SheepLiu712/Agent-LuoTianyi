@@ -1,7 +1,7 @@
 """登录窗口的注册流程：校验→协议门禁→异步提交→成功回登录页并预填用户名。"""
 
-from types import SimpleNamespace
 from time import monotonic
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,7 +10,6 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Signal
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
-
 from src.gui import login_dialog as login_module  # noqa: E402
 from src.gui.agreement_sign_dialog import AgreementSignDialog  # noqa: E402
 from src.gui.login_dialog import LoginDialog  # noqa: E402
@@ -56,7 +55,7 @@ class FakeSignDialog(QDialog):
         if close:
             self.reject()
 
-    def reload_document(self) -> bool:
+    def reload_document(self, notice="") -> bool:
         self.reloads += 1
         return True
 
@@ -85,16 +84,24 @@ class FakeBinder:
         return (self.server_url,)
 
     def prepare_account_request(self, action, **values):
+        def execute(_cancelled):
+            if action == "register":
+                return False, "请签署协议", {"code": "AGREEMENT_REQUIRED"}
+            if action == "agreement_login":
+                accepted = self.on_accept_agreement(
+                    values["username"],
+                    values["agreement_version"],
+                    password=(values["password"] if values.get("token") is None else None),
+                    token=values.get("token"),
+                )
+                if not accepted[0]:
+                    return accepted
+                if values.get("token") is not None:
+                    return self.on_auto_login_with_details(values["username"], values["token"])
+            return self.on_login_with_details(values["username"], values["password"], values.get("remember", False))
+
         return SimpleNamespace(
-            context=self.account_context(),
-            action=action,
-            base_url=self.server_url,
-            **values,
-            execute=lambda _cancelled: (
-                (False, "请签署协议", {"code": "AGREEMENT_REQUIRED"})
-                if action == "register"
-                else self.on_login_with_details(values["username"], values["password"], values.get("remember", False))
-            ),
+            context=self.account_context(), action=action, base_url=self.server_url, **values, execute=execute
         )
 
     def apply_account_result(self, request, result):
@@ -629,8 +636,9 @@ def test_password_agreement_required_signs_then_logs_in_separately(dialog, monke
     # The real dialog is replaced with a small deterministic test double below.
     submitted = []
 
-    class Sign:
+    class Sign(QDialog):
         def __init__(self, *args, **kwargs):
+            super().__init__(args[0] if args else None)
             self.submit_requested = SimpleNamespace(connect=lambda callback: submitted.append(callback))
 
         def set_reject_text(self, text):
@@ -638,10 +646,15 @@ def test_password_agreement_required_signs_then_logs_in_separately(dialog, monke
 
         def exec(self):
             submitted[0]("terms-v1")
+            for _ in range(500):
+                if hasattr(self, "finished_result"):
+                    break
+                QTest.qWait(10)
+            assert hasattr(self, "finished_result")
             return QDialog.DialogCode.Accepted
 
         def finish_submit(self, success, message=""):
-            self.finished = (success, message)
+            self.finished_result = (success, message)
 
     monkeypatch.setattr(login_module, "AgreementSignDialog", Sign)
     dialog.widget.l_username.setText("newbie")
@@ -657,8 +670,9 @@ def test_existing_user_signing_login_failure_releases_submit_for_retry(dialog, m
     dialog.binder.detail_login_result = (False, "登录失败", {})
     callbacks = []
 
-    class Sign:
+    class Sign(QDialog):
         def __init__(self, *args, **kwargs):
+            super().__init__(args[0] if args else None)
             self.submit_requested = SimpleNamespace(connect=callbacks.append)
             self.finished = []
 
@@ -667,10 +681,15 @@ def test_existing_user_signing_login_failure_releases_submit_for_retry(dialog, m
 
         def exec(self):
             callbacks[0]("terms-v1")
+            for _ in range(500):
+                if getattr(self, "finished_result", None):
+                    break
+                QTest.qWait(10)
+            assert self.finished_result
             return QDialog.DialogCode.Rejected
 
         def finish_submit(self, success, message=""):
-            self.finished.append((success, message))
+            self.finished_result = (success, message)
 
     monkeypatch.setattr(login_module, "AgreementSignDialog", Sign)
     assert (
@@ -710,10 +729,11 @@ def test_post_sign_in_error_routes_and_later_reject_exits(dialog, monkeypatch, l
     dialog.binder.detail_login_result = login_details
     callbacks = []
 
-    class Sign:
+    class Sign(QDialog):
         last = None
 
         def __init__(self, *args, **kwargs):
+            super().__init__(args[0] if args else None)
             self.submit_requested = SimpleNamespace(connect=callbacks.append)
             self.reloads = 0
             Sign.last = self
@@ -723,12 +743,17 @@ def test_post_sign_in_error_routes_and_later_reject_exits(dialog, monkeypatch, l
 
         def exec(self):
             callbacks[0]("terms-v1")
+            for _ in range(500):
+                if getattr(self, "finished_result", None):
+                    break
+                QTest.qWait(10)
+            assert self.finished_result
             return QDialog.DialogCode.Rejected
 
         def finish_submit(self, success, message="", **kwargs):
-            self.finished = (success, message, kwargs)
+            self.finished_result = (success, message, kwargs)
 
-        def reload_document(self):
+        def reload_document(self, notice=""):
             self.reloads += 1
 
     monkeypatch.setattr(login_module, "AgreementSignDialog", Sign)
@@ -981,7 +1006,12 @@ def test_version_change_starts_new_request_with_new_version(dialog):
 
     dialog.widget._on_register_finished(
         sign.submit_token,
-        RegisterOutcome(False, "用户协议已更新，请重新阅读", code="AGREEMENT_CHANGED", agreement_version="terms-v2"),
+        RegisterOutcome(
+            False,
+            "用户协议已更新，请重新阅读",
+            code="AGREEMENT_CHANGED",
+            agreement_version="terms-v2",
+        ),
     )
 
     context = dialog.widget._submit_context
@@ -1248,7 +1278,10 @@ def test_unverifiable_closes_real_modal_and_preserves_pending(app, monkeypatch, 
     monkeypatch.setattr(registration_resume.storage, "temp_path", lambda name: str(tmp_path / name))
     binder = FakeBinder(
         outcome=RegisterOutcome(
-            False, "上次注册已经完成，请用该账号登录确认", code="REGISTRATION_REQUEST_UNVERIFIABLE", status_code=409
+            False,
+            "上次注册已经完成，请用该账号登录确认",
+            code="REGISTRATION_REQUEST_UNVERIFIABLE",
+            status_code=409,
         )
     )
     widget = LoginDialog(binder)

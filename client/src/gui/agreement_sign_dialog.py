@@ -99,11 +99,13 @@ class AgreementSignDialog(QDialog):
         self.gate = SigningGate()
         self.version: str = ""
         self.last_error: str = ""
+        self._reload_notice = ""
         self._pending_anchor: Optional[tuple] = None
         self._anchor_restoring = False
         self._reject_text = reject_text
 
         self.setWindowTitle("用户协议")
+        self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
         self.setModal(True)
         self.setMinimumSize(560, 460)
         self.resize(640, 520)
@@ -222,7 +224,7 @@ class AgreementSignDialog(QDialog):
         self.setWindowTitle(str(payload.get("title", "") or "用户协议"))
         self.version_label.setText(f"版本：{self.version}" if self.version else "")
         self.view.setDocument(render_agreement_document(payload, self.font().family()))
-        self._set_error("")
+        self._set_error(self._reload_notice)
         self.gate.begin_loading()
         self.gate.mark_loaded()
         # 异步正文可能在窗口已经显示且仍处于前台时返回；加载重置门禁后要从此刻继续累计。
@@ -231,12 +233,14 @@ class AgreementSignDialog(QDialog):
         self._sync_scroll_state()
         self._refresh_actions()
 
-    def reload_document(self) -> bool:
+    def reload_document(self, notice: str = "") -> bool:
         """重新拉取当前正文（加载失败后的重试，也用于协议换版重读）。"""
         if self._load_document is None or self._load_in_flight:
             return False
         self.gate.begin_loading()
-        self._set_error("")
+        if notice:
+            self._reload_notice = notice
+        self._set_error(self._reload_notice)
         self._refresh_actions()
         self._load_request_id += 1
         self._load_in_flight = True
@@ -246,6 +250,7 @@ class AgreementSignDialog(QDialog):
     def begin_submit(self) -> None:
         self.gate.begin_submit()
         self.last_error = ""
+        self._reload_notice = ""
         self._set_error("")
         self._refresh_actions()
 

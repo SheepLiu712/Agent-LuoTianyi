@@ -6,7 +6,6 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
-
 from src.gui.agreement_sign_dialog import (  # noqa: E402
     COLOR_DISABLED,
     COLOR_PRIMARY,
@@ -81,6 +80,47 @@ def confirm_color(dialog) -> str:
         if color in dialog.confirm_btn.styleSheet():
             return color
     return "unknown"
+
+
+def test_minimized_reading_does_not_count_ten_seconds(app, clock):
+    widget = AgreementSignDialog(document=SHORT_DOC, clock=clock)
+    widget.show()
+    app.processEvents()
+    try:
+        clock.advance(2)
+        widget._on_tick()
+        assert widget.gate.remaining_seconds == 3
+        widget.showMinimized()
+        app.processEvents()
+        clock.advance(10)
+        widget._on_tick()
+        assert widget.gate.remaining_seconds == 3
+        assert not widget.confirm_btn.isEnabled()
+        widget.showNormal()
+        widget.activateWindow()
+        app.processEvents()
+        clock.advance(3)
+        widget._on_tick()
+        assert widget.confirm_btn.isEnabled()
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
+
+
+def test_bottom_within_first_second_needs_only_remaining_four(app, dialog, clock):
+    app.processEvents()
+    bar = dialog.view.verticalScrollBar()
+    assert bar.maximum() > 0
+    clock.advance(1)
+    bar.setValue(bar.maximum())
+    dialog._on_tick()
+    assert dialog.gate.reached_bottom
+    assert dialog.gate.remaining_seconds == 4
+    assert not dialog.confirm_btn.isEnabled()
+    clock.advance(4)
+    dialog._on_tick()
+    assert dialog.confirm_btn.isEnabled()
 
 
 def test_confirm_is_disabled_until_time_and_bottom_are_both_met(dialog, clock):
