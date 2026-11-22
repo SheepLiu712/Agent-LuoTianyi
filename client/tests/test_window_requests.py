@@ -6,11 +6,11 @@ from unittest.mock import Mock
 
 import pytest
 import requests
-from PySide6.QtCore import QCoreApplication, QEvent, QTimer, Qt
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton
 from src.gui import login_dialog as dialog_module
 from src.gui.binder import AgentBinder
 from src.gui.login_dialog import LoginDialog
@@ -127,7 +127,7 @@ def account_window(qapp, monkeypatch):
     windows = []
     states = []
 
-    def create(post_status=503, block="POST"):
+    def create(post_status=503, block="POST", require_acceptance=False):
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         pem = (
             key.public_key()
@@ -161,6 +161,8 @@ def account_window(qapp, monkeypatch):
                     "detail": "retry",
                 }
             )
+            if request.url.endswith("/auth/agreement/policy"):
+                payload = {"require_acceptance": require_acceptance}
             response._content = json.dumps(payload).encode()
             response.request = request
             state["complete"].set()
@@ -168,6 +170,7 @@ def account_window(qapp, monkeypatch):
 
         monkeypatch.setattr(requests.Session, "send", send)
         monkeypatch.setattr(dialog_module.credential, "load_credentials", lambda: None)
+        monkeypatch.setattr(dialog_module.registration_resume, "load_pending", lambda: None)
         monkeypatch.setattr(dialog_module.QMessageBox, "critical", lambda *args: None)
         monkeypatch.setattr(dialog_module.QMessageBox, "information", lambda *args: None)
         network = NetworkClient("https://window-test.invalid")
@@ -271,12 +274,14 @@ def test_account_actions_keep_http_off_gui_single_flight_and_allow_manual_retry(
     QTest.qWait(50)
     assert heartbeat == [True]
     assert not button.isEnabled()
-    assert len(state["calls"]) == (1 if action == "server" else 2)
+    requests_per_attempt = {"server": 1, "register": 3}.get(action, 2)
+    assert len(state["calls"]) == requests_per_attempt
     assert all(thread != ui_thread for _, _, thread in state["calls"])
     assert all(session is not network.session for session, _, _ in state["calls"])
     if action != "server":
-        assert state["calls"][0][0] is state["calls"][1][0]
-        body = json.loads(state["calls"][1][1].body)
+        account_calls = [call for call in state["calls"] if not call[1].url.endswith("/auth/agreement/policy")]
+        assert account_calls[0][0] is account_calls[1][0]
+        body = json.loads(account_calls[1][1].body)
         encrypted = body.get("password") or body.get("new_password")
         assert (
             key.decrypt(
@@ -292,13 +297,16 @@ def test_account_actions_keep_http_off_gui_single_flight_and_allow_manual_retry(
         state["status"] = 200
         previous = len(state["calls"])
         QTest.mouseClick(button, Qt.MouseButton.LeftButton)
-        wait_for(lambda: len(state["calls"]) == previous + 2)
+        wait_for(lambda: len(state["calls"]) == previous + requests_per_attempt)
         if action == "login":
             wait_for(lambda: not window.isVisible())
             assert saves == [ui_thread]
             network.ws_transport.start.assert_called_once()
         elif action == "register":
             wait_for(lambda: window.tabs.currentIndex() == 0)
+            assert window.l_username.text() == "test-user"
+            assert saves == []
+            network.ws_transport.start.assert_not_called()
         else:
             wait_for(lambda: not child.isVisible())
             assert window.l_username.text() == "test-user"
@@ -403,3 +411,38 @@ def test_synchronous_account_interfaces_keep_original_result_contract(account_wi
     assert network.user_id == "test-user"
     assert len(saves) == 1
     network.ws_transport.start.assert_called_once()
+
+
+def test_disabled_policy_registers_without_opening_agreement(account_window, monkeypatch):
+    window, network, state, saves, _key = account_window(post_status=200)
+    state["gate"].set()
+    monkeypatch.setattr(dialog_module.registration_resume, "load_pending", lambda: None)
+    sign = Mock(side_effect=AssertionError("disabled policy must not open signing dialog"))
+    monkeypatch.setattr(dialog_module, "AgreementSignDialog", sign)
+    window.tabs.setCurrentIndex(1)
+    window.r_username.setText("test-user")
+    window.r_password.setText("test-password")
+    window.r_confirm_password.setText("test-password")
+    window.r_invite.setText("test-invite")
+    window.do_register()
+    wait_for(lambda: not window._account_operation.busy)
+    assert window.tabs.currentIndex() == 0
+    assert window.l_username.text() == "test-user"
+    posts = [request for _, request, _ in state["calls"] if request.method == "POST"]
+    assert len(posts) == 1
+    payload = json.loads(posts[0].body)
+    assert payload["username"] == "test-user"
+    assert "accepted" not in payload
+    sign.assert_not_called()
+
+
+@pytest.mark.parametrize("policy", [True, "false"])
+def test_registration_policy_requires_signing_or_rejects_invalid_policy_without_post(account_window, policy):
+    window, network, state, _, _key = account_window(require_acceptance=policy)
+    state["gate"].set()
+    request = network.prepare_account_request("register", username="test-user", password="pw", invite="invite")
+    ok, message, details = request.execute(threading.Event())
+    assert not ok
+    assert message
+    assert details.get("code") == ("AGREEMENT_REQUIRED" if policy is True else None)
+    assert not any(req.method == "POST" for _, req, _ in state["calls"])

@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from src.application.admin import get_admin_shell
 from src.utils.logger import get_logger
 
 from .runtime_access import require_bearer_token, runtime_not_ready_detail
 from .types import (
+    AgreementAcceptRequest,
     AutoLoginRequest,
     CallCapabilityQuery,
     CallCapabilityResponse,
@@ -48,6 +50,37 @@ def get_runtime() -> "ServerRuntime":
 @router.get("/auth/public_key")
 async def get_public_key(server_runtime: "ServerRuntime" = Depends(get_runtime)):
     return {"public_key": server_runtime.user_interface.get_public_key_pem()}
+
+
+@router.get("/auth/agreement/policy")
+async def get_agreement_policy(server_runtime: "ServerRuntime" = Depends(get_runtime)):
+    return JSONResponse(
+        {"require_acceptance": server_runtime.agreement_service.require_acceptance},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/auth/agreement")
+async def get_agreement(server_runtime: "ServerRuntime" = Depends(get_runtime)):
+    agreement_doc = server_runtime.agreement_service.get_current()
+    return JSONResponse(
+        {
+            "version": agreement_doc.version,
+            "title": agreement_doc.title,
+            "format": agreement_doc.format,
+            "blocks": agreement_doc.blocks,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/auth/agreement/accept")
+async def accept_agreement(
+    req: AgreementAcceptRequest,
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+    request: Request = None,
+):
+    return await server_runtime.user_interface.accept_agreement(req, server_runtime, request)
 
 
 @router.get("/llm/client-model-types")

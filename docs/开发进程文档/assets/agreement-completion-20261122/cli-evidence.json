@@ -1,0 +1,12 @@
+[
+  {
+    "account": "test3",
+    "success": false,
+    "message": "请升级到支持用户协议签署的版本，阅读并同意用户协议后再登录。"
+  },
+  {
+    "account": "test2",
+    "success": true,
+    "message": "Login Successful"
+  }
+]

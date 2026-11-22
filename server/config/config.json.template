@@ -139,6 +139,10 @@
             }
         }
     },
+    "user_agreements": {
+        "require_acceptance": false,
+        "exempt_user_uuids": []
+    },
     "infrastructure": {
         "media_resolution": {
             "root": "data/media",

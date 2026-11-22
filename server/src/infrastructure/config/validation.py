@@ -82,6 +82,7 @@ class RuntimeConfigValidator:
                 items.append(ValidationItem("core", "agent_runtime.skills", "error", str(error)))
         items.extend(self._validate_secrets(config))
         items.extend(self._validate_security_config(config))
+        items.extend(self._validate_user_agreement_config(config))
         items.extend(self._validate_llm_interfaces(config))
         items.extend(self._validate_call_setup_timeout(config))
         items.extend(self._validate_realtime_speech(config))
@@ -173,6 +174,23 @@ class RuntimeConfigValidator:
                 )
             ]
         return [ValidationItem("core", name, "ok", f"消息令牌有效期为 {value} 秒")]
+
+    @staticmethod
+    def _validate_user_agreement_config(config: dict[str, Any]) -> list[ValidationItem]:
+        name = "config.user_agreements.exempt_user_uuids"
+        agreement_config = config.get("user_agreements", {})
+        if not isinstance(agreement_config, dict):
+            return [ValidationItem("core", name, "error", "user_agreements 必须是对象")]
+        if not isinstance(agreement_config.get("require_acceptance", False), bool):
+            return [
+                ValidationItem(
+                    "core", "config.user_agreements.require_acceptance", "error", "require_acceptance 必须是布尔值"
+                )
+            ]
+        user_uuids = agreement_config.get("exempt_user_uuids", [])
+        if not isinstance(user_uuids, list) or any(not isinstance(value, str) or not value for value in user_uuids):
+            return [ValidationItem("core", name, "error", "exempt_user_uuids 必须是非空账号 ID 的列表")]
+        return [ValidationItem("core", name, "ok", f"协议豁免账号数: {len(user_uuids)}")]
 
     def _validate_llm_interfaces(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []

@@ -46,6 +46,8 @@ async def test_server_runtime_shutdown_is_ordered_idempotent_and_retryable():
         llm_service=object(),
         observability=object(),
         client_llm_executor=ClientLLMExecutor(),
+        agreement_service=object(),
+        registration_service=object(),
         owns_observability=False,
     )
 
@@ -97,6 +99,8 @@ async def test_server_runtime_shutdown_awaits_owned_call_transport_release_tasks
         client_llm_executor=ClientLLMExecutor(),
         owns_observability=False,
         call_adapter=adapter,
+        agreement_service=object(),
+        registration_service=object(),
     )
 
     await runtime.shutdown()

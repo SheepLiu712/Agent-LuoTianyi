@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ChildProcess, spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -148,4 +149,11 @@ export async function waitUntil<T>(probe: () => T | Promise<T>, accept: (value: 
     await delay(30);
   }
   throw new Error(`condition timed out; last=${JSON.stringify(last)}`);
+}
+
+export async function registrationAgreement(url: string) {
+  const response = await fetch(`${url}/auth/agreement`);
+  if (!response.ok) throw new Error(`agreement fetch failed: ${response.status}`);
+  const agreement = await response.json();
+  return { agreement_version: agreement.version, registration_request_id: randomUUID(), accepted: true };
 }

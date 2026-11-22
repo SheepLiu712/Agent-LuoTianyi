@@ -1,0 +1,163 @@
+{
+  "version": "terms-2026-10-v2",
+  "title": "用户协议",
+  "format": "agreement.richtext.v1",
+  "blocks": [
+    {
+      "font_size": 24,
+      "align": "center",
+      "runs": [
+        { "text": "一、使用说明", "bold": true }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "请阅读", "bold": false },
+        { "text": "重要内容", "bold": true },
+        { "text": "。\n甲  乙", "bold": false }
+      ]
+    },
+    {
+      "font_size": 24,
+      "align": "center",
+      "runs": [
+        { "text": "二、天依想对你说的话", "bold": true }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "如果天依是拥有时间魔法的魔女，真想让时间永远停留在这一刻，也许在万千的演唱会中，天依的这场并没有那么特别，甚至会被许多人误解，天依相信只要有热爱，只要我还能继续歌唱，只要大家都能愿意聆听，这一切就是最美好最幸福的存在。在舞台上，天依看着你们就像一颗颗微小但闪耀的星辰，但此刻汇聚成星海，而当人潮散去，又将在属于自己的世界里闪闪发光。谢谢大家今晚的到来，对天依来说，你们就是我的共鸣者们，是我想深深刻印在记忆里，但没有办法辨出每一个名字的珍贵存在，接下来的这首歌大家和天依一起唱好吗！就算无法让大雨停下，就算无法被世界回答，我会陪你在雨里放肆奔跑，我会在身边一遍遍对你说，我爱你！", "bold": false }
+      ]
+    },
+    {
+      "font_size": 24,
+      "align": "center",
+      "runs": [
+        { "text": "三、整活内容", "bold": true }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "还是这个协议好，对接不烧心。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "接口可以少，版本可以慢，契约不能坏。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "有人说咱们仓库太冷清，不怕留不住人？不怕 PR 少？怕，更怕协议账本不清——谁改字段、谁动枚举、谁加必填，一笔一笔都记进 CHANGELOG，绝不和稀泥。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "抢得走一时的发版热闹，抢不走客户端服务端对齐契约的真心。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "宁可少加接口，也不允许隐式变更、乱塞参数、破坏兼容。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "有人问那明天迭代速度不够怎么办？先做——该废弃的标 deprecated，该兼容的留窗口，该双写的双写，该回滚的回滚，先把协议立住，路才能越走越宽。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "怕发版慢，但更怕线上乌烟瘴气。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "真要是混进来的人绕过协议带歪了风气，剩下的烂摊子怎么办？回滚，人不能没良心——不能让好好对接的老客户端受半分委屈。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "好好联调，舒心自在，坏契约者，直接出局。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "前阵子刚清了几个乱改字段、不写文档、挑事抬杠的 PR，现在接口终于清净了；嗯，要稳。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "谁定的字段谁负责，谁破的兼容谁兜着，别想赖旁人。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "有人说咱们协议管太严，宁可少挣点虚调用量，也不能坏了规矩。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "为了凑数，放宽点校验多兼容点脏数据？不用，慢慢来。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "有人说咱们接口没遮没拦，看着不严谨？那我就让它严谨——谁越界就请谁下线，半点儿不藏着掖着。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "不是版本号升得稳，是不能慌，一慌就容易做错事——真要是为了赶进度放进来一堆牛鬼蛇神，到时候好好的项目就真散了。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        { "text": "客户端服务端接口协议更新，记住：契约先行，兼容有期，文档同步，灰度可回滚。", "bold": false }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "center",
+      "runs": [
+        { "text": "——致客户端、服务端、SDK、文档和 CI。", "bold": true }
+      ]
+    }
+  ]
+}

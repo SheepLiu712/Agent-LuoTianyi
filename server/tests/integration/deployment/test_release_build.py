@@ -41,6 +41,17 @@ def create_release_repo(tmp_path):
     (server / resource).parent.mkdir(parents=True)
     (server / resource).write_bytes(b"original")
     resources = {"files": [{"path": resource, "sha256": hashlib.sha256(b"original").hexdigest(), "size": 8}]}
+    for source in sorted((SERVER / "res/user_agreements").glob("*")):
+        if not source.is_file():
+            continue
+        relative = source.relative_to(SERVER)
+        content = source.read_bytes()
+        target = server / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        resources["files"].append(
+            {"path": relative.as_posix(), "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+        )
     (server / "scripts/deploy/release/resources.lock.json").write_text(json.dumps(dict(schema_version=1, **resources)))
     for path in ("app/secret", "server/config/config.json", "server/res/tts/model.bin", "server/data/music.wav"):
         target = tmp_path / path
@@ -139,3 +150,15 @@ def test_build_rejects_inline_secret_in_release_template(repo):
     assert result.returncode != 0
     assert b"never-publish-this-secret" not in result.stderr
     assert not (repo / "dist").exists()
+
+
+def test_release_contains_current_and_historical_agreement_documents(repo):
+    result = build(repo, "HEAD")
+    assert result.returncode == 0, result.stderr
+    with tarfile.open(json.loads(result.stdout)["package"]) as archive:
+        assert archive.extractfile("res/user_agreements/__init__.py") is not None
+        manifest = json.load(archive.extractfile("res/user_agreements/manifest.json"))
+        assert manifest["current_version"] in manifest["files"]
+        for filename in manifest["files"].values():
+            content = archive.extractfile(f"res/user_agreements/{filename}").read()
+            assert json.loads(content)

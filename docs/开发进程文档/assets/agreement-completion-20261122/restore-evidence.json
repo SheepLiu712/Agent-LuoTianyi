@@ -1,0 +1,14 @@
+{
+  "pid": 269166,
+  "policy": {
+    "require_acceptance": true
+  },
+  "current_version": "terms-2026-10-v3",
+  "config_restored": true,
+  "manifest_restored": true,
+  "stopped_test_pids": [
+    266608,
+    268722,
+    268766
+  ]
+}
