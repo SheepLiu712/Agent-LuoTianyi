@@ -228,8 +228,7 @@ class AgreementSignDialog(QDialog):
         self.gate.begin_loading()
         self.gate.mark_loaded()
         # 异步正文可能在窗口已经显示且仍处于前台时返回；加载重置门禁后要从此刻继续累计。
-        if self.isVisible() and self.isActiveWindow() and not self.isMinimized():
-            self.gate.resume(self._clock())
+        self._sync_reading_activity()
         self._sync_scroll_state()
         self._refresh_actions()
 
@@ -273,18 +272,25 @@ class AgreementSignDialog(QDialog):
     # ── 事件与刷新 ───────────────────────────────────────────────
     def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         super().showEvent(event)
-        self.gate.resume(self._clock())
+        self._sync_reading_activity()
         self._timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        self.gate.pause()
+        self._timer.stop()
+        super().hideEvent(event)
 
     def changeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         super().changeEvent(event)
-        if event.type() == event.Type.WindowStateChange and self.isMinimized():
+        if event.type() in (event.Type.WindowStateChange, event.Type.ActivationChange):
+            self._sync_reading_activity()
+
+    def _sync_reading_activity(self) -> None:
+        # Qt 可能在最小化状态变化后再次发送 Show，不能把 Show 等同于前台可阅读。
+        if self.isVisible() and self.isActiveWindow() and not self.isMinimized():
+            self.gate.resume(self._clock())
+        else:
             self.gate.pause()
-        elif event.type() == event.Type.ActivationChange:
-            if self.isActiveWindow():
-                self.gate.resume(self._clock())
-            else:
-                self.gate.pause()
 
     def _on_tick(self) -> None:
         self.gate.tick(self._clock())

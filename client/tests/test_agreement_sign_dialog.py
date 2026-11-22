@@ -69,6 +69,7 @@ def clock():
 def dialog(app, clock):
     widget = AgreementSignDialog(document=DOC, clock=clock)
     widget.show()
+    app.processEvents()
     yield widget
     widget.close()
     widget.deleteLater()
@@ -121,6 +122,34 @@ def test_bottom_within_first_second_needs_only_remaining_four(app, dialog, clock
     clock.advance(4)
     dialog._on_tick()
     assert dialog.confirm_btn.isEnabled()
+
+
+def test_hidden_reading_resumes_only_after_returning_to_foreground(app, clock):
+    widget = AgreementSignDialog(document=SHORT_DOC, clock=clock)
+    widget.show()
+    app.processEvents()
+    try:
+        clock.advance(2)
+        widget._on_tick()
+        assert widget.gate.remaining_seconds == 3
+        widget.hide()
+        app.processEvents()
+        clock.advance(10)
+        widget._on_tick()
+        assert widget.gate.remaining_seconds == 3
+        assert not widget.confirm_btn.isEnabled()
+        widget.show()
+        # offscreen 平台重显窗口不会自动取得系统焦点，显式投递 Qt 的前台切换。
+        app.setActiveWindow(widget)
+        app.processEvents()
+        assert widget.isActiveWindow()
+        clock.advance(3)
+        widget._on_tick()
+        assert widget.confirm_btn.isEnabled()
+    finally:
+        widget.close()
+        widget.deleteLater()
+        app.processEvents()
 
 
 def test_confirm_is_disabled_until_time_and_bottom_are_both_met(dialog, clock):
@@ -283,6 +312,7 @@ def test_document_that_fits_on_one_screen_satisfies_bottom_after_five_seconds(ap
     """正文一屏完整显示时，读满五秒即可同意，不需要真的去滚动。"""
     widget = AgreementSignDialog(document=SHORT_DOC, clock=clock)
     widget.show()
+    app.processEvents()
     clock.advance(5.0)
     widget._on_tick()
 
