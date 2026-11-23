@@ -55,7 +55,12 @@ def main() -> None:
     )
     client_godot = any(
         path.parts[0] == "client-godot"
-        or path in {Path(".gitignore"), Path(".github/workflows/ci.yml")}
+        or path
+        in {
+            Path(".gitignore"),
+            Path(".github/workflows/ci.yml"),
+            Path(".github/scripts/docs_ci.py"),
+        }
         for path in paths
     )
     if args.command == "classify":
