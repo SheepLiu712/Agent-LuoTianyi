@@ -1,7 +1,5 @@
 """聊天与世界交互调度及生命周期管理。"""
 
-from src.domain.stage import DueEvent, DueEventProvider
-
 from ._finalization import InteractionFinalizing
 from ._world_sinks import NoChannelOutputSink, WorldFactSink
 from .call._call_records import CallStartFailed
@@ -16,8 +14,6 @@ __all__ = [
     "ChatStage",
     "CallStage",
     "CallIngressReceipt",
-    "DueEvent",
-    "DueEventProvider",
     "NoChannelOutputSink",
     "StageManager",
     "WorldFactSink",

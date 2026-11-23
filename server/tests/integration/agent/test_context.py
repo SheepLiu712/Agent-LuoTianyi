@@ -550,7 +550,6 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
     from src.utils.logger import get_logger
     from tests.integration.stage.test_call_stage import _eventually
     from tests.integration.stage.test_chat_stage import Socket
-    from tests.integration.stage.test_proactive_due_dispatch import DueEvents, event
     from tests.integration.websocket.test_call_websocket_adapter import start_message
 
     class LateSpeech(FakeRealtimeSpeechSessionFactory):
@@ -572,7 +571,6 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
     chat_adapter = WebSocketAdapter()
     contexts = factory(database)
     agent, generation_calls = _reminder_agent()
-    due_events = DueEvents((event("after-cancel"),))
     stages = make_stage_manager(
         adapter=chat_adapter,
         get_agent=lambda _: agent,
@@ -580,7 +578,6 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
         call_sessions=InMemoryCallSessionRepository(),
         conversation_service=database,
         realtime_speech_factory=speech,
-        due_event_provider=due_events,
     )
     calls = make_call_adapter(manager=stages, enabled=True, supports_character=lambda _: True)
     connection = StubChatConnection(Socket(), "u", "device")
@@ -630,7 +627,7 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
         await _eventually(lambda: not calls._sessions)
         await asyncio.wait_for(speech.cancelled.wait(), 1)
         assert chat.input_suspended
-        assert not await chat.dispatch_due_events(merge_all=True)
+        assert not chat._can_dispatch_proactive()
         assert not generation_calls
         speech.release.set()
         result = await asyncio.wait_for(call.terminate(StageEndReason.USER_REQUESTED), 2)
@@ -639,7 +636,7 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
             await call.start()
         if refresh_fails:
             assert chat.lifecycle_state is StageLifecycleState.TERMINATED
-            assert not await chat.dispatch_due_events(merge_all=True)
+            assert not chat._can_dispatch_proactive()
             assert not generation_calls
             assert "Chat rollback refresh failed" in caplog.text
             connection = StubChatConnection(Socket(), "u", "replacement")
@@ -651,7 +648,9 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
         contents = [entry.content for entry in resumed.context.conversation.read().entries]
         records = [content for content in contents if isinstance(content, CallContent)]
         assert len(records) == 1 and records[0].outcome is CallOutcome.CANCELLED_BEFORE_ANSWER
-        assert await resumed.dispatch_due_events(merge_all=True)
+        resumed._proactive_timer.get_user_stimulus()
+        resumed._proactive_timer.start_timer()
+        resumed._proactive_timer._expire(resumed._proactive_timer._generation)
         await _eventually(lambda: any(item["type"] == "agent_message" for item in connection.websocket.events))
         assert generation_calls["extract"]["conversation_history"].count(records[0].text) == 1
         assert generation_calls["replier"]["conversation_history"].count(records[0].text) == 1
@@ -664,12 +663,13 @@ async def test_cancelled_call_restores_same_chat_with_committed_history(database
 
 
 def _reminder_agent():
+    from types import SimpleNamespace
     """真实提醒生成与交付链路，仅替换模型响应和语音输出。"""
     import src.domain.agent as d
     from src.agent import Agent
     from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
-    from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+    from src.agent.handlers.stimulus.proactive_speech import ProactiveSpeechHandler
     from src.agent.handlers.stimulus.router import StimulusRouter
     from src.agent.processing.output_drafts import MessageEndDraft, TextFinalDraft
     from tests.integration.agent.test_topic_reply_pipeline import pipeline
@@ -689,8 +689,8 @@ def _reminder_agent():
         stimulus_router=StimulusRouter(
             [
                 (
-                    d.StimulusKind.PROACTIVE_PROMPT_DUE,
-                    FirstLoginHandler(prepared_names=(), prepared_speech=None, skills=composition),
+                    d.StimulusKind.PROACTIVE_SPEECH_DUE,
+                    ProactiveSpeechHandler(skills=composition, events=SimpleNamespace(list_due=lambda **kwargs: ())),
                 ),
                 (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             ]

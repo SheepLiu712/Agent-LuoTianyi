@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import requests
+from support.agreement import registration_agreement
 
 _SERVER_MODULE = "support.call_network_success_server"
 _SERVER_BOOTSTRAP = """
@@ -118,6 +119,7 @@ def test_production_restart_preserves_credentials_without_replaying_old_calls(tm
         registered = http.post(
             url + "/auth/register",
             json={
+                **registration_agreement(http, url),
                 "username": "alice",
                 "password": _encrypted_password(http, url, "offline-password"),
                 "invite_code": "invite",
@@ -168,6 +170,7 @@ def test_process_restart_leaves_partial_summary_and_maintenance_unchanged(tmp_pa
         registered = http.post(
             url + "/auth/register",
             json={
+                **registration_agreement(http, url),
                 "username": "alice",
                 "password": _encrypted_password(http, url, "offline-password"),
                 "invite_code": "invite",

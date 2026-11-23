@@ -514,6 +514,49 @@ class DynamicReadState(Base):
     user = relationship("User", back_populates="dynamic_read_state")
 
 
+# ————————————
+# 协议表
+# ————————————
+
+
+class AgreementVersion(Base):
+    __tablename__ = "agreement_versions"
+
+    version = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    format = Column(String, nullable=False)
+    content_json = Column(Text, nullable=False)
+    content_sha256 = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
+class AgreementSignature(Base):
+    """账号对某个协议版本的首次成功签署；重复同意不新增记录，也不覆盖首次时间。"""
+
+    __tablename__ = "agreement_signatures"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_uuid = Column(String, ForeignKey("users.uuid"), nullable=False)
+    agreement_version = Column(String, ForeignKey("agreement_versions.version"), nullable=False)
+    accepted_at = Column(String, nullable=False)
+
+    __table_args__ = (UniqueConstraint("user_uuid", "agreement_version", name="uq_agreement_signature_user_version"),)
+
+
+class RegistrationRequest(Base):
+    """已成功注册请求的结果，用于响应丢失后按同一请求 ID 恢复原结果。"""
+
+    __tablename__ = "registration_requests"
+
+    registration_request_id = Column(String, primary_key=True)
+    user_uuid = Column(String, ForeignKey("users.uuid"), nullable=False)
+    # 原注册密码的指纹（HMAC，非明文）：账号重置改密后仍能核验"原操作"。
+    password_fingerprint = Column(String, nullable=True)
+    agreement_version = Column(String, ForeignKey("agreement_versions.version"), nullable=False)
+    response_json = Column(Text, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
 # Database URL
 SessionLocal = None
 engine = None
@@ -553,7 +596,13 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         _migrate_sqlite_schema(engine)
         with engine.begin() as connection:
             stamp(connection.connection.driver_connection, "main")
-    # 迁移：为已存在的数据库添加新列
+    # Agreement tables are additive to schema 1; old dev installations may not have them yet.
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[AgreementVersion.__table__, AgreementSignature.__table__, RegistrationRequest.__table__],
+    )
+    with engine.begin() as connection:
+        _migrate_registration_schema(connection)
 
 
 def _migrate_sqlite_schema(db_engine: Engine) -> None:
@@ -567,10 +616,17 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
         _migrate_memory_chunk_schema(connection)
         _migrate_call_session_schema(connection)
         _migrate_call_maintenance_schema(connection)
+        _migrate_registration_schema(connection)
 
 
 def _table_columns(connection, table_name: str) -> set[str]:
     return {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _migrate_registration_schema(connection) -> None:
+    columns = _table_columns(connection, "registration_requests")
+    if columns and "password_fingerprint" not in columns:
+        connection.exec_driver_sql("ALTER TABLE registration_requests ADD COLUMN password_fingerprint VARCHAR")
 
 
 def _migrate_call_session_schema(connection) -> None:

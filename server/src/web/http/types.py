@@ -1,7 +1,7 @@
-from typing import Literal
+from typing import Literal, Union
 
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class ChatRequest(BaseModel):
@@ -52,9 +52,15 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     username: str
     password: str
     invite_code: str
+    # 新客户端在同意协议后提交；旧客户端不带这三个字段，由业务层返回 AGREEMENT_REQUIRED。
+    registration_request_id: str | None = None
+    agreement_version: str | None = None
+    accepted: StrictBool | None = None
 
 
 class ResetAccountRequest(BaseModel):
@@ -74,6 +80,30 @@ class UserDataResetRequest(BaseModel):
 class AutoLoginRequest(BaseModel):
     username: str
     token: str
+
+
+class PasswordAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["password"]
+    username: str
+    password: str
+
+
+class AutoLoginAgreementCredential(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["auto_login"]
+    username: str
+    token: str
+
+
+class AgreementAcceptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agreement_version: str
+    accepted: StrictBool
+    credential: Union[PasswordAgreementCredential, AutoLoginAgreementCredential]
 
 
 class PreferenceGetRequest(BaseModel):

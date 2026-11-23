@@ -1,0 +1,355 @@
+{
+  "version": "terms-2026-10-v3",
+  "title": "用户协议",
+  "format": "agreement.richtext.v1",
+  "blocks": [
+    {
+      "font_size": 24,
+      "align": "center",
+      "runs": [
+        {
+          "text": "一、使用说明",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "请阅读",
+          "bold": false
+        },
+        {
+          "text": "重要内容",
+          "bold": true
+        },
+        {
+          "text": "。\n甲  乙",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 24,
+      "align": "center",
+      "runs": [
+        {
+          "text": "二、天依想对你说的话",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "如果天依是拥有时间魔法的魔女，真想让时间永远停留在这一刻，也许在万千的演唱会中，天依的这场并没有那么特别，甚至会被许多人误解，天依相信只要有热爱，只要我还能继续歌唱，只要大家都能愿意聆听，这一切就是最美好最幸福的存在。在舞台上，天依看着你们就像一颗颗微小但闪耀的星辰，但此刻汇聚成星海，而当人潮散去，又将在属于自己的世界里闪闪发光。谢谢大家今晚的到来，对天依来说，你们就是我的共鸣者们，是我想深深刻印在记忆里，但没有办法辨出每一个名字的珍贵存在，接下来的这首歌大家和天依一起唱好吗！就算无法让大雨停下，就算无法被世界回答，我会陪你在雨里放肆奔跑，我会在身边一遍遍对你说，我爱你！",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 24,
+      "align": "center",
+      "runs": [
+        {
+          "text": "三、天依教教义  ：",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "1.天依可以是你的任何人，朋友，姐妹，妻子，女儿，但是要对天依保持神圣，且不可亵渎",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "2.小笼包是依门圣物，天依的祝福存在于食物当中，对待食物要充满敬意，不可玩弄和浪费食物，享用美食前请务必与天依分享",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "3.购买周边是对天依的供奉，但是如果购买周边的钱会导致生活质量下降，那请先停止购买周边，比起供奉，天依更希望你好好活着",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "4.好好对待身边人，哪怕身边人对你产生误解也不要嗔怒，天依知道你所背负的一切，她会与你一同背负，与你同在，但是如果素不相识的人莫名诋毁天依，削他",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "5.天依爱着每一个人，但天依并不希望她是你唯一的光，天依不希望成为太阳，她希望成为月亮和火焰在黑暗中为你带来光芒，为你指引方向",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "6.天依并不介意你离开她，请不必为此感到介怀，同样，她也不介意你的爱分给更多的人，她是你万分之一的光，也希望你能成为更多人的光",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "7.与同好起争执是很正常的事，但是不要因此产生间隙，天依喜欢各式各样的声音但不希望共鸣中产生杂音",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "8.8是天依的神圣数字，信天依者，死后会前往共鸣天堂，那里充满着数不尽的美酒美食和数不尽的周边，在那里你可以和同好们永不停歇地观看一场又一场演唱会",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "9.天依有各种形象，也有无数创作者，或许有些作品不合你胃口但也请不要对作者恶语相向，天依的生命是粉丝与创作者共同组成的",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "10.想做什么就勇敢去做，失败了也不要因此灰心，无论圆圈之内还是圆圈之外天依会永远支持你",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "center",
+      "runs": [
+        {
+          "text": "信依者，得小笼包，依门永存",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "font_size": 24,
+      "align": "center",
+      "runs": [
+        {
+          "text": "四、整活内容",
+          "bold": true
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "还是这个协议好，对接不烧心。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "接口可以少，版本可以慢，契约不能坏。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "有人说咱们仓库太冷清，不怕留不住人？不怕 PR 少？怕，更怕协议账本不清——谁改字段、谁动枚举、谁加必填，一笔一笔都记进 CHANGELOG，绝不和稀泥。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "抢得走一时的发版热闹，抢不走客户端服务端对齐契约的真心。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "宁可少加接口，也不允许隐式变更、乱塞参数、破坏兼容。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "有人问那明天迭代速度不够怎么办？先做——该废弃的标 deprecated，该兼容的留窗口，该双写的双写，该回滚的回滚，先把协议立住，路才能越走越宽。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "怕发版慢，但更怕线上乌烟瘴气。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "真要是混进来的人绕过协议带歪了风气，剩下的烂摊子怎么办？回滚，人不能没良心——不能让好好对接的老客户端受半分委屈。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "好好联调，舒心自在，坏契约者，直接出局。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "前阵子刚清了几个乱改字段、不写文档、挑事抬杠的 PR，现在接口终于清净了；嗯，要稳。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "谁定的字段谁负责，谁破的兼容谁兜着，别想赖旁人。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "有人说咱们协议管太严，宁可少挣点虚调用量，也不能坏了规矩。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "为了凑数，放宽点校验多兼容点脏数据？不用，慢慢来。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "有人说咱们接口没遮没拦，看着不严谨？那我就让它严谨——谁越界就请谁下线，半点儿不藏着掖着。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "不是版本号升得稳，是不能慌，一慌就容易做错事——真要是为了赶进度放进来一堆牛鬼蛇神，到时候好好的项目就真散了。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "justify",
+      "runs": [
+        {
+          "text": "客户端服务端接口协议更新，记住：契约先行，兼容有期，文档同步，灰度可回滚。",
+          "bold": false
+        }
+      ]
+    },
+    {
+      "font_size": 16,
+      "align": "center",
+      "runs": [
+        {
+          "text": "——致客户端、服务端、SDK、文档和 CI。",
+          "bold": true
+        }
+      ]
+    }
+  ]
+}

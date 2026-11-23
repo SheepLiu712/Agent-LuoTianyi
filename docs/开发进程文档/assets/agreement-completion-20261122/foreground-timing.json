@@ -1,0 +1,22 @@
+[
+  {
+    "event": "retry",
+    "seconds": 0.094
+  },
+  {
+    "event": "before_background",
+    "seconds": 1.453
+  },
+  {
+    "event": "home",
+    "seconds": 1.531
+  },
+  {
+    "event": "resume",
+    "seconds": 11.641
+  },
+  {
+    "event": "ready",
+    "seconds": 17.0
+  }
+]

@@ -285,6 +285,31 @@
       "path": "src/world/learn_sing_songs/song_learner/src/msaf/algorithms/olda/models/EstBeats_SALAMI-i.npy",
       "size": 70768,
       "sha256": "96f4f09c0e164485d0d622c2f334a09c5c4663af0cba0982fa6eabeef086eb56"
+    },
+    {
+      "path": "res/user_agreements/__init__.py",
+      "size": 81,
+      "sha256": "221ebb10e88b1db11a21ad12d466c7f93dde6464774cd3bf5596ec74bd974f52"
+    },
+    {
+      "path": "res/user_agreements/manifest.json",
+      "size": 226,
+      "sha256": "0733d5cc74f361a49734ccd7cf2c4e8bae651be6ef7187067817b3de2bb34bb4"
+    },
+    {
+      "path": "res/user_agreements/terms-2026-10-v1.json",
+      "size": 4828,
+      "sha256": "3bd3f2a3bfb61963a18a5d877941add160d50892f55df72000d5f095d5df557d"
+    },
+    {
+      "path": "res/user_agreements/terms-2026-10-v2.json",
+      "size": 5637,
+      "sha256": "8955b2148d78ac77235e350cd5df5722eb5e9e7021c09747f3d2b64028f5a928"
+    },
+    {
+      "path": "res/user_agreements/terms-2026-10-v3.json",
+      "size": 9888,
+      "sha256": "94e73a04f0d8e6aabb7f47372427220e4a69d38685b2780a8e8ce3d41b6720bc"
     }
   ]
 }

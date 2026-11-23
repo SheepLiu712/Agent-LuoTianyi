@@ -1,0 +1,49 @@
+[
+  {
+    "case": "门禁无登录时间、token或签署副作用",
+    "pass": true
+  },
+  {
+    "case": "并发签署唯一、签署不触发登录副作用",
+    "before": {
+      "uuid": "a9bee0bb-a1af-4efa-b221-020fe2753b21",
+      "last_login": "2026-11-16 12:44:52.673867",
+      "token_sha": "73a589cbf8315624596ae8a7af5c57120def5ed04c600210e740660368e062f6",
+      "signatures": []
+    },
+    "after": {
+      "uuid": "a9bee0bb-a1af-4efa-b221-020fe2753b21",
+      "last_login": "2026-11-16 12:44:52.673867",
+      "token_sha": "73a589cbf8315624596ae8a7af5c57120def5ed04c600210e740660368e062f6",
+      "signatures": [
+        [
+          "terms-2026-10-v3",
+          "2026-11-22T13:46:57+08:00"
+        ]
+      ]
+    }
+  },
+  {
+    "case": "注册幂等及无自动登录",
+    "registration": {
+      "message": "注册成功",
+      "user_id": "ua_replay_1122"
+    },
+    "signature": {
+      "uuid": "8e48a1d9-2e2b-4f18-ba5a-047d50c4a5d9",
+      "last_login": null,
+      "token_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "signatures": [
+        [
+          "terms-2026-10-v3",
+          "2026-11-22T13:47:02+08:00"
+        ]
+      ]
+    },
+    "reset_status": 200
+  },
+  {
+    "case": "邀请码重置保留UUID和签署",
+    "pass": true
+  }
+]

@@ -4,9 +4,9 @@
 >
 > 关联工单：[Issue #412](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/412)。2026-11-17 读取的最新 body 更新时间为 `2026-11-16T15:37:16Z`，comments 为空。本文以 `ee718b21536e410ce5e4073b068f03b9bfcd68dc` 为实现调查基线。
 >
-> 规格阶段只新增本文与 [AI_DECISIONS.md](<../../AI_DECISIONS.md>)；没有修改运行代码、测试、现用配置或密钥，没有进行业务启动、资源测量或 GitHub 写操作。lead 已单独授权本次两文档原子提交；未授权推送。下文“必须”是目标契约，不表示现状已支持。
+> 规格阶段只新增本文与 [AI_DECISIONS.md](https://github.com/SheepLiu712/Agent-LuoTianyi/blob/b50ab5309b3c0a5ec99d7d5fbc856c85d30bdb29/AI_DECISIONS.md)；没有修改运行代码、测试、现用配置或密钥，没有进行业务启动、资源测量或 GitHub 写操作。lead 已单独授权本次两文档原子提交；未授权推送。下文“必须”是目标契约，不表示现状已支持。
 >
-> 按 [spec 文档模板](<../模板/spec文档模板.md>)组织；流程依据为 [开发守则](<../开发守则.md#L5-L9>)。2026-11-17 非作者 D3 attempt 2/3 报告确认 N1/M1-S 和 N2 均闭合，G1–G6 无新增必修，完整规格可进入分阶段实施。审查冻结输入为原 418 行 spec SHA-256 `9a60e13c4f23447f5bb093347476354f38e36222976f918c9805c66350cffae8`、260 行 AI_DECISIONS SHA-256 `39d63748ffafd4c911a10ac25738c7e6aef50b07f74c9d6a9a399b17a47770db`；本次仅机械登记审核状态，不改已审契约。文内“待 attempt 2”等措辞保留为修稿历程，均由此状态与文末裁定覆盖；不代表仍有未决产品选择，也不表示 A1–A6 或实现已通过。
+> 按 [spec 文档模板](<../模板/spec文档模板.md>)组织；流程依据为 [开发守则](<../开发守则.md#人与ai的行为边界>)。2026-11-17 非作者 D3 attempt 2/3 报告确认 N1/M1-S 和 N2 均闭合，G1–G6 无新增必修，完整规格可进入分阶段实施。审查冻结输入为原 418 行 spec SHA-256 `9a60e13c4f23447f5bb093347476354f38e36222976f918c9805c66350cffae8`、260 行 AI_DECISIONS SHA-256 `39d63748ffafd4c911a10ac25738c7e6aef50b07f74c9d6a9a399b17a47770db`；本次仅机械登记审核状态，不改已审契约。文内“待 attempt 2”等措辞保留为修稿历程，均由此状态与文末裁定覆盖；不代表仍有未决产品选择，也不表示 A1–A6 或实现已通过。
 
 ## 用户故事
 
@@ -88,7 +88,7 @@
 
 - [FastAPI 官方 Lifespan](https://fastapi.tiangolo.com/advanced/events/)：昂贵共享模型应在受控启动阶段加载、在关闭阶段释放，而不是导入模块就加载。这支持“装配前选择 + 既有 owner 负责清理”；**不要求**把本项目已有 `ServerLifecycle/RuntimeSupervisor` 改写成 FastAPI lifespan，项目的管理壳与业务 runtime 分离必须保留。
 - [FastAPI 官方生命周期测试](https://fastapi.tiangolo.com/advanced/testing-events/)：测试要实际进入/退出生命周期才能观察初始化及释放。这支持真实装配/关闭测试，不能只 mock `runtime.running`。本项目正式入口显式管理生命周期，因此测试也须显式经过对应入口，不假定 TestClient 自动运行被关闭的 lifespan。
-- SQL 正本/可选向量投影的技术依据与补充参考见 [AI_DECISIONS.md](<../../AI_DECISIONS.md>)，其中区分本项目已存在的索引职责与作者新提出的保留语义。外部参考只能佐证技术约束，不能替代本项目的产品及 scope 审核。
+- SQL 正本/可选向量投影的技术依据与补充参考见 [AI_DECISIONS.md](https://github.com/SheepLiu712/Agent-LuoTianyi/blob/b50ab5309b3c0a5ec99d7d5fbc856c85d30bdb29/AI_DECISIONS.md)，其中区分本项目已存在的索引职责与作者新提出的保留语义。外部参考只能佐证技术约束，不能替代本项目的产品及 scope 审核。
 
 ### 2. 模块划分
 
@@ -127,7 +127,7 @@ flowchart TD
 | 管理前后端 / `application.admin` | 两项开关编辑及现有校验→保存→重启→状态反馈 | 不新增热应用端点、preset 或第二套进程管理。 |
 | README/配置模板 | 可复制的逐项键、默认及资源/数据语义、隔离运行路线 | 不放真实密钥，不把完整资产部署流程降低为可缺资源的生产发布。 |
 
-实现后的文件归属以 [代码地图](<../代码地图.md#L165-L183>) 为准。本文不是改动清单的强制逐文件拆分；小型能力事实、禁用 Adapter 和必要测试可放在上述现有 owner 内，不新建全局“轻量 runtime”框架。
+实现后的文件归属以 [代码地图](<../代码地图.md#3-server-模块职责与边界>) 为准。本文不是改动清单的强制逐文件拆分；小型能力事实、禁用 Adapter 和必要测试可放在上述现有 owner 内，不新建全局“轻量 runtime”框架。
 
 ### 3. 接口规范
 
@@ -318,7 +318,7 @@ D3 attempt 1 已接受的保守契约：disabled Adapter 可对配置的持久�
 
 ### 关键技术选型与否决项
 
-完整理由及官方证据在 [AI_DECISIONS.md](<../../AI_DECISIONS.md>)。推荐“装配时真实/禁用 Adapter + owner 清理 + 少量显式能力事实”，不是重构通用插件系统。
+完整理由及官方证据在 [AI_DECISIONS.md](https://github.com/SheepLiu712/Agent-LuoTianyi/blob/b50ab5309b3c0a5ec99d7d5fbc856c85d30bdb29/AI_DECISIONS.md)。推荐“装配时真实/禁用 Adapter + owner 清理 + 少量显式能力事实”，不是重构通用插件系统。
 
 - 不选 `None` 扩散：多个依赖门禁和调用点需要非空向量/语音对象，调用者容易漏判，关闭/回滚难一致。
 - 不选空流/假 ID 的 Null 实现：空 TTS 流是失败；假 upsert ID 会破坏正本与真实向量一致性。

@@ -809,7 +809,7 @@ async def test_secrets_required_status_matches_citywalk_condition(tmp_path, monk
     assert (await admin_interface.secrets_status())["AMAP_KEY"]["required"] is True
 
 
-@pytest.mark.parametrize("task,value", [("citywalk", "false"), ("auto_song_learner", 0), ("qq_music_credential_refresh", 1), ("song_knowledge", None), ("bili_dynamic_fetcher", []), ("dynamic_interaction", {}), ("diary", "false"), ("proactive_topic_check", 0), ("expired_event_cleanup", 1)])
+@pytest.mark.parametrize("task,value", [("citywalk", "false"), ("auto_song_learner", 0), ("qq_music_credential_refresh", 1), ("song_knowledge", None), ("bili_dynamic_fetcher", []), ("dynamic_interaction", {}), ("diary", "false"), ("expired_event_cleanup", 1)])
 def test_validator_rejects_non_boolean_world_task_enabled(tmp_path, monkeypatch, task, value):
     monkeypatch.setenv("JWT_SECRET", "jwt")
     monkeypatch.setenv("AMAP_KEY", "amap")

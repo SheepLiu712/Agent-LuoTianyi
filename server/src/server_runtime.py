@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from importlib.resources import files
 from typing import Final
 
 from src.adapter.websocket.call_v1 import CallCapabilityStatus, CallWebSocketAdapter, parse_call_transport_enabled
@@ -11,6 +12,8 @@ from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.application.host_context import ServerHostContext
 from src.application.user import UserResetFence, UserResetService
+from src.application.user.agreement_service import AgreementService, prepare_agreements, publish_agreements
+from src.application.user.registration_service import RegistrationService
 from src.domain.stage import StageState
 from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
@@ -19,7 +22,7 @@ from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
 from src.infrastructure.observability.population import PopulationSampler
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
-from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
+from src.infrastructure.persistence.database.sql_database import User
 from src.stage import StageManager, WorldStage
 from src.utils.logger import (
     get_logger,
@@ -33,6 +36,7 @@ from src.world import WorldRuntime
 
 logger = get_logger(__name__)
 DEFAULT_WORLD_ID: Final = "default"
+AGREEMENT_RESOURCE: Final = files("res.user_agreements")
 
 
 @dataclass
@@ -48,6 +52,8 @@ class ServerRuntime:
     llm_service: LLMService
     client_llm_executor: ClientLLMExecutor
     observability: ObservabilityService
+    agreement_service: AgreementService
+    registration_service: RegistrationService
     owns_observability: bool = field(default=True)
     population_sampler: PopulationSampler | None = field(default=None, init=False)
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
@@ -101,7 +107,38 @@ class ServerRuntime:
             database_manager = DatabaseManager(config.get("database", {}))
             set_default_database_manager(database_manager)
 
-            # 4. 初始化中立媒体解析适配器；角色音频能力由 Agent Skill 自行拥有。
+            # 4. 校验协议发布清单与已有归档；新版本在运行时就绪边界再持久化。
+            agreement_session = database_manager.open_sql_session()
+            try:
+                agreement_service = prepare_agreements(agreement_session, AGREEMENT_RESOURCE)
+                exempt_user_uuids = config.get("user_agreements", {}).get("exempt_user_uuids", [])
+                if not isinstance(exempt_user_uuids, list) or any(
+                    not isinstance(user_uuid, str) or not user_uuid for user_uuid in exempt_user_uuids
+                ):
+                    raise ValueError("user_agreements.exempt_user_uuids 必须是非空账号 ID 的列表")
+                existing_user_uuids = {
+                    user_uuid
+                    for (user_uuid,) in agreement_session.query(User.uuid).filter(User.uuid.in_(exempt_user_uuids))
+                }
+                missing_user_uuids = set(exempt_user_uuids) - existing_user_uuids
+                if missing_user_uuids:
+                    raise ValueError(f"协议豁免账号不存在: {sorted(missing_user_uuids)}")
+                agreement_service = AgreementService(
+                    agreement_service.current_version,
+                    agreement_service._docs,
+                    set(exempt_user_uuids),
+                    require_acceptance=config.get("user_agreements", {}).get("require_acceptance", False),
+                )
+            finally:
+                agreement_session.close()
+
+            # 4b. 注册用例：把账号、协议签署、邀请码与注册请求结果放进同一次提交。
+            registration_service = RegistrationService(
+                agreement_service=agreement_service,
+                credential_service=database_manager.credential_service,
+            )
+
+            # 5. 初始化中立媒体解析适配器；角色音频能力由 Agent Skill 自行拥有。
             media_config = config.get("infrastructure", {}).get("media_resolution", {})
             media_resolver = create_media_resolver(media_config)
 
@@ -126,7 +163,7 @@ class ServerRuntime:
                 omni_factory=speech_factory,
             )
 
-            # 6. 初始化箱庭世界运行时，并显式注入它需要的角色能力端口。
+            # 7. 初始化箱庭世界运行时，并显式注入它需要的角色能力端口。
             world = WorldRuntime(
                 config.get("world", {}),
                 singing_backend=agent_runtime.singing_backend,
@@ -145,6 +182,8 @@ class ServerRuntime:
                 llm_service=llm_service,
                 client_llm_executor=client_llm_executor,
                 observability=observability,
+                agreement_service=agreement_service,
+                registration_service=registration_service,
                 owns_observability=owns_observability,
                 chat_adapter=WebSocketAdapter(
                     {
@@ -161,10 +200,6 @@ class ServerRuntime:
                 _call_transport_requested=call_requested,
                 _host_context=resolved_host_context,
             )
-
-            event_store = database_manager.event_store
-            if event_store is None:
-                raise RuntimeError("EventStore is required for due-event dispatch")
 
             if (
                 database_manager.call_sessions is None
@@ -184,7 +219,6 @@ class ServerRuntime:
                 call_output_sink=call_output_sink,
                 detach_stage_binding=runtime.chat_adapter.detach_stage_binding,
                 get_context_factory=agent_runtime.context_factories.__getitem__,
-                due_event_provider=EventStoreDueEventProvider(event_store),
                 call_sessions=database_manager.call_sessions,
                 conversation_service=database_manager.conversation_service,
                 call_maintenance_batches=database_manager.call_maintenance_batches,
@@ -224,6 +258,12 @@ class ServerRuntime:
             await runtime.stage_manager.initialize()
             runtime._start_background_services()
             runtime.user_interface.generate_rsa_keys()
+
+            agreement_session = database_manager.open_sql_session()
+            try:
+                publish_agreements(agreement_session, agreement_service)
+            finally:
+                agreement_session.close()
             return runtime
         except BaseException:
             logger.error("ServerRuntime initialization failed, starting rollback...")
@@ -461,6 +501,8 @@ class ServerRuntime:
             "media_resolver": self.media_resolver,
             "llm_service": self.llm_service,
             "observability": self.observability,
+            "agreement_service": self.agreement_service,
+            "registration_service": self.registration_service,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:

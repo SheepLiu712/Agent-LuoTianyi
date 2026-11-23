@@ -1,17 +1,19 @@
-"""把 EventStore 适配为 Stage 的到期事件窄端口。"""
+"""把 EventStore 适配为 角色的话题事件端口。"""
 
 from __future__ import annotations
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from src.domain.stage import DueEvent
+from src.domain.agent.due_events import DueEvent
 
 
 class EventStoreDueEventProvider:
-    """只转换 EventStore 快照并转发其原子通知 claim。"""
+    """转换 EventStore 快照，并复用通知记录保存话题分享结果。"""
 
     def __init__(self, event_store) -> None:
+        if event_store is None:
+            raise RuntimeError("角色主动话题缺少事件存储")
         self._event_store = event_store
 
     def list_due(
@@ -65,21 +67,6 @@ class EventStoreDueEventProvider:
         trigger_key: str,
     ) -> bool:
         return self._event_store.try_claim_notification(
-            event_id,
-            user_id,
-            trigger_key,
-            character_id,
-        )
-
-    def release(
-        self,
-        event_id: str,
-        *,
-        user_id: str,
-        character_id: str,
-        trigger_key: str,
-    ) -> None:
-        self._event_store.release_notification_claim(
             event_id,
             user_id,
             trigger_key,

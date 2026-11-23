@@ -1,0 +1,23 @@
+{
+  "legacy_backup": "before-agreement-20261122-133429",
+  "existing_users_preserved": 10,
+  "existing_invites_preserved": 10,
+  "legacy_had_signature_table": false,
+  "current_signatures": [
+    [
+      "test8",
+      "terms-2026-10-v3",
+      "2026-11-22T13:37:21+08:00"
+    ],
+    [
+      "test2",
+      "terms-2026-10-v3",
+      "2026-11-22T13:46:57+08:00"
+    ],
+    [
+      "ua_replay_reset_1122",
+      "terms-2026-10-v3",
+      "2026-11-22T13:47:02+08:00"
+    ]
+  ]
+}

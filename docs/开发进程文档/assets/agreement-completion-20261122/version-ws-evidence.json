@@ -1,0 +1,21 @@
+{
+  "ws_before": [
+    "auth_ok",
+    "chat.ready"
+  ],
+  "ws_after_version_change_with_original_token": [
+    "auth_ok",
+    "chat.ready"
+  ],
+  "next_login": {
+    "detail": "请升级到支持用户协议签署的版本，阅读并同意用户协议后再登录。",
+    "code": "AGREEMENT_REQUIRED",
+    "agreement_version": "terms-2026-10-v1"
+  },
+  "signed_versions": [
+    [
+      "terms-2026-10-v3",
+      "2026-11-22T13:37:21+08:00"
+    ]
+  ]
+}

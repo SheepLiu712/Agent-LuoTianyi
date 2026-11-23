@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import random
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -15,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
 from src.agent.context import ContextFactory, ConversationMode, InteractionContext
+from src.agent.proactive_timer import ProactivePolicy
 from src.domain.stage import (
     AgentPresentationChanged,
     AgentPresentationState,
@@ -23,7 +23,6 @@ from src.domain.stage import (
     StageState,
     StageTerminationResult,
 )
-from src.domain.stage.due_events import DueEvent, DueEventProvider
 from src.domain.stage.lifecycle import (
     StageEndReason,
     StageInitializationOwner,
@@ -90,7 +89,6 @@ class ChatStage:
         monotonic=time.monotonic,
         config: dict | None = None,
         timezone_name: str = "Asia/Shanghai",
-        due_event_provider: DueEventProvider | None = None,
     ) -> None:
         """接管 context 并绑定用户、角色与协作者；config 控制等待秒数、容量和终止期限。"""
         if any(not isinstance(value, str) or not value.strip() for value in (user_id, character_id)):
@@ -110,8 +108,18 @@ class ChatStage:
         self._offline_deadline = None
         self._agent, self._output_transport = agent, output_sink
         self._input_suspended = False
-        self._due_event_provider = due_event_provider
         self._config = _StageConfig.from_dict({} if config is None else config)
+        self._proactive_timer = agent.create_proactive_timer(
+            user_id=user_id,
+            on_due=self._on_speech_due,
+            policy=ProactivePolicy(
+                self._config.proactive_idle_seconds,
+                self._config.proactive_half_life_seconds,
+                self._config.proactive_threshold,
+            ),
+            monotonic=monotonic,
+        )
+        self._proactive_reply_ready = False
         self._timezone = ZoneInfo(timezone_name)
         self._state = StageState.OFFLINE
         self._connection_state = d.ConnectionState.DISCONNECTED
@@ -135,13 +143,6 @@ class ChatStage:
         self._timer: asyncio.TimerHandle | None = None
         self._first_login_timer: asyncio.TimerHandle | None = None
         self._first_login_pending = False
-        self._login_reminder_timer: asyncio.TimerHandle | None = None
-        self._login_reminder_dispatch: asyncio.Task[bool] | None = None
-        self._login_reminder_pending = False
-        self._last_activity_at = datetime.now(timezone.utc)
-        self._proactive_claims: dict[str, tuple[DueEvent, ...]] = {}
-        self._proactive_expected_plans: dict[str, set[str]] = {}
-        self._proactive_plan_results: dict[str, dict[str, bool]] = {}
         self._stimulus_sink = StimulusInputSink(self)
         self._output_sink = _AgentOutputSink(self)
         self._logger = get_logger(__name__)
@@ -164,7 +165,6 @@ class ChatStage:
         context_factory: ContextFactory,
         config: dict | None = None,
         timezone_name: str = "Asia/Shanghai",
-        due_event_provider: DueEventProvider | None = None,
         **lifecycle,
     ) -> ChatStage:
         """创建并启动初始化，不等待上下文加载。"""
@@ -176,7 +176,6 @@ class ChatStage:
             context_factory=context_factory,
             config=config,
             timezone_name=timezone_name,
-            due_event_provider=due_event_provider,
             **lifecycle,
         )
 
@@ -235,7 +234,6 @@ class ChatStage:
         if self._connection_state is state:
             return True
         self._connection_state = state
-        self._last_activity_at = datetime.now(timezone.utc)
         self._revision += 1
         self._state = StageState.ONLINE if state is d.ConnectionState.CONNECTED else StageState.OFFLINE
         if self._state is StageState.OFFLINE:
@@ -264,10 +262,9 @@ class ChatStage:
 
     def _resume_proactive(self):
         if not self._input_suspended and self._state is StageState.ONLINE:
+            self._maybe_start_proactive()
             if self._first_login_pending:
                 self._schedule_first_login()
-            elif self._login_reminder_pending:
-                self._schedule_login_reminders()
 
     def schedule_first_login(self) -> None:
         """记录首次登录，并在 Stage 已上线后从当前时刻开始同步窗口计时。"""
@@ -276,14 +273,6 @@ class ChatStage:
         self._first_login_pending = True
         if self._state is StageState.ONLINE:
             self._schedule_first_login()
-
-    def schedule_login_reminders(self) -> None:
-        """记录当天首次普通登录，并在 Stage 上线后合并可 claim 的到期提醒。"""
-        if self._state in (StageState.TERMINATING, StageState.TERMINATED):
-            raise ValueError("stage is ending")
-        self._login_reminder_pending = True
-        if self._state is StageState.ONLINE:
-            self._schedule_login_reminders()
 
     async def propose_relationship(self, relationship: str) -> None:
         """把已保存的用户关系提议交给 Agent，并等待当前上下文完成更新。"""
@@ -294,65 +283,9 @@ class ChatStage:
             relationship=relationship,
         )
         self._revision += 1
-        self._last_activity_at = datetime.now(timezone.utc)
         report = await self._handle(self._make_request(stimulus))
         if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED:
             raise RuntimeError("relationship proposal was not handled")
-
-    async def dispatch_due_events(self, *, merge_all: bool) -> bool:
-        """在流空闲时筛选、claim 并向 Agent 投递一个或合并后的到期事实。"""
-        if self._due_event_provider is None or not self._can_dispatch_proactive(
-            require_idle=not merge_all,
-        ):
-            return False
-        now = datetime.now(timezone.utc)
-        candidates = tuple(
-            event
-            for event in self._due_event_provider.list_due(
-                character_id=self.character_id,
-                user_id=self.user_id,
-                now=now,
-            )
-            if self._supports_due_event(event)
-        )
-        selected = candidates if merge_all else ((random.choice(candidates),) if candidates else ())
-        reminders = {
-            event.event_id: d.EventReminder(
-                event_id=event.event_id,
-                event_type=event.reason,
-                title=event.title,
-                description=event.description,
-                trigger_key=event.trigger_key,
-            )
-            for event in selected
-        }
-        claimed = []
-        for event in selected:
-            if self._due_event_provider.claim(
-                event.event_id,
-                user_id=self.user_id,
-                character_id=self.character_id,
-                trigger_key=event.trigger_key,
-            ):
-                claimed.append(event)
-        if not claimed:
-            return False
-        stimulus = d.ProactivePromptDue(
-            **self._stage_stimulus_fields(),
-            reason=d.ProactiveReason(value="+".join(event.reason for event in claimed)),
-            due_at=min(event.due_at for event in claimed),
-            dedup_key="|".join(
-                f"{event.event_id}:{self.user_id}:{self.character_id}:{event.trigger_key}" for event in claimed
-            ),
-            fact_refs=tuple(d.EvidenceRef(evidence_id=event.event_id) for event in claimed),
-            events=tuple(reminders[event.event_id] for event in claimed),
-        )
-        request = self._make_request(stimulus)
-        self._proactive_claims[request.request_id] = tuple(claimed)
-        self._proactive_plan_results[request.request_id] = {}
-        self._last_activity_at = now
-        self._launch_handle(request, self._on_proactive_handled)
-        return True
 
     def begin_termination(self, reason: StageEndReason) -> None:
         if not isinstance(reason, StageEndReason):
@@ -394,6 +327,9 @@ class ChatStage:
     def set_input_suspended(self, suspended: bool) -> None:
         """切换准备只关闭新刺激准入，不取消已接纳的工作。"""
         self._input_suspended = suspended
+        if suspended:
+            self._proactive_reply_ready |= self._proactive_timer.running
+            self._proactive_timer.stop_timer()
         if not suspended:
             self._resume_proactive()
 
@@ -451,11 +387,15 @@ class ChatStage:
     def _on_raw_stimulus(self, stimulus: d.Stimulus) -> None:
         """接收原始刺激，更新等待策略并启动独立预处理。"""
         self._revision += 1
-        self._last_activity_at = datetime.now(timezone.utc)
         if self._apply_voice_coordination(stimulus):
             self._refresh_deadline()
             return
         if isinstance(stimulus, _CONTENT):
+            self._proactive_timer.get_user_stimulus()
+            self._proactive_reply_ready = False
+            for request in tuple(self._requests.values()):
+                if isinstance(request.stimulus, d.ProactiveSpeechDue):
+                    request.cancellation.cancel(d.CancellationReason.SUPERSEDED)
             self._cancel_interruptible_reply_handles()
             self._pending[stimulus.stimulus_id] = _PendingInput(stimulus, self._revision)
             self._wait_until, self._wait_immediate = None, False
@@ -479,6 +419,19 @@ class ChatStage:
         request = self._make_request(stimulus, (stimulus,) if not isinstance(stimulus, _COORDINATION) else ())
         self._launch_handle(request, self._on_preprocessing_finished)
         self._refresh_deadline()
+
+    def _on_speech_due(self, stimulus: d.ProactiveSpeechDue) -> None:
+        if not self._proactive_timer.is_current(stimulus) or not self._can_dispatch_proactive():
+            return
+        request = self._make_request(stimulus)
+        attempt = _ReplyAttempt(request, ())
+        self._attempts[request.request_id] = attempt
+        self._launch_handle(request, self._on_reply_finished)
+
+    def _maybe_start_proactive(self) -> None:
+        if self._proactive_reply_ready and self._can_dispatch_proactive():
+            self._proactive_reply_ready = False
+            self._proactive_timer.start_timer()
 
     def _apply_voice_coordination(self, stimulus: d.Stimulus) -> bool:
         if isinstance(stimulus, d.VoiceRecordingStarted):
@@ -541,11 +494,10 @@ class ChatStage:
             self._logger.error("Stage completion failed request=%s", request_id)
         self._handles.pop(request_id, None)
         self._requests.pop(request_id, None)
-        if task.cancelled() or task.exception() is not None:
-            self._release_proactive_claims(request_id)
         if self._reply is not None and self._reply.request.request_id == request_id:
             self._reply = None
         self._refresh_deadline()
+        self._maybe_start_proactive()
 
     def _failed_report(self, request: d.HandleStimulusRequest) -> d.HandlingReport:
         ids = tuple(s.stimulus_id for s in request.interaction.pending_stimuli)
@@ -684,21 +636,21 @@ class ChatStage:
             )
         if attempt.interrupted or attempt.report.request_status is not d.HandlingRequestStatus.COMPLETED:
             return
+        if attempt.has_reply_plan and not self._pending and not attempt.execution_failed:
+            self._proactive_reply_ready = True
 
     def _on_execution_finished(self, plan: d.ActionPlan, report: d.ExecutionReport | None) -> None:
         """登记计划已经结束，推进所属回复尝试的清理和维护。"""
         attempt = self._attempts.get(plan.origin_request_id)
         if attempt is not None:
+            if report is None or report.status is not d.ExecutionStatus.COMPLETED:
+                attempt.execution_failed = True
             attempt.remaining_plans.discard(plan.plan_id)
             if attempt.interrupted and not attempt.remaining_plans:
                 self._attempts.pop(plan.origin_request_id, None)
             else:
                 self._finish_attempt(attempt)
-        request_id = plan.origin_request_id
-        if request_id in self._proactive_claims:
-            succeeded = report is not None and report.status is d.ExecutionStatus.COMPLETED
-            self._proactive_plan_results[request_id][plan.plan_id] = succeeded
-            self._finish_proactive_claim(request_id)
+        self._maybe_start_proactive()
 
     def _snapshot(self) -> d.ChatInteractionSnapshot:
         return d.ChatInteractionSnapshot(
@@ -767,6 +719,7 @@ class ChatStage:
             # StartThinking is handled by _PlanSink and never reaches this queue.
             # Keep this boundary even after every accepted plan has finished executing.
             attempt.has_committed_plan = True
+            attempt.has_reply_plan |= any(isinstance(action, (d.Say, d.Sing)) for action in plan.actions)
             attempt.remaining_plans.add(plan.plan_id)
         if self._maintenance.accepts(plan):
             self._maintenance.enqueue(plan, token)
@@ -778,6 +731,7 @@ class ChatStage:
         if self._plans and self._state is StageState.ONLINE and (self._realizing is None or self._realizing.done()):
             self._realizing = asyncio.create_task(self._realize_plans(), name="stage-realize")
             self._realizing.add_done_callback(lambda _: self._resume_execution())
+        self._maybe_start_proactive()
 
     async def _realize_plans(self) -> None:
         while self._plans and self._state is StageState.ONLINE:
@@ -870,32 +824,7 @@ class ChatStage:
         )
         self._launch_handle(self._make_request(stimulus), lambda request, report: None)
 
-    def _schedule_login_reminders(self) -> None:
-        if self._login_reminder_timer is not None:
-            return
-        minimum_delay = self._config.login_reminder_wait + time.get_clock_info("monotonic").resolution
-        self._login_reminder_timer = asyncio.get_running_loop().call_later(
-            minimum_delay,
-            self._on_login_reminders_due,
-        )
-
-    def _on_login_reminders_due(self) -> None:
-        self._login_reminder_timer = None
-        if not self._login_reminder_pending or self._state is not StageState.ONLINE:
-            return
-        if not self._can_dispatch_proactive(require_idle=False):
-            self._schedule_login_reminders()
-            return
-        self._login_reminder_pending = False
-        self._login_reminder_dispatch = asyncio.create_task(
-            self.dispatch_due_events(merge_all=True),
-            name="stage-login-reminders",
-        )
-        self._login_reminder_dispatch.add_done_callback(
-            lambda _: setattr(self, "_login_reminder_dispatch", None),
-        )
-
-    def _can_dispatch_proactive(self, *, require_idle: bool = True) -> bool:
+    def _can_dispatch_proactive(self) -> bool:
         if (
             self._state is not StageState.ONLINE
             or self._input_suspended
@@ -911,57 +840,7 @@ class ChatStage:
         )
         if busy:
             return False
-        idle_seconds = (datetime.now(timezone.utc) - self._last_activity_at).total_seconds()
-        return not require_idle or idle_seconds >= self._config.proactive_idle_seconds
-
-    def _supports_due_event(self, event: DueEvent) -> bool:
-        supported = {"holiday", "travel", "new_song", "birthday", "anniversary"}
-        return (
-            event.reason in supported
-            and event.character_id == self.character_id
-            and (not event.is_personal or event.target_user_id == self.user_id)
-            and not event.is_notified
-        )
-
-    def _on_proactive_handled(
-        self,
-        request: d.HandleStimulusRequest,
-        report: d.HandlingReport | None,
-    ) -> None:
-        if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED:
-            self._release_proactive_claims(request.request_id)
-            return
-        self._proactive_expected_plans[request.request_id] = set(report.emitted_plan_ids)
-        if not report.emitted_plan_ids:
-            self._release_proactive_claims(request.request_id)
-            return
-        self._finish_proactive_claim(request.request_id)
-
-    def _finish_proactive_claim(self, request_id: str) -> None:
-        expected = self._proactive_expected_plans.get(request_id)
-        results = self._proactive_plan_results.get(request_id, {})
-        if expected is None or not expected.issubset(results):
-            return
-        if not all(results[plan_id] for plan_id in expected):
-            self._release_proactive_claims(request_id)
-            return
-        self._proactive_claims.pop(request_id, None)
-        self._proactive_expected_plans.pop(request_id, None)
-        self._proactive_plan_results.pop(request_id, None)
-
-    def _release_proactive_claims(self, request_id: str) -> None:
-        claims = self._proactive_claims.pop(request_id, ())
-        self._proactive_expected_plans.pop(request_id, None)
-        self._proactive_plan_results.pop(request_id, None)
-        if self._due_event_provider is None:
-            return
-        for event in claims:
-            self._due_event_provider.release(
-                event.event_id,
-                user_id=self.user_id,
-                character_id=self.character_id,
-                trigger_key=event.trigger_key,
-            )
+        return True
 
     def _stage_stimulus_fields(self) -> dict:
         return {
@@ -984,14 +863,13 @@ class ChatStage:
                 attempt.timing.finish("cancelled")
 
     async def _stop_work(self, *, require_safe_cleanup: bool = False) -> None:
+        self._proactive_reply_ready |= self._proactive_timer.running
+        self._proactive_timer.stop_timer()
         self._scheduling = False
         self._invalidate_deadline()
         if self._first_login_timer is not None:
             self._first_login_timer.cancel()
             self._first_login_timer = None
-        if self._login_reminder_timer is not None:
-            self._login_reminder_timer.cancel()
-            self._login_reminder_timer = None
         self._plans.clear()
         cleanup_tokens = self._active_work_tokens()
         for context in (*self._requests.values(), self._execution):
@@ -1000,14 +878,12 @@ class ChatStage:
         maintenance_task = self._maintenance.cancel()
         tasks = [
             task
-            for task in (*self._handles.values(), self._realizing, self._login_reminder_dispatch, maintenance_task)
+            for task in (*self._handles.values(), self._realizing, maintenance_task)
             if task is not None and not task.done()
         ]
         await self._cancel_work_tasks(tasks, require_safe_cleanup=require_safe_cleanup)
         if require_safe_cleanup:
             self._require_clean_cancellation(cleanup_tokens)
-        for request_id in tuple(self._proactive_claims):
-            self._release_proactive_claims(request_id)
         self._requests.clear()
         self._handles.clear()
         self._thinking.clear()
