@@ -19,24 +19,29 @@ class ConnectionDiagnostics:
         self.stage = None
         self.previous_connection_id = None
         self.task = None
-        self._warning = asyncio.get_running_loop().call_later(_SLOW_READY_SECONDS, self._warn)
+        self._warning: asyncio.TimerHandle | None = None
 
     def enter(self, phase: str) -> None:
         self.phase = phase
         self.phase_started = time.monotonic()
         self.task = asyncio.current_task()
+        if self._warning is None:
+            self._warning = asyncio.get_running_loop().call_later(_SLOW_READY_SECONDS, self._warn)
 
     def ready(self, future: asyncio.Future) -> None:
         if self.phase != "sending_ready":
             return
         self.enter("ready_send_failed" if future.cancelled() or future.exception() else "ready_sent")
-        self._warning.cancel()
+        if self._warning is not None:
+            self._warning.cancel()
         self.task = None
 
     def close(self) -> None:
-        self.enter("closed")
+        self.phase = "closed"
+        self.phase_started = time.monotonic()
         self.task = None
-        self._warning.cancel()
+        if self._warning is not None:
+            self._warning.cancel()
 
     def snapshot(self) -> dict:
         now = time.monotonic()
