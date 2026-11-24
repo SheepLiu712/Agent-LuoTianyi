@@ -33,7 +33,9 @@ function Resolve-Godot([string]$Path) { return 'fake-engine' }
 function Read-Host([string]$Prompt) {
     Write-Host $Prompt
     $answersPath = Join-Path $ProjectRoot 'answers.json'
-    $answers = Get-Content $answersPath -Raw | ConvertFrom-Json
+    $parsed = Get-Content $answersPath -Raw | ConvertFrom-Json
+    $answers = @()
+    if ($null -ne $parsed) { $answers = @($parsed) }
     if ($answers.Count -eq 0) { throw 'Unexpected prompt' }
     $answer = [string]$answers[0]
     ConvertTo-Json -InputObject @($answers | Select-Object -Skip 1) | Set-Content $answersPath
