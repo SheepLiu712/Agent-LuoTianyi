@@ -184,6 +184,23 @@ class ChatStage:
             self.interaction_id, mode=ConversationMode.CHAT, user_id=self.user_id
         )
 
+    def diagnostics(self) -> dict:
+        """Expose owned task locations without context, prompts, or local variables."""
+        from src.utils.task_diagnostics import task_snapshot
+
+        tasks = {
+            "initialization": self._lifetime.initialization,
+            "termination": self._lifetime.termination,
+            "reply": self._realizing,
+            "maintenance": self._maintenance.task,
+        }
+        tasks.update({f"handling_{index}": task for index, task in enumerate(self._handles.values())})
+        return {
+            "interaction_id": self.interaction_id,
+            "state": self.lifecycle_state.value,
+            "tasks": {name: task_snapshot(task) for name, task in list(tasks.items())[:32] if task is not None},
+        }
+
     async def start(self) -> None:
         await self._lifetime.start()
 

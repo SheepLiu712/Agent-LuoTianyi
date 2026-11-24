@@ -107,6 +107,7 @@ class WebSocketAdapter:
         self._stage_manager: StageManager | None = None
         self._admission_locks = WeakValueDictionary()
         self._bindings: dict[AdapterConnection, Binding] = {}
+        self._closing_bindings: set[Binding] = set()
         self._output_sink = _ChatOutputSink(self)
         self._client_executor = None
         self._closed = False
@@ -231,7 +232,11 @@ class WebSocketAdapter:
         if binding is not None:
             if self._client_executor is not None:
                 self._client_executor.clear_user(binding.user_uuid, binding)
-            await complete_owned(self._close_connection(binding))
+            self._closing_bindings.add(binding)
+            try:
+                await complete_owned(self._close_connection(binding))
+            finally:
+                self._closing_bindings.discard(binding)
 
     async def close(self) -> None:
         """等待 Adapter 自有的关闭操作完成，清理连接与投递任务。"""
@@ -242,6 +247,17 @@ class WebSocketAdapter:
         for connection in tuple(self._bindings):
             await self.disconnect(connection)
 
+    def connection_diagnostics(self, user_id: str) -> dict:
+        bindings = [
+            binding for binding in (*self._bindings.values(), *self._closing_bindings) if binding.user_uuid == user_id
+        ]
+        return {
+            "user_id": user_id,
+            "connection_count": len(bindings),
+            "connections": [binding.diagnostic_snapshot() for binding in bindings[:100]],
+            "truncated": len(bindings) > 100,
+        }
+
     async def _open(self, connection: Binding, character_id: str) -> ChatStage:
         if self._stage_manager is None:
             raise RuntimeError("adapter is not initialized")
@@ -250,7 +266,9 @@ class WebSocketAdapter:
         if admission_lock is None:
             admission_lock = asyncio.Lock()
             self._admission_locks[key] = admission_lock
+        connection.diagnostics.enter("waiting_admission_lock")
         async with admission_lock:
+            connection.diagnostics.enter("getting_stage")
             stage = await self._stage_manager.try_to_get_stage(
                 user_id=connection.user_uuid,
                 character_id=character_id,
@@ -458,7 +476,10 @@ class WebSocketAdapter:
         await complete_owned(self._unbind(stage, connection))
 
     async def _bind(self, stage: ChatStage, connection: Binding) -> None:
+        connection.diagnostics.stage = stage
+        connection.diagnostics.enter("initializing_stage")
         await stage.start()
+        connection.diagnostics.enter("waiting_binding_lock")
         async with self._binding_lock(stage.interaction_id):
             self._require_binding_candidate(stage, connection)
             if connection.stage is not None and (connection.stage is not stage or not connection.accepting):
@@ -471,19 +492,24 @@ class WebSocketAdapter:
                     if not await stage.connection_changed(True, connection.generation):
                         raise ValueError("stage is no longer connectable")
                     return
+                connection.diagnostics.previous_connection_id = old.diagnostics.connection_id
+                connection.diagnostics.enter("cleaning_previous_connection")
                 await self._disconnect(old)
             self._require_binding_candidate(stage, connection)
+            connection.diagnostics.enter("binding_stage")
             connection.prepare(stage, stage.connection_generation + 1)
             self._routes[stage.interaction_id] = connection
             try:
                 if not await stage.connection_changed(True, connection.generation):
                     raise ValueError("stage is no longer connectable")
                 self._require_binding_candidate(stage, connection)
-                enqueue_event(
+                connection.diagnostics.enter("sending_ready")
+                ready = enqueue_event(
                     connection,
                     "chat.ready",
                     {"character_id": stage.character_id, "interaction_id": stage.interaction_id, "schema_version": 1},
                 )
+                ready.add_done_callback(connection.diagnostics.ready)
                 connection.activate()
             except BaseException:
                 # 失败候选不会再交付网络层，先唤醒等待就绪或发送完成的任务。
@@ -512,13 +538,16 @@ class WebSocketAdapter:
                 await self._disconnect(binding)
 
     async def _disconnect(self, binding) -> None:
+        binding.diagnostics.enter("stopping_stage_tasks")
         binding.revoke()
         try:
             # 通知期间保留路由，让 Stage 的取消输出仍能完成。
             await binding.stage.connection_changed(False, binding.generation)
         finally:
             try:
+                binding.diagnostics.enter("draining_delivery")
                 await binding.detach()
             finally:
+                binding.diagnostics.close()
                 if self._routes.get(binding.stage.interaction_id) is binding:
                     self._routes.pop(binding.stage.interaction_id)
