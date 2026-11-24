@@ -52,17 +52,17 @@ func check_bubble(bubble: Control, style_mode: String) -> void:
 func _check_chat_surface_follows_style(chat: Variant, style_mode: String) -> void:
 	var card: StyleBoxFlat = chat.get_node("Background").get_theme_stylebox("panel")
 	if style_mode == "crystal":
-		check(card.corner_radius_top_left == 0 and card.corner_radius_top_right == 0 and card.corner_radius_bottom_left == 0 and card.corner_radius_bottom_right == 0, "crystal chat surface is square")
-		check(card.border_width_left == 0 and card.border_width_top == 0 and card.border_width_right == 0 and card.border_width_bottom == 0, "crystal chat surface has no border")
-		check(card.shadow_size == 0, "crystal chat surface has no corner shadow")
+		check(card.corner_radius_top_left == 12 and card.corner_radius_top_right == 12 and card.corner_radius_bottom_left == 12 and card.corner_radius_bottom_right == 12, "crystal chat surface keeps rounded corners matching avatar")
+		check(card.border_width_left == 1 and card.border_width_top == 1 and card.border_width_right == 1 and card.border_width_bottom == 1, "crystal chat surface keeps luminous border")
+		check(card.shadow_size == 12, "crystal chat surface keeps card shadow")
 	else:
-		check(card.corner_radius_top_left == 8 and card.corner_radius_bottom_right == 8, "flat chat surface keeps rounded corners")
+		check(card.corner_radius_top_left == 10 and card.corner_radius_bottom_right == 10, "flat chat surface keeps rounded corners")
 		check(card.border_width_left == 1, "flat chat surface keeps its border")
 		check(card.shadow_size == 0, "flat chat surface has no shadow")
 
 func _check_dynamic_card_shadow(style: Variant, style_mode: String) -> void:
 	var post := style._theme.get_stylebox("normal", "DynamicsPost") as StyleBoxFlat
-	check(post != null and post.shadow_size == (12 if style_mode == "crystal" else 0), "dynamic card shadow follows style")
+	check(post != null and post.shadow_size == 0, "dynamic card stays flat in " + style_mode)
 	var row := (load("res://scenes/ui/dynamics/dynamics_post_row.tscn") as PackedScene).instantiate() as Button
 	check(not row.clip_contents, "dynamic card does not clip its shadow")
 	row.free()
@@ -138,6 +138,11 @@ func check_failed_save() -> void:
 	root.add_child(window)
 	window.open()
 	var page = window.get_node("%StylePage")
+	check(not page.get_node("%IconStylePresets").visible and not page.get_node("Column/StyleCard/Content/IconStyleLabel").visible, "icon style selector entry is hidden in settings UI")
+	check(page.get_node("%DefaultPreviewImage").button_pressed, "default image preview checkbox defaults to enabled")
+	page.get_node("%DefaultPreviewImage").button_pressed = false
+	check(window.is_dirty() and style.default_preview_image, "image preview toggle stays a draft until saved")
+	page.get_node("%DefaultPreviewImage").button_pressed = true
 	page.get_node("%UiStylePresets").activated.emit("crystal")
 	page.get_node("%IconStylePresets").activated.emit("emoji")
 	check(window.is_dirty() and style.ui_style == "flat", "selection stays a draft until saved")
@@ -156,14 +161,17 @@ func check_failed_save() -> void:
 	check(is_instance_valid(window) and window.is_dirty() and store.saves == 2, "failed save-and-close keeps window and draft")
 	store.fail = false
 	result = await window.save_changes()
-	check(result.ok and not window.is_dirty() and changes.size() == 1, "retry saves both settings and clears draft")
-	check(store.saves == 3 and style.ui_style == "crystal" and style.icon_style == "emoji", "retry applies the retained selection")
+	_check_retry_succeeds(result, window, changes, store, style)
 	page.get_node("%UiStylePresets").activated.emit("flat")
 	window.close_requested.emit()
 	window.get_node("%UnsavedDialog").get_node("%SaveAndClose").pressed.emit()
 	await process_frame
 	check(not is_instance_valid(window) and style.ui_style == "flat", "successful save-and-close applies appearance and closes")
 	check(style.save_preferences("flat", "svg") == OK, "restore flat shared theme after verification")
+
+func _check_retry_succeeds(result: Dictionary, window: Node, changes: Array, store: Variant, style: Variant) -> void:
+	check(result.ok and not window.is_dirty() and changes.size() == 1, "retry saves both settings and clears draft")
+	check(store.saves == 3 and style.ui_style == "crystal" and style.icon_style == "emoji", "retry applies the retained selection")
 
 func _check_failure_notice(window: Node) -> void:
 	check(window.get_node("%SaveToast").last_text().is_empty(), "failed save stays out of the main toast")
@@ -179,7 +187,7 @@ func _error_dialog(window: Node) -> Node:
 	return null
 
 func _check_fresh_configuration_defaults_to_flat_svg(style: Variant) -> void:
-	check(style.ui_style == "flat" and style.icon_style == "svg", "fresh configuration defaults to flat/svg")
+	check(style.ui_style == "flat" and style.icon_style == "svg" and style.default_preview_image, "fresh configuration defaults to flat/svg and auto preview")
 
 func _check_scene_stylebox_asset_is_not_mutated(source: Variant) -> void:
 	check(source.corner_radius_top_left == 8 and source.shadow_size == 0, "shared theme stylebox is not mutated")
@@ -210,7 +218,7 @@ func _check_style_combinations(style: Variant, notifications: Array, own: Varian
 		check(chat.get_node("%Input").text == "未发送草稿", "switching preserves chat draft")
 		var suffix: String = "_emoji.png" if pair[1] == "emoji" else ".svg"
 		check(chat.get_node("%Send").icon.resource_path.ends_with("action_send" + suffix), "chat icon switches")
-		check(chat.get_node("%Send").get_theme_constant("icon_max_width") == 20, "both icon formats use a fixed display size")
+		check(chat.get_node("%Send").get_theme_constant("icon_max_width") == 16, "both icon formats use a fixed display size")
 		for status in ["playing", "paused", "idle"]:
 			own.set_audio_state(audio_state(status))
 			var audio = own.find_child("MessageAudio", true, false)

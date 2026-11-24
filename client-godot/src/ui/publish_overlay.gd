@@ -2,8 +2,14 @@ extends Control
 signal close_requested
 signal published(id: String)
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const DraftAutosave = preload("res://src/ui/draft_autosave.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 
 var _controller: Node
+var _drafts: RefCounted
+var _scope := ""
+var _text_draft: RefCounted
+var _ui_style: RefCounted
 @onready var _panel: PanelContainer = %Panel
 @onready var _draft: TextEdit = %PublishDraft
 @onready var _cancel: Button = %CancelPublish
@@ -11,15 +17,29 @@ var _controller: Node
 @onready var _status: Label = %PublishStatus
 @onready var _discard_dialog: Window = %DiscardDialog
 var _writing := false
+var _discarding := false
+var _published := false
 
 
-func setup(controller: Node) -> void:
+func set_ui_style(style: RefCounted) -> void:
+	_ui_style = style
+
+
+func setup(controller: Node, drafts: RefCounted = null, scope: String = "") -> void:
 	_controller = controller
+	_drafts = drafts
+	_scope = scope
 func _ready() -> void:
 	close_requested.connect(_request_close)
 	_cancel.pressed.connect(func(): close_requested.emit())
-	_discard_dialog.confirmed.connect(queue_free)
+	_discard_dialog.confirmed.connect(_discard_now)
 	_send.pressed.connect(_publish)
+	if _drafts != null and not _scope.is_empty():
+		_text_draft = DraftAutosave.new()
+		_text_draft.bind(_draft, _drafts, _scope, "dynamics.publish")
+	_cancel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_send.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	UiMotion.bind_tactile_press(_send, func(): return _ui_style)
 	resized.connect(_layout_panel)
 	_layout_panel()
 func is_dirty() -> bool:
@@ -35,6 +55,9 @@ func _publish() -> void:
 	_draft.editable = true
 	if result.ok:
 		_draft.clear()
+		if _text_draft != null:
+			_text_draft.clear()
+		_published = true
 		published.emit(result.item_id)
 		queue_free()
 	else:
@@ -49,6 +72,7 @@ func _publish() -> void:
 func open() -> void:
 	show()
 	_layout_panel()
+	UiMotion.reveal_overlay(_panel, Vector2(0.5, 0.5), -6.0, 0.20, _ui_style)
 	_draft.grab_focus()
 
 func _layout_panel() -> void:
@@ -63,10 +87,49 @@ func _set_status(text: String) -> void:
 	_status.text = text
 	_status.visible = not text.is_empty()
 func _request_close() -> void:
+	flush_drafts()
 	if is_dirty():
 		_discard_dialog.popup_centered()
 		_discard_dialog.get_cancel_button().grab_focus()
 	else: queue_free()
+
+
+func flush_drafts() -> bool:
+	if _text_draft == null:
+		return true
+	return bool(_text_draft.flush())
+
+
+func loss_warnings() -> Array[String]:
+	var warnings: Array[String] = []
+	if _drafts == null or _scope.is_empty():
+		if is_dirty():
+			warnings.append("动态发布草稿")
+		return warnings
+	if _writing:
+		warnings.append("动态正在发布，退出后结果可能未确认")
+	if not _draft.text.strip_edges().is_empty() and _text_draft != null and _text_draft.has_failure():
+		warnings.append("动态发布草稿保存失败")
+	return warnings
+
+
+func clear_draft() -> void:
+	_discarding = true
+	_draft.clear()
+	if _text_draft != null:
+		_text_draft.clear()
+
+
+func _discard_now() -> void:
+	clear_draft()
+	queue_free()
+
+
+func _exit_tree() -> void:
+	if not _discarding and not _published:
+		flush_drafts()
+
+
 func _input(event: InputEvent) -> void:
 	if is_visible_in_tree() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
 		get_viewport().set_input_as_handled()

@@ -6,7 +6,7 @@ const Schema = preload("res://src/storage/history_schema.gd")
 const MessageTime = preload("res://src/domain/message_time.gd")
 
 const ROLES := ["agent", "user", "system"]
-const KINDS := ["text", "image", "sing", "cmd"]
+const KINDS := ["text", "image", "sing", "cmd", "audio", "call", "voice_call"]
 const STATES := ["waiting_history", "pending", "sending", "sent", "failed", "received"]
 ## 本地接纳时刻与服务器处理时刻可能相差几十秒；十分钟内视为同一条消息。
 const SUPERSEDE_WINDOW_MS := 600000
@@ -259,7 +259,7 @@ func _valid_rows(rows: Array) -> Dictionary:
 			return _failure("HISTORY_INVALID")
 		if not str(row.get("source", "")) in ROLES or not str(row.get("type", "")) in KINDS:
 			return _failure("HISTORY_INVALID")
-		if str(row.get("type")) != "image" and not row.get("content") is String:
+		if not str(row.get("type")) in ["image", "audio", "call", "voice_call"] and not row.get("content") is String:
 			return _failure("HISTORY_INVALID")
 	return _success()
 

@@ -1,6 +1,7 @@
 extends Window
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 var _source: WeakRef
 var _previous_focus: WeakRef
 var _provider: Callable
@@ -10,6 +11,7 @@ var _hidden_by_source := false
 var _fitting := true
 var _zoom := 1.0
 var _error_announced := false
+var _panning := false
 
 func _ready() -> void:
 	close_requested.connect(close_image)
@@ -25,6 +27,9 @@ func _ready() -> void:
 			_set_feedback("")
 			ErrorDialog.present(self, "图片暂时无法发送，请检查当前连接后重试。图片已保留。"))
 	%ImageScroll.resized.connect(func(): if _fitting: _resize_image())
+	%ImageScroll.gui_input.connect(_on_scroll_gui_input)
+	%Picture.gui_input.connect(_on_scroll_gui_input)
+	UiMotion.bind_interactive_cursors(self)
 
 func present(source: Window, provider: Callable, confirm: Callable = Callable()) -> void:
 	_source = weakref(source)
@@ -116,6 +121,53 @@ func _process(_delta: float) -> void:
 		_reveal()
 
 func _input(event: InputEvent) -> void:
-	if visible and event.is_action_pressed("ui_cancel"):
+	if not visible:
+		return
+	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		close_requested.emit()
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		_handle_zoom_key(event)
+
+
+func _handle_zoom_key(event: InputEventKey) -> void:
+	if %Picture.texture == null:
+		return
+	match event.keycode:
+		KEY_EQUAL, KEY_KP_ADD, KEY_PLUS:
+			_zoom_by(1.25)
+		KEY_MINUS, KEY_KP_SUBTRACT:
+			_zoom_by(0.8)
+		KEY_0, KEY_KP_0:
+			_fitting = true
+			_resize_image()
+		_:
+			return
+	get_viewport().set_input_as_handled()
+
+
+func _on_scroll_gui_input(event: InputEvent) -> void:
+	if %Picture.texture == null:
+		return
+	if event is InputEventMouseButton:
+		_handle_scroll_button(event)
+	elif event is InputEventMouseMotion and _panning:
+		%ImageScroll.scroll_horizontal -= roundi(event.relative.x)
+		%ImageScroll.scroll_vertical -= roundi(event.relative.y)
+		%ImageScroll.accept_event()
+
+
+func _handle_scroll_button(event: InputEventMouseButton) -> void:
+	if event.button_index == MOUSE_BUTTON_LEFT:
+		_panning = event.pressed
+		%Picture.mouse_default_cursor_shape = Control.CURSOR_MOVE if _panning else Control.CURSOR_ARROW
+		return
+	if not event.pressed:
+		return
+	if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		_zoom_by(1.15)
+		%ImageScroll.accept_event()
+	elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		_zoom_by(1.0 / 1.15)
+		%ImageScroll.accept_event()

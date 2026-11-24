@@ -3,6 +3,7 @@ extends Window
 
 const ModalStack = preload("res://src/ui/modal_stack.gd")
 const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 
 signal confirmed
 signal canceled
@@ -24,6 +25,7 @@ func _ready() -> void:
 	%SaveAndClose.pressed.connect(func(): hide(); custom_action.emit("save"))
 	close_requested.connect(_cancel)
 	visibility_changed.connect(_display)
+	UiMotion.bind_interactive_cursors(self)
 	_display()
 
 

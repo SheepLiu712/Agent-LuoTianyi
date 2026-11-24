@@ -1,18 +1,19 @@
 extends RefCounted
 ## Login-only visual overrides ported from the backup client.
 
+const Tokens = preload("res://src/ui/design_tokens.gd")
 const THEME := preload("res://theme/app_theme.tres")
 const STATES := ["normal", "hover", "pressed", "disabled", "focus"]
 
-const SURFACE_COLOR := Color(0.935, 0.97, 1, 1)
-const AVATAR_BORDER := Color(0.4, 0.8, 1, 0.8)
-const AVATAR_SHADOW := Color(0.4, 0.8, 1, 0.25)
-const DIALOG_SHADOW := Color(0.063, 0.157, 0.227, 0.20)
-const ACTION_SHADOW := Color(0.20, 0.65, 0.95, 0.28)
-const POPUP_BORDER_FLAT := Color(0.776, 0.827, 0.867, 1)
-const POPUP_BORDER_CRYSTAL := Color(0.4, 0.8, 1, 0.5)
-const RADIUS_FLAT := 16
-const RADIUS_CRYSTAL := 20
+const SURFACE_COLOR := Tokens.LOGIN_SURFACE_COLOR
+const AVATAR_BORDER := Tokens.LOGIN_AVATAR_BORDER
+const AVATAR_SHADOW := Tokens.LOGIN_AVATAR_SHADOW
+const DIALOG_SHADOW := Tokens.LOGIN_DIALOG_SHADOW
+const ACTION_SHADOW := Tokens.LOGIN_ACTION_SHADOW
+const POPUP_BORDER_FLAT := Tokens.LOGIN_POPUP_BORDER_FLAT
+const POPUP_BORDER_CRYSTAL := Tokens.LOGIN_POPUP_BORDER_CRYSTAL
+const RADIUS_FLAT := Tokens.RADIUS_LOGIN_FLAT
+const RADIUS_CRYSTAL := Tokens.RADIUS_LOGIN_CRYSTAL
 
 
 static func apply_account_view(page: Control, crystal: bool = false) -> void:
@@ -75,18 +76,26 @@ static func _apply_page(page: Control) -> void:
 	if surface != null:
 		surface.bg_color = SURFACE_COLOR
 		page.add_theme_stylebox_override("panel", surface)
+	var avatar_ring := page.find_child("AvatarRing", true, false) as Control
+	if avatar_ring != null:
+		var ring := StyleBoxFlat.new()
+		ring.bg_color = Color("e1f3fe")
+		ring.set_corner_radius_all(64)
+		ring.content_margin_left = 6
+		ring.content_margin_top = 6
+		ring.content_margin_right = 6
+		ring.content_margin_bottom = 6
+		avatar_ring.add_theme_stylebox_override("panel", ring)
 	var avatar_frame := page.find_child("AvatarFrame", true, false) as Control
 	if avatar_frame == null:
 		return
 	var avatar := _copy("panel", "LoginAvatar")
 	if avatar == null:
 		return
-	avatar.set_border_width_all(2)
-	avatar.border_color = AVATAR_BORDER
-	avatar.set_corner_radius_all(64)
-	avatar.shadow_color = AVATAR_SHADOW
-	avatar.shadow_size = 12
-	avatar.shadow_offset = Vector2(0, 3)
+	avatar.set_border_width_all(3)
+	avatar.border_color = Tokens.ACCENT
+	avatar.set_corner_radius_all(56)
+	avatar.shadow_size = 0
 	avatar_frame.add_theme_stylebox_override("panel", avatar)
 
 

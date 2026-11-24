@@ -1,4 +1,5 @@
 extends Control
+signal dirty_changed
 signal plaintext_answer(allowed: bool)
 const Card = preload("res://scenes/ui/settings/model_purpose_card.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
@@ -42,6 +43,18 @@ func is_dirty() -> bool:
 		if _drafts[id] != _as_draft(_settings.get_config(id)): return true
 	return false
 
+
+func discard_changes() -> void:
+	if _settings == null or _saving or _testing:
+		return
+	for id in _drafts:
+		_drafts[id] = _as_draft(_settings.get_config(id))
+		if _cards.has(id):
+			_cards[id].set_draft(_drafts[id])
+			_cards[id].show_error("")
+	_set_editable()
+	dirty_changed.emit()
+
 func is_data_settled() -> bool:
 	if _settings == null: return true
 	var state: Dictionary = _settings.get_state()
@@ -63,8 +76,8 @@ func _update(state: Dictionary) -> void:
 			card.setup(purpose, _drafts[purpose.id], _types, _executor != null)
 			card.edited.connect(func(id, draft):
 				_drafts[id] = draft
-				_status.text = "有未保存的修改。"
-				_set_editable())
+				_set_editable()
+				dirty_changed.emit())
 			card.copy_requested.connect(_copy_config)
 			card.test_requested.connect(_request_test)
 			%Cards.add_child(card)
@@ -82,10 +95,12 @@ func _update(state: Dictionary) -> void:
 	else:
 		_last_error_code = ""
 	_set_editable()
+	dirty_changed.emit()
 
 
 func _set_status(text: String, kind: String) -> void:
 	_status.text = text
+	_status.visible = not text.is_empty()
 	if not text.is_empty():
 		StatusBanner.apply_surface_status(null, _status, kind)
 
@@ -102,6 +117,7 @@ func _reload() -> void:
 	_cards.clear()
 	_types.clear()
 	_drafts.clear()
+	dirty_changed.emit()
 	await _settings.reload()
 
 func _locate_error(id: String, code: String) -> void:
@@ -174,6 +190,7 @@ func save_changes(validation: Dictionary = {}) -> Dictionary:
 		results.append({"section":"models","id":id,"ok":result.ok,"code":result.code})
 	_saving = false
 	_set_editable()
+	dirty_changed.emit()
 	return {"ok":all_ok,"results":results}
 
 
@@ -183,6 +200,7 @@ func _copy_config(id: String, source_id: String) -> void:
 	_cards[id].set_draft(_drafts[id])
 	_set_status("已复制为草稿；保存时按目标用途重新校验。", "info")
 	_set_editable()
+	dirty_changed.emit()
 
 func _request_test(id: String, draft: Dictionary) -> void:
 	if _testing or _saving: return
@@ -206,7 +224,7 @@ func _test() -> void:
 	_testing = false
 	_set_editable()
 	if result.ok:
-		_set_status("本次请求成功；不代表已全面认证模型能力。", "success")
+		_set_status("连接测试成功。", "success")
 	else:
 		_set_status("", "muted")
 		ErrorDialog.present(self, "请先填写模型地址和密钥。" if result.code in ["MODEL_FIELDS_REQUIRED","INVALID_CONFIG"] else "测试未通过，请检查服务地址和密钥后重试。")

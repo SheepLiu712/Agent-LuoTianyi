@@ -42,6 +42,7 @@ func run() -> void:
 	await _check_hidden_stage_recovers()
 	await _check_zero_stage_recovers()
 	await _check_scroll_container_stays_top_safe()
+	await _check_reduced_motion_instant()
 	print("Toast bubble: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -140,4 +141,20 @@ func _check_zero_stage_recovers() -> void:
 	_check_centred(toast, stage, "triggered before the stage had a size")
 	toast.queue_free()
 	stage.queue_free()
+	await process_frame
+
+
+func _check_reduced_motion_instant() -> void:
+	var store_path := "user://toast-rm-%s.cfg" % Time.get_ticks_usec()
+	var style = preload("res://src/application/ui_style.gd").new()
+	style.configure(preload("res://src/storage/godot_settings_store.gd").new(store_path))
+	style.save_preferences("flat", "svg", true)
+	var toast: Control = load(SCENE).instantiate()
+	toast.set_ui_style(style)
+	root.add_child(toast)
+	await process_frame
+	toast.show_kind("即时提示", "info", -1.0)
+	check(is_equal_approx(toast.get_node("%Panel").modulate.a, 1.0), "reduced motion shows toast at full opacity immediately")
+	toast.queue_free()
+	DirAccess.remove_absolute(store_path)
 	await process_frame

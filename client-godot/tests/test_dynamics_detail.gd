@@ -11,6 +11,7 @@ func _run() -> void:
 	await test_publish_failure()
 	await test_pruning_and_states()
 	await test_open_post_from_card()
+	await test_draft_persistence()
 	print("Dynamics detail: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -263,6 +264,98 @@ func _open_publisher(window: Node) -> void:
 	for button in window.find_children("*","Button",true,false):
 		if button.text == "发布动态":
 			button.pressed.emit()
+
+
+func test_draft_persistence() -> void:
+	var controller = load("res://src/session/dynamics_controller.gd").new()
+	root.add_child(controller)
+	await controller.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"draft-user","message_token":"fixture-token"})
+	await controller.refresh()
+	var draft_root := "user://dynamics-drafts-%s" % Time.get_ticks_usec()
+	var store = load("res://src/storage/draft_store.gd").new(draft_root)
+	var scope := "draft-scope"
+	var scene: PackedScene = load("res://scenes/ui/windows/dynamics_window.tscn")
+	var first = _open_draft_window(scene, controller, store, scope)
+	await process_frame
+	check(first.select_post("d0"),"draft test selects a post")
+	await _wait_comments(controller,"d0")
+	var comment = first.find_child("CommentDraft",true,false)
+	comment.text = "comment survives"
+	comment.text_changed.emit()
+	_open_publisher(first)
+	await process_frame
+	var publish = first.find_child("PublishDraft",true,false)
+	publish.text = "publish survives"
+	publish.text_changed.emit()
+	var replies = first.find_children("*","Button",true,false).filter(func(b): return b.text == "回复" and b.is_visible_in_tree())
+	check(not replies.is_empty(),"draft test finds a reply action")
+	if not replies.is_empty():
+		replies[0].pressed.emit()
+		var reply = first.find_child("ReplyDraft",true,false)
+		reply.text = "reply survives"
+		reply.text_changed.emit()
+	check(first.flush_drafts(),"draft flush succeeds")
+	first.queue_free()
+	await process_frame
+
+	var restored = _open_draft_window(scene, controller, store, scope)
+	await process_frame
+	check(restored.select_post("d0"),"restored window selects the post")
+	await _wait_comments(controller,"d0")
+	comment = restored.find_child("CommentDraft",true,false)
+	check(comment.text == "comment survives","comment draft restores across window recreation")
+	var reply = restored.find_child("ReplyDraft",true,false)
+	check(reply.text == "reply survives","reply draft restores across window recreation")
+	var label: Label = restored.find_child("ReplyLabel",true,false)
+	check(label.text.begins_with("回复"),"reply target restores with its author")
+	_open_publisher(restored)
+	await process_frame
+	publish = restored.find_child("PublishDraft",true,false)
+	check(publish.text == "publish survives","publish draft restores across window recreation")
+	var publisher: Control = restored._publisher
+	var discard: Window = publisher.get_node("%DiscardDialog")
+	publisher.get_node("%CancelPublish").pressed.emit()
+	await process_frame
+	check(discard.visible,"restored publish draft asks before discard")
+	discard.get_ok_button().pressed.emit()
+	await process_frame
+	var discarded = _open_draft_window(scene, controller, store, scope)
+	await process_frame
+	_open_publisher(discarded)
+	await process_frame
+	check(discarded.find_child("PublishDraft",true,false).text.is_empty(),"confirmed discard clears persisted publish draft")
+
+	var isolated = _open_draft_window(scene, controller, store, "other-scope")
+	await process_frame
+	check(isolated.select_post("d0"),"isolated window selects the post")
+	await _wait_comments(controller,"d0")
+	comment = isolated.find_child("CommentDraft",true,false)
+	check(comment.text.is_empty(),"another scope does not inherit comment draft")
+
+	restored.queue_free()
+	discarded.queue_free()
+	isolated.queue_free()
+	await process_frame
+	controller.queue_free()
+	await process_frame
+	_remove_folder(draft_root)
+
+
+func _open_draft_window(scene: PackedScene, controller: Node, store: RefCounted, scope: String) -> Window:
+	var layout_path := "user://dynamics-draft-layout-%s.cfg" % Time.get_ticks_usec()
+	var window: Window = scene.instantiate()
+	window.setup(controller, preload("res://src/storage/godot_settings_store.gd").new(layout_path), store, scope)
+	root.add_child(window)
+	window.open()
+	return window
+
+
+func _remove_folder(path: String) -> void:
+	for folder in DirAccess.get_directories_at(path):
+		_remove_folder(path.path_join(folder))
+	for file in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path.path_join(file))
+	DirAccess.remove_absolute(path)
 
 func _wait_publish_done(send: Button) -> void:
 	var deadline := Time.get_ticks_msec() + 3000

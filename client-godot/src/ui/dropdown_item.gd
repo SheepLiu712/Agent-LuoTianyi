@@ -1,5 +1,11 @@
 extends Button
-## 共享下拉的一行：静态外观与尺寸由 dropdown_item.tscn 与共享主题定义，setup() 只注入数据。
+## 共享下拉的一行：基础样式与最小高度在 _init() 声明，setup() 只注入数据。
+
+
+func _init() -> void:
+	custom_minimum_size = Vector2(0, 36)
+	alignment = HORIZONTAL_ALIGNMENT_LEFT
+	theme_type_variation = &"DropdownItem"
 
 
 func setup(item: Dictionary) -> void:

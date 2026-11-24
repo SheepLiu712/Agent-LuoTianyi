@@ -31,7 +31,7 @@ theme_type_variation = &"MessageTimeChip"
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(0.365, 0.443, 0.482, 1)
+theme_override_colors/font_color = Color(0.309804, 0.396078, 0.45098, 1)
 theme_override_font_sizes/font_size = 12
 horizontal_alignment = 1
 
@@ -45,7 +45,7 @@ unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.50980395, 0.6000000, 0.6509804, 1)
+theme_override_colors/font_color = Color(0.321569, 0.403922, 0.458824, 1)
 theme_override_font_sizes/font_size = 12
 horizontal_alignment = 1
 
@@ -137,14 +137,16 @@ theme_override_constants/separation = 8
 
 [node name="RetryButton" type="Button" parent="Row/Body/MessageColumn/FailureActions"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 32)
 layout_mode = 2
-flat = true
+theme_type_variation = &"InlineLinkButton"
 theme_override_font_sizes/font_size = 12
 text = "重试"
 
 [node name="DeleteButton" type="Button" parent="Row/Body/MessageColumn/FailureActions"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 32)
 layout_mode = 2
-flat = true
+theme_type_variation = &"InlineLinkButton"
 theme_override_font_sizes/font_size = 12
 text = "删除"

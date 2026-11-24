@@ -18,7 +18,7 @@ const SCENES := {
 		"root":"ModelPage","type":"Control","setup":"setup","unique":["Cards","RefreshTypes","Status","PlainDialog","TestDialog"]
 	},
 	"res://scenes/ui/settings/model_purpose_card.tscn": {
-		"root":"ModelPurposeCard","type":"PanelContainer","setup":"setup","unique":["PurposeTitle","Enabled","Requirements","Description","Fields","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","CardStatus"]
+		"root":"ModelPurposeCard","type":"PanelContainer","setup":"setup","unique":["PurposeTitle","Enabled","ChipsRow","Description","Fields","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","CardStatus"]
 	},
 	"res://scenes/ui/pages/account_view.tscn": {
 		"root":"AccountForm","type":"PanelContainer","setup":"setup","unique":["Form","Server","Username","Password","Confirm","Invite","Remember","AutoLogin","Submit","Status","Logs","MenuButton","RegisterLink","ResetLink","HistoryButton","ServerDialog","SavedLogin","UsePassword"]
@@ -30,17 +30,11 @@ const SCENES := {
 	"res://scenes/ui/pages/chat_workspace.tscn": {
 		"root":"ChatWorkspace","type":"Control","setup":"setup","unique":["Background","Navigation","NavChat","NavDynamics","DynamicsUnread","NavSettings","NavLogs","Split","AvatarPanel","ChatView"]
 	},
-	"res://scenes/ui/components/window_chrome.tscn": {
-		"root":"WindowChrome","type":"Control","setup":"","unique":[]
-	},
 	"res://scenes/ui/components/unified_dropdown.tscn": {
 		"root":"UnifiedDropdown","type":"Button","setup":"","unique":["Menu","Scroll","Rows"]
 	},
-	"res://scenes/ui/components/dropdown_item.tscn": {
-		"root":"DropdownItem","type":"Button","setup":"setup","unique":[]
-	},
 	"res://scenes/ui/windows/log_window.tscn": {
-		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","CategoryDropdown","LevelDropdown","ModuleDropdown","OriginDropdown","Search","Text","Follow","CopyButton","ExportButton","Status","Picker"]
+		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","CategoryDropdown","ModuleDropdown","OriginDropdown","Search","LogScroll","LogRows","Follow","CopyButton","ExportButton","Status","Dropped","ChipInfo","ChipWarn","ChipError","ChipDebug","Picker"]
 	},
 	"res://scenes/ui/chat/message_audio.tscn": {
 		"root":"MessageAudio","type":"VBoxContainer","setup":"","unique":["Row","Play","Wave","Time","Stop","Error"]
@@ -61,45 +55,41 @@ const SCENES := {
 		"root":"DynamicsWindow","type":"Window","setup":"setup","unique":["Unread","Publish","Refresh","ReadAll","Notice","Split","ListScroll","List","Right","Empty"]
 	},
 	"res://scenes/ui/dynamics/dynamics_post_row.tscn": {
-		"root":"DynamicsPostRow","type":"Button","setup":"setup","unique":["Avatar","Author","Meta","Excerpt","UnreadDot"]
+		"root":"DynamicsPostRow","type":"Button","setup":"setup","unique":["Avatar","Author","Time","Excerpt","CommentCount"]
 	},
 	"res://scenes/ui/dynamics/dynamic_comment_row.tscn": {
-		"root":"DynamicCommentRow","type":"VBoxContainer","setup":"setup","unique":["Avatar","Author","Body","Time","Reply"]
+		"root":"DynamicCommentRow","type":"PanelContainer","setup":"setup","unique":["Avatar","Author","Body","Time","Reply"]
 	},
 	"res://scenes/ui/dynamics/dynamic_detail.tscn": {
-		"root":"DynamicDetail","type":"ScrollContainer","setup":"setup","unique":["Column","Avatar","Author","CreatedAt","Body","Notice","CommentDraft","Send","Comments","ReplyBox","ReplyLabel","ReplyDraft","CancelReply","ReplySend","Status"]
+		"root":"DynamicDetail","type":"VBoxContainer","setup":"setup","unique":["Column","Avatar","Author","CreatedAt","Body","Notice","CommentDraft","Send","Comments","ReplyLabel","CancelReply","Status"]
 	},
 	"res://scenes/avatar/avatar_panel.tscn": {
 		"root":"AvatarPanel","type":"Control","setup":"","unique":["Driver","Error","Reset","Heading"]
 	},
-	"res://scenes/avatar/avatar_preview.tscn": {
-		"root":"AvatarPreview","type":"Control","setup":"","unique":["Driver","Error","Reset"]
-	},
 }
 # Semantic requirements stay attached to public controls, independent of nesting.
 const PROPERTIES := {
-	"account_view": {"%Username":{"secret":false},"%Password":{"secret":true},"%Confirm":{"secret":true},"%Invite":{"secret":true},"%Submit":{"text":"登录"},"%RegisterLink":{"text":"注册账号"},"%ResetLink":{"text":"忘记密码"},"%Logs":{"text":"日志"}},
-	"model_purpose_card": {"%api_key":{"secret":true},"%Enabled":{"text":"使用自己的 API Key"}},
+	"account_view": {"%Username":{"secret":false},"%Password":{"secret":true},"%Confirm":{"secret":true},"%Invite":{"secret":true},"%Submit":{"text":"登录"},"%RegisterLink":{"text":"使用邀请码注册"},"%ResetLink":{"text":"忘记密码？"},"%Logs":{"text":"日志"}},
+	"model_purpose_card": {"%api_key":{"secret":true}},
 	"preferences_page": {"%PersonalityField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CustomContextField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Toast":{"mouse_filter":Control.MOUSE_FILTER_IGNORE}},
-	"log_window": {"%Text":{"selection_enabled":true},"%Picker":{"file_mode":FileDialog.FILE_MODE_SAVE_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
+	"log_window": {"%Picker":{"file_mode":FileDialog.FILE_MODE_SAVE_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
 	"message_bubble": {"%Text":{"fit_content":true,"selection_enabled":true,"scroll_active":false,"autowrap_mode":TextServer.AUTOWRAP_WORD_SMART}},
-	"chat_view": {"%HistoryRetry":{"text":"重试历史"},"%HistorySkip":{"text":"跳过本次"},"%ImageButton":{"text":""},"%VolumeButton":{"text":"","tooltip_text":"语音音量"},"%Input":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Send":{"text":"","tooltip_text":"发送消息"},"%ComposerSurface":{"mouse_filter":Control.MOUSE_FILTER_PASS}},
+	"chat_view": {"%HistoryRetry":{"text":"重试历史"},"%HistorySkip":{"text":"跳过本次"},"%ImageButton":{"text":""},"%VolumeButton":{"text":"","tooltip_text":"语音音量"},"%Input":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Send":{"text":"发送","tooltip_text":"发送消息"},"%ComposerSurface":{"mouse_filter":Control.MOUSE_FILTER_PASS}},
 	"dynamics_window": {"%Publish":{"text":"发布动态"},"%Refresh":{"text":"刷新"},"%ReadAll":{"text":"全部已读"}},
-	"dynamics_post_row": {"%UnreadDot":{"visible":false}},
 	"dynamic_comment_row": {"%Body":{"selection_enabled":true,"fit_content":true,"scroll_active":false},"%Reply":{"text":"回复"}},
-	"dynamic_detail": {"%Body":{"selection_enabled":true,"fit_content":true,"scroll_active":false},"%Notice":{"text":"此动态不可评论。"},"%CommentDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%ReplyDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CancelReply":{"text":"取消回复对象"},"%Send":{"text":"发送评论"},"%ReplySend":{"text":"发送回复"}},
+	"dynamic_detail": {"%Body":{"selection_enabled":true,"fit_content":true,"scroll_active":false},"%Notice":{"text":"此动态不可评论。"},"%CommentDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CancelReply":{"tooltip_text":"取消回复对象"},"%Send":{"text":"发送"}},
 	"publish_overlay": {"%PublishDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY}},
 	"unified_dropdown": {"%Menu":{"visible":false,"force_native":false,"transparent_bg":true}},
 	"main": {"%ExitDialog":{"ok_button_text":"放弃并继续","cancel_button_text":"返回继续编辑"},"%SecurityError":{"visible":false,"text":"凭据保护组件缺失，请重新解压完整程序。"}},
 	"message_audio": {"%Stop":{"text":"停止"},"%Error":{"text":"语音未能保存"}},
 	"profile_page": {"%PickButton":{"text":"选择本地图片"},"%ResetButton":{"text":"恢复默认头像"},"%FileDialog":{"file_mode":FileDialog.FILE_MODE_OPEN_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
 }
-const DROPDOWNS := {"preferences_page":["RelationshipPresets","SpeakingStylePresets"],"model_purpose_card":["CopySlot"],"log_window":["RunsDropdown","CategoryDropdown","LevelDropdown","ModuleDropdown","OriginDropdown"]}
+const DROPDOWNS := {"preferences_page":["RelationshipPresets","SpeakingStylePresets"],"model_purpose_card":["CopySlot"],"log_window":["RunsDropdown","CategoryDropdown","ModuleDropdown","OriginDropdown"]}
 const INPUT_HINTS := {
 	"account_view":["Server","Username","Password","Confirm","Invite"],
 	"preferences_page":["PersonalityField","CustomContextField"],
 	"publish_overlay":["PublishDraft"], "log_window":["Search"],
-	"chat_view":["Input"], "dynamic_detail":["CommentDraft","ReplyDraft"],
+	"chat_view":["Input"], "dynamic_detail":["CommentDraft"],
 }
 const TOOL_HINTS := {"account_view":["Server"], "chat_view":["Volume"], "avatar_panel":["Reset"]}
 const CLICK_TARGETS := {"avatar_panel":{"%Heading":{"mouse_filter":Control.MOUSE_FILTER_STOP,"mouse_default_cursor_shape":Control.CURSOR_POINTING_HAND}}}
@@ -119,30 +109,30 @@ func run() -> void:
 	for path: String in SCENES:
 		await check_scene(path, SCENES[path])
 	await check_settings_nav()
-	var separator: PackedScene = load("res://scenes/ui/components/dropdown_separator.tscn")
-	check(separator != null, "dropdown separator scene loads")
-	if separator != null:
-		var node := separator.instantiate()
-		check(node is HSeparator, "dropdown separator is authored in a reusable scene")
-		if node != null: node.free()
+	var item := preload("res://src/ui/dropdown_item.gd").new()
+	check(item is Button and item.theme_type_variation == &"DropdownItem", "dropdown item builds from shared script without a scene wrapper")
+	item.free()
 	remove_folder(_temp)
 	print("UI scenes: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
-## 分组标题是「父」，导航项是「子」：缩进、引导线与更小字号一起表达从属关系。
+## 侧栏以分组标题、图标行与可折叠轨道表达层次。
 func check_settings_nav() -> void:
 	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
-	var heading: Label = window.get_node("%Heading")
-	check(heading.text == "偏好与配置", "sidebar heading is a plain group title")
-	check(heading.get_theme_type_variation() == &"SettingsNavHeading", "sidebar heading no longer looks like a nav item")
+	var sidebar: Control = window.get_node("%Sidebar")
+	check(sidebar.custom_minimum_size.x == 208.0, "expanded sidebar keeps its width")
+	var margin: Control = window.get_node("%SidebarMargin")
+	check(margin.get_theme_constant("margin_left") == 12, "sidebar keeps a 12px gutter")
 	var column: Control = window.get_node("%PreferencesTab").get_parent()
 	check(column.name == "NavColumn", "nav items share one sub-column")
-	var margin: Control = column.get_parent().get_parent()
-	check(margin.get_theme_constant("margin_left") == 12, "nav items are indented under the group title")
+	check(column.get_child(0).name == "SidebarHead", "sidebar header leads the column")
+	check((window.get_node("%SidebarTitle") as Label).text == "设置", "sidebar keeps a compact title")
+	check(window.get_node("%SidebarToggle") is Button, "sidebar exposes a collapse toggle")
 	for name in ["ProfileTab", "PreferencesTab", "ModelsTab", "AudioTab", "StyleTab"]:
 		var tab: Button = window.get_node("%" + name)
-		check(tab.get_theme_type_variation() == &"SettingsNavItem", "nav item uses the child styling: " + name)
-	check(column.get_child(0).name == "ProfileTab", "profile page is the first nav item")
+		check(tab.custom_minimum_size == Vector2(0, 38), "nav item keeps its compact height: " + name)
+		check(tab.get_node_or_null("Row") is HBoxContainer, "nav item keeps icon and label row: " + name)
+	check(column.get_child(2).name == "ProfileTab", "profile page is the first nav item")
 	var toast: Control = window.get_node_or_null("%SaveToast")
 	check(toast != null and toast.mouse_filter == Control.MOUSE_FILTER_IGNORE, "save feedback floats above the window without blocking input")
 	_check_toast_shape(toast)

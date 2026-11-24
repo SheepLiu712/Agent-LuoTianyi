@@ -277,7 +277,7 @@ func _discard_incompatible(path: String) -> Dictionary:
 		return _success()
 	var header := _read_header(path)
 	if not header.is_empty() \
-			and int(header.get("version", -1)) == Schema.VERSION \
+			and int(header.get("version", -1)) in [100, Schema.VERSION] \
 			and int(header.get("application_id", -1)) == Schema.APPLICATION_ID:
 		_clear_backups(path)
 		return _success()
@@ -409,6 +409,13 @@ func _ensure_schema() -> Dictionary:
 		return _rebuild_cache()
 	if int(version.data.version) == 0:
 		return _install()
+	if int(version.data.version) == 100:
+		var migrated: Dictionary = preload("res://src/storage/history_media_migration.gd").migrate(_access)
+		if migrated.ok:
+			var valid := _validate()
+			if valid.ok:
+				return valid
+		return _rebuild_cache()
 	return _rebuild_cache()
 
 

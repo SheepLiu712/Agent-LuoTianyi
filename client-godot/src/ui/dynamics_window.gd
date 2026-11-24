@@ -5,10 +5,11 @@ const DetailScene = preload("res://scenes/ui/dynamics/dynamic_detail.tscn")
 const PostRow = preload("res://scenes/ui/dynamics/dynamics_post_row.tscn")
 const PublishOverlay = preload("res://scenes/ui/dynamics/publish_overlay.tscn")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
-const StatusBanner = preload("res://src/ui/status_banner.gd")
 const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
+@onready var _unread_chip: PanelContainer = %UnreadChip
 @onready var _unread: Label = %Unread
-@onready var _notice_banner: PanelContainer = %NoticeBanner
+@onready var _notice_wrap: MarginContainer = %NoticeWrap
 @onready var _notice: Label = %Notice
 @onready var _split: HSplitContainer = %Split
 @onready var _list_scroll: ScrollContainer = %ListScroll
@@ -19,13 +20,9 @@ const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
 @onready var _refresh_button: Button = %Refresh
 @onready var _read_all: Button = %ReadAll
 var _controller: Node
+var _drafts: RefCounted
+var _scope := ""
 @export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
-const PLACEHOLDERS := {
-	"loading": "正在加载动态…",
-	"empty": "还没有动态，发布第一条吧。",
-	"failed": "暂无动态",
-	"unselected": "选择左侧一条动态查看评论。",
-}
 var _ratio := .35
 var _selected := ""
 var _read_request_key := ""
@@ -34,16 +31,17 @@ var _detail_scroll_positions := {}
 var _rows := {}
 var _publisher: Control
 var _refreshing := false
+var _notice_dismissed := false
+var _last_hint := false
 var _last_failure_code := ""
 var _last_unread_code := ""
 var _initialized := false
 var _ui_style: RefCounted
-var _right_style: StyleBoxFlat
 var _avatar_source: Node
 var _custom_avatar: Texture2D
 var _username := ""
 
-## 头像源由装配层给出；这里只把纹理转发给每一行和每个详情，重建列表交给控制器。
+
 func set_avatar_source(source: Node) -> void:
 	if _avatar_source != null and _avatar_source.avatar_changed.is_connected(_sync_avatar):
 		_avatar_source.avatar_changed.disconnect(_sync_avatar)
@@ -53,6 +51,7 @@ func set_avatar_source(source: Node) -> void:
 	source.avatar_changed.connect(_sync_avatar)
 	_sync_avatar(source.get_texture())
 
+
 func _sync_avatar(texture: Texture2D) -> void:
 	_custom_avatar = texture
 	_username = _avatar_source.get_username() if _avatar_source != null else ""
@@ -61,8 +60,10 @@ func _sync_avatar(texture: Texture2D) -> void:
 	for id in _details:
 		_details[id].set_avatar_context(texture, _username)
 
+
 func _row_avatar(post: Dictionary) -> Texture2D:
 	return Detail.avatar_texture(post, _custom_avatar, _username)
+
 
 func _find_post(id: String) -> Dictionary:
 	for post in _controller.get_posts():
@@ -70,48 +71,69 @@ func _find_post(id: String) -> Dictionary:
 			return post
 	return {}
 
+
 func set_ui_style(style: RefCounted) -> void:
 	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_ui_style):
 		_ui_style.style_changed.disconnect(_apply_ui_style)
 	_ui_style = style
-	style.apply_view(self, {"Publish":"action_edit", "Refresh":"action_refresh", "ReadAll":"action_check_all"})
 	_ui_style.style_changed.connect(_apply_ui_style)
 	if is_node_ready(): _apply_ui_style()
 
+
 func _apply_ui_style() -> void:
 	if _ui_style == null or not is_node_ready(): return
-	if _right_style == null:
-		_right_style = _right.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	_ui_style.apply_surface_style(_right_style)
-	_right.add_theme_stylebox_override("panel", _right_style)
-	if _notice_banner.visible:
-		StatusBanner.apply_surface_status(_notice_banner, _notice, "info", _ui_style)
+	_ui_style.apply_view(self, {"Publish":"action_edit", "Refresh":"action_refresh", "ReadAll":"action_check_all"})
+	for button in [_publish, _refresh_button, _read_all]:
+		button.add_theme_constant_override("icon_max_width", 16)
 	_select_style()
 
-func setup(controller: Node,settings_store: Resource = null) -> void:
+
+func setup(controller: Node, settings_store: Resource = null, drafts: RefCounted = null, scope: String = "") -> void:
 	_controller = controller
 	if settings_store != null: settings = settings_store
+	_drafts = drafts
+	_scope = scope
 	if is_node_ready(): _initialize()
+
 
 func _ready() -> void:
 	super._ready()
+	UiMotion.bind_interactive_cursors(self)
+	UiMotion.bind_tactile_press(%Publish, func(): return _ui_style)
 	_apply_ui_style()
 	if _controller == null: return
 	_initialize()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible or not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if event.is_action_pressed("ui_cancel") and not is_instance_valid(_publisher):
+		get_viewport().set_input_as_handled()
+		close_requested.emit()
+	elif event.keycode == KEY_F5 or (event.ctrl_pressed and event.keycode == KEY_R):
+		get_viewport().set_input_as_handled()
+		_refresh()
+
 
 func _initialize() -> void:
 	if _initialized: return
 	_initialized = true
 	var config = settings
 	if config.load_settings() == OK:
-		var saved: Variant = config.get_value("window","size",size)
+		var saved: Variant = config.get_value("window", "size", size)
 		if saved is Vector2i: size = saved.max(min_size)
-		var ratio: Variant = config.get_value("window","ratio",.35)
-		if (ratio is float or ratio is int) and is_finite(ratio): _ratio = clampf(ratio,.25,.7)
+		var ratio: Variant = config.get_value("window", "ratio", .35)
+		if (ratio is float or ratio is int) and is_finite(ratio): _ratio = clampf(ratio, .25, .7)
 	else:
 		push_warning("Dynamics window layout could not be loaded")
 	_publish.pressed.connect(_open_publisher)
 	_refresh_button.pressed.connect(_refresh)
+	%NoticeRefresh.pressed.connect(_refresh)
+	%NoticeClose.pressed.connect(func():
+		_notice_dismissed = true
+		_notice_wrap.hide())
+	%ListEmptyAction.pressed.connect(_on_empty_action)
 	_read_all.pressed.connect(func():
 		_controller.mark_read()
 		ToastOverlay.present_in(self, "已全部标为已读。", "success", 2.0, _ui_style))
@@ -119,7 +141,7 @@ func _initialize() -> void:
 	_list_scroll.gui_input.connect(_list_input)
 	_split.resized.connect(_resize_split)
 	_split.dragged.connect(func(_offset):
-		_ratio = clampf(_split.split_offset/maxf(1,_split.size.x),.25,.7)
+		_ratio = clampf(_split.split_offset / maxf(1, _split.size.x), .25, .7)
 		_save_layout())
 	size_changed.connect(_save_layout)
 	_controller.changed.connect(_update)
@@ -127,12 +149,12 @@ func _initialize() -> void:
 	_update()
 	_update_unread(_controller.get_state().unread)
 	_resize_split.call_deferred()
-	# 只有「一次也没取过」才在开窗时补拉；空列表与失败都有各自的占位和重试入口，
-	# 开窗时再拉一次会把已经落定的状态改写成加载中。
 	if _controller.get_state().code.is_empty(): _controller.refresh()
+
 
 func get_selected_id() -> String:
 	return _selected
+
 
 func select_post(id: String) -> bool:
 	var posts: Array = _controller.get_posts().filter(func(post): return post.id == id)
@@ -140,7 +162,6 @@ func select_post(id: String) -> bool:
 	if _selected == id:
 		_refresh_selected_comments(id)
 		return true
-	# 点开就算读过：只推进这条动态自己的已读水位，圆点随之消退。
 	if _controller.is_unread(posts[0]):
 		_controller.dismiss_preview(posts[0].id)
 		_controller.mark_post_read(posts[0].id)
@@ -153,7 +174,7 @@ func select_post(id: String) -> bool:
 	if not _details.has(id):
 		var detail = DetailScene.instantiate()
 		if _ui_style != null: detail.set_ui_style(_ui_style)
-		detail.setup(_controller,posts[0])
+		detail.setup(_controller, posts[0], _drafts, _scope)
 		detail.set_avatar_context(_custom_avatar, _username)
 		_details[id] = detail
 		_right.add_child(detail)
@@ -164,9 +185,7 @@ func select_post(id: String) -> bool:
 	_refresh_selected_comments(id)
 	return true
 
-## 角色卡片携带的是服务端预览快照：列表已加载时直接选中；
-## 否则等当前刷新完成。刷新成功仍找不到时视为已删除，
-## 只有网络失败才退回快照，避免把临时断网当成删除。
+
 func open_post(post: Dictionary) -> bool:
 	if _controller == null or post.is_empty():
 		return false
@@ -183,32 +202,66 @@ func open_post(post: Dictionary) -> bool:
 	_controller.accept_post(post)
 	return select_post(id)
 
+
 func _refresh_selected_comments(id: String) -> void:
 	var state: Dictionary = _controller.get_comments(id)
 	if not state.busy: _details[id].refresh_comments()
+
 
 func is_dirty() -> bool:
 	if is_instance_valid(_publisher) and _publisher.is_dirty(): return true
 	return _details.values().any(func(detail): return detail.is_dirty())
 
+
+func flush_drafts() -> bool:
+	var ok := true
+	if is_instance_valid(_publisher):
+		ok = bool(_publisher.flush_drafts()) and ok
+	for detail in _details.values():
+		if is_instance_valid(detail):
+			ok = bool(detail.flush_drafts()) and ok
+	return ok
+
+
+func loss_warnings() -> Array[String]:
+	if _drafts == null or _scope.is_empty():
+		return super.loss_warnings()
+	var warnings: Array[String] = []
+	if is_instance_valid(_publisher):
+		for item in _publisher.loss_warnings():
+			warnings.append(str(item))
+	for detail in _details.values():
+		if is_instance_valid(detail):
+			for item in detail.loss_warnings():
+				warnings.append(str(item))
+	return warnings
+
+
+func clear_drafts() -> void:
+	if is_instance_valid(_publisher):
+		_publisher.clear_draft()
+	for detail in _details.values():
+		if is_instance_valid(detail):
+			detail.clear_drafts()
+
+
 func _update_unread(count: int) -> void:
-	_unread.text = "动态"+(" · "+("99+" if count>99 else str(count)) if count else "")
-	var text := _notice_text(count, _controller.get_state())
+	_unread_chip.visible = count > 0
+	_unread.text = "%s 条未读" % ("99+" if count > 99 else str(count))
+	var state: Dictionary = _controller.get_state()
+	var hint := bool(state.get("unread_hint", false))
+	if hint and not _last_hint:
+		_notice_dismissed = false
+	_last_hint = hint
+	var text := "有新的评论尚未同步到本地列表。" if hint else ""
 	_notice.text = text
-	_notice_banner.visible = not text.is_empty()
-	if _notice_banner.visible:
-		StatusBanner.apply_surface_status(_notice_banner, _notice, "info", _ui_style)
+	_notice_wrap.visible = not text.is_empty() and not _notice_dismissed
 
-## 只为「已有内容但加载失败」和未读失败保留横幅；首屏状态交给占位文案。
-func _notice_text(count: int, state: Dictionary) -> String:
-	if bool(state.get("unread_hint", false)):
-		return "有新的评论暂时不在已缓存列表中，刷新或稍后再看。"
-	return "有新的动态或评论，点击卡片查看最新评论，刷新可更新动态列表。" if count else ""
 
-## 翻页失败不会把 phase 推成 failed，只看 phase 会漏报，所以以 code 兜底。
 func _shows_failure(state: Dictionary) -> bool:
 	if _controller.get_posts().is_empty(): return false
-	return state.phase == "failed" or str(state.code) not in ["","OK"]
+	return state.phase == "failed" or str(state.code) not in ["", "OK"]
+
 
 func _update() -> void:
 	var state: Dictionary = _controller.get_state()
@@ -222,32 +275,30 @@ func _update() -> void:
 	_refresh_placeholder(posts, state)
 
 
-## 用户停在详情页时，新到达并已渲染的回复视为已读；窗口不可见时不动水位。
 func _mark_selected_read(posts: Array) -> void:
 	if _selected.is_empty() or not visible:
 		return
 	for post in posts:
 		if str(post.id) != _selected:
 			continue
-		# 只有本地缓存行带活动水位；纯网络内存模式没有可推进的持久水位。
 		if not post.has("last_activity_at"):
 			return
 		if not _controller.is_unread(post):
 			_read_request_key = ""
 			return
-		var key := "%s|%s|%s" % [
-			_selected, post.get("last_activity_at", ""), post.get("last_activity_id", "")]
+		var key := "%s|%s|%s" % [_selected, post.get("last_activity_at", ""), post.get("last_activity_id", "")]
 		if key == _read_request_key:
 			return
-		# 标记失败时 changed 会再次触发本函数；同一个水位只请求一次，避免递归。
 		_read_request_key = key
 		_controller.dismiss_preview(_selected)
 		_controller.mark_post_read(_selected)
 		return
 
+
 func _announce_failures(state: Dictionary) -> void:
 	_announce_posts_failure(state)
 	_announce_unread_failure(state)
+
 
 func _announce_posts_failure(state: Dictionary) -> void:
 	var code := str(state.code)
@@ -258,6 +309,7 @@ func _announce_posts_failure(state: Dictionary) -> void:
 	elif not _shows_failure(state) and not first_failed:
 		_last_failure_code = ""
 
+
 func _announce_unread_failure(state: Dictionary) -> void:
 	var unread := str(state.unread_code)
 	if unread not in ["", "OK"] and unread != _last_unread_code:
@@ -266,7 +318,7 @@ func _announce_unread_failure(state: Dictionary) -> void:
 	elif unread in ["", "OK"]:
 		_last_unread_code = ""
 
-## 服务端已删除的动态必须连同行、详情和缓存一起消失，否则刷新只会越积越多。
+
 func _sync_rows(posts: Array) -> void:
 	var live := {}
 	for index in posts.size():
@@ -276,6 +328,8 @@ func _sync_rows(posts: Array) -> void:
 			_rows[post.id] = _create_row(post)
 		_rows[post.id].set_avatar(_row_avatar(post))
 		_rows[post.id].set_unread(_controller.is_unread(post))
+		var comment_count := int(post.get("comment_count", _controller.get_comments(str(post.id)).items.size()))
+		_rows[post.id].set_comment_count(comment_count)
 		_list.move_child(_rows[post.id], index)
 		if _details.has(post.id): _details[post.id].update_post(post)
 	for id in _rows.keys():
@@ -288,8 +342,8 @@ func _sync_rows(posts: Array) -> void:
 
 func _create_row(post: Dictionary) -> Control:
 	var row = PostRow.instantiate()
-	row.name = "Post_"+str(post.id)
-	row.setup(post,_row_avatar(post))
+	row.name = "Post_" + str(post.id)
+	row.setup(post, _row_avatar(post))
 	row.pressed.connect(func(): select_post(post.id))
 	_list.add_child(row)
 	return row
@@ -318,41 +372,59 @@ func _sync_selection(posts: Array) -> void:
 	for detail in _details.values(): detail.hide()
 
 
-## 四种状态互斥：加载中、空列表、失败可重试、未选择动态。
 func _refresh_placeholder(posts: Array, state: Dictionary) -> void:
-	var text := _placeholder_text(posts, state)
-	_empty.text = text
-	_empty.visible = not text.is_empty()
+	var empty_list := posts.is_empty()
+	_list_scroll.visible = not empty_list
+	%ListEmptyState.visible = empty_list
+	if empty_list:
+		if state.phase == "loading":
+			%ListEmptyTitle.text = "正在加载动态…"
+			%ListEmptySubtitle.text = "请稍候"
+			%ListEmptyAction.visible = false
+		elif state.phase == "failed":
+			%ListEmptyTitle.text = "加载失败"
+			%ListEmptySubtitle.text = "暂时无法获取动态列表"
+			%ListEmptyAction.text = "重试"
+			%ListEmptyAction.visible = true
+		else:
+			%ListEmptyTitle.text = "还没有动态"
+			%ListEmptySubtitle.text = "天依发布的动态和你的分享都会出现在这里"
+			%ListEmptyAction.text = "发布第一条动态"
+			%ListEmptyAction.visible = true
+	_empty.visible = _selected.is_empty()
+	_empty.text = "选择左侧的一条动态查看详情"
 	_refresh_button.disabled = bool(state.busy)
 
 
-func _placeholder_text(posts: Array, state: Dictionary) -> String:
-	if state.phase == "loading" and posts.is_empty():
-		return PLACEHOLDERS.loading
-	if state.phase == "failed":
-		return PLACEHOLDERS.failed
-	if posts.is_empty():
-		return PLACEHOLDERS.empty
-	return PLACEHOLDERS.unselected if _selected.is_empty() else ""
+func _on_empty_action() -> void:
+	if _controller != null and _controller.get_state().phase == "failed":
+		_refresh()
+	else:
+		_open_publisher()
+
 
 func _select_style() -> void:
 	for id in _rows:
 		var style := get_theme_stylebox("selected" if id == _selected else "normal", "DynamicsPost")
 		_rows[id].add_theme_stylebox_override("normal", style)
 
+
 func _refresh() -> void:
 	if _refreshing: return
 	_refreshing = true
+	_notice_dismissed = false
 	await _controller.refresh()
 	if _details.has(_selected): await _details[_selected].refresh_comments()
 	_refreshing = false
+
 
 func _open_publisher() -> void:
 	if not is_instance_valid(_publisher):
 		_publisher = PublishOverlay.instantiate()
 		if _ui_style != null:
+			_publisher.set_ui_style(_ui_style)
 			_ui_style.apply_view(_publisher, {"PublishButton":"action_send", "CancelPublish":"action_close"})
-		_publisher.setup(_controller)
+		_publisher.setup(_controller, _drafts, _scope)
 		add_child(_publisher)
 		_publisher.published.connect(func(id):
 			_update()
@@ -360,23 +432,27 @@ func _open_publisher() -> void:
 			_list_scroll.scroll_vertical = 0)
 	_publisher.open()
 
+
 func _list_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 		_at_bottom.call_deferred()
 
+
 func _at_bottom() -> void:
 	var bar := _list_scroll.get_v_scroll_bar()
 	var state: Dictionary = _controller.get_state()
-	if bar.value+bar.page >= bar.max_value-24 and state.has_more and not state.busy:
+	if bar.value + bar.page >= bar.max_value - 24 and state.has_more and not state.busy:
 		_controller.load_more()
 
+
 func _resize_split() -> void:
-	_split.split_offset = int(_split.size.x*_ratio)
+	_split.split_offset = int(clampf(_split.size.x * _ratio, 300.0, maxf(300.0, _split.size.x - 360.0)))
+
 
 func _save_layout() -> void:
 	if window_system.minimized(self): return
 	var config = settings
-	config.set_value("window","size",size)
-	config.set_value("window","ratio",_ratio)
+	config.set_value("window", "size", size)
+	config.set_value("window", "ratio", _ratio)
 	if config.save_settings() != OK:
 		push_warning("Dynamics window layout could not be saved")

@@ -75,6 +75,9 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_import_states.gd') 'import-states'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_settings_prewarm.gd') 'settings-prewarm' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_ui_style.gd') 'ui-style-preferences'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_ui_motion.gd') 'ui-motion' -RequirePass
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_draft_autosave.gd') 'draft-autosave' -RequirePass
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_chat_interactions.gd') 'chat-interactions' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_image_attachment.gd') 'image-attachment'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_avatar_image.gd') 'avatar-image'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_avatar_store.gd') 'avatar-store'
@@ -84,6 +87,7 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_sqlite_runtime.gd') 'sqlite-runtime' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_sqlite_database.gd') 'sqlite-database' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_dynamics_store.gd') 'dynamics-store' -RequirePass
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_draft_store.gd') 'draft-store' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_scope_session.gd') 'scope-session' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_sqlite_worker.gd') 'sqlite-worker' -RequirePass
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/session/test_message_persistence.gd') 'message-persistence' -RequirePass

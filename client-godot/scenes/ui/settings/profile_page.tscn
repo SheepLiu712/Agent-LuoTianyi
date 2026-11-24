@@ -69,7 +69,7 @@ text = "—"
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"SettingsHelpText"
-text = "支持 PNG、JPG、WebP，单张不超过 6 MB。选好后立即生效，只保存在本机。"
+text = "仅保存在本机，选择后立即生效（6 MB 以内）。"
 autowrap_mode = 3
 
 [node name="Actions" type="HBoxContainer" parent="Column/ProfileCard/Content/Row/Info"]
@@ -96,6 +96,38 @@ visible = false
 layout_mode = 2
 theme_type_variation = &"SettingsHelpText"
 autowrap_mode = 3
+
+[node name="LogoutCard" type="PanelContainer" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"SettingsCard"
+
+[node name="Row" type="HBoxContainer" parent="Column/LogoutCard"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Info" type="VBoxContainer" parent="Column/LogoutCard/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="LogoutTitle" type="Label" parent="Column/LogoutCard/Row/Info"]
+layout_mode = 2
+theme_type_variation = &"SettingsCardTitle"
+text = "退出登录"
+
+[node name="LogoutHint" type="Label" parent="Column/LogoutCard/Row/Info"]
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "退出当前账号并返回登录页，本机保存的聊天与媒体缓存不会删除。"
+autowrap_mode = 3
+
+[node name="LogoutButton" type="Button" parent="Column/LogoutCard/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(112, 38)
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SettingsDangerButton"
+text = "退出登录"
 
 [node name="FileDialog" type="FileDialog" parent="."]
 unique_name_in_owner = true

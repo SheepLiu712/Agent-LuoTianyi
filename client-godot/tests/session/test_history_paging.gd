@@ -93,6 +93,7 @@ func run() -> void:
 	await _case_write_failure_stops_cursor()
 	await _case_initial_failure_releases_boundary()
 	await _case_warm_cache_failure_releases_boundary()
+	await _case_media_rows_are_accepted()
 	print("History paging: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
 
@@ -288,6 +289,41 @@ func _case_warm_cache_failure_releases_boundary() -> void:
 	sync.start(_session(scope))
 	check(await _until(func(): return sync.get_state().initial == "failed"), "warm cache initial failure settles")
 	check(released[0], "warm cache with a persisted baseline releases sends")
+	_teardown(sync, opened)
+
+
+## 服务端历史包含语音/通话行时，媒体类型不能把整个首屏判成坏页。
+func _case_media_rows_are_accepted() -> void:
+	events.clear()
+	var scope := _scope("f2")
+	var opened: Dictionary = await _open(scope)
+	var source := FakeSource.new()
+	source.total = 100
+	var newest: Array = source._rows(70, 100)
+	newest[0] = {
+		"uuid": "voice-70", "source": "user", "type": "audio", "content": "[语音消息]",
+		"timestamp": "2026-09-19 00:01:10", "duration_ms": 3200, "audio_available": true,
+	}
+	newest[1] = {
+		"uuid": "call-71", "source": "user", "type": "call", "content": "[语音通话] 01:20",
+		"timestamp": "2026-09-19 00:01:11", "call_id": "call-71", "outcome": "connected",
+		"active_duration_ms": 80000,
+	}
+	newest[2] = {
+		"uuid": "legacy-72", "source": "user", "type": "voice_call", "content": "{\"duration_ms\":1000}",
+		"timestamp": "2026-09-19 00:01:12",
+	}
+	source.overrides[-1] = newest
+	var sync: Node = _sync(source, opened.persistence)
+	sync.start(_session(scope))
+	check(await _until(func(): return sync.get_state().phase == "complete"), "media history page reaches complete")
+	check(sync.get_state().code == "", "media history page has no error code")
+	check(_count_of("page") == 1 and _last_of("page")[1] == 30, "media history page is delivered")
+	var latest: Dictionary = await opened.persistence.read_latest(30)
+	check(latest.ok and latest.data.messages.any(
+		func(message): return message.id == "voice-70" and message.type == "audio"), "audio history row persisted")
+	check(latest.ok and latest.data.messages.any(
+		func(message): return message.id == "call-71" and message.type == "call"), "call history row persisted")
 	_teardown(sync, opened)
 
 

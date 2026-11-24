@@ -10,16 +10,16 @@ var _can_test := false
 var _fields: Dictionary
 var _refreshing := false
 @onready var _purpose_title: Label = %PurposeTitle
-@onready var _enabled: CheckBox = %Enabled
-@onready var _requirements: Label = %Requirements
+@onready var _chips_row: HBoxContainer = %ChipsRow
+@onready var _enabled: BaseButton = %Enabled
 @onready var _description: Label = %Description
 @onready var _fields_box: VBoxContainer = %Fields
 @onready var _provider_input: LineEdit = %provider
 @onready var _base_url_input: LineEdit = %base_url
 @onready var _api_key_input: LineEdit = %api_key
 @onready var _model_input: LineEdit = %ModelName
-@onready var _json_check: CheckBox = %Json
-@onready var _thinking_check: CheckBox = %Thinking
+@onready var _json_check: BaseButton = %Json
+@onready var _thinking_check: BaseButton = %Thinking
 @onready var _params_edit: TextEdit = %Params
 @onready var _copy_slot: Button = %CopySlot
 @onready var _copy_button: Button = %CopyButton
@@ -33,16 +33,20 @@ func setup(purpose: Dictionary, draft: Dictionary, purposes: Array, can_test: bo
 	_purposes = purposes
 	_can_test = can_test
 
+
 func _ready() -> void:
 	_fields = {"provider":_provider_input,"base_url":_base_url_input,"api_key":_api_key_input,"model":_model_input}
 	_purpose_title.text = _purpose.get("name", "模型用途")
-	_requirements.text = "调用要求：%s%s%s" % [_purpose.get("model_kind", "llm").to_upper(), " / 需要 JSON" if _purpose.get("requires_json", false) else "", " / 需要 thinking" if _purpose.get("requires_thinking", false) else ""]
-	_description.text = _purpose.get("description", "")
+	_populate_chips()
+	var desc := str(_purpose.get("description", ""))
+	_description.text = desc if not desc.is_empty() else "未开启时使用服务器默认模型"
 	var options: Array = []
-	for purpose in _purposes: options.append({"id":purpose.id,"label":purpose.name})
+	for purpose in _purposes:
+		options.append({"id":purpose.id,"label":purpose.name})
 	_copy_slot.set_items(options)
 	set_draft(_draft)
-	for field in _fields.values(): field.text_changed.connect(func(_text): _edit())
+	for field in _fields.values():
+		field.text_changed.connect(func(_text): _edit())
 	_enabled.toggled.connect(func(value):
 		_fields_box.visible = value
 		_edit())
@@ -53,36 +57,78 @@ func _ready() -> void:
 	_test_button.visible = _can_test
 	_test_button.pressed.connect(func(): test_requested.emit(_purpose.id, _draft.duplicate(true)))
 
+
+func _populate_chips() -> void:
+	for child in _chips_row.get_children():
+		child.queue_free()
+	_add_chip(str(_purpose.get("model_kind", "llm")).to_upper())
+	if _purpose.get("requires_json", false):
+		_add_chip("需要 JSON")
+	if _purpose.get("requires_thinking", false):
+		_add_chip("需要 thinking")
+
+
+func _add_chip(label_text: String) -> void:
+	var pill := PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color("e9f2f8")
+	box.set_corner_radius_all(99)
+	box.content_margin_left = 10
+	box.content_margin_right = 10
+	box.content_margin_top = 2
+	box.content_margin_bottom = 2
+	pill.add_theme_stylebox_override("panel", box)
+	pill.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.add_theme_color_override("font_color", Color("3f5563"))
+	pill.add_child(lbl)
+	_chips_row.add_child(pill)
+
+
 func set_draft(draft: Dictionary) -> void:
 	_draft = draft.duplicate(true)
 	if not is_node_ready(): return
 	_refreshing = true
-	for key in _fields: _fields[key].text = _draft.get(key, "")
-	_enabled.button_pressed = _draft.get("enabled", false)
+	for key in _fields:
+		_fields[key].text = _draft.get(key, "")
+	_enabled.set_pressed_no_signal(bool(_draft.get("enabled", false)))
+	_enabled.queue_redraw()
 	_fields_box.visible = _enabled.button_pressed
-	_json_check.button_pressed = _draft.get("model_capabilities", {}).get("can_use_json", false)
-	_thinking_check.button_pressed = _draft.get("model_capabilities", {}).get("can_enable_thinking", false)
+	_json_check.set_pressed_no_signal(bool(_draft.get("model_capabilities", {}).get("can_use_json", false)))
+	_json_check.queue_redraw()
+	_thinking_check.set_pressed_no_signal(bool(_draft.get("model_capabilities", {}).get("can_enable_thinking", false)))
+	_thinking_check.queue_redraw()
 	_params_edit.text = _draft.get("params_text", "{}")
 	_refreshing = false
 
+
 func set_editable(value: bool) -> void:
 	_enabled.disabled = not value
-	for field in _fields.values(): field.editable = value
+	for field in _fields.values():
+		field.editable = value
 	_params_edit.editable = value
-	for control in [_json_check, _thinking_check, _copy_slot, _copy_button, _test_button]: control.disabled = not value
+	for control in [_json_check, _thinking_check, _copy_slot, _copy_button, _test_button]:
+		control.disabled = not value
+
 
 func show_error(text: String) -> void:
 	_set_card_status(text)
-	if not text.is_empty(): _fields_box.show()
+	if not text.is_empty():
+		_fields_box.show()
+
 
 func _edit() -> void:
 	if _refreshing: return
-	for key in _fields: _draft[key] = _fields[key].text
+	for key in _fields:
+		_draft[key] = _fields[key].text
 	_draft.enabled = _enabled.button_pressed
 	_draft.model_capabilities = {"can_use_json":_json_check.button_pressed,"can_enable_thinking":_thinking_check.button_pressed}
 	_draft.params_text = _params_edit.text
-	_set_card_status("有未保存的修改。")
+	_set_card_status("")
 	edited.emit(_purpose.id, _draft.duplicate(true))
+
 
 func _set_card_status(text: String) -> void:
 	_card_status.text = text

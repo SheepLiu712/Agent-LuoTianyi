@@ -3,9 +3,10 @@ extends Control
 ## seconds 传负数表示常驻，直到被下一条替换或显式 clear()。
 
 const SCENE_PATH := "res://scenes/ui/components/toast_overlay.tscn"
-const DEFAULT_SECONDS := 2.0
-const FADE_IN := 0.15
-const FADE_OUT := 0.25
+const UiMotion := preload("res://src/ui/ui_motion.gd")
+const DEFAULT_SECONDS := 3.0
+const FADE_IN := 0.16
+const FADE_OUT := 0.20
 ## 自动折行要先拿到宽度才能算高度，所以排版走两轮。
 const LAYOUT_PASSES := 2
 const TOP_MARGIN := 16.0
@@ -166,13 +167,31 @@ func show_kind(text: String, kind: String, seconds: float = DEFAULT_SECONDS) -> 
 	_layout()
 	show()
 	_kill_tween()
+	_panel.pivot_offset = Vector2(_panel.size.x * 0.5, 0.0)
+	if UiMotion.should_reduce_motion(_ui_style):
+		_show_instant(seconds)
+		return
 	_panel.modulate.a = 0.0
+	_panel.scale = Vector2(0.96, 0.96)
 	_tween = create_tween()
+	_tween.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	_tween.tween_property(_panel, "modulate:a", 1.0, FADE_IN)
+	_tween.parallel().tween_property(_panel, "scale", Vector2.ONE, FADE_IN)
 	if seconds < 0.0:
 		return
 	_tween.tween_interval(maxf(0.0, seconds))
-	_tween.tween_property(_panel, "modulate:a", 0.0, FADE_OUT)
+	_tween.tween_property(_panel, "modulate:a", 0.0, FADE_OUT).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	_tween.parallel().tween_property(_panel, "scale", Vector2(0.97, 0.97), FADE_OUT).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	_tween.tween_callback(hide)
+
+
+func _show_instant(seconds: float) -> void:
+	_panel.modulate.a = 1.0
+	_panel.scale = Vector2.ONE
+	if seconds < 0.0:
+		return
+	_tween = create_tween()
+	_tween.tween_interval(maxf(0.0, seconds))
 	_tween.tween_callback(hide)
 
 

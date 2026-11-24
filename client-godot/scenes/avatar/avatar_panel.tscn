@@ -8,11 +8,27 @@
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="Texture2D" path="res://assets/ui/bg2.jpg" id="3_background"]
 [ext_resource type="Script" path="res://src/platform/cubism_avatar_driver.gd" id="4_driver"]
-[ext_resource type="Shader" path="res://assets/ui/card_background.gdshader" id="card_background"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_reset_ccw.svg" id="reset_icon"]
 
-[sub_resource type="ShaderMaterial" id="BackgroundCorners"]
-resource_local_to_scene = true
-shader = ExtResource("card_background")
+[sub_resource type="StyleBoxFlat" id="StageClipStyle"]
+bg_color = Color(0.96, 0.98, 1, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+anti_aliasing = true
+
+[sub_resource type="StyleBoxFlat" id="AvatarCardBorder"]
+draw_center = false
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
 
 [node name="AvatarPanel" type="Control"]
 clip_contents = true
@@ -29,16 +45,19 @@ settings = ExtResource("isolation_settings")
 
 window_system = ExtResource("isolation_window_system")
 
-[node name="Stage" type="Control" parent="."]
+[node name="Stage" type="Panel" parent="."]
 unique_name_in_owner = true
+clip_children = 2
 clip_contents = true
 layout_mode = 1
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_filter = 2
+theme_override_styles/panel = SubResource("StageClipStyle")
 
 [node name="Background" type="TextureRect" parent="Stage"]
-material = SubResource("BackgroundCorners")
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -95,23 +114,36 @@ theme_override_font_sizes/font_size = 12
 autowrap_mode = 3
 max_lines_visible = 3
 text_overrun_behavior = 3
+[node name="BorderOverlay" type="Panel" parent="."]
+unique_name_in_owner = true
+z_index = 2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("AvatarCardBorder")
+
 [node name="Reset" type="Button" parent="."]
 unique_name_in_owner = true
 visible = false
-z_index = 1
-custom_minimum_size = Vector2(88, 36)
+z_index = 3
+custom_minimum_size = Vector2(36, 36)
 layout_mode = 1
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -104.0
-offset_top = -52.0
-offset_right = -16.0
-offset_bottom = -16.0
-theme_override_font_sizes/font_size = 12
-text = "重置位置"
-tooltip_text = "重置角色位置与缩放"
+offset_left = -48.0
+offset_top = -48.0
+offset_right = -12.0
+offset_bottom = -12.0
+icon = ExtResource("reset_icon")
+icon_alignment = 1
+theme_override_constants/icon_max_width = 18
+tooltip_text = "重置位置"
 
 [node name="Error" type="Label" parent="."]
 unique_name_in_owner = true

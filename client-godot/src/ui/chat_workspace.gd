@@ -3,6 +3,7 @@ extends Control
 
 const AccountScope = preload("res://src/domain/account_scope.gd")
 const ExpressionFallback = preload("res://src/avatar/expression_fallback.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 ## 导航节点 → 图标名。按图标语义而非节点名映射：NavDynamics 用 @（动态/提及），NavLogs 用卷宗（日志归档）。
 const NAV_ICONS := {"NavChat":"nav_chat", "NavDynamics":"nav_at", "NavSettings":"nav_settings", "NavLogs":"nav_scroll"}
 
@@ -15,13 +16,17 @@ signal image_requested(provider: Callable)
 signal attachment_requested(provider: Callable, confirm: Callable)
 signal attachment_cleared
 
+const TIANYI_AVATAR := preload("res://assets/ui/tianyi_icon.png")
 @onready var _background: TextureRect = %Background
 @onready var _navigation: PanelContainer = %Navigation
 @onready var _nav_chat: Button = %NavChat
 @onready var _nav_dynamics: Button = %NavDynamics
 @onready var _dynamics_unread: Control = %DynamicsUnread
+@onready var _dynamics_unread_count: Label = %DynamicsUnreadCount
 @onready var _nav_settings: Button = %NavSettings
 @onready var _nav_logs: Button = %NavLogs
+@onready var _nav_avatar_button: Button = %NavAvatarButton
+@onready var _nav_avatar: TextureRect = %NavAvatar
 @onready var _split: HSplitContainer = %Split
 @onready var _avatar: Control = %AvatarPanel
 @onready var _chat_view: Control = %ChatView
@@ -30,6 +35,8 @@ var _chat: Node
 var _dynamics: Node
 var _settings: Resource
 var _scope: Dictionary = {}
+var _scope_key := ""
+var _drafts: RefCounted
 var _ui_style: RefCounted
 var _log: RefCounted
 var _rail_style: StyleBoxFlat
@@ -38,11 +45,12 @@ var _initialized := false
 var _expression_fallback: Node
 
 
-func setup(chat: Node, dynamics: Node, settings_store: Resource, scope: Dictionary, ui_style: RefCounted, log_sink: RefCounted = null) -> void:
+func setup(chat: Node, dynamics: Node, settings_store: Resource, scope: Dictionary, ui_style: RefCounted, log_sink: RefCounted = null, drafts: RefCounted = null) -> void:
 	_chat = chat
 	_dynamics = dynamics
 	_settings = settings_store
 	_scope = scope.duplicate(true)
+	_drafts = drafts
 	_ui_style = ui_style
 	_log = log_sink
 	if is_node_ready():
@@ -65,15 +73,41 @@ func is_dirty() -> bool:
 	return is_instance_valid(_chat_view) and _chat_view.is_dirty()
 
 
+func flush_drafts() -> bool:
+	if not is_instance_valid(_chat_view):
+		return true
+	return bool(_chat_view.flush_drafts())
+
+
+func loss_warnings() -> Array[String]:
+	if not is_instance_valid(_chat_view):
+		return []
+	var warnings: Array[String] = []
+	for item in _chat_view.loss_warnings():
+		warnings.append(str(item))
+	return warnings
+
+
 func focus_chat_nav() -> void:
 	_nav_chat.button_pressed = true
 
 
 func _ready() -> void:
 	_bind_navigation()
+	UiMotion.bind_interactive_cursors(_navigation)
+	for nav_btn in [_nav_chat, _nav_dynamics, _nav_settings, _nav_logs, _nav_avatar_button]:
+		UiMotion.bind_tactile_press(nav_btn, func(): return _ui_style)
 	if _chat == null:
 		return
 	_initialize()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_COMMA:
+		get_viewport().set_input_as_handled()
+		settings_requested.emit()
 
 
 func _exit_tree() -> void:
@@ -115,6 +149,7 @@ func _initialize() -> void:
 	_initialized = true
 	_restore_ratio()
 	_apply_style()
+	_scope_key = AccountScope.key(str(_scope.get("server", "")), str(_scope.get("username", "")))
 	_bind_session()
 	_split.resized.connect(_resize_split)
 	_split.dragged.connect(_on_split_dragged)
@@ -128,12 +163,14 @@ func _bind_navigation() -> void:
 	_nav_dynamics.pressed.connect(func(): dynamics_requested.emit())
 	_nav_settings.pressed.connect(func(): settings_requested.emit())
 	_nav_logs.pressed.connect(func(): logs_requested.emit())
+	if is_instance_valid(_nav_avatar_button):
+		_nav_avatar_button.pressed.connect(func(): settings_requested.emit())
 
 
 func _bind_session() -> void:
 	_avatar.touched.connect(_chat.record_touch)
 	_avatar.dynamic_requested.connect(func(post): dynamic_post_requested.emit(post))
-	_chat_view.setup(_chat)
+	_chat_view.setup(_chat, _drafts, _scope_key)
 	_chat_view.image_requested.connect(func(provider): image_requested.emit(provider))
 	_chat_view.attachment_requested.connect(func(provider, confirm): attachment_requested.emit(provider, confirm))
 	_chat_view.attachment_cleared.connect(func(): attachment_cleared.emit())
@@ -145,6 +182,10 @@ func _bind_session() -> void:
 	_chat.state_changed.connect(_on_chat_state_changed)
 	_on_chat_state_changed(_chat.get_state())
 	_chat.mouth_changed.connect(_on_mouth_changed)
+	if _chat.has_signal("user_avatar_changed"):
+		_chat.user_avatar_changed.connect(_on_user_avatar_changed)
+	if _chat.has_method("get_user_avatar"):
+		_on_user_avatar_changed(_chat.get_user_avatar())
 	if _dynamics != null:
 		_dynamics.unread_changed.connect(_on_unread_changed)
 		_dynamics.latest_unread_changed.connect(_on_latest_unread_changed)
@@ -239,8 +280,15 @@ func _is_number(value: Variant) -> bool:
 func _on_unread_changed(count: int) -> void:
 	if is_instance_valid(_dynamics_unread):
 		_dynamics_unread.visible = count > 0
+	if is_instance_valid(_dynamics_unread_count):
+		_dynamics_unread_count.text = "99+" if count > 99 else str(maxi(count, 0))
 	if is_instance_valid(_nav_dynamics):
 		_nav_dynamics.tooltip_text = "动态" if count <= 0 else "动态 · %s 条未读" % count
+
+
+func _on_user_avatar_changed(texture: Texture2D) -> void:
+	if is_instance_valid(_nav_avatar):
+		_nav_avatar.texture = texture if texture != null else TIANYI_AVATAR
 
 
 func _on_latest_unread_changed(post: Dictionary) -> void:

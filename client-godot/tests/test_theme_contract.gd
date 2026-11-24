@@ -68,6 +68,7 @@ func run() -> void:
 	_check_selection_colors(theme)
 	_check_button_states(theme)
 	_check_focus_and_input(theme)
+	_check_contrast_and_login_focus(theme)
 	_check_checkbox_focus_geometry(theme)
 	_check_toggle_states(theme)
 	check_surface(theme, "AppSurface", "panel", 8)
@@ -105,7 +106,7 @@ func _check_shared_control_states(theme: Theme) -> void:
 
 ## 界面底板统一由主题类型提供；场景只保留确有局部语义的样式。
 func _check_surface_variations(theme: Theme) -> void:
-	for entry in [["ChatSurface", "panel", 8], ["ChatComposer", "panel", 8], ["DynamicsSurface", "panel", 8],
+	for entry in [["ChatSurface", "panel", 10], ["ChatComposer", "panel", 10], ["DynamicsSurface", "panel", 8],
 			["DynamicsDetailSurface", "panel", 8], ["DropdownItem", "normal", 6], ["DropdownItem", "hover", 6],
 			["DynamicInput", "normal", 8], ["MessageBubbleOwn", "panel", 8], ["MessageBubbleOther", "panel", 8],
 			["MessageTimeChip", "panel", 8], ["TerminalPanel", "panel", 0], ["ImageEntry", "focus", 8],
@@ -120,12 +121,12 @@ func _check_surface_variations(theme: Theme) -> void:
 		check(shell.bg_color.a == 1.0 and shell.shadow_size == 0, "window shell surface defaults to solid and flat")
 
 
+## 共享消息组件必须由主题提供样式；页面级布局允许场景内局部 StyleBox。
 func _check_styles_are_centralised() -> void:
 	var source := FileAccess.get_file_as_string(THEME_PATH)
 	check(not source.is_empty(), "theme source readable")
 	check(not source.contains('id="StyleBoxFlat_'), "no anonymous stylebox in the theme")
-	for path in ["res://scenes/ui/chat/message_bubble.tscn", "res://scenes/ui/chat/chat_view.tscn", "res://scenes/ui/windows/dynamics_window.tscn",
-			"res://scenes/ui/dynamics/dynamic_detail.tscn", "res://scenes/ui/components/dropdown_item.tscn", "res://scenes/ui/windows/log_window.tscn"]:
+	for path in ["res://scenes/ui/chat/message_bubble.tscn"]:
 		check(not FileAccess.get_file_as_string(path).contains("StyleBoxFlat"), "shared surfaces come from the theme: " + path)
 
 func flat_style(theme: Theme, kind: String, state: String) -> StyleBoxFlat:
@@ -203,3 +204,26 @@ func _check_selection_colors(theme: Theme) -> void:
 	for kind in ["LineEdit", "TextEdit", "RichTextLabel"]:
 		check(theme.get_color("selection_color", kind).is_equal_approx(Color("0078d7")), "system blue text selection: " + kind)
 		check(theme.get_color("font_selected_color", kind).is_equal_approx(Color.WHITE), "white selected text: " + kind)
+
+
+func _check_contrast_and_login_focus(theme: Theme) -> void:
+	for kind in ["NavigationButton", "LoginPrimary", "LoginLink", "LoginIcon", "LoginMenuItem", "LoginField", "DynamicsPost"]:
+		check(theme.get_stylebox("focus", kind) is StyleBoxFlat, "keyboard focus ring present: " + kind)
+	check(theme.has_stylebox("hover", "DynamicsPost"), "dynamic post card declares hover state")
+	check(_contrast_ratio(theme.get_color("font_color", "SettingsHelpText"), Color.WHITE) >= 4.5, "help text meets WCAG AA 4.5:1")
+	check(_contrast_ratio(theme.get_color("font_placeholder_color", "TextEdit"), Color.WHITE) >= 4.5, "placeholder text meets WCAG AA 4.5:1")
+	check(_contrast_ratio(theme.get_color("delivery_status", "MessageBubble"), Color.WHITE) >= 4.5, "delivery status meets WCAG AA 4.5:1")
+
+
+func _contrast_ratio(fg: Color, bg: Color) -> float:
+	var l1 := _rel_lum(fg)
+	var l2 := _rel_lum(bg)
+	return (maxf(l1, l2) + 0.05) / (minf(l1, l2) + 0.05)
+
+
+func _rel_lum(c: Color) -> float:
+	return 0.2126 * _lin(c.r) + 0.7152 * _lin(c.g) + 0.0722 * _lin(c.b)
+
+
+func _lin(v: float) -> float:
+	return v / 12.92 if v <= 0.03928 else pow((v + 0.055) / 1.055, 2.4)

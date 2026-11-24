@@ -20,11 +20,11 @@ func capture(window: Window, label: String) -> void:
 	await RenderingServer.frame_post_draw
 	check(window.get_texture().get_image().save_png(ARTIFACTS.path_join(label + ".png")) == OK, "capture: " + label)
 
-func check_icon(view: Node, name: String, resource: String, emoji: bool) -> void:
+func check_icon(view: Node, name: String, resource: String, emoji: bool, size: int = 20) -> void:
 	var button: Button = view.get_node("%" + name)
 	var suffix := "_emoji.png" if emoji else ".svg"
 	check(button.icon != null and button.icon.resource_path.ends_with(resource + suffix), "application icon: " + name)
-	check(button.get_theme_constant("icon_max_width") == 20, "fixed icon size: " + name)
+	check(button.get_theme_constant("icon_max_width") == size, "fixed icon size: " + name)
 
 func make_app(directory: String) -> Control:
 	var security = ClassDB.instantiate("WindowsSecurity")
@@ -100,7 +100,7 @@ func run() -> void:
 	workspace.get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
 	check(settings.get_node("%StylePage").get_node("%UiStylePresets").get_selected_id() == "crystal", "reopened settings shows persisted choice")
-	check_icon(workspace.get_chat_view(), "Send", "action_send", true)
+	check_icon(workspace.get_chat_view(), "Send", "action_send", true, 16)
 	check(app._services.ui_style.save_preferences("flat", "svg") == OK, "reset fixture to defaults")
 	app.queue_free()
 	await process_frame
@@ -185,10 +185,11 @@ func _check_style_combinations(app: Variant, workspace: Variant, settings: Varia
 		var label: String = pair[0] + "-" + pair[1]
 		var form_scroll: ScrollContainer = settings.get_node("%Content")
 		await create_timer(.2).timeout
-		form_scroll.ensure_control_visible(page.get_node("%IconStylePresets"))
+		form_scroll.ensure_control_visible(page.get_node("%UiStylePresets"))
 		await process_frame
 		await process_frame
-		check(form_scroll.get_global_rect().encloses(page.get_node("%IconStylePresets").get_global_rect()), "icon style selector remains reachable")
+		check(form_scroll.get_global_rect().encloses(page.get_node("%UiStylePresets").get_global_rect()), "style selector remains reachable")
+		check(not page.get_node("%IconStylePresets").visible, "icon style selector entry remains hidden")
 		await capture(settings, "settings-" + label)
 		settings.hide()
 		await capture(root, "chat-" + label)

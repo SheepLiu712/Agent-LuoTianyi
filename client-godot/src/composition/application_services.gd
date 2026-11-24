@@ -1,5 +1,7 @@
 extends RefCounted
 ## 唯一的服务装配根：不做全局查找，也不承担业务状态迁移。
+const AccountScope = preload("res://src/domain/account_scope.gd")
+
 var account: Node
 var chat: Node
 var models: Node
@@ -14,6 +16,7 @@ var avatar: Node
 var cache: RefCounted
 var storage: RefCounted
 var log: RefCounted
+var drafts: RefCounted
 var settings: Resource
 var dynamics_settings: Resource
 var ui_style: RefCounted
@@ -32,6 +35,7 @@ func _init(layout_path: String, runtime: Resource) -> void:
 func mount(host: Node, injected_account: Node, layout_path: String, encryption: Resource, secrets: Resource, decoder_factory: Resource) -> void:
 	var data_root := layout_path.get_base_dir()
 	_data_root = data_root
+	drafts = preload("res://src/storage/draft_store.gd").new(data_root.path_join("drafts"),log)
 	var credentials = preload("res://src/storage/credential_store.gd").new(secrets,data_root.path_join("accounts"),log)
 	storage = preload("res://src/storage/godot_storage_service.gd").new(data_root.path_join("account.cfg"),credentials)
 	account = injected_account
@@ -95,7 +99,9 @@ func create_settings() -> Dictionary:
 func create_dynamics() -> Dictionary:
 	var window = preload("res://scenes/ui/windows/dynamics_window.tscn").instantiate()
 	window.set_ui_style(ui_style)
-	window.setup(dynamics,dynamics_settings)
+	var session: Dictionary = account.get_session()
+	var scope := AccountScope.key(str(session.get("server", "")), str(session.get("username", "")))
+	window.setup(dynamics,dynamics_settings,drafts,scope)
 	window.set_avatar_source(avatar)
 	return {"window":window,"start":Callable()}
 

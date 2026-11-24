@@ -46,7 +46,11 @@ func click(button: Button) -> void:
 func inspect_dialog(dialog: Window, host: Window) -> void:
 	check(dialog.visible, "exit decision is visible")
 	check(dialog.title.contains("退出应用" if host == root else "退出登录"), "decision names the actual exit action")
-	check(dialog.dialog_text.contains("尚未提交") and dialog.dialog_text.contains("不会自动保存或发送"), "decision explains draft loss and no automatic submission")
+	check(dialog.dialog_text.contains("尚未提交") and dialog.dialog_text.contains("退出后将丢失"), "decision explains what will be lost")
+	if host != root:
+		check(dialog.ok_button_text == "是" and dialog.cancel_button_text == "否", "logout decision uses yes/no buttons")
+	else:
+		check(dialog.ok_button_text == "放弃并继续" and dialog.cancel_button_text == "返回继续编辑", "exit decision restores discard/continue buttons")
 	check(dialog.get_parent().get_window() == host, "exit decision belongs to its triggering window")
 	if DisplayServer.get_name() != "headless":
 		await create_timer(.1).timeout
@@ -97,6 +101,13 @@ func run() -> void:
 		remove_folder(path)
 		quit(1)
 		return
+	app.get_workspace().get_node("%NavSettings").pressed.emit()
+	settings = app.find_child("SettingsWindow", true, false)
+	check(await until_ms(func(): return settings.visible, 1000), "settings reopens before root exit")
+	field = settings.find_child("CustomContextField", true, false)
+	check(await until(func(): return field.editable), "preferences load before root exit")
+	field.text = "root exit keeps this"
+	field.text_changed.emit()
 	root.close_requested.emit()
 	await inspect_dialog(dialog, root)
 	await click(dialog.get_cancel_button())

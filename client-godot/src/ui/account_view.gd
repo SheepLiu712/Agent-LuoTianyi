@@ -8,8 +8,15 @@ const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const LoginStyle = preload("res://src/ui/login_style.gd")
 const ModalStack = preload("res://src/ui/modal_stack.gd")
 const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
 const STALE_CA_MESSAGE := "当前版本过低，请更新最新版本"
+const EYE_ICON := preload("res://assets/ui/icons/ui_eye.svg")
+const EYE_OFF_ICON := preload("res://assets/ui/icons/ui_eye_off.svg")
+const FIELD_ICON_NORMAL := Color("526470")
+const FIELD_ICON_FOCUS := Color("1278ad")
+const FIELD_BORDER_NORMAL := Color("dbe7f0")
+const FIELD_BORDER_FOCUS := Color("66ccff")
 @export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _password_drafts := {"password":"", "confirm":""}
 var _password_carets := {"password":0, "confirm":0}
@@ -48,13 +55,20 @@ func setup(session: Node, ui_style: RefCounted = null) -> void:
 
 func _ready() -> void:
 	_apply_login_style()
+	UiMotion.bind_interactive_cursors(self)
+	UiMotion.bind_tactile_press(_submit, func(): return _ui_style)
 	_menu_trigger = preload("res://src/ui/popup_trigger.gd").new(%MenuButton,%MenuPopup)
 	_history_trigger = preload("res://src/ui/popup_trigger.gd").new(%HistoryButton,%HistoryPopup)
 	%MenuButton.pressed.connect(_open_menu)
 	%MenuPopup.visibility_changed.connect(func(): %MenuButton.set_pressed_no_signal(%MenuPopup.visible))
 	%Logs.pressed.connect(func(): %MenuPopup.hide(); log_requested.emit())
 	%Feedback.pressed.connect(func(): %MenuPopup.hide(); feedback_requested.emit())
-	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe]: button.disabled = true
+	%TogglePassword.toggled.connect(_toggle_password_visibility)
+	_bind_field_focus(%Username, %UsernameFrame, %UsernameIcon)
+	_bind_field_focus(%Password, %PasswordFrame, %PasswordIcon)
+	_bind_field_focus(%Confirm, %ConfirmFrame, %ConfirmIcon)
+	_bind_field_focus(%Invite, %InviteFrame, %InviteIcon)
+	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe,%TogglePassword]: button.disabled = true
 	%RemoveAccountDialog.visibility_changed.connect(func(): _apply_login_style.call_deferred())
 	if _session != null: _initialize()
 
@@ -98,7 +112,7 @@ func _initialize() -> void:
 	resized.connect(_layout_form)
 	_layout_form()
 	_session.changed.connect(_update_state)
-	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe]: button.disabled = false
+	for button in [%Submit,%Remember,%AutoLogin,%RegisterLink,%ResetLink,%SetServer,%HistoryButton,%ServerProbe,%TogglePassword]: button.disabled = false
 	_sync_selected()
 	if _session.get_login_defaults().storage_error:
 		push_warning("Login storage was not ready")
@@ -128,20 +142,21 @@ func _apply_mode() -> void:
 	_queue_ime_sync()
 
 func _apply_mode_visibility(login: bool, saved: bool, signed_in: bool) -> void:
+	%TopSpacer.custom_minimum_size.y = 52.0 if login else 12.0
 	%AvatarBlock.visible = login
 	%AvatarGap.visible = login
+	%BrandTitle.visible = login
+	%FormTopGap.visible = login
 	%BackToLogin.visible = not login
 	%ModeTitle.visible = not login
 	%ModeHelp.visible = _mode == "reset"
-	%Confirm.visible = not login
-	%Invite.visible = not login
-	%Password.visible = not saved
+	%ConfirmFrame.visible = not login
+	%InviteFrame.visible = not login
+	%PasswordFrame.visible = not saved
 	%SavedLogin.visible = saved
 	%HistoryButton.visible = login
 	%Options.visible = login
-	var footer_visible := login and not signed_in
-	%Footer.visible = footer_visible
-	%Footer.get_parent().visible = footer_visible
+	%RegisterRow.visible = login and not signed_in
 	_form.visible = not signed_in
 
 func _apply_mode_copy() -> void:
@@ -189,7 +204,7 @@ func _focus_order() -> Array[Control]:
 		var field: LineEdit = _fields[name]
 		if field.is_visible_in_tree(): order.append(field)
 	if %UsePassword.is_visible_in_tree() and not %UsePassword.disabled: order.append(%UsePassword)
-	for control in [_automatic,_remember,_submit,%HistoryButton]:
+	for control in [_remember,_automatic,_submit,%HistoryButton]:
 		if control.is_visible_in_tree() and not control.disabled: order.append(control)
 	return order
 
@@ -304,7 +319,7 @@ func _update_state(state: Dictionary) -> void:
 func _apply_busy_state(state: Dictionary) -> void:
 	_busy = state.phase == "busy"
 	for name in ["username","password","confirm","invite","server"]: _fields[name].editable = not _busy
-	for button in [_submit,_remember,_automatic,%BackToLogin,%RegisterLink,%ResetLink,%HistoryButton,%UsePassword,%SetServer,%ServerSave,%ServerDefault,%ServerProbe]: button.disabled = _busy or _probing
+	for button in [_submit,_remember,_automatic,%BackToLogin,%RegisterLink,%ResetLink,%HistoryButton,%UsePassword,%SetServer,%ServerSave,%ServerDefault,%ServerProbe,%TogglePassword]: button.disabled = _busy or _probing
 
 func _report_state(state: Dictionary) -> void:
 	if _is_error_code(state.code):
@@ -322,6 +337,7 @@ func _open_menu() -> void:
 	var available := get_window().get_visible_rect().size
 	var bottom: Vector2 = %MenuButton.get_global_transform_with_canvas() * Vector2(0,%MenuButton.size.y)
 	_popup(%MenuPopup, Vector2(available.x-192,bottom.y+6), Vector2i(168,152))
+	UiMotion.reveal_overlay(%MenuPopup/MenuItems, Vector2(1.0, 0.0), -4.0, 0.16, _ui_style)
 	(%Logs if %SetServer.disabled else %SetServer).grab_focus.call_deferred()
 
 func _popup(window: Window, position: Vector2, requested: Vector2i) -> void:
@@ -353,8 +369,10 @@ func _open_history() -> void:
 			%RemoveAccountDialog.dialog_text = "移除“%s”的本机账号记录和已记住的登录状态？不会删除服务器账号或聊天、语音缓存。" % entry.username
 			%RemoveAccountDialog.popup_centered())
 		%HistoryRows.add_child(row)
+	UiMotion.bind_interactive_cursors(%HistoryRows)
 	var anchor: Control = %Username.get_parent().get_parent()
 	_popup(%HistoryPopup, anchor.get_global_transform_with_canvas() * Vector2(0,anchor.size.y+6), Vector2i(int(anchor.size.x),mini(280,maxi(64,history.size()*48+16))))
+	UiMotion.reveal_overlay(%HistoryPopup/HistoryScroll, Vector2(0.5, 0.0), -4.0, 0.16, _ui_style)
 
 func _remove_record() -> void:
 	var response: Dictionary = _session.remove_account(_removing)
@@ -365,7 +383,7 @@ func _open_server() -> void:
 	%MenuPopup.hide()
 	if _busy: return
 	%Server.text = _session.get_login_defaults().server
-	%ServerStatus.text = "验证连接成功后才使用新地址。"
+	_set_server_status("")
 	%ProbeResult.text = ""
 	%ProbeResult.visible = false
 	_apply_probe_state()
@@ -374,9 +392,15 @@ func _open_server() -> void:
 	ModalStack.activate(%ServerDialog)
 	%Server.grab_focus()
 
+
+func _set_server_status(text: String) -> void:
+	%ServerStatus.text = text
+	%ServerStatus.visible = not text.is_empty()
+
+
 func _save_server() -> void:
 	if _busy or _probing: return
-	%ServerStatus.text = "正在验证服务器…"
+	_set_server_status("正在验证服务器…")
 	_checking_server = true
 	var response: Dictionary = await _session.set_server(%Server.text)
 	_checking_server = false
@@ -384,33 +408,33 @@ func _save_server() -> void:
 	if response.ok: %ServerDialog.hide()
 	else:
 		var message := _error_text(response.code, response.get("status", 0), str(response.get("detail", "")))
-		%ServerStatus.text = message
+		_set_server_status(message)
 		if _should_auto_probe(response):
 			await _probe_server(message)
 
-## 只有链路层失败才补测；账号/参数错误不需要再打一次公网基线。
+## 只有链路层失败才补测；账号/参数错误不需要再打一次基础网络测试。
 static func _should_auto_probe(response: Dictionary) -> bool:
 	return int(response.get("status", 0)) == 0 and str(response.get("code", "")) in [
 		"NETWORK_ERROR", "TIMEOUT", "PUBLIC_KEY_ERROR"]
 
-func _probe_server(status_text: String = "验证连接成功后才使用新地址。") -> void:
+func _probe_server(status_text: String = "") -> void:
 	if _probing or _busy or _checking_server: return
 	var address := ServerAddress.normalize(%Server.text)
 	if address.is_empty():
-		%ProbeResult.text = "公网基线：未测试\n目标服务器：地址无效"
+		%ProbeResult.text = "基础网络：未测试\n目标服务器：地址无效"
 		%ProbeResult.visible = true
 		return
 	_probing = true
 	_apply_probe_state()
-	%ServerStatus.text = "正在测试网络连通性…"
+	_set_server_status("正在测试网络连通性…")
 	var result: Dictionary = await _session.probe_connectivity(address)
 	_probing = false
 	_apply_probe_state()
 	if not %ServerDialog.visible or bool(result.get("cancelled", false)): return
-	%ServerStatus.text = _probe_status_text(result, status_text)
+	_set_server_status(_probe_status_text(result, status_text))
 	var baseline: Dictionary = result.get("baseline", {})
 	var target: Dictionary = result.get("target", {})
-	%ProbeResult.text = "公网基线：%s\n目标服务器：%s" % [_probe_text(baseline), _probe_text(target)]
+	%ProbeResult.text = "基础网络：%s\n目标服务器：%s" % [_probe_text(baseline), _probe_text(target)]
 	%ProbeResult.visible = true
 
 func _apply_probe_state() -> void:
@@ -435,7 +459,33 @@ func _layout_form() -> void:
 func _clear_secrets() -> void:
 	_password_drafts = {"password":"", "confirm":""}
 	_password_carets = {"password":0, "confirm":0}
+	if %TogglePassword != null:
+		%TogglePassword.set_pressed_no_signal(false)
+		_toggle_password_visibility(false)
 	for field in ["password","confirm","invite"]: _fields[field].clear()
+
+
+func _toggle_password_visibility(shown: bool) -> void:
+	%Password.secret = not shown
+	%TogglePassword.icon = EYE_OFF_ICON if shown else EYE_ICON
+	%TogglePassword.tooltip_text = "隐藏密码" if shown else "显示密码"
+
+
+func _bind_field_focus(field: LineEdit, frame: PanelContainer, icon: TextureRect) -> void:
+	field.focus_entered.connect(func(): _style_field_frame(frame, icon, true))
+	field.focus_exited.connect(func(): _style_field_frame(frame, icon, false))
+
+
+func _style_field_frame(frame: PanelContainer, icon: TextureRect, focused: bool) -> void:
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color.WHITE
+	box.set_corner_radius_all(6)
+	box.set_border_width_all(2 if focused else 1)
+	box.border_color = FIELD_BORDER_FOCUS if focused else FIELD_BORDER_NORMAL
+	box.content_margin_left = 14
+	box.content_margin_right = 10
+	frame.add_theme_stylebox_override("panel", box)
+	icon.modulate = FIELD_ICON_FOCUS if focused else FIELD_ICON_NORMAL
 
 func _password_changed(field: String, value: String) -> void:
 	if _ascii_password(value):
@@ -489,7 +539,7 @@ static func _probe_status_text(result: Dictionary, fallback: String) -> String:
 	if _is_ca_expiry_failure(str(target.get("detail", ""))):
 		return STALE_CA_MESSAGE
 	if bool(result.get("baseline", {}).get("ok", false)):
-		return "服务器证书校验失败：公网正常，目标服务器 TLS 握手未通过。请检查系统时间、代理/安全软件或服务器证书。"
+		return "服务器证书校验失败：基础网络正常，目标服务器 TLS 握手未通过。请检查系统时间、代理/安全软件或服务器证书。"
 	return "目标服务器 TLS 证书校验失败。请检查系统时间、代理/安全软件或服务器证书。"
 
 static func _probe_text(entry: Dictionary) -> String:

@@ -144,7 +144,9 @@ func _init_window_coordinator() -> void:
 		_services.create_settings,
 		_services.create_dynamics,
 		func(): return is_instance_valid(_workspace) and _workspace.is_dirty(),
-		_log)
+		_log,
+		_flush_workspace_drafts,
+		_workspace_losses)
 	_coordinator.exit_requested.connect(func(): _request_persisted_close("exit"))
 	_coordinator.logout_requested.connect(func(): _request_persisted_close("logout"))
 
@@ -241,7 +243,7 @@ func _mount_workspace() -> void:
 		return
 	_workspace = Workspace.instantiate() as Control
 	_page_slot.add_child(_workspace)
-	_workspace.setup(_chat, _dynamics, _services.settings, _session.get_session(), _services.ui_style, _log)
+	_workspace.setup(_chat, _dynamics, _services.settings, _session.get_session(), _services.ui_style, _log, _services.drafts)
 	_workspace.chat_requested.connect(func(): _log_ui("chat", func(): _chrome.open_window()))
 	_workspace.dynamics_requested.connect(func(): _open_settings("dynamics"))
 	_workspace.settings_requested.connect(func(): _open_settings("settings"))
@@ -305,11 +307,27 @@ func _request_close(action: String) -> void:
 
 
 ## 退出或登出前先把本地记录收口：写不进去就静默忽略，不提示、不拦截、不改变退出流程。
+func _flush_workspace_drafts() -> void:
+	if is_instance_valid(_workspace):
+		_workspace.flush_drafts()
+
+
+func _workspace_losses() -> Array[String]:
+	if not is_instance_valid(_workspace):
+		return []
+	var warnings: Array[String] = []
+	for item in _workspace.loss_warnings():
+		warnings.append(str(item))
+	return warnings
+
+
 func _request_persisted_close(action: String) -> void:
 	if _closing or not is_instance_valid(_chat):
 		_finish_close(action)
 		return
 	_closing = true
+	if is_instance_valid(_workspace):
+		_workspace.flush_drafts()
 	_chat.prepare_close()
 	await _chat.close_persistence()
 	_closing = false

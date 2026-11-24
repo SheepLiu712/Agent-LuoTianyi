@@ -3,6 +3,8 @@
 [ext_resource type="Script" path="res://src/ui/model_page.gd" id="1_model"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="3_decision"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_refresh.svg" id="refresh_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_lock.svg" id="lock_icon"]
 
 [node name="ModelPage" type="MarginContainer"]
 layout_mode = 2
@@ -13,7 +15,7 @@ script = ExtResource("1_model")
 [node name="Column" type="VBoxContainer" parent="."]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 16
+theme_override_constants/separation = 12
 
 [node name="Header" type="HBoxContainer" parent="Column"]
 layout_mode = 2
@@ -22,23 +24,46 @@ theme_override_constants/separation = 12
 [node name="Title" type="Label" parent="Column/Header"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_type_variation = &"SettingsPageTitle"
-text = "LLM 模型设置"
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 21
+text = "模型配置"
 
 [node name="RefreshTypes" type="Button" parent="Column/Header"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 theme_type_variation = &"SettingsButton"
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
+theme_override_font_sizes/font_size = 13
 text = "刷新需求列表"
+icon = ExtResource("refresh_icon")
 
-[node name="Description" type="Label" parent="Column"]
+[node name="SecurityRow" type="HBoxContainer" parent="Column"]
 layout_mode = 2
-text = "服务端只规定每类调用需要的模型和能力。服务商、Base URL、模型和 Key 由你配置，Key 不会上传到服务器。"
+theme_override_constants/separation = 6
+
+[node name="LockIcon" type="TextureRect" parent="Column/SecurityRow"]
+modulate = Color(0.133333, 0.545098, 0.329412, 1)
+custom_minimum_size = Vector2(14, 14)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("lock_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Description" type="Label" parent="Column/SecurityRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "API Key 仅保存在本机，不会上传到服务器。"
 autowrap_mode = 3
 
 [node name="Status" type="Label" parent="Column"]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
 theme_type_variation = &"SettingsHelpText"
 autowrap_mode = 3
@@ -46,7 +71,7 @@ autowrap_mode = 3
 [node name="Cards" type="VBoxContainer" parent="Column"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 12
 
 [node name="PlainDialog" parent="." instance=ExtResource("3_decision")]
 unique_name_in_owner = true

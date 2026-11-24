@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://rmw8x3ftxi1" path="res://src/application.gd" id="1_app"]
 [ext_resource type="Theme" uid="uid://dxbfy2n125n1p" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="Decision"]
-[ext_resource type="PackedScene" path="res://scenes/ui/components/window_chrome.tscn" id="WindowChrome"]
+[ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="WindowChrome"]
 [ext_resource type="Resource" path="res://resources/platform/decoder.tres" id="isolation_decoder"]
 [ext_resource type="Resource" path="res://resources/platform/encryption.tres" id="isolation_password_encryption"]
 [ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
@@ -68,9 +68,12 @@ offset_left = 120.0
 offset_top = 3.0
 offset_right = -24.0
 theme_type_variation = &"AccountNotice"
-text = "本次登录有效，但本地登录状态未能保存或清除。下次可能需要输入密码，请查看日志。"
+text = "本次登录有效，但未能记住本机登录状态，下次需重新输入密码。"
 autowrap_mode = 3
 
-[node name="Chrome" parent="." unique_id=582216013 instance=ExtResource("WindowChrome")]
+[node name="Chrome" type="Control" parent="." unique_id=582216013]
 unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+script = ExtResource("WindowChrome")
 login_mode = true

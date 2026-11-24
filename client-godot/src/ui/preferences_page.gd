@@ -1,5 +1,6 @@
 extends Control
 ## 相处偏好页：保存失败走错误弹窗；加载失败用不挡输入的浮层说明如何重试。
+signal dirty_changed
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 var _controller: Node
 var _fields: Dictionary = {}
@@ -61,6 +62,11 @@ func _initialize() -> void:
 func is_dirty() -> bool:
 	return _controller != null and _controller.get_state().dirty
 
+
+func discard_changes() -> void:
+	if _controller != null and _controller.has_method("discard"):
+		_controller.discard()
+
 func is_data_settled() -> bool:
 	return _controller != null and _controller.get_state().phase not in ["idle","loading"]
 
@@ -78,6 +84,7 @@ func _edit() -> void:
 	for key in _selector_values:
 		fields[key] = _selector_values[key]
 	_controller.edit(fields)
+	dirty_changed.emit()
 
 func _update(state: Dictionary) -> void:
 	_refreshing = true
@@ -87,6 +94,7 @@ func _update(state: Dictionary) -> void:
 	_refreshing = false
 	_update_presets(state)
 	_update_notice(state)
+	dirty_changed.emit()
 
 func _apply_field(key: String, state: Dictionary) -> void:
 	var value: String = state.fields.get(key,"")
@@ -113,6 +121,7 @@ func save_changes() -> Dictionary:
 	if not is_dirty(): return {"ok":true,"results":[]}
 	await _controller.save()
 	var state: Dictionary = _controller.get_state()
+	dirty_changed.emit()
 	return {"ok":not state.dirty,"results":[{"section":"preferences","id":"相处模式","ok":not state.dirty,"code":state.code}]}
 
 func _update_presets(state: Dictionary) -> void:

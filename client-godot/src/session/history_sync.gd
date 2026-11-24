@@ -427,9 +427,9 @@ func _valid_row(row: Variant) -> bool:
 		return false
 	if not str(row.get("source", "")) in ["agent", "user", "system"]:
 		return false
-	if not str(row.get("type", "")) in ["text", "image", "sing", "cmd"]:
+	if not str(row.get("type", "")) in ["text", "image", "sing", "cmd", "audio", "call", "voice_call"]:
 		return false
-	if str(row.get("type")) == "image":
+	if str(row.get("type")) in ["image", "audio", "call", "voice_call"]:
 		return true
 	return row.get("content") is String
 

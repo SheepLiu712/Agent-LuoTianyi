@@ -3,7 +3,7 @@
 [ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
 [ext_resource type="Script" path="res://src/ui/image_window.gd" id="script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
-[ext_resource type="PackedScene" path="res://scenes/ui/components/window_chrome.tscn" id="window_chrome"]
+[ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="window_chrome"]
 [ext_resource type="Shader" path="res://assets/ui/image_backdrop.gdshader" id="backdrop_shader"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_backdrop"]
@@ -139,5 +139,8 @@ layout_mode = 2
 theme_type_variation = &"SettingsButton"
 text = "关闭"
 
-[node name="Chrome" parent="." instance=ExtResource("window_chrome")]
+[node name="Chrome" type="Control" parent="."]
 unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+script = ExtResource("window_chrome")

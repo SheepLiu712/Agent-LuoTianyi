@@ -6,7 +6,8 @@ signal delivery_action(action: String)
 const USER_ICON := preload("res://assets/ui/user_icon.png")
 const TIANYI_ICON := preload("res://assets/ui/tianyi_icon.png")
 const AudioRow = preload("res://scenes/ui/chat/message_audio.tscn")
-const ErrorDialog = preload("res://src/ui/error_dialog.gd")
+const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 const IMAGE_PREVIEW_MAX := 250.0
 ## 新状态机不再产生 uncertain；failed 必须保留可见并提供重试/删除。
 const HIDDEN_STATUSES: Array[String] = []
@@ -87,6 +88,7 @@ func _ready() -> void:
 		if _picture.texture != null: image_opened.emit(_picture.texture))
 	_retry_button.pressed.connect(func(): delivery_action.emit("retry"))
 	_delete_button.pressed.connect(func(): delivery_action.emit("delete"))
+	UiMotion.bind_interactive_cursors(self)
 	resized.connect(_queue_layout)
 	_text.theme_changed.connect(_queue_layout)
 	_bubble.theme_changed.connect(_queue_layout)
@@ -246,7 +248,7 @@ func _apply_image_state(state: Dictionary, next_size: Vector2i) -> void:
 	_image_button.disabled = state.status in ["idle","loading"]
 	_image_button.text = {"idle":"加载图片…","loading":"正在下载图片…","ready":"打开原图","error":"重试"}.get(state.status,"")
 	if state.status == "error" and previous_status != "error":
-		ErrorDialog.present(self, "图片未加载，点击重试。")
+		ToastOverlay.present_in(self, "图片未加载，可点击重试。", "warning", 2.5, _ui_style)
 	if state.status == "ready":
 		var preview_size := _fixed_preview_size()
 		if preview_size != Vector2.ZERO:

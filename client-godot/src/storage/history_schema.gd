@@ -2,12 +2,13 @@ extends RefCounted
 ## 单一职责：集中持有聊天与动态库的 SQL 文本、结构契约与版本标识。
 ## 这里只有常量与纯函数：不建立连接、不读写文件、不依赖其它模块。
 ##
-## 本地库是「可重建缓存 + 在途发送队列」：没有旧版本迁移，
-## 文件头不是 (application_id, 100) 时由仓储层整库物理删除后重建。
+## 本地库是「可重建缓存 + 在途发送队列」。
+## v100 原地升级媒体类型约束，保留聊天、在途队列与动态；
+## 其它不兼容版本沿用仓储层重建缓存的约定。
 
 ## 0x4C544859 == "LTHY"
 const APPLICATION_ID := 1280591961
-const VERSION := 100
+const VERSION := 101
 
 ## 顺序有硬约束：auto_vacuum 必须最先执行，早于任何会初始化数据库头的 PRAGMA。
 const PRAGMAS := [
@@ -25,7 +26,7 @@ CREATE TABLE messages (
   id TEXT PRIMARY KEY,
   server_index INTEGER NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('user','agent','system')),
-  kind TEXT NOT NULL CHECK(kind IN ('text','image','sing','cmd')),
+  kind TEXT NOT NULL CHECK(kind IN ('text','image','sing','cmd','audio','call','voice_call')),
   content TEXT NOT NULL DEFAULT '',
   sent_ts_ms INTEGER NOT NULL,
   created_at_ms INTEGER NOT NULL
@@ -36,7 +37,7 @@ CREATE TABLE local_messages (
   id TEXT PRIMARY KEY,
   local_seq INTEGER NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('user','agent','system')),
-  kind TEXT NOT NULL CHECK(kind IN ('text','image','sing','cmd')),
+  kind TEXT NOT NULL CHECK(kind IN ('text','image','sing','cmd','audio','call','voice_call')),
   content TEXT NOT NULL DEFAULT '',
   sent_ts_ms INTEGER NOT NULL,
   state TEXT NOT NULL CHECK(state IN

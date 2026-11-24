@@ -9,6 +9,8 @@ var _geometry: Resource
 var _settings_factory: Callable
 var _dynamics_factory: Callable
 var _chat_dirty: Callable
+var _chat_flush: Callable
+var _chat_losses: Callable
 var _logger: RefCounted
 var _windows: Dictionary = {}
 var _starters: Dictionary = {}
@@ -17,7 +19,7 @@ var _action := ""
 var _waiting_save := false
 var _disposed := false
 
-func _init(host: Control, dialog: Window, images: Node, geometry: Resource, settings_factory: Callable, dynamics_factory: Callable, chat_dirty: Callable, logger: RefCounted = null) -> void:
+func _init(host: Control, dialog: Window, images: Node, geometry: Resource, settings_factory: Callable, dynamics_factory: Callable, chat_dirty: Callable, logger: RefCounted = null, chat_flush: Callable = Callable(), chat_losses: Callable = Callable()) -> void:
 	_host = host
 	_dialog = dialog
 	_images = images
@@ -25,6 +27,8 @@ func _init(host: Control, dialog: Window, images: Node, geometry: Resource, sett
 	_settings_factory = settings_factory
 	_dynamics_factory = dynamics_factory
 	_chat_dirty = chat_dirty
+	_chat_flush = chat_flush
+	_chat_losses = chat_losses
 	_logger = logger
 	_dialog.confirmed.connect(_confirmed)
 	_dialog.canceled.connect(_cancel)
@@ -101,7 +105,8 @@ func request_close(action: String) -> void:
 				_waiting_save = false
 				request_close(_action),CONNECT_ONE_SHOT)
 		return
-	var drafts := _collect_drafts()
+	_flush_drafts()
+	var drafts := _collect_losses()
 	_action = action
 	if drafts.is_empty() and action != "logout":
 		_confirmed()
@@ -125,6 +130,7 @@ func _cancel() -> void:
 	_return_dialog()
 
 func close_all() -> void:
+	_flush_drafts()
 	_return_dialog()
 	_images.close()
 	_log("runtime", "all", "close", "success", 0, "close_all")
@@ -149,26 +155,57 @@ func dispose() -> void:
 	_settings_factory = Callable()
 	_dynamics_factory = Callable()
 	_chat_dirty = Callable()
+	_chat_flush = Callable()
+	_chat_losses = Callable()
 
-func _collect_drafts() -> Array[String]:
+func _flush_drafts() -> void:
+	if _chat_flush.is_valid():
+		_chat_flush.call()
+	for window in _windows.values():
+		if is_instance_valid(window) and window.has_method("flush_drafts"):
+			window.flush_drafts()
+
+
+func _collect_losses() -> Array[String]:
 	var drafts: Array[String] = []
-	if _chat_dirty.call(): drafts.append("聊天输入中的未发送文字或图片")
+	_append_chat_losses(drafts)
 	for key in _windows:
 		var window = _windows[key]
-		if is_instance_valid(window) and window.is_dirty():
-			drafts.append("设置中的未保存修改" if key == "settings" else "动态发布或评论草稿")
+		if is_instance_valid(window):
+			_append_window_losses(drafts, key, window)
 	return drafts
+
+
+func _append_chat_losses(drafts: Array[String]) -> void:
+	if _chat_losses.is_valid():
+		for item in _chat_losses.call():
+			drafts.append(str(item))
+	elif _chat_dirty.is_valid() and _chat_dirty.call():
+		drafts.append("聊天输入中的未发送文字或图片")
+
+
+func _append_window_losses(drafts: Array[String], key: String, window: Variant) -> void:
+	if window.has_method("loss_warnings"):
+		for item in window.loss_warnings():
+			drafts.append(str(item))
+	elif window.is_dirty():
+		drafts.append("设置中的未保存修改" if key == "settings" else "动态发布或评论草稿")
 
 func _show_close_dialog(action: String, settings: Variant, drafts: Array[String]) -> void:
 	_log("runtime", "main", "close_dialog", "success", 0, action)
 	_dialog.hide()
 	var owner: Node = settings if action == "logout" and is_instance_valid(settings) else _host
 	if _dialog.get_parent() != owner: _dialog.reparent(owner)
-	_dialog.title = "退出应用前请确认" if action == "exit" else "退出登录前请确认"
-	if drafts.is_empty():
-		_dialog.dialog_text = "将结束本机登录。聊天记录和已保存的设置不会删除；未提交的内容不会自动保存。"
+	if action == "logout":
+		_dialog.title = "退出登录"
+		_dialog.ok_button_text = "是"
+		_dialog.cancel_button_text = "否"
+		_dialog.dialog_text = "是否退出登录？" if drafts.is_empty() else "是否退出登录？\n\n以下内容尚未提交，退出后将丢失：\n• " + "\n• ".join(drafts)
 	else:
-		_dialog.dialog_text = "以下内容尚未提交：\n• " + "\n• ".join(drafts) + "\n不会自动保存或发送。"
+		_dialog.title = "退出应用前请确认"
+		_dialog.ok_button_text = "放弃并继续"
+		_dialog.cancel_button_text = "返回继续编辑"
+		_dialog.dialog_text = "以下内容尚未提交，退出后将丢失：\n• " + "\n• ".join(drafts)
 	_dialog.popup_centered()
 	_dialog.get_cancel_button().grab_focus()
 

@@ -14,6 +14,10 @@ const RADIUS_FLAT := 8
 const RADIUS_CRYSTAL := 12
 const RADIUS_DROPDOWN_FLAT := 6
 const RADIUS_DROPDOWN_CRYSTAL := 8
+const RADIUS_NESTED_FLAT := 6
+const RADIUS_NESTED_CRYSTAL := 8
+const RADIUS_LOGIN_FLAT := 16
+const RADIUS_LOGIN_CRYSTAL := 20
 
 const ICON_SIZE := 20
 
@@ -28,60 +32,77 @@ const ACCENT_SOFT := Color("e6f6ff")
 const ACCENT_TINT_SELECTED := Color("d9f1ff")
 
 const INK_PRIMARY := Color("304553")
+const INK_PRIMARY_PRESSED := Color("1e303b")
 const INK_SECONDARY := Color("4f6775")
-const INK_MUTED := Color("6b8290")
-const INK_PLACEHOLDER := Color("8299a6")
-const INK_DISABLED := Color("9aabb5")
+const INK_MUTED := Color("526775")
+const INK_PLACEHOLDER := Color("5f7583")
+const INK_DISABLED := Color("6d7f8a")
 const INK_ON_ACCENT := Color("ffffff")
 
 const SELECTION_BG := Color("0078d7")
 const SELECTION_FG := Color("ffffff")
 
 # Surfaces & Borders
-const WINDOW_BG_FLAT := Color(0.953, 0.976, 0.992, 1.0)
+const WINDOW_BG_FLAT := Color("f2f8fc")
 const WINDOW_BG_CRYSTAL := Color(0.922, 0.961, 0.992, 1.0)
 const SURFACE_WHITE := Color(1.0, 1.0, 1.0, 1.0)
 const SURFACE_CARD := Color(0.984, 0.994, 1.0, 1.0)
 const SURFACE_SUBTLE := Color(0.945, 0.973, 0.988, 1.0)
 const SURFACE_DISABLED := Color(0.929, 0.945, 0.957, 1.0)
 
-const BORDER_FLAT := Color(0.84, 0.90, 0.95, 0.92)
+const BORDER_FLAT := Color("dbe7f0")
 const BORDER_SUBTLE := Color(0.863, 0.910, 0.949, 1.0)
+const BORDER_DROPDOWN_FLAT := Color(0.776, 0.827, 0.867, 1.0)
 const BORDER_CRYSTAL := Color(0.72, 0.88, 1.0, 0.58)
 const BORDER_CRYSTAL_SOFT := Color(0.72, 0.88, 1.0, 0.45)
+const BORDER_CRYSTAL_POST := Color(0.72, 0.88, 1.0, 0.50)
+const BORDER_CRYSTAL_INPUT := Color(0.72, 0.88, 1.0, 0.62)
+const BORDER_CRYSTAL_SELECTED := Color(0.4, 0.8, 1.0, 0.9)
 
 # Chat Surfaces & Workspace Chrome
-const NAV_RAIL_BG_FLAT := Color(0.941, 0.965, 0.980, 1.0)
+const NAV_RAIL_BG_FLAT := Color("e8f2f8")
 const NAV_RAIL_BG_CRYSTAL := Color(0.940, 0.975, 1.0, 0.65)
-const NAV_RAIL_BORDER_FLAT := Color(0.878, 0.914, 0.941, 1.0)
+const NAV_RAIL_BORDER_FLAT := Color("dbe7f0")
 const NAV_RAIL_BORDER_CRYSTAL := Color(1.0, 1.0, 1.0, 0.70)
-const BACKDROP_START_FLAT := Color(0.965, 0.976, 0.988, 1.0)
-const BACKDROP_END_FLAT := Color(0.965, 0.976, 0.988, 1.0)
+const NAV_HOVER_RGB := Color("dfecf5")
+const NAV_PRESSED_RGB := Color("d9f1ff")
+const BACKDROP_START_FLAT := Color("f2f8fc")
+const BACKDROP_END_FLAT := Color("f2f8fc")
 const BACKDROP_START_CRYSTAL := Color(0.84, 0.94, 1.0, 1.0)
 const BACKDROP_END_CRYSTAL := Color(0.93, 0.975, 1.0, 1.0)
-const CHAT_SURFACE_CRYSTAL := Color(1.0, 1.0, 1.0, 0.82)
-const CHAT_COMPOSER_CRYSTAL := Color(1.0, 1.0, 1.0, 0.45)
+const CHAT_SURFACE_CRYSTAL := Color(1.0, 1.0, 1.0, 0.84)
+const CHAT_COMPOSER_CRYSTAL := Color(1.0, 1.0, 1.0, 0.82)
 const AVATAR_HEADING_FLAT := Color(1.0, 1.0, 1.0, 0.94)
 const AVATAR_HEADING_CRYSTAL := Color(1.0, 1.0, 1.0, 0.82)
 const AVATAR_RESET_STATES := {
-	"normal": Color(1.0, 1.0, 1.0, 0.94),
+	"normal": Color(1.0, 1.0, 1.0, 1.0),
 	"hover": Color(0.94, 0.98, 1.0, 1.0),
 	"pressed": Color(0.86, 0.95, 1.0, 1.0),
 }
+
+# Login Tokens
+const LOGIN_SURFACE_COLOR := Color("f2f8fc")
+const LOGIN_AVATAR_BORDER := Color(0.4, 0.8, 1.0, 0.8)
+const LOGIN_AVATAR_SHADOW := Color(0.4, 0.8, 1.0, 0.25)
+const LOGIN_DIALOG_SHADOW := Color(0.063, 0.157, 0.227, 0.20)
+const LOGIN_ACTION_SHADOW := Color(0.20, 0.65, 0.95, 0.28)
+const LOGIN_POPUP_BORDER_FLAT := Color(0.776, 0.827, 0.867, 1.0)
+const LOGIN_POPUP_BORDER_CRYSTAL := Color(0.4, 0.8, 1.0, 0.5)
 
 # Chat Bubbles
 const BUBBLE_OWN_FLAT := Color(0.80, 0.92, 1.0, 1.0)
 const BUBBLE_OTHER_FLAT := Color(0.945, 0.969, 0.984, 1.0)
 const BUBBLE_OWN_CRYSTAL := Color(0.863, 0.949, 1.0, 0.74)
-const BUBBLE_OTHER_CRYSTAL := Color(1.0, 1.0, 1.0, 0.75)
+const BUBBLE_OTHER_CRYSTAL := Color(1.0, 1.0, 1.0, 0.78)
 const TIME_CHIP_FLAT := Color(0.93, 0.95, 0.97, 1.0)
-const TIME_CHIP_CRYSTAL := Color(0.91, 0.95, 0.98, 0.72)
+const TIME_CHIP_CRYSTAL := Color(0.91, 0.95, 0.98, 0.82)
 
 # Shadows
 const SHADOW_CARD := Color(0.10, 0.25, 0.40, 0.08)
 const SHADOW_BUBBLE := Color(0.12, 0.28, 0.42, 0.08)
 const SHADOW_DIALOG := Color(0.063, 0.157, 0.227, 0.16)
 const SHADOW_ACTION := Color(0.063, 0.157, 0.227, 0.10)
+const SHADOW_ICON := Color(0.063, 0.157, 0.227, 0.06)
 const SHADOW_CLEAR := Color(0.0, 0.0, 0.0, 0.0)
 
 # Semantic Status & Toasts
@@ -94,7 +115,7 @@ const TOAST_COLORS := {
 }
 
 const STATUS_PALETTES := {
-	"muted": {"text": Color(0.42, 0.5, 0.56, 1), "bg": Color(0.968, 0.98, 0.988, 1), "border": Color(0.86, 0.905, 0.94, 1)},
+	"muted": {"text": Color("526775"), "bg": Color(0.968, 0.98, 0.988, 1), "border": Color(0.86, 0.905, 0.94, 1)},
 	"info": {"text": Color(0.117647, 0.407843, 0.6, 1), "bg": Color(0.945, 0.982, 1.0, 1), "border": Color(0.62, 0.86, 0.98, 0.95)},
 	"progress": {"text": Color(0.117647, 0.407843, 0.6, 1), "bg": Color(0.945, 0.982, 1.0, 1), "border": Color(0.4, 0.8, 1.0, 0.95)},
 	"success": {"text": Color(0.117647, 0.431373, 0.286275, 1), "bg": Color(0.94, 0.992, 0.96, 1), "border": Color(0.46, 0.79, 0.6, 0.9)},
@@ -111,7 +132,7 @@ const RING_WARNING := Color(0.91, 0.62, 0.24, 1.0)
 const RING_DANGER := Color(0.82, 0.34, 0.34, 1.0)
 
 const WAVE_BAR_ACTIVE := ACCENT
-const WAVE_BAR_INACTIVE := Color("9eb6c4")
+const WAVE_BAR_INACTIVE := Color("6f8999")
 const WAVE_PLAYHEAD := Color(0.08, 0.46, 0.68, 1.0)
 
 
@@ -121,6 +142,14 @@ static func surface_radius(crystal: bool) -> int:
 
 static func dropdown_item_radius(crystal: bool) -> int:
 	return RADIUS_DROPDOWN_CRYSTAL if crystal else RADIUS_DROPDOWN_FLAT
+
+
+static func inner_radius(outer_radius: int, padding: int) -> int:
+	return maxi(4, outer_radius - padding)
+
+
+static func nested_radius(crystal: bool) -> int:
+	return RADIUS_NESTED_CRYSTAL if crystal else RADIUS_NESTED_FLAT
 
 
 static func icon_path(name: String, emoji: bool) -> String:

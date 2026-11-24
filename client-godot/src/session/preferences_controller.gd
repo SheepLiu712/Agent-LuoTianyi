@@ -43,6 +43,14 @@ func edit(fields: Dictionary) -> void:
 			_state.fields[key] = fields[key]
 	_state.dirty = _state.fields != _baseline
 	_notify()
+
+
+func discard() -> void:
+	if _state.phase != "ready":
+		return
+	_state.fields = _baseline.duplicate(true)
+	_state.dirty = false
+	_notify()
 func save() -> void:
 	if not _state.can_save:
 		return

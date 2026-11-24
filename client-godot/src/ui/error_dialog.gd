@@ -5,6 +5,7 @@ const SCENE_PATH := "res://scenes/ui/components/error_dialog.tscn"
 const LoginStyle = preload("res://src/ui/login_style.gd")
 const ModalStack = preload("res://src/ui/modal_stack.gd")
 const ModalWindowLayout = preload("res://src/ui/modal_window_layout.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 const MAX_QUEUE := 8
 const DEDUPE_MS := 3000
 const COMPACT_MIN_HEIGHT := 128
@@ -54,6 +55,7 @@ func _ready() -> void:
 	add_to_group("error_dialog")
 	_confirm_button.pressed.connect(_dismiss)
 	close_requested.connect(_dismiss)
+	UiMotion.bind_interactive_cursors(self)
 
 
 func apply_login_style(enabled: bool, crystal: bool = false) -> void:

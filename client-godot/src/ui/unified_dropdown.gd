@@ -2,8 +2,8 @@ extends Button
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 ## 共享的稳定 ID 选择器/动作菜单；弹层细节不对外暴露。
 signal activated(id: String)
-const ItemScene = preload("res://scenes/ui/components/dropdown_item.tscn")
-const SeparatorScene = preload("res://scenes/ui/components/dropdown_separator.tscn")
+const DropdownItem = preload("res://src/ui/dropdown_item.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 const DEFAULT_VARIATION := &"DropdownItem"
 const SELECTED_VARIATION := &"DropdownItemSelected"
 @export var show_selected_label := true
@@ -28,6 +28,7 @@ var _hidden_focus_style: StyleBoxEmpty
 
 func _ready() -> void:
 	get_window().gui_embed_subwindows = true
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_popup.window_input.connect(_key_input)
 	_popup.visibility_changed.connect(_sync_open_state)
 	_trigger = preload("res://src/ui/popup_trigger.gd").new(self,_popup)
@@ -98,9 +99,10 @@ func _build() -> void:
 	_buttons.clear()
 	for item in _items:
 		if item.get("separator",false):
-			_rows.add_child(SeparatorScene.instantiate())
+			_rows.add_child(HSeparator.new())
 			continue
-		var row = ItemScene.instantiate()
+		var row := DropdownItem.new()
+		row.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		row.setup(item)
 		row.gui_input.connect(_key_input)
 		row.pressed.connect(func(): _activate(item.id))
@@ -132,6 +134,7 @@ func open_menu() -> void:
 	_popup.content_scale_factor = 1.0
 	_set_focus_visible(false)
 	_popup.popup(Rect2i(Vector2i(clampi(origin.x, shadow, maxi(shadow, int(available.x) - width - shadow)), y), Vector2i(width,height)))
+	UiMotion.reveal_overlay(_scroll, Vector2(0.5, 1.0 if y < origin.y else 0.0), 4.0 if y < origin.y else -4.0, 0.16)
 	_focus_menu_items()
 func _label(id: String) -> String:
 	for item in _items:

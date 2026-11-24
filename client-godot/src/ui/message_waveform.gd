@@ -1,7 +1,9 @@
-extends HBoxContainer
+extends Control
 ## Audio waveform visualizer driven by normalized amplitude samples and playback progress.
 
 const Tokens = preload("res://src/ui/design_tokens.gd")
+const MAX_BARS := 24
+const BAR_WIDTH := 2.0
 
 @export var played_color := Tokens.WAVE_BAR_ACTIVE
 @export var remaining_color := Tokens.WAVE_BAR_INACTIVE
@@ -9,27 +11,33 @@ const Tokens = preload("res://src/ui/design_tokens.gd")
 var values := PackedFloat32Array():
 	set(value):
 		values = value
-		_refresh()
+		queue_redraw()
 var progress := 0.0:
 	set(value):
 		progress = value
-		_refresh()
+		queue_redraw()
 
 
 func _ready() -> void:
-	resized.connect(_refresh)
-	_refresh()
+	resized.connect(queue_redraw)
+	queue_redraw()
 
 
-func _refresh() -> void:
-	if not is_node_ready():
+func bar_count() -> int:
+	return mini(values.size(), MAX_BARS)
+
+
+func bar_color(index: int, count: int) -> Color:
+	return played_color if count > 0 and float(index) / float(count) < progress else remaining_color
+
+
+func _draw() -> void:
+	var count := bar_count()
+	if count <= 0 or size.x <= 0.0 or size.y <= 0.0:
 		return
-	var count := mini(values.size(), get_child_count())
-	for index in get_child_count():
-		var slot := get_child(index) as Control
-		slot.visible = index < count
-		if index >= count:
-			continue
-		var bar := slot.get_node("Bar") as ColorRect
-		bar.custom_minimum_size.y = maxf(2.0, clampf(values[index], 0.0, 1.0) * size.y)
-		bar.color = played_color if float(index) / float(count) < progress else remaining_color
+	var slot_width := size.x / float(count)
+	for index in count:
+		var bar_height := maxf(2.0, clampf(values[index], 0.0, 1.0) * size.y)
+		var x := slot_width * float(index) + (slot_width - BAR_WIDTH) * 0.5
+		var y := (size.y - bar_height) * 0.5
+		draw_rect(Rect2(x, y, BAR_WIDTH, bar_height), bar_color(index, count))

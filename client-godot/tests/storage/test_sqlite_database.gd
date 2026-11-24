@@ -3,6 +3,7 @@ extends SceneTree
 
 const Database = preload("res://src/storage/sqlite_history_database.gd")
 const MessageTime = preload("res://src/domain/message_time.gd")
+const Schema = preload("res://src/storage/history_schema.gd")
 
 var failures: Array[String] = []
 var _root := ""
@@ -30,6 +31,7 @@ func run() -> void:
 	_case_stale_scope()
 	_case_config_rebuild()
 	_case_explicit_reset()
+	_case_media_schema_migration()
 	_case_reset_legacy()
 	_case_reset_orphans()
 	_case_repair_metadata()
@@ -87,7 +89,7 @@ func _case_install() -> void:
 	var scope := _scope("a")
 	var database := _open(scope)
 	check(int(_row(database, "PRAGMA auto_vacuum")["auto_vacuum"]) == 2, "auto_vacuum is incremental")
-	check(int(_row(database, "PRAGMA user_version")["user_version"]) == 100, "schema version is 100")
+	check(int(_row(database, "PRAGMA user_version")["user_version"]) == 101, "schema version is 101")
 	check(int(_row(database, "PRAGMA application_id")["application_id"]) == 1280591961, "application id is LTHY")
 	check(str(_row(database, "PRAGMA journal_mode")["journal_mode"]).to_lower() == "wal", "journal is WAL")
 	check(int(_row(database, "PRAGMA foreign_keys")["foreign_keys"]) == 1, "foreign keys are on")
@@ -413,6 +415,53 @@ func _case_explicit_reset() -> void:
 	database.close()
 
 
+## v100 库升级只放宽媒体类型约束，聊天与待发队列必须原样保留。
+func _case_media_schema_migration() -> void:
+	var scope := _scope("7")
+	var directory := _root.path_join(scope)
+	DirAccess.make_dir_recursive_absolute(directory)
+	var path := directory.path_join("history.db")
+	var v100_tables: String = Schema.CREATE_SCHEMA.replace(
+		"'text','image','sing','cmd','audio','call','voice_call'", "'text','image','sing','cmd'")
+	var raw: Object = ClassDB.instantiate("SQLite")
+	raw.path = path
+	raw.open_db()
+	raw.query("PRAGMA auto_vacuum=INCREMENTAL")
+	raw.query("PRAGMA application_id=1280591961")
+	raw.query("PRAGMA journal_mode=WAL")
+	for sql in Schema.statements(v100_tables):
+		raw.query(sql)
+	raw.query("INSERT INTO sync_state(id,scope_key,next_end,baseline_index,revision) VALUES(1,'%s',30,29,1)" % scope)
+	raw.query("INSERT INTO messages(id,server_index,role,kind,content,sent_ts_ms,created_at_ms) " +
+		"VALUES('old-text',0,'user','text','hello',1000,1000)")
+	raw.query("INSERT INTO local_messages(id,local_seq,role,kind,content,sent_ts_ms,state,error_code," +
+		"stream_complete,payload_json,attempts,created_at_ms,updated_at_ms) " +
+		"VALUES('pending-1',1,'user','text','queued',1000,'pending','',1,'',0,1000,1000)")
+	raw.query("PRAGMA user_version=100")
+	raw.close_db()
+
+	var database = Database.new()
+	var opened: Dictionary = database.open(_root, scope)
+	check(opened.ok, "v100 cache migrates in place (%s)" % opened.code)
+	check(int(_row(database, "PRAGMA user_version")["user_version"]) == 101, "migration bumps schema to 101")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM messages WHERE id='old-text'")["count"]) == 1,
+		"server history survives the migration")
+	check(int(_row(database, "SELECT COUNT(*) AS count FROM local_messages WHERE id='pending-1'")["count"]) == 1,
+		"pending sends survive the migration")
+	var media: Dictionary = _execute(database, "save_page", scope, {
+		"page": {"start_index": 10, "history": [
+			{"uuid": "voice-1", "source": "user", "type": "audio", "content": "[语音消息]",
+				"timestamp": "2026-09-19 10:00:00", "duration_ms": 1200},
+			{"uuid": "call-1", "source": "user", "type": "call", "content": "[语音通话] 00:05",
+				"timestamp": "2026-09-19 10:00:01", "call_id": "call-1", "outcome": "connected",
+				"active_duration_ms": 5000},
+		]},
+		"context": {"direction": "catchup"},
+	})
+	check(media.ok, "migrated schema accepts media rows (%s)" % media.code)
+	database.close()
+
+
 func _recovery_files(directory: String) -> Array:
 	return Array(DirAccess.get_files_at(directory)).filter(func(name): return str(name).contains(".recovery-"))
 
@@ -441,13 +490,13 @@ func _case_reset_legacy() -> void:
 		check(not FileAccess.file_exists(path + suffix), "legacy %s is removed" % suffix)
 	var opened: Dictionary = database.open(_root, scope)
 	check(opened.ok, "legacy cache is rebuilt (%s)" % opened.code)
-	check(int(_row(database, "PRAGMA user_version")["user_version"]) == 100, "rebuilt cache has version 100")
+	check(int(_row(database, "PRAGMA user_version")["user_version"]) == 101, "rebuilt cache has version 101")
 	check(int(_row(database, "SELECT COUNT(*) AS count FROM messages")["count"]) == 0, "legacy rows are not migrated")
 	var columns: Array = database._access.column_names("messages")
 	check(columns.has("server_index") and columns.has("sent_ts_ms"), "rebuilt table uses the new columns")
 	database.close()
 	var header := _header(path)
-	check(int(header.application_id) == 1280591961 and int(header.version) == 100, "file header advertises the new cache")
+	check(int(header.application_id) == 1280591961 and int(header.version) == 101, "file header advertises the new cache")
 
 
 ## 主库不存在时，残留 sidecar/备份也不能与新库配对。

@@ -1,20 +1,168 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://src/ui/log_window.gd" id="1_script"]
+[ext_resource type="Script" path="res://src/ui/toggle_switch.gd" id="2_toggle"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/components/unified_dropdown.tscn" id="3_dropdown"]
-[ext_resource type="PackedScene" path="res://scenes/ui/components/window_chrome.tscn" id="window_chrome"]
+[ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="window_chrome"]
 [ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
 [ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_search.svg" id="search_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_copy.svg" id="copy_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_export.svg" id="export_icon"]
 
 [sub_resource type="SystemFont" id="SystemFont_mono"]
 font_names = PackedStringArray("Cascadia Mono", "Consolas", "Microsoft YaHei UI")
+
+[sub_resource type="StyleBoxFlat" id="LogShell"]
+content_margin_left = 16.0
+content_margin_top = 14.0
+content_margin_right = 16.0
+content_margin_bottom = 14.0
+bg_color = Color(0.94902, 0.972549, 0.988235, 1)
+
+[sub_resource type="StyleBoxFlat" id="RunsChipNormal"]
+content_margin_left = 10.0
+content_margin_top = 4.0
+content_margin_right = 10.0
+content_margin_bottom = 4.0
+bg_color = Color(0.913725, 0.94902, 0.972549, 1)
+corner_radius_top_left = 99
+corner_radius_top_right = 99
+corner_radius_bottom_right = 99
+corner_radius_bottom_left = 99
+
+[sub_resource type="StyleBoxFlat" id="RunsChipHover"]
+content_margin_left = 10.0
+content_margin_top = 4.0
+content_margin_right = 10.0
+content_margin_bottom = 4.0
+bg_color = Color(0.862745, 0.917647, 0.956863, 1)
+corner_radius_top_left = 99
+corner_radius_top_right = 99
+corner_radius_bottom_right = 99
+corner_radius_bottom_left = 99
+
+[sub_resource type="StyleBoxFlat" id="SearchFrameStyle"]
+content_margin_left = 12.0
+content_margin_top = 0.0
+content_margin_right = 12.0
+content_margin_bottom = 0.0
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxEmpty" id="SearchInputEmpty"]
+
+[sub_resource type="StyleBoxFlat" id="CompactDropNormal"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="CompactDropHover"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.94902, 0.976471, 0.996078, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.560784, 0.843137, 0.960784, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="TableCardStyle"]
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="TableHeaderStyle"]
+content_margin_left = 14.0
+content_margin_top = 0.0
+content_margin_right = 14.0
+content_margin_bottom = 0.0
+bg_color = Color(0.933333, 0.960784, 0.980392, 1)
+border_width_bottom = 1
+border_color = Color(0.901961, 0.933333, 0.956863, 1)
+
+[sub_resource type="StyleBoxFlat" id="ChipInfoStyle"]
+content_margin_left = 8.0
+content_margin_top = 3.0
+content_margin_right = 8.0
+content_margin_bottom = 3.0
+bg_color = Color(0.890196, 0.952941, 0.988235, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="ChipWarnStyle"]
+content_margin_left = 8.0
+content_margin_top = 3.0
+content_margin_right = 8.0
+content_margin_bottom = 3.0
+bg_color = Color(1, 0.945098, 0.85098, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="ChipErrorStyle"]
+content_margin_left = 8.0
+content_margin_top = 3.0
+content_margin_right = 8.0
+content_margin_bottom = 3.0
+bg_color = Color(0.992157, 0.901961, 0.901961, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="ChipDebugStyle"]
+content_margin_left = 8.0
+content_margin_top = 3.0
+content_margin_right = 8.0
+content_margin_bottom = 3.0
+bg_color = Color(0.933333, 0.945098, 0.952941, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
 
 [node name="LogWindow" type="Window"]
 size = Vector2i(960, 620)
 visible = false
 transient = false
-min_size = Vector2i(660, 400)
+min_size = Vector2i(760, 480)
 force_native = true
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
@@ -27,90 +175,310 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_type_variation = &"WindowShellSurface"
+theme_override_styles/panel = SubResource("LogShell")
 
 [node name="Column" type="VBoxContainer" parent="Panel"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 10
 
-[node name="Filters" type="HFlowContainer" parent="Panel/Column"]
+[node name="TitleRow" type="HBoxContainer" parent="Panel/Column"]
 layout_mode = 2
-theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 8
+theme_override_constants/separation = 10
 
-[node name="RunsDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
+[node name="Title" type="Label" parent="Panel/Column/TitleRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 17
+text = "客户端日志"
+
+[node name="RunsDropdown" parent="Panel/Column/TitleRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(220, 40)
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_vertical = 4
+clip_text = false
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+theme_override_styles/normal = SubResource("RunsChipNormal")
+theme_override_styles/hover = SubResource("RunsChipHover")
+theme_override_styles/pressed = SubResource("RunsChipHover")
+
+[node name="Spacer" type="Control" parent="Panel/Column/TitleRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+mouse_filter = 2
 
-[node name="CategoryDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
+[node name="ChipInfo" type="Button" parent="Panel/Column/TitleRow"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.070588, 0.376471, 0.568627, 1)
+theme_override_colors/font_pressed_color = Color(0.070588, 0.376471, 0.568627, 1)
+theme_override_colors/font_hover_color = Color(0.070588, 0.376471, 0.568627, 1)
+theme_override_colors/font_hover_pressed_color = Color(0.070588, 0.376471, 0.568627, 1)
+theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = SubResource("SystemFont_mono")
+theme_override_styles/normal = SubResource("ChipInfoStyle")
+theme_override_styles/hover = SubResource("ChipInfoStyle")
+theme_override_styles/pressed = SubResource("ChipInfoStyle")
+theme_override_styles/hover_pressed = SubResource("ChipInfoStyle")
+toggle_mode = true
+button_pressed = true
+text = "INFO 0"
 
-[node name="LevelDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
+[node name="ChipWarn" type="Button" parent="Panel/Column/TitleRow"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.560784, 0.309804, 0, 1)
+theme_override_colors/font_pressed_color = Color(0.560784, 0.309804, 0, 1)
+theme_override_colors/font_hover_color = Color(0.560784, 0.309804, 0, 1)
+theme_override_colors/font_hover_pressed_color = Color(0.560784, 0.309804, 0, 1)
+theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = SubResource("SystemFont_mono")
+theme_override_styles/normal = SubResource("ChipWarnStyle")
+theme_override_styles/hover = SubResource("ChipWarnStyle")
+theme_override_styles/pressed = SubResource("ChipWarnStyle")
+theme_override_styles/hover_pressed = SubResource("ChipWarnStyle")
+toggle_mode = true
+button_pressed = true
+text = "WARN 0"
 
-[node name="ModuleDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
+[node name="ChipError" type="Button" parent="Panel/Column/TitleRow"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.705882, 0.184314, 0.184314, 1)
+theme_override_colors/font_pressed_color = Color(0.705882, 0.184314, 0.184314, 1)
+theme_override_colors/font_hover_color = Color(0.705882, 0.184314, 0.184314, 1)
+theme_override_colors/font_hover_pressed_color = Color(0.705882, 0.184314, 0.184314, 1)
+theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = SubResource("SystemFont_mono")
+theme_override_styles/normal = SubResource("ChipErrorStyle")
+theme_override_styles/hover = SubResource("ChipErrorStyle")
+theme_override_styles/pressed = SubResource("ChipErrorStyle")
+theme_override_styles/hover_pressed = SubResource("ChipErrorStyle")
+toggle_mode = true
+button_pressed = true
+text = "ERROR 0"
 
-[node name="OriginDropdown" parent="Panel/Column/Filters" instance=ExtResource("3_dropdown")]
+[node name="ChipDebug" type="Button" parent="Panel/Column/TitleRow"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.321569, 0.376471, 0.411765, 1)
+theme_override_colors/font_pressed_color = Color(0.321569, 0.376471, 0.411765, 1)
+theme_override_colors/font_hover_color = Color(0.321569, 0.376471, 0.411765, 1)
+theme_override_colors/font_hover_pressed_color = Color(0.321569, 0.376471, 0.411765, 1)
+theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = SubResource("SystemFont_mono")
+theme_override_styles/normal = SubResource("ChipDebugStyle")
+theme_override_styles/hover = SubResource("ChipDebugStyle")
+theme_override_styles/pressed = SubResource("ChipDebugStyle")
+theme_override_styles/hover_pressed = SubResource("ChipDebugStyle")
+toggle_mode = true
+button_pressed = true
+text = "DEBUG 0"
 
-[node name="Search" type="LineEdit" parent="Panel/Column"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
-layout_mode = 2
-placeholder_text = "搜索时间、活动或错误码"
-
-[node name="Text" type="RichTextLabel" parent="Panel/Column"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_type_variation = &"TerminalSurface"
-theme_override_colors/default_color = Color(0.8392157, 0.8980392, 0.93333334, 1)
-theme_override_fonts/normal_font = SubResource("SystemFont_mono")
-theme_override_font_sizes/normal_font_size = 14
-selection_enabled = true
-
-[node name="Actions" type="HBoxContainer" parent="Panel/Column"]
+[node name="Toolbar" type="HBoxContainer" parent="Panel/Column"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Follow" type="CheckBox" parent="Panel/Column/Actions"]
+[node name="SearchFrame" type="PanelContainer" parent="Panel/Column/Toolbar"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("SearchFrameStyle")
+
+[node name="SearchRow" type="HBoxContainer" parent="Panel/Column/Toolbar/SearchFrame"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SearchIcon" type="TextureRect" parent="Panel/Column/Toolbar/SearchFrame/SearchRow"]
+modulate = Color(0.321569, 0.392157, 0.439216, 1)
+custom_minimum_size = Vector2(16, 16)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("search_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Search" type="LineEdit" parent="Panel/Column/Toolbar/SearchFrame/SearchRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_colors/font_placeholder_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("SearchInputEmpty")
+theme_override_styles/focus = SubResource("SearchInputEmpty")
+theme_override_styles/read_only = SubResource("SearchInputEmpty")
+placeholder_text = "搜索事件、trace_id 或错误码"
+
+[node name="CategoryDropdown" parent="Panel/Column/Toolbar" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(124, 36)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("CompactDropNormal")
+theme_override_styles/hover = SubResource("CompactDropHover")
+theme_override_styles/pressed = SubResource("CompactDropHover")
+
+[node name="ModuleDropdown" parent="Panel/Column/Toolbar" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(124, 36)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("CompactDropNormal")
+theme_override_styles/hover = SubResource("CompactDropHover")
+theme_override_styles/pressed = SubResource("CompactDropHover")
+
+[node name="OriginDropdown" parent="Panel/Column/Toolbar" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(124, 36)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("CompactDropNormal")
+theme_override_styles/hover = SubResource("CompactDropHover")
+theme_override_styles/pressed = SubResource("CompactDropHover")
+
+[node name="TableCard" type="PanelContainer" parent="Panel/Column"]
+clip_children = 2
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("TableCardStyle")
+
+[node name="TableColumn" type="VBoxContainer" parent="Panel/Column/TableCard"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="TableHeader" type="PanelContainer" parent="Panel/Column/TableCard/TableColumn"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+theme_override_styles/panel = SubResource("TableHeaderStyle")
+
+[node name="HeaderRow" type="HBoxContainer" parent="Panel/Column/TableCard/TableColumn/TableHeader"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ColTime" type="Label" parent="Panel/Column/TableCard/TableColumn/TableHeader/HeaderRow"]
+custom_minimum_size = Vector2(104, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+text = "时间"
+
+[node name="ColLevel" type="Label" parent="Panel/Column/TableCard/TableColumn/TableHeader/HeaderRow"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+text = "级别"
+
+[node name="ColCategory" type="Label" parent="Panel/Column/TableCard/TableColumn/TableHeader/HeaderRow"]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+text = "类别"
+
+[node name="ColModule" type="Label" parent="Panel/Column/TableCard/TableColumn/TableHeader/HeaderRow"]
+custom_minimum_size = Vector2(78, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+text = "模块"
+
+[node name="ColEvent" type="Label" parent="Panel/Column/TableCard/TableColumn/TableHeader/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+text = "事件"
+
+[node name="LogScroll" type="ScrollContainer" parent="Panel/Column/TableCard/TableColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="LogRows" type="VBoxContainer" parent="Panel/Column/TableCard/TableColumn/LogScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
+
+[node name="BottomBar" type="HBoxContainer" parent="Panel/Column"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Status" type="Label" parent="Panel/Column/BottomBar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "共 0 条 · 显示 0 条"
+
+[node name="Dropped" type="Label" parent="Panel/Column/BottomBar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+text = "丢弃 0（容量 0 / 队列 0）"
+
+[node name="BottomSpacer" type="Control" parent="Panel/Column/BottomBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Follow" type="BaseButton" parent="Panel/Column/BottomBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 20)
+layout_mode = 2
+size_flags_vertical = 4
+toggle_mode = true
 button_pressed = true
+script = ExtResource("2_toggle")
+
+[node name="FollowLabel" type="Label" parent="Panel/Column/BottomBar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
 text = "跟随最新"
 
-[node name="CopyButton" type="Button" parent="Panel/Column/Actions"]
+[node name="FollowGap" type="Control" parent="Panel/Column/BottomBar"]
+custom_minimum_size = Vector2(4, 0)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="CopyButton" type="Button" parent="Panel/Column/BottomBar"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 theme_type_variation = &"SettingsButton"
-text = "复制显示记录"
-
-[node name="ExportButton" type="Button" parent="Panel/Column/Actions"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
-layout_mode = 2
-theme_type_variation = &"SettingsButton"
-text = "导出完整诊断 ZIP"
-
-[node name="StatusBanner" type="PanelContainer" parent="Panel/Column"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_type_variation = &"StatusBannerSurface"
-
-[node name="Status" type="Label" parent="Panel/Column/StatusBanner"]
-unique_name_in_owner = true
-layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
 theme_override_font_sizes/font_size = 13
-autowrap_mode = 3
+text = "复制"
+icon = ExtResource("copy_icon")
+
+[node name="ExportButton" type="Button" parent="Panel/Column/BottomBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+tooltip_text = "筛选只影响显示，导出包含整次启动的完整日志。"
+theme_type_variation = &"SettingsPrimaryButton"
+theme_override_colors/font_color = Color(0.054902, 0.164706, 0.231373, 1)
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
+theme_override_font_sizes/font_size = 13
+text = "导出诊断 ZIP"
+icon = ExtResource("export_icon")
 
 [node name="Picker" type="FileDialog" parent="."]
 unique_name_in_owner = true
@@ -119,5 +487,8 @@ access = 2
 filters = PackedStringArray("*.zip ; ZIP 诊断包")
 use_native_dialog = true
 
-[node name="Chrome" parent="." instance=ExtResource("window_chrome")]
+[node name="Chrome" type="Control" parent="."]
 unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+script = ExtResource("window_chrome")

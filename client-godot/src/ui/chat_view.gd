@@ -7,17 +7,30 @@ signal attachment_cleared
 ## 松手才发一次：应用层据此写盘，拖动过程中不碰磁盘。
 signal composer_height_changed(height: float)
 const Attachment = preload("res://src/media/image_attachment.gd")
+const DraftAutosave = preload("res://src/ui/draft_autosave.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const StatusBanner = preload("res://src/ui/status_banner.gd")
+const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 const DecisionDialog = preload("res://scenes/ui/components/decision_dialog.tscn")
-const MIN_COMPOSER_HEIGHT := 48.0
+const MIN_COMPOSER_HEIGHT := 44.0
 const MAX_COMPOSER_HEIGHT := 320.0
 const AUTO_MAX_HEIGHT := 128.0
-const COMPOSER_LINE_HEIGHT := 24.0
-const COMPOSER_PADDING := 24.0
+const COMPOSER_LINE_HEIGHT := 22.0
+const COMPOSER_PADDING := 22.0
+const DOT_ONLINE := Color("228b54")
+const DOT_BUSY := Color("c77d18")
+const DOT_THINKING := Color("1278ad")
+const DOT_OFFLINE := Color("8da0ad")
 var _attachment: Dictionary = {}
+var _drafts: RefCounted
+var _scope := ""
+var _text_draft: RefCounted
+var _attachment_save_failed := false
 @onready var _margin: MarginContainer = %Margin
+@onready var _status_dot: Panel = %StatusDot
 @onready var _status: Label = %Status
+@onready var _composer_box: PanelContainer = %ComposerBox
 @onready var _history_status: Label = %HistoryStatus
 @onready var _history_retry: Button = %HistoryRetry
 @onready var _history_skip: Button = %HistorySkip
@@ -35,7 +48,9 @@ var _initialized := false
 var _ui_style: RefCounted
 var _card_style: StyleBoxFlat
 var _composer_style: StyleBoxFlat
-var _input_style: StyleBoxFlat
+var _composer_box_style: StyleBoxFlat
+var _status_dot_style: StyleBoxFlat
+var _input_focused := false
 var _auto_height := MIN_COMPOSER_HEIGHT
 var _manual_height := 0.0
 ## 未读目标不在当前窗口时，等下一页历史到达后再试一次；用户显式操作会取消。
@@ -46,6 +61,7 @@ var _announced_messages: Dictionary = {}
 var _auth_announced := false
 var _history_incomplete_announced := false
 var _refresh_queued := false
+var _volume_trigger: RefCounted
 
 func set_ui_style(style: RefCounted) -> void:
 	if _ui_style != null and _ui_style.style_changed.is_connected(_apply_ui_style):
@@ -60,12 +76,18 @@ func _apply_ui_style() -> void:
 	if _ui_style == null or not is_node_ready():
 		return
 	_ui_style.apply_chat_card_style(_card_style)
+	if _card_style != null and not _ui_style.is_crystal():
+		_card_style.set_corner_radius_all(10)
 	_ui_style.apply_composer_style(_composer_style)
-	_ui_style.apply_input_style(_input_style)
+	_ui_style.apply_composer_box_style(_composer_box_style)
+	_send_button.add_theme_constant_override("icon_max_width", 16)
+	_sync_composer_focus_border()
 	_sync_history_banner(_last_history_phase)
 
-func setup(session: Node) -> void:
+func setup(session: Node, drafts: RefCounted = null, scope: String = "") -> void:
 	_session = session
+	_drafts = drafts
+	_scope = scope
 	if is_node_ready():
 		_initialize()
 
@@ -73,14 +95,28 @@ func is_dirty() -> bool:
 	return not _input.text.strip_edges().is_empty() or not _attachment.is_empty()
 
 func _ready() -> void:
+	_volume_trigger = preload("res://src/ui/popup_trigger.gd").new(%VolumeButton, %VolumePopup)
+	_send_button.add_theme_constant_override("icon_max_width", 16)
 	%VolumeButton.pressed.connect(_show_volume)
 	_card_style = get_node("Background").get_theme_stylebox("panel").duplicate() as StyleBoxFlat
 	get_node("Background").add_theme_stylebox_override("panel", _card_style)
 	_composer_style = _composer.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
 	_composer.add_theme_stylebox_override("panel", _composer_style)
-	_input_style = _input.get_theme_stylebox("normal").duplicate() as StyleBoxFlat
-	_input.add_theme_stylebox_override("normal", _input_style)
+	_composer_box_style = _composer_box.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	_composer_box.add_theme_stylebox_override("panel", _composer_box_style)
+	_status_dot_style = _status_dot.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	_status_dot.add_theme_stylebox_override("panel", _status_dot_style)
+	_input.focus_entered.connect(func(): _input_focused = true; _sync_composer_focus_border())
+	_input.focus_exited.connect(func(): _input_focused = false; _sync_composer_focus_border())
 	_apply_ui_style()
+	UiMotion.bind_interactive_cursors(self)
+	UiMotion.bind_tactile_press(_send_button, func(): return _ui_style)
+	UiMotion.bind_tactile_press(_latest, func(): return _ui_style)
+	UiMotion.bind_tactile_press(_unread, func(): return _ui_style)
+	for prompt in %QuickPrompts.get_children():
+		if prompt is Button:
+			UiMotion.bind_tactile_press(prompt, func(): return _ui_style)
+			prompt.pressed.connect(func(): _fill_quick_prompt(prompt.text))
 	resized.connect(_update_density)
 	_update_density()
 	_composer.drag_delta.connect(_on_resize_drag)
@@ -122,6 +158,7 @@ func _initialize() -> void:
 	%PreviewImage.pressed.connect(_preview_attachment)
 	%RemoveImage.pressed.connect(func(): _clear_attachment(true))
 	_input.text_changed.connect(_on_input_text_changed)
+	_restore_drafts()
 	_volume.value = _session.get_audio_state().volume
 	_volume.value_changed.connect(func(value): _session.set_volume(value))
 	_send_button.pressed.connect(_send)
@@ -134,23 +171,31 @@ func _initialize() -> void:
 	get_window().focus_entered.connect(_report_reading)
 
 func _show_volume() -> void:
+	if _volume_trigger != null and not _volume_trigger.should_open():
+		return
 	var popup: PopupPanel = %VolumePopup
 	var button: Button = %VolumeButton
 	var popup_position := button.get_global_rect().position if get_viewport().gui_embed_subwindows else button.get_screen_position()
 	popup_position.y -= popup.size.y + 8
 	popup.popup(Rect2i(Vector2i(popup_position), popup.size))
+	UiMotion.reveal_overlay(popup.get_node("VolumeMargin"), Vector2(0.15, 1.0), 4.0, 0.16, _ui_style)
 
 func _send() -> void:
 	_session.note_read_interaction()
 	_session.set_typing(false)
-	if _input.text.strip_edges().is_empty():
+	var has_text := not _input.text.strip_edges().is_empty()
+	var has_attachment := not _attachment.is_empty()
+	if not has_text and not has_attachment:
 		return
 	if str(_session.get_state().get("phase", "")) in ["idle", "auth_rejected"]:
 		ErrorDialog.present(self, "未连接，消息未发送。")
 		return
-	if not _attachment.is_empty() and not _confirm_attachment(null): return
-	if not _session.send_text(_input.text).is_empty():
+	if has_attachment and not _confirm_attachment(null):
+		return
+	if has_text and not _session.send_text(_input.text).is_empty():
 		_input.clear()
+		if _text_draft != null:
+			_text_draft.clear()
 		_last_error_code = ""
 		_update_auto_height()
 
@@ -195,11 +240,21 @@ func _attach(result: Dictionary) -> void:
 		ErrorDialog.present(self, {"IMAGE_TOO_LARGE":"图片过大，请选择小于 6 MiB 的图片。", "IMAGE_DIMENSIONS":"图片尺寸过大（最多8192像素、1600万像素）。", "IMAGE_FORMAT":"支持 PNG、JPEG、WebP 和 BMP 图片。", "IMAGE_READ_FAILED":"图片无法读取，请检查文件后重试。"}.get(result.code,"图片格式无效或文件已损坏。"))
 		_session.set_image_selecting(false)
 		return
+	_apply_attachment(result)
+	_persist_attachment()
+	if _should_default_preview_image():
+		_preview_attachment()
+
+
+func _apply_attachment(result: Dictionary) -> void:
 	_attachment = result
 	%AttachmentThumbnail.texture = result.texture
 	%AttachmentBar.show()
-	%ImageStatus.text = "图片待发送；关闭预览后仍保留，可查看或移除。"
-	_preview_attachment()
+	%ImageStatus.text = ""
+	%ImageStatus.hide()
+
+func _should_default_preview_image() -> bool:
+	return bool(_ui_style.default_preview_image) if _ui_style != null and "default_preview_image" in _ui_style else true
 
 func _preview_attachment() -> void:
 	if _attachment.is_empty(): return
@@ -223,6 +278,9 @@ func _clear_attachment(canceled: bool) -> void:
 	%AttachmentBar.hide()
 	%ImageStatus.text = ""
 	%ImageStatus.hide()
+	_attachment_save_failed = false
+	if _drafts != null and not _scope.is_empty():
+		_drafts.clear_attachment(_scope, "chat.image")
 	if canceled: _session.set_image_selecting(false)
 	attachment_cleared.emit()
 
@@ -234,17 +292,35 @@ func _schedule_refresh() -> void:
 	_refresh.call_deferred()
 
 
+func _fill_quick_prompt(prompt_text: String) -> void:
+	_input.text = prompt_text
+	_input.grab_focus()
+	_input.set_caret_column(prompt_text.length())
+	_on_input_text_changed()
+	if _text_draft != null:
+		_text_draft.flush()
+
+
 func _refresh() -> void:
 	_refresh_queued = false
 	var retry_unread := _pending_unread_jump
 	var messages: Array[Dictionary] = _session.get_messages_view() if _session.has_method("get_messages_view") else _session.get_messages()
 	_announce_message_failures(messages)
 	_scroll.set_messages(messages)
+	_sync_empty_welcome(messages)
 	_visible_audio(_scroll.get_visible_ids())
 	_apply_reading()
 	if retry_unread and _pending_unread_jump:
 		_pending_unread_jump = false
 		_jump_reading()
+
+
+func _sync_empty_welcome(messages: Array[Dictionary]) -> void:
+	if _session == null or not _session.has_method("get_state"):
+		%EmptyWelcome.visible = messages.is_empty()
+		return
+	var phase := str(_session.get_state().get("history", {}).get("phase", ""))
+	%EmptyWelcome.visible = messages.is_empty() and phase in ["complete", "skipped", "idle", ""]
 
 func _visible_audio(ids: Array[String]) -> void:
 	for id in ids:
@@ -262,15 +338,33 @@ func _to_latest() -> void:
 	_latest.hide()
 	_report_reading.call_deferred()
 
+func _sync_composer_focus_border() -> void:
+	if _composer_box_style == null:
+		return
+	var crystal: bool = _ui_style != null and _ui_style.is_crystal()
+	var normal_border := Color(0.72, 0.88, 1.0, 0.62) if crystal else Color("dbe7f0")
+	_composer_box_style.border_color = Color("66ccff") if _input_focused else normal_border
+	_composer_box_style.set_border_width_all(2 if _input_focused else 1)
+
+
 func _state_changed(state: Dictionary) -> void:
 	_update_history_status(state)
-	_status.text = {"idle":"未连接", "connecting":"正在连接…", "authenticating":"正在验证账户…",
-		"ready":"已连接", "reconnecting":"连接已断开，正在重试", "auth_rejected":"未连接"}.get(state.phase, "")
+	var phase := str(state.get("phase", ""))
+	_status.text = {"idle":"离线", "connecting":"正在连接…", "authenticating":"正在验证账户…",
+		"ready":"在线", "reconnecting":"连接已断开，正在重试", "auth_rejected":"离线"}.get(phase, "")
+	var dot_color := DOT_OFFLINE
+	if phase == "ready":
+		dot_color = DOT_ONLINE
+	elif phase in ["connecting", "authenticating", "reconnecting"]:
+		dot_color = DOT_BUSY
 	if state.thinking:
 		_status.text = "天依正在想一想…"
+		dot_color = DOT_THINKING
 	if state.get("speaking", false):
 		_status.text += " · 正在播放语音"
-	if state.phase == "auth_rejected":
+	if _status_dot_style != null:
+		_status_dot_style.bg_color = dot_color
+	if phase == "auth_rejected":
 		if not _auth_announced:
 			_auth_announced = true
 			ErrorDialog.present(self, "聊天凭据已失效，请重新登录。")
@@ -359,14 +453,79 @@ func _delivery_action(id: String, action: String) -> void:
 	elif action == "delete":
 		_session.delete_message(id)
 
+func flush_drafts() -> bool:
+	var ok := true
+	if _text_draft != null:
+		ok = bool(_text_draft.flush()) and ok
+	if not _attachment.is_empty() and _attachment_save_failed:
+		_persist_attachment()
+		ok = not _attachment_save_failed and ok
+	return ok
+
+
+func loss_warnings() -> Array[String]:
+	var warnings: Array[String] = []
+	if _drafts == null or _scope.is_empty():
+		if is_dirty():
+			warnings.append("聊天输入中的未发送文字或图片")
+		return warnings
+	if not _input.text.strip_edges().is_empty() and _text_draft != null and _text_draft.has_failure():
+		warnings.append("聊天草稿保存失败")
+	if not _attachment.is_empty() and _attachment_save_failed:
+		warnings.append("待发送图片保存失败")
+	return warnings
+
+
+func _restore_drafts() -> void:
+	if _drafts == null or _scope.is_empty():
+		return
+	_text_draft = DraftAutosave.new()
+	_text_draft.bind(_input, _drafts, _scope, "chat.text")
+	if not _input.text.is_empty():
+		_input.set_caret_column(_input.text.length())
+		_update_auto_height()
+	var stored: Dictionary = _drafts.read_attachment(_scope, "chat.image")
+	if stored.is_empty():
+		return
+	if not bool(stored.get("ok", false)):
+		_drafts.clear_attachment(_scope, "chat.image")
+		_show_image_restore_error()
+		return
+	var bytes: PackedByteArray = stored.get("bytes", PackedByteArray())
+	var result: Dictionary = Attachment.from_bytes(bytes, str(stored.get("mime", "")))
+	if bool(result.get("ok", false)):
+		_apply_attachment(result)
+	else:
+		_drafts.clear_attachment(_scope, "chat.image")
+		_show_image_restore_error()
+
+
+func _persist_attachment() -> void:
+	if _drafts == null or _scope.is_empty() or _attachment.is_empty():
+		return
+	var bytes: PackedByteArray = _attachment.get("bytes", PackedByteArray())
+	var error := int(_drafts.write_attachment(_scope, "chat.image", bytes, str(_attachment.get("mime", ""))))
+	_attachment_save_failed = error != OK
+
+
+func _show_image_restore_error() -> void:
+	%ImageStatus.text = "上次未发送的图片无法恢复。"
+	%ImageStatus.show()
+	_session.set_image_selecting(false)
+
+
 func _exit_tree() -> void:
+	flush_drafts()
 	files.cancel()
 
 func _update_density() -> void:
-	_latest.text = "最新" if size.x < 520 else "回到最新"
+	var compact := size.x < 520
+	_latest.text = "最新" if compact else "回到最新"
 	_latest.tooltip_text = "回到最新消息"
-	_unread.text = "未读" if size.x < 520 else "定位未读"
+	_unread.text = "未读" if compact else "定位未读"
 	_unread.tooltip_text = "定位未读消息"
+	if is_instance_valid(%Hint):
+		%Hint.text = "Enter 发送" if compact else "Enter 发送 · Shift+Enter 换行"
 
 func _update_history_status(state: Dictionary) -> void:
 	var history: Dictionary = state.get("history",{"phase":"idle","count":0})
@@ -388,10 +547,10 @@ func _apply_history_buttons(history: Dictionary, storage_broken: bool, resetting
 
 func _history_status_text(history: Dictionary, storage_broken: bool, resetting: bool) -> String:
 	if resetting:
-		return "正在重建本地历史…"
+		return "正在重建本地缓存…"
 	if storage_broken:
-		return "本地历史不可用（%s）。可重建本地库；旧库会保留为 recovery 文件。" % str(history.get("code", "STORAGE_UNAVAILABLE"))
-	return {"first_loading":"正在同步最近历史；发送的消息将暂时排队。", "first_failed":"", "loading":"后台同步历史 · 已加载 %s 条" % history.count, "failed":"", "skipped":"已跳过本次历史同步。"}.get(history.phase, "")
+		return "本地聊天缓存异常（%s），可尝试重建本地缓存。" % str(history.get("code", "STORAGE_UNAVAILABLE"))
+	return {"first_loading":"正在同步最近聊天记录…", "first_failed":"", "loading":"", "failed":"", "skipped":"已跳过历史同步。"}.get(history.phase, "")
 
 
 func _announce_history_phase(history: Dictionary) -> void:
@@ -400,10 +559,10 @@ func _announce_history_phase(history: Dictionary) -> void:
 		if history.phase == "first_failed":
 			ErrorDialog.present(self, "首批历史加载失败，可重试或跳过。")
 		elif history.phase == "failed":
-			ErrorDialog.present(self, "较早历史加载失败，已加载内容保留。")
+			ToastOverlay.present_in(self, "较早历史加载失败，已加载内容保留。", "warning", 3.5, _ui_style)
 	if history.get("incomplete",false) and not _history_incomplete_announced:
 		_history_incomplete_announced = true
-		ErrorDialog.present(self, "部分历史可能缺失。")
+		ToastOverlay.present_in(self, "部分历史可能缺失。", "warning", 3.5, _ui_style)
 
 
 func _sync_history_banner(phase: String) -> void:

@@ -41,8 +41,7 @@ func _check_application(directory: String) -> void:
 		_check_one_nonmodal_log_window_opens(windows)
 		if windows.size() == 1:
 			var window: Window = windows[0]
-			var texts := window.find_children("*","RichTextLabel",true,false)
-			_check_late_opening_retains_first_startup_entry(texts)
+			_check_late_opening_retains_first_startup_entry(window)
 			open_button.pressed.emit()
 			window.close_requested.emit()
 			check(not window.visible,"close hides log window")
@@ -79,13 +78,18 @@ func _check_viewer(directory: String) -> void:
 	_check_filter_widths(viewer)
 	_check_origin_filter(viewer)
 	logger.record_as("business", "audio_frames_received",{"level":"DEBUG", "frames":42, "phase":"receiving"})
-	var output: RichTextLabel = viewer.find_children("*","RichTextLabel",true,false)[0]
-	check(output.get_parsed_text().contains("42"),"visible window appends live metrics")
+	await process_frame
+	check(_log_text(viewer).contains("audio_frames_received"),"visible window appends live entries")
+	var live_rows: Control = viewer.get_node("%LogRows")
+	var live_row: Node = live_rows.get_child(live_rows.get_child_count() - 1)
+	live_row.set_expanded(true)
+	await process_frame
+	check(_log_text(live_row).contains("42"),"expanded row keeps live metrics")
 	var search: LineEdit = viewer.find_children("*","LineEdit",true,false).filter(func(n): return n.placeholder_text.begins_with("搜索"))[0]
 	search.text = "audio_frames_received"
 	search.text_changed.emit(search.text)
 	await create_timer(0.3).timeout
-	_check_search_filters_display(output)
+	_check_search_filters_display(viewer)
 	check(logger.read_entries().size() == 2,"filter does not discard archive entries")
 	viewer.queue_free()
 	await process_frame
@@ -101,11 +105,10 @@ func _check_render_cap(directory: String) -> void:
 	viewer.open()
 	await process_frame
 	await process_frame
-	var output: RichTextLabel = viewer.find_children("*","RichTextLabel",true,false)[0]
-	var lines: Array = Array(output.get_parsed_text().split("\n")).filter(func(line): return not line.strip_edges().is_empty())
-	check(lines.size() == 1000, "large run renders only the first 1000 matching entries")
+	var rows: Control = viewer.get_node("%LogRows")
+	check(rows.get_child_count() == 500, "large run renders only the newest 500 matching entries")
 	var status: Label = viewer.get_node("%Status")
-	check(status.text.contains("仅显示前 1000"), "render cap is announced in status")
+	check(status.text.contains("显示最新 500 条"), "render cap is announced in status")
 	viewer.queue_free()
 	await process_frame
 	logger.finish()
@@ -120,8 +123,8 @@ func _check_drop_status(directory: String) -> void:
 	viewer.open()
 	await process_frame
 	await process_frame
-	var status: Label = viewer.get_node("%Status")
-	check(status.text.contains("已丢弃") and status.text.contains("容量 2"), "dropped entries are visible in status")
+	var dropped: Label = viewer.get_node("%Dropped")
+	check(dropped.text.contains("丢弃") and dropped.text.contains("容量 2"), "dropped entries are visible in status")
 	viewer.queue_free()
 	await process_frame
 	logger.finish()
@@ -139,8 +142,11 @@ func _cleanup(directory: String) -> void:
 			DirAccess.remove_absolute(directory+"/drops/"+file)
 		DirAccess.remove_absolute(directory+"/drops")
 	DirAccess.remove_absolute(directory)
-func _check_late_opening_retains_first_startup_entry(texts: Variant) -> void:
-	check(texts.size() == 1 and texts[0].get_parsed_text().contains("客户端启动"),"late opening retains first startup entry")
+func _check_late_opening_retains_first_startup_entry(viewer: Variant) -> void:
+	var rows: Control = viewer.get_node("%LogRows")
+	check(rows.get_child_count() >= 1, "late opening renders the first startup entry")
+	if rows.get_child_count() >= 1:
+		check(_log_text(rows.get_child(0)).contains("客户端启动"), "late opening retains first startup entry")
 
 func _check_one_nonmodal_log_window_opens(windows: Variant) -> void:
 	check(windows.size() == 1 and windows[0].visible,"one nonmodal log window opens")
@@ -151,8 +157,15 @@ func _check_engine_warning_captured_with_detail(data: Variant) -> void:
 func _check_application_exit_closes_startup_archive(runs: Variant) -> void:
 	check(runs.size() == 1 and runs[0].closed,"application exit closes startup archive")
 
-func _check_search_filters_display(output: Variant) -> void:
-	check(output.get_parsed_text().contains("audio_frames_received") and not output.get_parsed_text().contains("app_started"),"search filters display")
+func _check_search_filters_display(viewer: Variant) -> void:
+	var text := _log_text(viewer)
+	check(text.contains("audio_frames_received") and not text.contains("app_started"),"search filters display")
+
+func _log_text(root_node: Node) -> String:
+	var parts: Array[String] = []
+	for label in root_node.find_children("*", "RichTextLabel", true, false):
+		parts.append(label.get_parsed_text())
+	return "\n".join(parts)
 
 func _check_filter_widths(viewer: Variant) -> void:
 	for control in viewer.find_children("*","Button",true,false):

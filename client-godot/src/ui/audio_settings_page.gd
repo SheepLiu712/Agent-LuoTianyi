@@ -3,6 +3,7 @@ extends MarginContainer
 const StorageService = preload("res://src/storage/storage_service.gd")
 const MigrationPort = preload("res://src/storage/python_media_migration_port.gd")
 const StatusBanner = preload("res://src/ui/status_banner.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 const SETTINGS_SECTION := "storage"
 const SETTINGS_LAST_SCAN := "last_scan_at"
 const SETTINGS_SNAPSHOT := "usage_snapshot"
@@ -102,6 +103,7 @@ func _reapply_banner_styles() -> void:
 
 
 func _ready() -> void:
+	UiMotion.bind_interactive_cursors(self)
 	%OlderThanDays.custom_minimum_size.y = maxf(%OlderThanDays.custom_minimum_size.y, 40.0)
 	%OlderThanDays.get_line_edit().theme_type_variation = &"SettingsLineEdit"
 	%ClearCache.disabled = not _clear_cache.is_valid()

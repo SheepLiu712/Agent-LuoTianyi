@@ -4,8 +4,92 @@
 [ext_resource type="Resource" path="res://resources/platform/dynamics.tres" id="isolation_settings"]
 [ext_resource type="Script" path="res://src/ui/dynamics_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
-[ext_resource type="PackedScene" path="res://scenes/ui/components/window_chrome.tscn" id="window_chrome"]
+[ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="window_chrome"]
 [ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="Discard"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_check_all.svg" id="check_all_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_refresh.svg" id="refresh_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_edit.svg" id="edit_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_edit.svg" id="empty_edit_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_close.svg" id="close_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_info_circle.svg" id="info_icon"]
+
+[sub_resource type="StyleBoxFlat" id="DynamicsShell"]
+bg_color = Color(0.94902, 0.972549, 0.988235, 1)
+
+[sub_resource type="StyleBoxFlat" id="UnreadChipStyle"]
+content_margin_left = 10.0
+content_margin_top = 3.0
+content_margin_right = 10.0
+content_margin_bottom = 3.0
+bg_color = Color(1, 0.913725, 0.913725, 1)
+corner_radius_top_left = 99
+corner_radius_top_right = 99
+corner_radius_bottom_right = 99
+corner_radius_bottom_left = 99
+
+[sub_resource type="StyleBoxFlat" id="ToolbarGhostNormal"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(1, 1, 1, 0)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="ToolbarGhostHover"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.905882, 0.94902, 0.976471, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="NoticeBannerStyle"]
+content_margin_left = 12.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 4.0
+bg_color = Color(0.909804, 0.960784, 0.996078, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.741176, 0.886275, 0.980392, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="MainCardStyle"]
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="LeftPaneStyle"]
+bg_color = Color(1, 1, 1, 0)
+border_width_right = 1
+border_color = Color(0.929412, 0.94902, 0.964706, 1)
+
+[sub_resource type="StyleBoxEmpty" id="RightPaneStyle"]
+
+[sub_resource type="StyleBoxFlat" id="EmptyCircleStyle"]
+bg_color = Color(0.901961, 0.964706, 1, 1)
+corner_radius_top_left = 36
+corner_radius_top_right = 36
+corner_radius_bottom_right = 36
+corner_radius_bottom_left = 36
 
 [node name="DynamicsWindow" type="Window"]
 title = "天依的动态"
@@ -24,100 +108,294 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_type_variation = &"WindowShellSurface"
+theme_override_styles/panel = SubResource("DynamicsShell")
 
 [node name="Column" type="VBoxContainer" parent="Panel"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 0
 
-[node name="Toolbar" type="HBoxContainer" parent="Panel/Column"]
+[node name="ToolbarMargin" type="MarginContainer" parent="Panel/Column"]
+custom_minimum_size = Vector2(0, 60)
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 0
+
+[node name="Toolbar" type="HBoxContainer" parent="Panel/Column/ToolbarMargin"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Unread" type="Label" parent="Panel/Column/Toolbar"]
-unique_name_in_owner = true
+[node name="Title" type="Label" parent="Panel/Column/ToolbarMargin/Toolbar"]
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.1882353, 0.27058825, 0.3254902, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 19
+text = "天依的动态"
 
-[node name="Publish" type="Button" parent="Panel/Column/Toolbar"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(104, 40)
-layout_mode = 2
-theme_type_variation = &"SettingsPrimaryButton"
-text = "发布动态"
-
-[node name="Refresh" type="Button" parent="Panel/Column/Toolbar"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(88, 40)
-layout_mode = 2
-theme_type_variation = &"SettingsButton"
-text = "刷新"
-
-[node name="ReadAll" type="Button" parent="Panel/Column/Toolbar"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(96, 40)
-layout_mode = 2
-theme_type_variation = &"SettingsButton"
-text = "全部已读"
-
-[node name="NoticeBanner" type="PanelContainer" parent="Panel/Column"]
+[node name="UnreadChip" type="PanelContainer" parent="Panel/Column/ToolbarMargin/Toolbar"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
-theme_type_variation = &"StatusBannerSurface"
+size_flags_vertical = 4
+theme_override_styles/panel = SubResource("UnreadChipStyle")
 
-[node name="Notice" type="Label" parent="Panel/Column/NoticeBanner"]
+[node name="Unread" type="Label" parent="Panel/Column/ToolbarMargin/Toolbar/UnreadChip"]
 unique_name_in_owner = true
 layout_mode = 2
+theme_override_colors/font_color = Color(0.780392, 0.239216, 0.239216, 1)
+theme_override_font_sizes/font_size = 12
+text = "0 条未读"
+
+[node name="Spacer" type="Control" parent="Panel/Column/ToolbarMargin/Toolbar"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="ReadAll" type="Button" parent="Panel/Column/ToolbarMargin/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
 theme_override_font_sizes/font_size = 13
-autowrap_mode = 3
+theme_override_styles/normal = SubResource("ToolbarGhostNormal")
+theme_override_styles/hover = SubResource("ToolbarGhostHover")
+theme_override_styles/pressed = SubResource("ToolbarGhostHover")
+text = "全部已读"
+icon = ExtResource("check_all_icon")
 
-[node name="Split" type="HSplitContainer" parent="Panel/Column"]
+[node name="Refresh" type="Button" parent="Panel/Column/ToolbarMargin/Toolbar"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
-size_flags_vertical = 3
-theme_override_constants/separation = 12
+size_flags_vertical = 4
+theme_type_variation = &"SettingsButton"
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
+theme_override_font_sizes/font_size = 13
+text = "刷新"
+icon = ExtResource("refresh_icon")
 
-[node name="Left" type="VBoxContainer" parent="Panel/Column/Split"]
-custom_minimum_size = Vector2(270, 0)
+[node name="Publish" type="Button" parent="Panel/Column/ToolbarMargin/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SettingsPrimaryButton"
+theme_override_colors/font_color = Color(0.054902, 0.164706, 0.231373, 1)
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
+theme_override_font_sizes/font_size = 13
+text = "发布动态"
+icon = ExtResource("edit_icon")
+
+[node name="NoticeWrap" type="MarginContainer" parent="Panel/Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 12
+
+[node name="NoticeBanner" type="PanelContainer" parent="Panel/Column/NoticeWrap"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_styles/panel = SubResource("NoticeBannerStyle")
+
+[node name="NoticeRow" type="HBoxContainer" parent="Panel/Column/NoticeWrap/NoticeBanner"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ListScroll" type="ScrollContainer" parent="Panel/Column/Split/Left"]
+[node name="NoticeIcon" type="TextureRect" parent="Panel/Column/NoticeWrap/NoticeBanner/NoticeRow"]
+modulate = Color(0.117647, 0.407843, 0.6, 1)
+custom_minimum_size = Vector2(16, 16)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("info_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Notice" type="Label" parent="Panel/Column/NoticeWrap/NoticeBanner/NoticeRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.117647, 0.407843, 0.6, 1)
+theme_override_font_sizes/font_size = 12
+text = "有新的评论尚未同步到本地列表。"
+
+[node name="NoticeRefresh" type="Button" parent="Panel/Column/NoticeWrap/NoticeBanner/NoticeRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"InlineLinkButton"
+theme_override_colors/font_color = Color(0.117647, 0.407843, 0.6, 1)
+theme_override_font_sizes/font_size = 12
+text = "立即刷新"
+
+[node name="Spacer" type="Control" parent="Panel/Column/NoticeWrap/NoticeBanner/NoticeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="NoticeClose" type="Button" parent="Panel/Column/NoticeWrap/NoticeBanner/NoticeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+size_flags_vertical = 4
+tooltip_text = "关闭提示"
+theme_override_colors/icon_normal_color = Color(0.117647, 0.407843, 0.6, 1)
+theme_override_constants/icon_max_width = 14
+theme_override_styles/normal = SubResource("ToolbarGhostNormal")
+theme_override_styles/hover = SubResource("ToolbarGhostHover")
+theme_override_styles/pressed = SubResource("ToolbarGhostHover")
+icon = ExtResource("close_icon")
+icon_alignment = 1
+
+[node name="CardWrap" type="MarginContainer" parent="Panel/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="MainCard" type="PanelContainer" parent="Panel/Column/CardWrap"]
+unique_name_in_owner = true
+clip_children = 2
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("MainCardStyle")
+
+[node name="Split" type="HSplitContainer" parent="Panel/Column/CardWrap/MainCard"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="Left" type="PanelContainer" parent="Panel/Column/CardWrap/MainCard/Split"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("LeftPaneStyle")
+
+[node name="LeftStack" type="Control" parent="Panel/Column/CardWrap/MainCard/Split/Left"]
+layout_mode = 2
+
+[node name="ListScroll" type="ScrollContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 horizontal_scroll_mode = 0
 
-[node name="ListMargin" type="MarginContainer" parent="Panel/Column/Split/Left/ListScroll"]
+[node name="ListMargin" type="MarginContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListScroll"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/margin_right = 8
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
 
-[node name="List" type="VBoxContainer" parent="Panel/Column/Split/Left/ListScroll/ListMargin"]
+[node name="List" type="VBoxContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListScroll/ListMargin"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 12
+theme_override_constants/separation = 6
 
-[node name="Right" type="PanelContainer" parent="Panel/Column/Split"]
+[node name="ListEmptyState" type="CenterContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(330, 0)
-layout_mode = 2
-theme_type_variation = &"DynamicsDetailSurface"
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Empty" type="Label" parent="Panel/Column/Split/Right"]
+[node name="EmptyCol" type="VBoxContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState"]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="CircleWrap" type="CenterContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol"]
+layout_mode = 2
+
+[node name="EmptyCircle" type="PanelContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol/CircleWrap"]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+theme_override_styles/panel = SubResource("EmptyCircleStyle")
+
+[node name="IconCenter" type="CenterContainer" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol/CircleWrap/EmptyCircle"]
+layout_mode = 2
+
+[node name="EmptyIcon" type="TextureRect" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol/CircleWrap/EmptyCircle/IconCenter"]
+modulate = Color(0.4, 0.8, 1, 1)
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+texture = ExtResource("empty_edit_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ListEmptyTitle" type="Label" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(0.41960785, 0.50980395, 0.5647059, 1)
-text = "选择一条动态"
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 15
+text = "还没有动态"
+horizontal_alignment = 1
+
+[node name="ListEmptySubtitle" type="Label" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "天依发布的动态和你的分享都会出现在这里"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="ActionGap" type="Control" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol"]
+custom_minimum_size = Vector2(0, 2)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="ListEmptyAction" type="Button" parent="Panel/Column/CardWrap/MainCard/Split/Left/LeftStack/ListEmptyState/EmptyCol"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(132, 36)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"SettingsPrimaryButton"
+theme_override_colors/font_color = Color(0.054902, 0.164706, 0.231373, 1)
+theme_override_font_sizes/font_size = 13
+text = "发布第一条动态"
+
+[node name="Right" type="PanelContainer" parent="Panel/Column/CardWrap/MainCard/Split"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("RightPaneStyle")
+
+[node name="Empty" type="Label" parent="Panel/Column/CardWrap/MainCard/Split/Right"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 13
+text = "选择左侧的一条动态查看详情"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Chrome" parent="." instance=ExtResource("window_chrome")]
+[node name="Chrome" type="Control" parent="."]
 unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+script = ExtResource("window_chrome")
 
 [node name="DiscardDialog" parent="." instance=ExtResource("Discard")]
 unique_name_in_owner = true

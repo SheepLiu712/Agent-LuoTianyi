@@ -22,6 +22,8 @@ const STATUS_PALETTES := Tokens.STATUS_PALETTES
 
 var ui_style := "flat"
 var icon_style := "svg"
+var reduced_motion := false
+var default_preview_image := true
 var _store: Resource
 var _icon_registry: Array[Dictionary] = []
 var _theme: Theme = preload(THEME_PATH)
@@ -35,33 +37,68 @@ func configure(store: Resource) -> void:
 		var icons: String = str(_store.get_value(SECTION, "icons", "svg"))
 		ui_style = style if style in ["flat", "crystal"] else "flat"
 		icon_style = icons if icons in ["svg", "emoji"] else "svg"
+		reduced_motion = bool(_store.get_value(SECTION, "reduced_motion", false))
+		default_preview_image = bool(_store.get_value(SECTION, "default_preview_image", true))
 	_apply_theme()
 
 
-func save_preferences(style: String, icons: String) -> Error:
+func save_preferences(style: String, icons: String, reduce_motion: Variant = null, preview_image: Variant = null) -> Error:
 	if style not in ["flat", "crystal"] or icons not in ["svg", "emoji"]:
 		return ERR_INVALID_PARAMETER
-	if style == ui_style and icons == icon_style:
+	var next_reduced: bool = reduced_motion if reduce_motion == null else bool(reduce_motion)
+	var next_preview: bool = default_preview_image if preview_image == null else bool(preview_image)
+	if _preferences_unchanged(style, icons, next_reduced, next_preview):
 		return OK
 	if _store == null:
 		return ERR_UNCONFIGURED
-	var old_style: Variant = _store.get_value(SECTION, "style", "flat")
-	var old_icons: Variant = _store.get_value(SECTION, "icons", "svg")
+	var motion_changed := next_reduced != reduced_motion
+	var preview_changed := next_preview != default_preview_image
+	var snapshot := _snapshot_store(motion_changed, preview_changed)
 	var theme_changed := ui_style != style
-	_store.set_value(SECTION, "style", style)
-	_store.set_value(SECTION, "icons", icons)
+	_write_store_preferences(style, icons, next_reduced, motion_changed, next_preview, preview_changed)
 	var error: Error = _store.save_settings()
 	if error != OK:
-		_store.set_value(SECTION, "style", old_style)
-		_store.set_value(SECTION, "icons", old_icons)
+		_restore_store_preferences(snapshot)
 		return error
 	ui_style = style
 	icon_style = icons
+	reduced_motion = next_reduced
+	default_preview_image = next_preview
 	if theme_changed:
 		_apply_theme()
 	_refresh_icons()
 	style_changed.emit()
 	return OK
+
+
+func _preferences_unchanged(style: String, icons: String, next_reduced: bool, next_preview: bool) -> bool:
+	return style == ui_style and icons == icon_style and next_reduced == reduced_motion and next_preview == default_preview_image
+
+
+func _snapshot_store(include_motion: bool, include_preview: bool) -> Dictionary:
+	var snap := {
+		"style": _store.get_value(SECTION, "style", "flat"),
+		"icons": _store.get_value(SECTION, "icons", "svg"),
+	}
+	if include_motion:
+		snap["reduced_motion"] = _store.get_value(SECTION, "reduced_motion", false)
+	if include_preview:
+		snap["default_preview_image"] = _store.get_value(SECTION, "default_preview_image", true)
+	return snap
+
+
+func _write_store_preferences(style: String, icons: String, next_reduced: bool, include_motion: bool, next_preview: bool, include_preview: bool) -> void:
+	_store.set_value(SECTION, "style", style)
+	_store.set_value(SECTION, "icons", icons)
+	if include_motion:
+		_store.set_value(SECTION, "reduced_motion", next_reduced)
+	if include_preview:
+		_store.set_value(SECTION, "default_preview_image", next_preview)
+
+
+func _restore_store_preferences(snapshot: Dictionary) -> void:
+	for key in snapshot:
+		_store.set_value(SECTION, key, snapshot[key])
 
 
 func is_crystal() -> bool:
@@ -70,6 +107,14 @@ func is_crystal() -> bool:
 
 func uses_emoji() -> bool:
 	return icon_style == "emoji"
+
+
+func prefers_reduced_motion() -> bool:
+	return reduced_motion
+
+
+func should_default_preview_image() -> bool:
+	return default_preview_image
 
 
 func apply_view(view: Node, icons: Dictionary = {}) -> void:
@@ -162,22 +207,19 @@ func apply_surface_style(stylebox: StyleBoxFlat) -> void:
 
 
 func apply_post_style(stylebox: StyleBoxFlat, selected: bool) -> void:
-	stylebox.set_corner_radius_all(Tokens.surface_radius(is_crystal()))
-	stylebox.set_border_width_all(2 if selected else 1)
+	stylebox.set_corner_radius_all(8 if is_crystal() else 6)
+	stylebox.set_border_width_all(1)
 	if selected:
-		stylebox.border_color = Color(0.4, 0.8, 1.0, 0.9)
+		stylebox.border_color = Tokens.BORDER_CRYSTAL_SELECTED if is_crystal() else Color("8dd4fa")
 	else:
-		stylebox.border_color = Color(0.72, 0.88, 1.0, 0.5) if is_crystal() else Tokens.BORDER_FLAT
-	var color := stylebox.bg_color
-	color.a = 0.94 if is_crystal() else 1.0
-	stylebox.bg_color = color
-	_apply_shadow(stylebox)
+		stylebox.border_color = Tokens.BORDER_CRYSTAL_POST if is_crystal() else Color(1, 1, 1, 0)
+	_clear_shadow(stylebox)
 
 
 func apply_input_style(stylebox: StyleBoxFlat) -> void:
 	stylebox.set_corner_radius_all(Tokens.surface_radius(is_crystal()))
 	stylebox.set_border_width_all(1)
-	stylebox.border_color = Color(0.72, 0.88, 1.0, 0.62) if is_crystal() else Tokens.BORDER_FLAT
+	stylebox.border_color = Tokens.BORDER_CRYSTAL_INPUT if is_crystal() else Tokens.BORDER_FLAT
 	var color := stylebox.bg_color
 	color.a = 0.90 if is_crystal() else 1.0
 	stylebox.bg_color = color
@@ -198,7 +240,7 @@ func apply_toast_style(stylebox: StyleBoxFlat, kind: String) -> void:
 	var background: Color = palette.get("bg", Color.WHITE)
 	background.a = 0.94 if is_crystal() else 1.0
 	stylebox.bg_color = background
-	stylebox.border_color = palette.get("border", Color(0.18, 0.48, 0.80, 0.9))
+	stylebox.border_color = palette.get("border", Tokens.ACCENT_DEEP)
 	stylebox.set_border_width_all(1)
 
 
@@ -234,25 +276,32 @@ func apply_chat_card_style(stylebox: StyleBoxFlat) -> void:
 		return
 	apply_surface_style(stylebox)
 	stylebox.bg_color = Tokens.CHAT_SURFACE_CRYSTAL if is_crystal() else Tokens.SURFACE_WHITE
-	if is_crystal():
-		stylebox.set_corner_radius_all(0)
-		stylebox.set_border_width_all(0)
+	if not is_crystal():
 		_clear_shadow(stylebox)
 
 
 func apply_composer_style(stylebox: StyleBoxFlat) -> void:
 	if stylebox == null:
 		return
-	stylebox.bg_color = Tokens.CHAT_COMPOSER_CRYSTAL if is_crystal() else Tokens.SURFACE_WHITE
+	stylebox.bg_color = Color(0, 0, 0, 0)
+	stylebox.set_border_width_all(0)
+
+
+func apply_composer_box_style(stylebox: StyleBoxFlat) -> void:
+	if stylebox == null:
+		return
+	stylebox.bg_color = Tokens.CHAT_COMPOSER_CRYSTAL if is_crystal() else Color("f7fbfe")
+	stylebox.set_border_width_all(1)
+	stylebox.border_color = Tokens.BORDER_CRYSTAL_INPUT if is_crystal() else Tokens.BORDER_FLAT
 	stylebox.set_corner_radius_all(Tokens.surface_radius(is_crystal()))
-	stylebox.corner_radius_top_left = 0
-	stylebox.corner_radius_top_right = 0
+	_clear_shadow(stylebox)
 
 
 func _apply_theme() -> void:
 	_theme.set_block_signals(true)
 	_apply_navigation_styles()
 	_apply_panel_themes()
+	_apply_nested_input_styles()
 	_apply_dropdown_styles()
 	_apply_action_styles()
 	_apply_chat_icon_styles()
@@ -261,21 +310,24 @@ func _apply_theme() -> void:
 
 
 func _apply_navigation_styles() -> void:
-	var colors := {
-		"normal": Color(0, 0, 0, 0),
-		"hover": Color(0.87, 0.95, 0.99, 0.72 if is_crystal() else 1.0),
-		"pressed": Color(0.87, 0.945, 0.992, 0.82 if is_crystal() else 1.0),
-	}
+	var hover := Tokens.NAV_HOVER_RGB
+	hover.a = 0.72 if is_crystal() else 1.0
+	var pressed := Tokens.NAV_PRESSED_RGB
+	pressed.a = 0.88 if is_crystal() else 1.0
+	var colors := {"normal": Color(0, 0, 0, 0), "hover": hover, "pressed": pressed, "hover_pressed": pressed}
 	for state in colors:
 		var navigation := _theme.get_stylebox(state, "NavigationButton") as StyleBoxFlat
 		if navigation == null:
 			continue
-		navigation.content_margin_left = SPACE_SM
-		navigation.content_margin_right = SPACE_SM
-		navigation.content_margin_top = SPACE_XS
-		navigation.content_margin_bottom = SPACE_XS
+		navigation.content_margin_left = 6.0
+		navigation.content_margin_right = 6.0
+		navigation.content_margin_top = SPACE_SM
+		navigation.content_margin_bottom = SPACE_SM
 		navigation.set_corner_radius_all(Tokens.surface_radius(is_crystal()))
 		navigation.bg_color = colors[state]
+	var focus := _stylebox_or_null("focus", "NavigationButton")
+	if focus != null:
+		focus.set_corner_radius_all(Tokens.surface_radius(is_crystal()))
 	_theme.set_font_size("font_size", "NavigationButton", 12)
 	_theme.set_constant("h_separation", "NavigationButton", 8)
 
@@ -377,6 +429,15 @@ func _apply_surface_group(property: String, kinds: Array) -> void:
 			apply_surface_style(panel)
 
 
+func _apply_nested_input_styles() -> void:
+	var radius := Tokens.nested_radius(is_crystal())
+	for kind in ["SettingsLineEdit", "SettingsTextEdit"]:
+		for state in ["normal", "read_only", "focus"]:
+			var box := _stylebox_or_null(state, kind)
+			if box != null:
+				box.set_corner_radius_all(radius)
+
+
 func _apply_dropdown_styles() -> void:
 	var trigger_radius := Tokens.surface_radius(is_crystal())
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
@@ -385,9 +446,9 @@ func _apply_dropdown_styles() -> void:
 			trigger.set_corner_radius_all(trigger_radius)
 	var popup := _stylebox_or_null("panel", "DropdownPopup")
 	if popup != null:
-		popup.bg_color = Color(1, 1, 1, 1)
+		popup.bg_color = Tokens.SURFACE_WHITE
 		popup.set_corner_radius_all(trigger_radius)
-		popup.border_color = Tokens.BORDER_CRYSTAL if is_crystal() else Color(0.776, 0.827, 0.867, 1)
+		popup.border_color = Tokens.BORDER_CRYSTAL if is_crystal() else Tokens.BORDER_DROPDOWN_FLAT
 		popup.shadow_color = Tokens.SHADOW_DIALOG
 		popup.shadow_size = 12 if is_crystal() else 8
 		popup.shadow_offset = Vector2(0, 4) if is_crystal() else Vector2(0, 3)
@@ -405,7 +466,7 @@ func _apply_action_styles() -> void:
 			var style := _stylebox_or_null(state, variant)
 			if style != null:
 				apply_action_style(style, state)
-	var link_radius := 8 if is_crystal() else 6
+	var link_radius := Tokens.RADIUS_DROPDOWN_CRYSTAL if is_crystal() else Tokens.RADIUS_DROPDOWN_FLAT
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		var link := _stylebox_or_null(state, "InlineLinkButton")
 		if link != null:
@@ -430,7 +491,7 @@ func _apply_chat_icon_styles() -> void:
 			color.a = (0.84 if state == "pressed" else 0.72) if is_crystal() else 1.0
 			style.bg_color = color
 		if is_crystal() and state in ["hover", "pressed"]:
-			style.shadow_color = Color(0.063, 0.157, 0.227, 0.06)
+			style.shadow_color = Tokens.SHADOW_ICON
 			style.shadow_size = 3
 			style.shadow_offset = Vector2(0, 1)
 		else:
@@ -441,9 +502,9 @@ func _apply_chat_surface() -> void:
 	var chat := _stylebox_or_null("panel", "ChatSurface")
 	if chat == null:
 		return
-	chat.set_corner_radius_all(0 if is_crystal() else Tokens.RADIUS_FLAT)
-	chat.set_border_width_all(0 if is_crystal() else 1)
-	chat.border_color = Tokens.BORDER_FLAT
+	chat.set_corner_radius_all(12 if is_crystal() else 10)
+	chat.set_border_width_all(1)
+	chat.border_color = Tokens.BORDER_CRYSTAL if is_crystal() else Tokens.BORDER_FLAT
 	var color := chat.bg_color
 	color.a = 0.92 if is_crystal() else 1.0
 	chat.bg_color = color
@@ -451,7 +512,7 @@ func _apply_chat_surface() -> void:
 
 
 func _apply_post_group() -> void:
-	for kind in ["normal", "selected"]:
+	for kind in ["normal", "hover", "pressed", "selected", "focus"]:
 		var post := _stylebox_or_null(kind, "DynamicsPost")
 		if post != null:
 			apply_post_style(post, kind == "selected")

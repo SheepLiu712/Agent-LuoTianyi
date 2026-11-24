@@ -12,7 +12,7 @@ func check(ok: bool, label: String) -> void:
 
 func _check_audio_page(window: Window, page: Control, dimensions: Vector2i) -> void:
 	var scroll: ScrollContainer = window.get_node("%Content")
-	var column: Control = page.get_node("Scroll")
+	var column: Control = page.get_node("Column")
 	check(column.size.x <= scroll.size.x + 1, "cache page never overflows horizontally: " + str(dimensions.x))
 	check(page.get_node("%StorageCard").get_global_rect().size.x > 300, "storage card remains readable: " + str(dimensions.x))
 	if DisplayServer.get_name() == "headless":

@@ -18,8 +18,9 @@ func run() -> void:
 	check(workspace.get_node("%Navigation").custom_minimum_size.x == 80,"navigation uses review width")
 	check(workspace.get_node("%DynamicsUnread") != null,"dynamic unread indication remains available")
 	for name in ["NavChat", "NavDynamics", "NavSettings"]:
-		check(workspace.get_node("%" + name).custom_minimum_size == Vector2(64, 64), name + " uses a square footprint")
-	check(workspace.get_node("%Navigation").find_children("*", "TextureRect", true, false).is_empty(), "navigation decorative avatars are removed")
+		check(workspace.get_node("%" + name).custom_minimum_size == Vector2(60, 60), name + " uses a square footprint")
+	check(workspace.get_node_or_null("%NavAvatarButton") != null, "navigation keeps one account avatar entry")
+	check(workspace.get_node("%Navigation").find_children("*", "TextureRect", true, false).size() == 1, "navigation decorative avatars are removed")
 	workspace.free()
 	var chat = load("res://scenes/ui/chat/chat_view.tscn").instantiate()
 	root.add_child(chat)
@@ -29,12 +30,13 @@ func run() -> void:
 		chat.get_node("%Input").text = "未发送草稿"
 		check(chat.is_dirty(),"unsent text participates in exit guard")
 	check(chat.get_node_or_null("%CacheButton") == null,"cache management has moved to settings")
-	check(chat.get_node("%Input").custom_minimum_size.y == 48,"composer starts with a compact input row")
-	check(chat.get_node("%Input").get_parent() == chat.get_node("%Send").get_parent(), "send is beside the input")
+	check(chat.get_node("%Input").custom_minimum_size.y == 44,"composer starts with a compact input row")
+	check(chat.get_node("%Send").get_parent().name == "ToolRow", "send sits in the composer tool row")
 	check(chat.get_node("%ImageButton").get_parent() == chat.get_node("%VolumeButton").get_parent(), "image and volume share the upper toolbar")
 	check(chat.get_node_or_null("%StopVoice") == null, "composer stop voice control is removed")
-	for name in ["ImageButton", "VolumeButton", "Send"]:
+	for name in ["ImageButton", "VolumeButton"]:
 		check(chat.get_node("%" + name).text.is_empty() and chat.get_node("%" + name).icon != null, name + " is icon-only with original artwork")
+	check(chat.get_node("%Send").icon != null and chat.get_node("%Send").text == "发送", "send keeps icon and label")
 	chat.queue_free()
 	await process_frame
 	print("Main navigation: ","PASS" if failures.is_empty() else "FAIL")

@@ -51,7 +51,8 @@ func _check_flat(page: Control) -> void:
 	check(surface != null and surface.bg_color.is_equal_approx(LoginStyle.SURFACE_COLOR), "login page uses pale blue")
 	var avatar_frame := page.find_child("AvatarFrame", true, false) as Control
 	var avatar := avatar_frame.get_theme_stylebox("panel") as StyleBoxFlat if avatar_frame != null else null
-	check(avatar != null and avatar.border_width_left == 2 and avatar.shadow_size == 12, "login avatar uses blue glow")
+	check(avatar != null and avatar.border_width_left == 3 and avatar.shadow_size == 0, "login avatar uses a crisp accent ring")
+	check(avatar != null and avatar.corner_radius_top_left == 56, "login avatar keeps its circular mask")
 	var menu := _box(page, "MenuPopup", "panel")
 	check(menu != null and menu.corner_radius_top_left == 16 and is_equal_approx(menu.shadow_color.a, 0.20), "login menu uses flat login radius")
 	var server_dialog := _child(page, "ServerDialog")

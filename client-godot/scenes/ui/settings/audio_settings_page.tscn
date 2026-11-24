@@ -108,6 +108,7 @@ theme_override_constants/separation = 2
 [node name="UsagePercent" type="Label" parent="Column/StorageCard/Content/UsageFlow/UsageRing/Center/Labels"]
 unique_name_in_owner = true
 layout_mode = 2
+theme_type_variation = &"MonoLabel"
 theme_override_font_sizes/font_size = 28
 text = "--%"
 horizontal_alignment = 1
@@ -274,6 +275,7 @@ text = "选择…"
 
 [node name="MigrationStatusPanel" type="PanelContainer" parent="Column/ImportCard/Content"]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
 theme_type_variation = &"StatusBannerSurface"
 
@@ -281,7 +283,6 @@ theme_type_variation = &"StatusBannerSurface"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 20)
 layout_mode = 2
-text = "尚未选择客户端程序。"
 autowrap_mode = 3
 
 [node name="MigrationActions" type="HBoxContainer" parent="Column/ImportCard/Content"]

@@ -1,8 +1,10 @@
 extends Control
 ## 头像改动立即落盘，所以这一页不参与「保存全部修改」，也不会让窗口变脏。
+signal logout_requested
 const DEFAULT_ICON := preload("res://assets/ui/tianyi_icon.png")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const StatusBanner = preload("res://src/ui/status_banner.gd")
+const UiMotion = preload("res://src/ui/ui_motion.gd")
 const OK_TEXT := "头像已更新。"
 const RESET_TEXT := "已恢复天依头像。"
 const ERROR_TEXT := {
@@ -32,8 +34,10 @@ func set_avatar_source(source: Node) -> void:
 	if is_node_ready(): _sync(source.get_texture())
 
 func _ready() -> void:
+	UiMotion.bind_interactive_cursors(self)
 	_pick.pressed.connect(func(): _dialog.popup_centered_ratio(.6))
 	_reset.pressed.connect(_reset_avatar)
+	%LogoutButton.pressed.connect(func(): logout_requested.emit())
 	_dialog.file_selected.connect(_apply_path)
 	_dialog.canceled.connect(_dialog.hide)
 	_sync(_source.get_texture() if _source != null else null)
