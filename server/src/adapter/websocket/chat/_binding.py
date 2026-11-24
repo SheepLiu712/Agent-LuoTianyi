@@ -10,9 +10,11 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.domain.agent import SinkRejectedError, SinkRejectionCode
 from src.domain.stage import AgentPresentationChanged, CancelDelivery, StageOutput
+from src.utils.task_diagnostics import task_snapshot
 
 from ..connection import OutboundDelivery
 from ._delivery import ConnectionDelivery, create_completion
+from ._diagnostics import ConnectionDiagnostics
 from ._protocol_translate import encode_event
 
 if TYPE_CHECKING:
@@ -23,6 +25,7 @@ class Binding:
     """持有一条连接及其 Stage 绑定，封装输入权限、投递调度和发送完成状态。"""
 
     def __init__(self, user_id: str, connection_id: object, capabilities, config) -> None:
+        self.diagnostics = ConnectionDiagnostics(user_id)
         self._config = config
         self._stage: ChatStage | None = None
         self._generation: int | None = None
@@ -39,9 +42,18 @@ class Binding:
         self.is_closed = False
         self._business_ready = asyncio.Event()
 
+    def diagnostic_snapshot(self) -> dict:
+        return {
+            **self.diagnostics.snapshot(),
+            "closed": self.is_closed,
+            "delivery_task": task_snapshot(self._delivery.task),
+            "control_tasks": [task_snapshot(task) for task in list(self._controls)[:32]],
+        }
+
     def mark_disconnected(self) -> None:
         """标记连接失效并关闭 Outbox，唤醒等待业务就绪的发送者。"""
         self.is_closed = True
+        self.diagnostics.close()
         self.revoke()
         self._outbox._close()
         self._business_ready.set()
