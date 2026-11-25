@@ -21,9 +21,10 @@ func button(view: Node, caption: String) -> void:
 	if caption == "退出登录":
 		view.get_workspace().get_node("%NavSettings").pressed.emit()
 		var settings = view.find_child("SettingsWindow",true,false)
-		check(settings != null and settings.get_node_or_null("%LogoutButton") != null,"logout exists in settings")
-		if settings != null and settings.get_node_or_null("%LogoutButton") != null:
-			settings.get_node("%LogoutButton").pressed.emit()
+		var logout = settings.find_child("LogoutButton",true,false) if settings != null else null
+		check(logout != null,"logout exists in settings")
+		if logout != null:
+			logout.pressed.emit()
 			var dialog = view.find_child("ExitDialog", true, false)
 			if dialog != null and dialog.visible:
 				dialog.get_ok_button().pressed.emit()

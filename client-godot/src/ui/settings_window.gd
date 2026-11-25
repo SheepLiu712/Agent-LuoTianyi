@@ -277,8 +277,12 @@ func _dirty_labels(section_dirty: Dictionary) -> Array[String]:
 	return labels
 
 
+func _can_sync_dirty_state() -> bool:
+	return is_node_ready() and is_inside_tree() and not is_queued_for_deletion() and get_node_or_null("%StylePage") != null and get_node_or_null("%ProfileTab") != null
+
+
 func _sync_dirty_state() -> void:
-	if not is_node_ready():
+	if not _can_sync_dirty_state():
 		return
 	var section_dirty := _dirty_sections()
 	var tabs := _all_tabs()

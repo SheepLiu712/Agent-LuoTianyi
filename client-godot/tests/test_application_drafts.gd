@@ -47,7 +47,7 @@ func _run() -> void:
 	var window = app.find_child("SettingsWindow",true,false)
 	check(window != null,"settings navigation opens unified window")
 	check(window == prewarmed,"settings navigation reuses the prewarmed window")
-	check(window.get_node_or_null("%LogoutButton") is Button,"settings provides logout action")
+	check(_logout_button(window) is Button,"settings provides logout action")
 	if not _require_logout_button(window):
 		app.queue_free()
 		await process_frame
@@ -73,10 +73,10 @@ func _run() -> void:
 	_check_exit_prompt_only_lists_settings(dialog)
 	dialog.get_cancel_button().pressed.emit()
 	_check_cancel_preserves_every_draft(chat, window, draft)
-	window.get_node("%LogoutButton").pressed.emit()
+	_logout_button(window).pressed.emit()
 	_check_logout_waits_for_decision(session, dialog)
 	dialog.get_cancel_button().pressed.emit()
-	window.get_node("%LogoutButton").pressed.emit()
+	_logout_button(window).pressed.emit()
 	dialog.get_ok_button().pressed.emit()
 	await process_frame
 	_step = "first logout"
@@ -119,7 +119,7 @@ func _run() -> void:
 	input.text_changed.emit()
 	window.get_node("%SaveAll").pressed.emit()
 	_check_save_exposes_processing_feedback(window)
-	window.get_node("%LogoutButton").pressed.emit()
+	_logout_button(window).pressed.emit()
 	check(not session.get_session().is_empty(),"logout waits for an in-flight save")
 	deadline = Time.get_ticks_msec()+3000
 	await _wait_logout(session, deadline)
@@ -142,8 +142,12 @@ func _scene_available() -> bool:
 	return exists
 
 
+func _logout_button(window: Variant) -> Button:
+	return window.find_child("LogoutButton",true,false) as Button if is_instance_valid(window) else null
+
+
 func _require_logout_button(window: Variant) -> bool:
-	var button = window.get_node_or_null("%LogoutButton") if is_instance_valid(window) else null
+	var button := _logout_button(window)
 	check(button is Button,"settings provides logout action")
 	return button is Button
 
@@ -165,7 +169,7 @@ func _second_logout(window: Variant, session: Variant, dialog: Variant) -> void:
 		await session.logout()
 		await process_frame
 		return
-	window.get_node("%LogoutButton").pressed.emit()
+	_logout_button(window).pressed.emit()
 	await process_frame
 	check(dialog.visible and dialog.dialog_text == "是否退出登录？","persisted drafts do not block logout")
 	dialog.get_ok_button().pressed.emit()

@@ -185,7 +185,7 @@ func check_focus_order(view: Control, username: LineEdit) -> void:
 	check(focused_name(view) == "Password", "Tab moves from the account field directly to password")
 	press_tab()
 	await process_frame
-	check(focused_name(view) == "AutoLogin", "Tab reaches automatic login after password")
+	check(focused_name(view) == "Remember", "Tab reaches remember login after password")
 	press_tab()
 	await process_frame
-	check(focused_name(view) == "Remember", "Tab reaches remember login after automatic login")
+	check(focused_name(view) == "AutoLogin", "Tab reaches automatic login after remember login")

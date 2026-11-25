@@ -81,7 +81,10 @@ func _run() -> void:
 func _settle() -> void:
 	for frame in 6: await process_frame
 
-func _wait_restored(detail: ScrollContainer) -> void:
+func _scroll(detail: Control) -> ScrollContainer:
+	return detail.get_node("%DetailScroll") as ScrollContainer
+
+func _wait_restored(detail: Control) -> void:
 	var deadline := Time.get_ticks_msec() + 3000
 	while detail._pending_scroll >= 0 and Time.get_ticks_msec() < deadline:
 		await process_frame
@@ -104,16 +107,17 @@ func _check_window(style_name: String, dimensions: Vector2i) -> void:
 	await _settle()
 	window.select_post("first")
 	controller.complete("first")
-	var first: ScrollContainer = window._details["first"]
+	var first: Control = window._details["first"]
 	await _wait_restored(first)
-	check(first.get_v_scroll_bar().max_value - first.get_v_scroll_bar().page >= 140, "fixture has real overflowing content")
-	first.scroll_vertical = 140
+	var first_scroll := _scroll(first)
+	check(first_scroll.get_v_scroll_bar().max_value - first_scroll.get_v_scroll_bar().page >= 140, "fixture has real overflowing content")
+	first_scroll.scroll_vertical = 140
 	await process_frame
 	window.select_post("second")
 	controller.complete("second")
-	var second: ScrollContainer = window._details["second"]
+	var second: Control = window._details["second"]
 	await _wait_restored(second)
-	second.scroll_vertical = 80
+	_scroll(second).scroll_vertical = 80
 	await process_frame
 	await _check_late_refresh(window, controller, first, second)
 	await _capture(window, style_name, dimensions)
@@ -128,7 +132,7 @@ func _check_window(style_name: String, dimensions: Vector2i) -> void:
 	await process_frame
 	DirAccess.remove_absolute(path)
 
-func _check_late_refresh(window: Window, controller: ControlledFeed, first: ScrollContainer, second: ScrollContainer) -> void:
+func _check_late_refresh(window: Window, controller: ControlledFeed, first: Control, second: Control) -> void:
 	window.select_post("first")
 	await _settle()
 	check(first.get_reading_position() == 140, "busy refresh retains intended position")
@@ -136,40 +140,44 @@ func _check_late_refresh(window: Window, controller: ControlledFeed, first: Scro
 	controller.complete("first")
 	controller.complete("second")
 	await _wait_restored(second)
-	check(window.get_selected_id() == "second" and second.scroll_vertical == 80, "late response does not move current post")
+	check(window.get_selected_id() == "second" and _scroll(second).scroll_vertical == 80, "late response does not move current post")
 	window.select_post("first")
 	controller.complete("first")
 	await _wait_restored(first)
-	check(first.scroll_vertical == 140, "switching during refresh does not replace saved position with clamped value")
+	check(_scroll(first).scroll_vertical == 140, "switching during refresh does not replace saved position with clamped value")
 
-func _check_user_scroll(window: Window, controller: ControlledFeed, first: ScrollContainer) -> void:
+func _check_user_scroll(window: Window, controller: ControlledFeed, first: Control) -> void:
 	window.select_post("second")
 	controller.complete("second")
 	await _wait_restored(window._details["second"])
 	window.select_post("first")
 	await _settle()
+	var first_scroll := _scroll(first)
 	var wheel := InputEventMouseButton.new()
 	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
 	wheel.pressed = true
-	wheel.position = first.get_global_rect().get_center()
+	wheel.position = first_scroll.get_global_rect().get_center()
 	wheel.global_position = wheel.position
 	window.push_input(wheel, true)
+	var wheel_up := wheel.duplicate()
+	wheel_up.pressed = false
+	window.push_input(wheel_up, true)
 	await process_frame
 	check(first._pending_scroll < 0, "real wheel input cancels pending restoration")
-	first.scroll_vertical = 60
+	first_scroll.scroll_vertical = 60
 	controller.complete("first")
 	await _wait_restored(first)
-	check(first.scroll_vertical == 60, "refresh completion does not steal user position")
+	check(first_scroll.scroll_vertical == 60, "refresh completion does not steal user position")
 
 func _check_short_detail(window: Window, controller: ControlledFeed) -> void:
 	window.select_post("short")
-	var detail: ScrollContainer = window._details["short"]
+	var detail: Control = window._details["short"]
 	detail.restore_reading_position(500)
 	controller.complete("short")
 	await _wait_restored(detail)
-	check(detail.scroll_vertical == 0, "short content legally clamps saved position")
+	check(_scroll(detail).scroll_vertical == 0, "short content legally clamps saved position")
 
-func _check_hidden_window(window: Window, controller: ControlledFeed, detail: ScrollContainer) -> void:
+func _check_hidden_window(window: Window, controller: ControlledFeed, detail: Control) -> void:
 	controller.refresh_comments("first")
 	detail.restore_reading_position(90)
 	window.hide()
@@ -178,10 +186,11 @@ func _check_hidden_window(window: Window, controller: ControlledFeed, detail: Sc
 	check(detail._pending_scroll == 90, "hidden window retains pending target")
 	window.show()
 	await _wait_restored(detail)
-	check(detail.scroll_vertical == 90, "showing window restores position after hidden response")
+	check(_scroll(detail).scroll_vertical == 90, "showing window restores position after hidden response")
 
-func _check_scrollbar_and_keyboard(window: Window, controller: ControlledFeed, detail: ScrollContainer) -> void:
-	var bar := detail.get_v_scroll_bar()
+func _check_scrollbar_and_keyboard(window: Window, controller: ControlledFeed, detail: Control) -> void:
+	var scroll := _scroll(detail)
+	var bar := scroll.get_v_scroll_bar()
 	bar.focus_mode = Control.FOCUS_ALL
 	bar.grab_focus()
 	controller.refresh_comments("first")
@@ -192,10 +201,10 @@ func _check_scrollbar_and_keyboard(window: Window, controller: ControlledFeed, d
 	window.push_input(key, true)
 	await process_frame
 	check(detail._pending_scroll < 0, "focused scrollbar key cancels pending target")
-	var keyboard_position := detail.scroll_vertical
+	var keyboard_position := scroll.scroll_vertical
 	controller.complete("first")
 	await _wait_restored(detail)
-	check(detail.scroll_vertical == keyboard_position, "refresh keeps keyboard scroll position")
+	check(scroll.scroll_vertical == keyboard_position, "refresh keeps keyboard scroll position")
 	await _check_scrollbar_pointer(window, controller, detail)
 
 func _pointer(window: Window, position: Vector2, pressed: bool) -> void:
@@ -206,10 +215,11 @@ func _pointer(window: Window, position: Vector2, pressed: bool) -> void:
 	event.pressed = pressed
 	window.push_input(event, true)
 
-func _check_scrollbar_pointer(window: Window, controller: ControlledFeed, detail: ScrollContainer) -> void:
+func _check_scrollbar_pointer(window: Window, controller: ControlledFeed, detail: Control) -> void:
+	var scroll := _scroll(detail)
 	controller.refresh_comments("first")
 	detail.restore_reading_position(140)
-	var point := detail.get_v_scroll_bar().get_global_rect().get_center()
+	var point := scroll.get_v_scroll_bar().get_global_rect().get_center()
 	_pointer(window, point, true)
 	var motion := InputEventMouseMotion.new()
 	motion.position = point + Vector2(0,20)
@@ -220,12 +230,13 @@ func _check_scrollbar_pointer(window: Window, controller: ControlledFeed, detail
 	_pointer(window, motion.position, false)
 	await process_frame
 	check(detail._pending_scroll < 0, "scrollbar pointer input cancels pending target")
-	var position := detail.scroll_vertical
+	var position := scroll.scroll_vertical
 	controller.complete("first")
 	await _wait_restored(detail)
-	check(detail.scroll_vertical == position, "refresh keeps scrollbar position")
+	check(scroll.scroll_vertical == position, "refresh keeps scrollbar position")
 
-func _check_bottom_pagination(window: Window, controller: ControlledFeed, detail: ScrollContainer) -> void:
+func _check_bottom_pagination(window: Window, controller: ControlledFeed, detail: Control) -> void:
+	var scroll := _scroll(detail)
 	controller.comments["first"].has_more = true
 	var calls := controller.page_calls
 	detail.restore_reading_position(100000)
@@ -234,20 +245,20 @@ func _check_bottom_pagination(window: Window, controller: ControlledFeed, detail
 	var wheel := InputEventMouseButton.new()
 	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
 	wheel.pressed = true
-	wheel.position = detail.get_global_rect().get_center()
+	wheel.position = scroll.get_global_rect().get_center()
 	wheel.global_position = wheel.position
 	window.push_input(wheel, true)
 	await _settle()
 	check(controller.page_calls == calls + 1, "wheel at already-restored bottom still loads next page")
 
-func _check_failed_refresh(window: Window, controller: ControlledFeed, first: ScrollContainer) -> void:
+func _check_failed_refresh(window: Window, controller: ControlledFeed, first: Control) -> void:
 	window.select_post("first")
 	first.get_node("%CommentDraft").text = "失败也保留评论草稿"
 	first.restore_reading_position(70)
 	var count: int = first._rows.size()
 	controller.complete("first", true)
 	await _wait_restored(first)
-	check(first.scroll_vertical == 70, "failed refresh restores cached reading position")
+	check(_scroll(first).scroll_vertical == 70, "failed refresh restores cached reading position")
 	check(first._rows.size() == count and first.get_node("%CommentDraft").text == "失败也保留评论草稿", "failed refresh preserves content and draft")
 	var error_dialog := _error_dialog(window)
 	check(error_dialog != null and error_dialog.visible and error_dialog.get_current_text().contains("评论加载失败"), "failed refresh remains visible")

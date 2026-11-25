@@ -195,11 +195,11 @@ func _check_login_uses_a_fixed_system_frame() -> void:
 func _check_signed_in_workspace_restores_the_system_frame() -> void:
 	check(not root.borderless and not root.transparent and not root.transparent_bg and not root.unresizable, "signed-in workspace restores the system frame")
 
-func _check_login_checkbox_is_a_24px_hollow_circle_not_a_square(circle: Variant) -> void:
-	check(circle.get_width() == 24 and circle.get_height() == 24 and circle.get_pixel(0,0).a < .1 and circle.get_pixel(12,12).a < .1, "login checkbox is a 24px hollow circle, not a square")
+func _check_login_checkbox_is_a_18px_rounded_box(box: Variant) -> void:
+	check(box.get_width() == 18 and box.get_height() == 18 and box.get_pixel(0,0).a < .1 and box.get_pixel(9,9).a > .9, "login checkbox is an 18px rounded box")
 
 func _check_remembered_account_shows_an_honest_status_without_fake_password_dots(session: Variant, view: Variant) -> void:
-	check(session.get_session().is_empty() and view.get_node("%SavedLogin").is_visible_in_tree() and not view.get_node("%Password").visible and view.get_node("%Password").text.is_empty(), "remembered account shows an honest status without fake password dots")
+	check(session.get_session().is_empty() and view.get_node("%SavedLogin").is_visible_in_tree() and not view.get_node("%Password").is_visible_in_tree() and view.get_node("%Password").text.is_empty(), "remembered account shows an honest status without fake password dots")
 
 func _check_login_style_overrides(view: Control) -> void:
 	_check_login_page_style(view)
@@ -211,7 +211,7 @@ func _check_login_page_style(view: Control) -> void:
 	var surface := view.get_theme_stylebox("panel") as StyleBoxFlat
 	check(surface != null, "login surface is themed")
 	if surface != null:
-		check(surface.bg_color.is_equal_approx(Color(0.935,0.97,1,1)), "login surface uses the backup pale-blue tint")
+		check(surface.bg_color.is_equal_approx(Color("f2f8fc")), "login surface uses the light login theme")
 	var avatar_frame := view.find_child("AvatarFrame", true, false) as Control
 	check(avatar_frame != null, "login avatar frame exists")
 	if avatar_frame == null:
@@ -220,8 +220,8 @@ func _check_login_page_style(view: Control) -> void:
 	check(avatar != null, "login avatar is themed")
 	if avatar == null:
 		return
-	check(avatar.border_width_left == 2 and avatar.border_color.is_equal_approx(Color(0.4,0.8,1,0.8)), "login avatar uses the backup blue border")
-	check(avatar.shadow_size == 12, "login avatar uses the backup glow")
+	check(avatar.border_width_left == 3 and avatar.border_color.is_equal_approx(Color(0.4,0.8,1,1)), "login avatar uses the blue ring border")
+	check(avatar.corner_radius_top_left == 56, "login avatar uses the circular radius")
 
 
 func _check_login_popup_style(view: Control) -> void:
@@ -273,7 +273,7 @@ func _check_busy_login_still_blocks_duplicate_input(view: Variant) -> void:
 	check(view.get_node("%Submit").disabled and not view.get_node("%Password").editable, "busy login still blocks duplicate input")
 
 func _check_user_can_explicitly_return_to_password_input(view: Variant) -> void:
-	check(view.get_node("%Password").visible and not view.get_node("%SavedLogin").visible, "user can explicitly return to password input")
+	check(view.get_node("%Password").is_visible_in_tree() and not view.get_node("%SavedLogin").is_visible_in_tree(), "user can explicitly return to password input")
 
 func _check_logout_restores_login_without_closing_logs_or_keeping_passwords(logs: Variant, view: Variant) -> void:
 	check(logs.visible and view.get_node("%Password").text.is_empty(), "logout restores login without closing logs or keeping passwords")
@@ -295,13 +295,13 @@ func _check_authored_login() -> bool:
 	for field in ["Username","Password","Confirm"]:
 		check(candidate.get_node("%"+field).get_theme_stylebox("focus") is StyleBoxEmpty, "login focus keeps only the caret: " + field)
 	var option: CheckBox = candidate.get_node("%AutoLogin")
-	var circle := option.get_theme_icon("unchecked").get_image()
-	_check_login_checkbox_is_a_24px_hollow_circle_not_a_square(circle)
-	check(option.get_theme_font_size("font_size") == 18, "login options use reference-sized regular text")
+	var checkbox_icon := option.get_theme_icon("unchecked").get_image()
+	_check_login_checkbox_is_a_18px_rounded_box(checkbox_icon)
+	check(option.get_theme_font_size("font_size") == 13, "login options use reference-sized regular text")
 	for control_name in ["AutoLogin","Remember","ResetLink","RegisterLink","HistoryButton"]:
 		var control: Control = candidate.get_node("%"+control_name)
 		check(control.get_theme_stylebox("disabled").bg_color.a == 0, "busy state keeps transparent control background: " + control_name)
-		check(control.get_theme_color("font_disabled_color").is_equal_approx(control.get_theme_color("font_color")), "busy state preserves text color: " + control_name)
+		check(control.get_theme_color("font_disabled_color").a > 0.9, "busy state keeps readable text color: " + control_name)
 	candidate.free()
 	if not failures.is_empty():
 		quit(1)

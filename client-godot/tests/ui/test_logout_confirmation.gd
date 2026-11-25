@@ -82,7 +82,7 @@ func run() -> void:
 	if DisplayServer.get_name() != "headless":
 		settings.grab_focus()
 		await create_timer(.1).timeout
-	await click(settings.get_node("%LogoutButton"))
+	await click(settings.find_child("LogoutButton", true, false))
 	var dialog = app.get_node("%ExitDialog")
 	await inspect_dialog(dialog, settings)
 	if DisplayServer.get_name() != "headless":
@@ -114,7 +114,7 @@ func run() -> void:
 	app.get_workspace().get_node("%NavSettings").pressed.emit()
 	settings = app.find_child("SettingsWindow", true, false)
 	check(await until_ms(func(): return settings.visible, 1000), "settings reopens promptly after prewarm")
-	await click(settings.get_node("%LogoutButton"))
+	await click(settings.find_child("LogoutButton", true, false))
 	await inspect_dialog(dialog, settings)
 	await click(dialog.get_ok_button())
 	await process_frame
@@ -128,14 +128,14 @@ func run() -> void:
 	field.text = "failed save must retain this"
 	field.text_changed.emit()
 	settings.get_node("%SaveAll").pressed.emit()
-	settings.get_node("%LogoutButton").pressed.emit()
+	settings.find_child("LogoutButton", true, false).pressed.emit()
 	check(not session.get_session().is_empty(), "logout waits for save")
 	check(await until(func(): return not settings.is_saving()), "failed save settles")
 	await inspect_dialog(dialog, settings)
 	await click(dialog.get_cancel_button())
 	_check_failed_save_logout_cancellation_preserves_draft_and_account(settings, field, session)
 	# A public save request may arrive after the original close snapshot.
-	settings.get_node("%LogoutButton").pressed.emit()
+	settings.find_child("LogoutButton", true, false).pressed.emit()
 	settings.save_changes()
 	dialog.get_ok_button().pressed.emit()
 	check(not session.get_session().is_empty(), "confirmation rechecks a save started after the close request")

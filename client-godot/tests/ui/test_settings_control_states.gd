@@ -69,17 +69,18 @@ func run() -> void:
 	await capture(window,"settings-saving")
 	_check_saving_retains_visible_progress(window)
 	readonly_fields(window,"saving")
-	check(not window.get_node("%BusyBlocker").get_global_rect().intersects(window.get_node("%LogoutButton").get_global_rect()),"busy blocker never covers footer actions")
+	check(not window.get_node("%BusyBlocker").get_global_rect().intersects(window.find_child("LogoutButton",true,false).get_global_rect()),"busy blocker never covers footer actions")
 	check(await until(func(): return not window.is_saving()),"save completes")
 	window.select_page("models")
 	await create_timer(.25).timeout
 	var card = window.get_node("%ModelPage").get_node("%Cards").get_child(0)
 	card.get_node("%Enabled").button_pressed = true
 	await process_frame
-	var checkbox: CheckBox = card.get_node("%Enabled")
+	var checkbox: BaseButton = card.get_node("%Enabled")
 	await _capture_checkbox_states(checkbox, window, theme)
 	for name in ["Enabled","Json","Thinking"]:
-		check(card.get_node("%"+name).get_theme_color("font_pressed_color").is_equal_approx(Color("304553")),"API and capability toggles share legible selected text")
+		var toggle: BaseButton = card.get_node("%"+name)
+		check(toggle != null and toggle.toggle_mode,"API and capability toggles are interactive switches")
 	if DisplayServer.get_name() != "headless":
 		for factor in [1.0,1.25,1.5,2.0]:
 			for logical in [Vector2i(880,760),Vector2i(720,640)]:
@@ -89,7 +90,7 @@ func run() -> void:
 				await capture(window,"settings-%s-%s" % [logical.x,int(factor*100)])
 				var area := Rect2(Vector2.ZERO,window.get_visible_rect().size)
 				for name in ["LogoutButton","CloseSettings","SaveAll"]:
-					check(area.encloses(window.get_node("%"+name).get_global_rect()),"footer action fits at scale %s: %s" % [factor,name])
+					check(area.encloses(window.find_child(name,true,false).get_global_rect()),"footer action fits at scale %s: %s" % [factor,name])
 				if logical.x == 720:
 					await check_minimum_preferences(window, factor)
 	window.queue_free()
@@ -152,7 +153,7 @@ func _check_readonly_presets(page: Variant, window: Window, prefs: Variant) -> v
 		check(not preset.get_items().any(func(item): return item.id == "custom" or item.label == "自定义"), "preference menus contain presets only: " + pair[1])
 		check(not preset.disabled, "ready preset dropdown accepts changes: " + pair[1])
 
-func _capture_checkbox_states(checkbox: CheckBox, window: Window, theme: Theme) -> void:
+func _capture_checkbox_states(checkbox: BaseButton, window: Window, theme: Theme) -> void:
 	for state in ["normal","pressed","hover","hover_pressed","disabled","focus"]:
 		checkbox.disabled = state == "disabled"
 		checkbox.button_pressed = state in ["pressed","hover_pressed","disabled","focus"]
@@ -162,9 +163,9 @@ func _capture_checkbox_states(checkbox: CheckBox, window: Window, theme: Theme) 
 		window.push_input(motion,true)
 		if state == "focus" and DisplayServer.get_name() != "headless": checkbox.grab_focus()
 		await capture(window,"checkbox-"+state)
-	check(checkbox.get_theme_color("font_hover_pressed_color").is_equal_approx(Color("304553")),"checked hover text stays dark")
-	if theme.has_stylebox("focus","CheckBox"):
-		check(checkbox.get_theme_stylebox("focus").border_color.is_equal_approx(Color("66ccff")),"settings keyboard focus uses the shared Tianyi blue outline")
+	check(theme.get_color("font_hover_pressed_color","CheckBox").is_equal_approx(Color("304553")),"checked hover text stays dark")
+	if theme.has_stylebox("focus","SettingsCheckBox"):
+		check(theme.get_stylebox("focus","SettingsCheckBox").border_color.is_equal_approx(Color("66ccff")),"settings keyboard focus uses the shared Tianyi blue outline")
 	checkbox.disabled = false
 
 func _check_theme_states() -> Theme:

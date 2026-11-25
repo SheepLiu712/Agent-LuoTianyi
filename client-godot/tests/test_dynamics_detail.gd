@@ -51,34 +51,35 @@ func test_details() -> void:
 	window.select_post("d0")
 	_check_switch_preserves_correct_draft(draft)
 	_check_unknown_selection_cannot_clear_current_detail(window)
-	var active = window.find_children("*","ScrollContainer",true,false).filter(func(n): return n.has_method("update_comments") and n.is_visible_in_tree())[0]
+	var active = window.find_children("*","VBoxContainer",true,false).filter(func(n): return n.has_method("update_comments") and n.is_visible_in_tree())[0]
+	var active_scroll: ScrollContainer = active.get_node("%DetailScroll")
 	await _wait_comments(controller, "d0")
 	await _wait_until(func(): return active._pending_scroll < 0, "reading-position restore completes before setting scroll")
-	check(active.get_v_scroll_bar().max_value - active.get_v_scroll_bar().page >= 140, "loaded detail has real scroll range")
-	active.scroll_vertical = 140
+	check(active_scroll.get_v_scroll_bar().max_value - active_scroll.get_v_scroll_bar().page >= 140, "loaded detail has real scroll range")
+	active_scroll.scroll_vertical = 140
 	await process_frame
-	check(active.scroll_vertical == 140, "reading position was set before switching")
+	check(active_scroll.scroll_vertical == 140, "reading position was set before switching")
 	window.select_post("d1")
 	await process_frame
 	window.select_post("d0")
 	await _wait_comments(controller, "d0")
 	await _wait_until(func(): return active._pending_scroll < 0, "per-post restore is actually applied")
-	check(active.scroll_vertical==140,"per-post reading position restored")
-	active.scroll_vertical = 100000
+	check(active_scroll.scroll_vertical==140,"per-post reading position restored")
+	active_scroll.scroll_vertical = 100000
 	await _wait_comments(controller, "d0")
 	check(controller.get_comments("d0").items.size()==22,"scrolling detail to bottom loads next comment page")
-	for scroll in window.find_children("*","ScrollContainer",true,false):
-		if not scroll.has_method("update_comments"): scroll.scroll_vertical = 100000
+	window.get_node("%ListScroll").scroll_vertical = 100000
 	await _wait_until(func(): return controller.get_posts().size() == 12, "feed pagination completes")
 	check(controller.get_posts().size()==12,"scrolling feed to bottom loads next post page")
 	var replies = window.find_children("*","Button",true,false).filter(func(b): return b.text == "回复" and b.is_visible_in_tree())
 	check(not replies.is_empty(),"explicit inline reply actions")
 	if not replies.is_empty():
 		replies[0].pressed.emit()
-		var reply = window.find_child("ReplyDraft",true,false)
+		var reply = window.find_child("CommentDraft",true,false)
 		reply.text = "reply draft"
 		window.find_child("CancelReply",true,false).pressed.emit()
 		_check_cancel_target_keeps_reply_text(reply, window)
+		reply.text = "ordinary draft"
 	for button in window.find_children("*","Button",true,false):
 		if button.text=="发布动态": button.pressed.emit()
 	await process_frame
@@ -142,7 +143,7 @@ func _check_empty_and_failure_placeholders() -> void:
 	await empty_feed.refresh()
 	var empty_window = _open_dynamics_window(empty_feed)
 	await process_frame
-	check(empty_window.get_node("%Empty").text.contains("还没有动态"),"empty feed states are not disguised as an error")
+	check(empty_window.get_node("%ListEmptyState").visible and empty_window.get_node("%ListEmptyTitle").text.contains("还没有动态"),"empty feed states are not disguised as an error")
 	check(not empty_window.get_node("%Refresh").disabled,"empty feed keeps retry available")
 	empty_window.queue_free()
 	empty_feed.queue_free()
@@ -291,9 +292,8 @@ func test_draft_persistence() -> void:
 	check(not replies.is_empty(),"draft test finds a reply action")
 	if not replies.is_empty():
 		replies[0].pressed.emit()
-		var reply = first.find_child("ReplyDraft",true,false)
-		reply.text = "reply survives"
-		reply.text_changed.emit()
+		comment.text = "reply survives"
+		comment.text_changed.emit()
 	check(first.flush_drafts(),"draft flush succeeds")
 	first.queue_free()
 	await process_frame
@@ -303,9 +303,7 @@ func test_draft_persistence() -> void:
 	check(restored.select_post("d0"),"restored window selects the post")
 	await _wait_comments(controller,"d0")
 	comment = restored.find_child("CommentDraft",true,false)
-	check(comment.text == "comment survives","comment draft restores across window recreation")
-	var reply = restored.find_child("ReplyDraft",true,false)
-	check(reply.text == "reply survives","reply draft restores across window recreation")
+	check(comment.text == "reply survives","comment and reply draft restores across window recreation")
 	var label: Label = restored.find_child("ReplyLabel",true,false)
 	check(label.text.begins_with("回复"),"reply target restores with its author")
 	_open_publisher(restored)
