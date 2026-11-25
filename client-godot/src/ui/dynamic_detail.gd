@@ -6,6 +6,7 @@ const DraftAutosave = preload("res://src/ui/draft_autosave.gd")
 const ErrorDialog = preload("res://src/ui/error_dialog.gd")
 const ToastOverlay = preload("res://src/ui/toast_overlay.gd")
 const UiMotion = preload("res://src/ui/ui_motion.gd")
+@export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 
 @onready var _scroll: ScrollContainer = %DetailScroll
 @onready var _column: VBoxContainer = %Column
@@ -110,8 +111,10 @@ func _initialize() -> void:
 
 
 func _copy_post_body() -> void:
-	DisplayServer.clipboard_set(str(_post.get("content", "")))
-	ToastOverlay.present_in(self, "已复制动态正文。", "success", 2.0, _ui_style)
+	if input_service.copy_text(str(_post.get("content", ""))) == OK:
+		ToastOverlay.present_in(self, "已复制动态正文。", "success", 2.0, _ui_style)
+	else:
+		ErrorDialog.present(self, "复制失败，请检查系统剪贴板。")
 
 
 func _open_more_menu() -> void:

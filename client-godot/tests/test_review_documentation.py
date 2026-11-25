@@ -53,6 +53,9 @@ class ReviewDocumentationTests(unittest.TestCase):
         for field in ("file_version", "product_version"):
             self.assertIn(f'application/{field}="{native}"', preset)
         self.assertIn(f"## {version} 当前源码", (PROJECT / "PREVIEW.md").read_text(encoding="utf-8"))
+        readme = (PROJECT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"当前源码版本为 `{version}`", readme)
+        self.assertIn(f"`release.json` 是版本的唯一来源，当前为 `{version}`", readme)
         self.assertIn("docs/*", preset)
 
     def test_import_metadata_has_local_lf_policy(self):

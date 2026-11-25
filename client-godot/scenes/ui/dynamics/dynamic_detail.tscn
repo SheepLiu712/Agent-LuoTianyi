@@ -6,6 +6,7 @@
 [ext_resource type="Texture2D" path="res://assets/ui/icons/ui_comment.svg" id="comment_icon"]
 [ext_resource type="Texture2D" path="res://assets/ui/icons/action_copy.svg" id="copy_icon"]
 [ext_resource type="Texture2D" path="res://assets/ui/icons/ui_more_horiz.svg" id="more_icon"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
 shader = ExtResource("3_shader")
@@ -92,6 +93,7 @@ size_flags_vertical = 3
 theme = ExtResource("2_theme")
 theme_override_constants/separation = 0
 script = ExtResource("1_detail")
+input_service = ExtResource("isolation_input_service")
 
 [node name="DetailScroll" type="ScrollContainer" parent="."]
 unique_name_in_owner = true

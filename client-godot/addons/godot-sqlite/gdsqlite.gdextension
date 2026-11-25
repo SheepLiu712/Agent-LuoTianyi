@@ -28,9 +28,9 @@ web.release.wasm32 = "res://addons/godot-sqlite/bin/libgdsqlite.web.template_rel
 
 [dependencies]
 
-ios.debug = { 
-    "res://addons/godot-sqlite/bin/libgodot-cpp.ios.template_debug.xcframework": "" 
+ios.debug = {
+    "res://addons/godot-sqlite/bin/libgodot-cpp.ios.template_debug.xcframework": ""
 }
-ios.release = { 
-    "res://addons/godot-sqlite/bin/libgodot-cpp.ios.template_release.xcframework": "" 
+ios.release = {
+    "res://addons/godot-sqlite/bin/libgodot-cpp.ios.template_release.xcframework": ""
 }
