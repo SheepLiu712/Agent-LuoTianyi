@@ -1,0 +1,212 @@
+extends SceneTree
+const THEME_PATH := "res://theme/app_theme.tres"
+# Public scene entrypoints; no internal container paths or script implementation snapshots.
+const SCENES := {
+	"res://scenes/ui/dynamics/publish_overlay.tscn": {
+		"root":"PublishOverlay","type":"Control","setup":"setup","unique":["PublishDraft","PublishButton","PublishStatus","CancelPublish","DiscardDialog"]
+	},
+	"res://scenes/ui/settings/profile_page.tscn": {
+		"root":"ProfilePage","type":"Control","setup":"set_avatar_source","unique":["Preview","Account","Hint","PickButton","ResetButton","Result","FileDialog"]
+	},
+	"res://scenes/ui/settings/preferences_page.tscn": {
+		"root":"PreferencesPage","type":"Control","setup":"setup","unique":["RelationshipPresets","SpeakingStylePresets","PersonalityField","CustomContextField","Toast"]
+	},
+	"res://scenes/ui/components/toast_overlay.tscn": {
+		"root":"Toast","type":"Control","setup":"","unique":["Panel","Text"]
+	},
+	"res://scenes/ui/settings/model_page.tscn": {
+		"root":"ModelPage","type":"Control","setup":"setup","unique":["Cards","RefreshTypes","Status","PlainDialog","TestDialog"]
+	},
+	"res://scenes/ui/settings/model_purpose_card.tscn": {
+		"root":"ModelPurposeCard","type":"PanelContainer","setup":"setup","unique":["PurposeTitle","Enabled","ChipsRow","Description","Fields","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","CardStatus"]
+	},
+	"res://scenes/ui/pages/account_view.tscn": {
+		"root":"AccountForm","type":"PanelContainer","setup":"setup","unique":["Form","Server","Username","Password","Confirm","Invite","Remember","AutoLogin","Submit","Status","Logs","MenuButton","RegisterLink","ResetLink","HistoryButton","ServerDialog","SavedLogin","UsePassword"]
+	},
+	"res://scenes/main.tscn": {
+		"root":"AgentLuo","type":"Control","setup":"setup","unique":["PageSlot","LogProblem","ExitDialog","SecurityError","AccountStorageWarning","Chrome"],
+		"inject_layout":true
+	},
+	"res://scenes/ui/pages/chat_workspace.tscn": {
+		"root":"ChatWorkspace","type":"Control","setup":"setup","unique":["Background","Navigation","NavChat","NavDynamics","DynamicsUnread","NavSettings","NavLogs","Split","AvatarPanel","ChatView"]
+	},
+	"res://scenes/ui/components/unified_dropdown.tscn": {
+		"root":"UnifiedDropdown","type":"Button","setup":"","unique":["Menu","Scroll","Rows"]
+	},
+	"res://scenes/ui/windows/log_window.tscn": {
+		"root":"LogWindow","type":"Window","setup":"setup","unique":["RunsDropdown","CategoryDropdown","ModuleDropdown","OriginDropdown","Search","LogScroll","LogRows","Follow","CopyButton","ExportButton","Status","Dropped","ChipInfo","ChipWarn","ChipError","ChipDebug","Picker"]
+	},
+	"res://scenes/ui/chat/message_audio.tscn": {
+		"root":"MessageAudio","type":"VBoxContainer","setup":"","unique":["Row","Play","Wave","Time","Stop","Error"]
+	},
+	"res://scenes/ui/chat/message_bubble.tscn": {
+		"root":"MessageBubble","type":"VBoxContainer","setup":"","unique":["Row","TimeMarker","TimeText","System","Avatar","Body","Bubble","Content","Text","HistoryPicture","ImageButton","Picture","Caption"]
+	},
+	"res://scenes/ui/chat/virtual_message_list.tscn": {
+		"root":"VirtualMessageList","type":"ScrollContainer","setup":"","unique":["Canvas"]
+	},
+	"res://scenes/ui/chat/chat_view.tscn": {
+		"root":"ChatView","type":"MarginContainer","setup":"setup","unique":["Margin","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Latest","Unread","Volume","VolumeButton","VolumePopup","ImageButton","Input","Send","ComposerSurface"]
+	},
+	"res://scenes/ui/windows/image_window.tscn": {
+		"root":"ImageWindow","type":"Window","setup":"","unique":["ImageScroll","Picture","ImageError","RetryImage","ZoomIn","ZoomOut","FitImage","OriginalSize","CloseImage","ConfirmImage","Chrome"]
+	},
+	"res://scenes/ui/windows/dynamics_window.tscn": {
+		"root":"DynamicsWindow","type":"Window","setup":"setup","unique":["Unread","Publish","Refresh","ReadAll","Notice","Split","ListScroll","List","Right","Empty"]
+	},
+	"res://scenes/ui/dynamics/dynamics_post_row.tscn": {
+		"root":"DynamicsPostRow","type":"Button","setup":"setup","unique":["Avatar","Author","Time","Excerpt","CommentCount"]
+	},
+	"res://scenes/ui/dynamics/dynamic_comment_row.tscn": {
+		"root":"DynamicCommentRow","type":"PanelContainer","setup":"setup","unique":["Avatar","Author","Body","Time","Reply"]
+	},
+	"res://scenes/ui/dynamics/dynamic_detail.tscn": {
+		"root":"DynamicDetail","type":"VBoxContainer","setup":"setup","unique":["Column","Avatar","Author","CreatedAt","Body","Notice","CommentDraft","Send","Comments","ReplyLabel","CancelReply","Status"]
+	},
+	"res://scenes/avatar/avatar_panel.tscn": {
+		"root":"AvatarPanel","type":"Control","setup":"","unique":["Driver","Error","Reset","Heading"]
+	},
+}
+# Semantic requirements stay attached to public controls, independent of nesting.
+const PROPERTIES := {
+	"account_view": {"%Username":{"secret":false},"%Password":{"secret":true},"%Confirm":{"secret":true},"%Invite":{"secret":true},"%Submit":{"text":"登录"},"%RegisterLink":{"text":"使用邀请码注册"},"%ResetLink":{"text":"忘记密码？"},"%Logs":{"text":"日志"}},
+	"model_purpose_card": {"%api_key":{"secret":true}},
+	"preferences_page": {"%PersonalityField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CustomContextField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Toast":{"mouse_filter":Control.MOUSE_FILTER_IGNORE}},
+	"log_window": {"%Picker":{"file_mode":FileDialog.FILE_MODE_SAVE_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
+	"message_bubble": {"%Text":{"fit_content":true,"selection_enabled":true,"scroll_active":false,"autowrap_mode":TextServer.AUTOWRAP_WORD_SMART}},
+	"chat_view": {"%HistoryRetry":{"text":"重试历史"},"%HistorySkip":{"text":"跳过本次"},"%ImageButton":{"text":""},"%VolumeButton":{"text":"","tooltip_text":"语音音量"},"%Input":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Send":{"text":"发送","tooltip_text":"发送消息"},"%ComposerSurface":{"mouse_filter":Control.MOUSE_FILTER_PASS}},
+	"dynamics_window": {"%Publish":{"text":"发布动态"},"%Refresh":{"text":"刷新"},"%ReadAll":{"text":"全部已读"}},
+	"dynamic_comment_row": {"%Body":{"selection_enabled":true,"fit_content":true,"scroll_active":false},"%Reply":{"text":"回复"}},
+	"dynamic_detail": {"%Body":{"selection_enabled":true,"fit_content":true,"scroll_active":false},"%Notice":{"text":"此动态不可评论。"},"%CommentDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CancelReply":{"tooltip_text":"取消回复对象"},"%Send":{"text":"发送"}},
+	"publish_overlay": {"%PublishDraft":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY}},
+	"unified_dropdown": {"%Menu":{"visible":false,"force_native":false,"transparent_bg":true}},
+	"main": {"%ExitDialog":{"ok_button_text":"放弃并继续","cancel_button_text":"返回继续编辑"},"%SecurityError":{"visible":false,"text":"凭据保护组件缺失，请重新解压完整程序。"}},
+	"message_audio": {"%Stop":{"text":"停止"},"%Error":{"text":"语音未能保存"}},
+	"profile_page": {"%PickButton":{"text":"选择本地图片"},"%ResetButton":{"text":"恢复默认头像"},"%FileDialog":{"file_mode":FileDialog.FILE_MODE_OPEN_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},
+}
+const DROPDOWNS := {"preferences_page":["RelationshipPresets","SpeakingStylePresets"],"model_purpose_card":["CopySlot"],"log_window":["RunsDropdown","CategoryDropdown","ModuleDropdown","OriginDropdown"]}
+const INPUT_HINTS := {
+	"account_view":["Server","Username","Password","Confirm","Invite"],
+	"preferences_page":["PersonalityField","CustomContextField"],
+	"publish_overlay":["PublishDraft"], "log_window":["Search"],
+	"chat_view":["Input"], "dynamic_detail":["CommentDraft"],
+}
+const TOOL_HINTS := {"account_view":["Server"], "chat_view":["Volume"], "avatar_panel":["Reset"]}
+const CLICK_TARGETS := {"avatar_panel":{"%Heading":{"mouse_filter":Control.MOUSE_FILTER_STOP,"mouse_default_cursor_shape":Control.CURSOR_POINTING_HAND}}}
+var failures: Array[String] = []
+var _temp := ""
+
+func check(value: bool, label: String) -> void:
+	if not value:
+		failures.append(label)
+		print("FAIL: ", label)
+
+func _initialize() -> void:
+	run.call_deferred()
+
+func run() -> void:
+	_temp = "user://ui-scenes-test-%s" % Time.get_ticks_usec()
+	for path: String in SCENES:
+		await check_scene(path, SCENES[path])
+	await check_settings_nav()
+	var item := preload("res://src/ui/dropdown_item.gd").new()
+	check(item is Button and item.theme_type_variation == &"DropdownItem", "dropdown item builds from shared script without a scene wrapper")
+	item.free()
+	remove_folder(_temp)
+	print("UI scenes: ", "PASS" if failures.is_empty() else "FAIL")
+	quit(0 if failures.is_empty() else 1)
+
+## 侧栏以分组标题、图标行与可折叠轨道表达层次。
+func check_settings_nav() -> void:
+	var window = load("res://scenes/ui/windows/settings_window.tscn").instantiate()
+	var sidebar: Control = window.get_node("%Sidebar")
+	check(sidebar.custom_minimum_size.x == 208.0, "expanded sidebar keeps its width")
+	var margin: Control = window.get_node("%SidebarMargin")
+	check(margin.get_theme_constant("margin_left") == 12, "sidebar keeps a 12px gutter")
+	var column: Control = window.get_node("%PreferencesTab").get_parent()
+	check(column.name == "NavColumn", "nav items share one sub-column")
+	check(column.get_child(0).name == "SidebarHead", "sidebar header leads the column")
+	check((window.get_node("%SidebarTitle") as Label).text == "设置", "sidebar keeps a compact title")
+	check(window.get_node("%SidebarToggle") is Button, "sidebar exposes a collapse toggle")
+	for name in ["ProfileTab", "PreferencesTab", "ModelsTab", "AudioTab", "StyleTab"]:
+		var tab: Button = window.get_node("%" + name)
+		check(tab.custom_minimum_size == Vector2(0, 38), "nav item keeps its compact height: " + name)
+		check(tab.get_node_or_null("Row") is HBoxContainer, "nav item keeps icon and label row: " + name)
+	check(column.get_child(2).name == "ProfileTab", "profile page is the first nav item")
+	var toast: Control = window.get_node_or_null("%SaveToast")
+	check(toast != null and toast.mouse_filter == Control.MOUSE_FILTER_IGNORE, "save feedback floats above the window without blocking input")
+	_check_toast_shape(toast)
+	check(window.get_node_or_null("Body/Column/Footer/ResultScroll") == null, "the fixed result line is gone from the footer")
+	window.free()
+
+## 提示必须是一条横向矩形停在画面中央，不能退化成逐字换行的竖条。
+func _check_toast_shape(toast: Control) -> void:
+	var panel: Control = toast.get_node("%Panel")
+	var size := panel.get_combined_minimum_size()
+	check(toast.anchor_right == 1.0 and toast.anchor_bottom == 1.0, "the toast stage fills the frame instead of hugging a corner")
+	check(size.x > 200.0 and size.y < 60.0, "the toast bubble is a horizontal rectangle: " + str(size))
+
+func check_scene(path: String, spec: Dictionary) -> void:
+	var scene: PackedScene = load(path)
+	check(scene != null, "scene loads: " + path)
+	if scene == null: return
+	var instance := scene.instantiate()
+	check(instance != null, "scene instantiates without constructor arguments: " + path)
+	if instance == null: return
+	_check_check_scene_result_3(instance, spec, path)
+	if not spec.setup.is_empty(): check(instance.has_method(spec.setup), "public injection method: " + path)
+	# These checks precede add_child/ready: controls must exist in the authored scene.
+	for name in spec.unique:
+		var control := instance.get_node_or_null("%" + name)
+		_check_check_scene_result(control, name, path)
+	var kind := path.get_file().get_basename()
+	for name in INPUT_HINTS.get(kind, []): check_hint(instance, name, "placeholder_text")
+	for name in TOOL_HINTS.get(kind, []): check_hint(instance, name, "tooltip_text")
+	for name in DROPDOWNS.get(kind, []):
+		var dropdown := instance.get_node_or_null("%" + name)
+		_check_check_scene_result_2(dropdown, name)
+	_check_semantic_properties(instance, kind)
+	_check_click_targets(instance, kind)
+	if spec.get("inject_layout", false): instance.callv(spec.setup, [null, _temp.path_join("window.cfg")])
+	root.add_child(instance)
+	await process_frame
+	check(instance.theme == load(THEME_PATH), "view uses the shared theme: " + path)
+	instance.queue_free()
+	await process_frame
+func check_hint(instance: Node, name: String, property: String) -> void:
+	var control := instance.get_node_or_null("%" + name)
+	check(control != null, "hint control exists: %" + name)
+	if control != null:
+		var hint: Variant = control.get(property)
+		check(hint is String and not hint.strip_edges().is_empty(), "input/action remains explained: %" + name)
+
+func remove_folder(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path): return
+	for folder in DirAccess.get_directories_at(path): remove_folder(path.path_join(folder))
+	for file in DirAccess.get_files_at(path): DirAccess.remove_absolute(path.path_join(file))
+	DirAccess.remove_absolute(path)
+
+func _check_check_scene_result(control: Variant, name: Variant, path: Variant) -> void:
+	check(control != null and control.unique_name_in_owner, "authored public control %" + name + ": " + path)
+
+func _check_check_scene_result_2(dropdown: Variant, name: Variant) -> void:
+	check(dropdown is Button and dropdown.scene_file_path == "res://scenes/ui/components/unified_dropdown.tscn", "editable dropdown before ready: " + name)
+
+func _check_check_scene_result_3(instance: Variant, spec: Variant, path: Variant) -> void:
+	check(instance.name == spec.root and instance.is_class(spec.type), "public root name and type: " + path)
+
+func _check_semantic_properties(instance: Node, kind: String) -> void:
+	for key: String in PROPERTIES.get(kind, {}):
+		var control := instance.get_node_or_null(key)
+		check(control != null, "semantic control exists: " + key)
+		if control == null: continue
+		for property: String in PROPERTIES[kind][key]:
+			check(control.get(property) == PROPERTIES[kind][key][property], "semantic property %s.%s: %s" % [kind,key,property])
+
+func _check_click_targets(instance: Node, kind: String) -> void:
+	for key: String in CLICK_TARGETS.get(kind, {}):
+		var control := instance.get_node_or_null(key)
+		check(control != null, "click target exists: " + key)
+		if control == null: continue
+		for property: String in CLICK_TARGETS[kind][key]:
+			check(control.get(property) == CLICK_TARGETS[kind][key][property], "click target %s.%s: %s" % [kind,key,property])

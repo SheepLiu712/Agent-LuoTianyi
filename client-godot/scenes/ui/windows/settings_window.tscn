@@ -1,0 +1,678 @@
+[gd_scene format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+[ext_resource type="Script" path="res://src/ui/settings_window.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="window_chrome"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/toast_overlay.tscn" id="toast_overlay"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="Decision"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/profile_page.tscn" id="profile_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/preferences_page.tscn" id="preferences_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/model_page.tscn" id="model_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/audio_settings_page.tscn" id="audio_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings/style_page.tscn" id="style_page"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_sidebar_toggle.svg" id="sidebar_toggle_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_user.svg" id="user_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_heart.svg" id="heart_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_cpu.svg" id="cpu_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_database.svg" id="database_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_palette.svg" id="palette_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_info_circle.svg" id="info_icon"]
+
+[sub_resource type="ButtonGroup" id="SettingsTabs"]
+allow_unpress = false
+
+[sub_resource type="StyleBoxFlat" id="SettingsShell"]
+bg_color = Color(0.94902, 0.972549, 0.988235, 1)
+
+[sub_resource type="StyleBoxFlat" id="SidebarPanel"]
+bg_color = Color(0.909804, 0.94902, 0.972549, 1)
+border_width_right = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+
+[sub_resource type="StyleBoxFlat" id="SidebarToggleNormal"]
+bg_color = Color(1, 1, 1, 0)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="SidebarToggleHover"]
+bg_color = Color(0.862745, 0.913725, 0.94902, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="SidebarNavNormal"]
+bg_color = Color(1, 1, 1, 0)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="SidebarNavHover"]
+bg_color = Color(0.87451, 0.92549, 0.960784, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="SidebarNavActive"]
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.831373, 0.890196, 0.933333, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="DirtyDotStyle"]
+bg_color = Color(0.4, 0.8, 1, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="UnsavedBarStyle"]
+content_margin_left = 16.0
+content_margin_top = 8.0
+content_margin_right = 10.0
+content_margin_bottom = 8.0
+bg_color = Color(1, 0.964706, 0.886275, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.933333, 0.788235, 0.486275, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="DiscardGhostNormal"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(1, 1, 1, 0)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="DiscardGhostHover"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.98, 0.92, 0.78, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="SettingsWindow" type="Window"]
+title = "设置"
+size = Vector2i(880, 760)
+visible = false
+transient = true
+min_size = Vector2i(720, 640)
+force_native = true
+theme = ExtResource("theme")
+script = ExtResource("script")
+window_system = ExtResource("isolation_window_system")
+
+[node name="Body" type="PanelContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("SettingsShell")
+
+[node name="Pages" type="HBoxContainer" parent="Body"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="Sidebar" type="PanelContainer" parent="Body/Pages"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(208, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("SidebarPanel")
+
+[node name="SidebarMargin" type="MarginContainer" parent="Body/Pages/Sidebar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 16
+
+[node name="NavColumn" type="VBoxContainer" parent="Body/Pages/Sidebar/SidebarMargin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SidebarHead" type="HBoxContainer" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SidebarTitlePad" type="Control" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/SidebarHead"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(10, 0)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="SidebarTitle" type="Label" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/SidebarHead"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+text = "设置"
+
+[node name="SidebarToggle" type="Button" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/SidebarHead"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+size_flags_vertical = 4
+tooltip_text = "切换详细/略缩"
+theme_override_colors/icon_normal_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_colors/icon_hover_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_colors/icon_pressed_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_colors/icon_focus_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_constants/icon_max_width = 17
+theme_override_styles/normal = SubResource("SidebarToggleNormal")
+theme_override_styles/hover = SubResource("SidebarToggleHover")
+theme_override_styles/pressed = SubResource("SidebarToggleHover")
+icon = ExtResource("sidebar_toggle_icon")
+icon_alignment = 1
+
+[node name="HeadGap" type="Control" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="ProfileTab" type="Button" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+tooltip_text = "个人资料"
+theme_override_styles/normal = SubResource("SidebarNavNormal")
+theme_override_styles/hover = SubResource("SidebarNavHover")
+theme_override_styles/pressed = SubResource("SidebarNavActive")
+theme_override_styles/hover_pressed = SubResource("SidebarNavActive")
+theme_override_styles/disabled = SubResource("SidebarNavNormal")
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+
+[node name="Row" type="HBoxContainer" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ProfileTab"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_right = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="TextureRect" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ProfileTab/Row"]
+modulate = Color(0.247059, 0.333333, 0.388235, 1)
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("user_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="Label" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ProfileTab/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "个人资料"
+
+[node name="DirtyDot" type="Panel" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ProfileTab"]
+visible = false
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -17.0
+offset_top = -3.5
+offset_right = -10.0
+offset_bottom = 3.5
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("DirtyDotStyle")
+
+[node name="PreferencesTab" type="Button" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+tooltip_text = "相处模式"
+theme_override_styles/normal = SubResource("SidebarNavNormal")
+theme_override_styles/hover = SubResource("SidebarNavHover")
+theme_override_styles/pressed = SubResource("SidebarNavActive")
+theme_override_styles/hover_pressed = SubResource("SidebarNavActive")
+theme_override_styles/disabled = SubResource("SidebarNavNormal")
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+
+[node name="Row" type="HBoxContainer" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/PreferencesTab"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_right = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="TextureRect" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/PreferencesTab/Row"]
+modulate = Color(0.247059, 0.333333, 0.388235, 1)
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("heart_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="Label" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/PreferencesTab/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "相处模式"
+
+[node name="DirtyDot" type="Panel" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/PreferencesTab"]
+visible = false
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -17.0
+offset_top = -3.5
+offset_right = -10.0
+offset_bottom = 3.5
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("DirtyDotStyle")
+
+[node name="ModelsTab" type="Button" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+tooltip_text = "模型配置"
+theme_override_styles/normal = SubResource("SidebarNavNormal")
+theme_override_styles/hover = SubResource("SidebarNavHover")
+theme_override_styles/pressed = SubResource("SidebarNavActive")
+theme_override_styles/hover_pressed = SubResource("SidebarNavActive")
+theme_override_styles/disabled = SubResource("SidebarNavNormal")
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+
+[node name="Row" type="HBoxContainer" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ModelsTab"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_right = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="TextureRect" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ModelsTab/Row"]
+modulate = Color(0.247059, 0.333333, 0.388235, 1)
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("cpu_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="Label" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ModelsTab/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "模型配置"
+
+[node name="DirtyDot" type="Panel" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/ModelsTab"]
+visible = false
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -17.0
+offset_top = -3.5
+offset_right = -10.0
+offset_bottom = 3.5
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("DirtyDotStyle")
+
+[node name="AudioTab" type="Button" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+tooltip_text = "缓存与导入"
+theme_override_styles/normal = SubResource("SidebarNavNormal")
+theme_override_styles/hover = SubResource("SidebarNavHover")
+theme_override_styles/pressed = SubResource("SidebarNavActive")
+theme_override_styles/hover_pressed = SubResource("SidebarNavActive")
+theme_override_styles/disabled = SubResource("SidebarNavNormal")
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+
+[node name="Row" type="HBoxContainer" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/AudioTab"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_right = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="TextureRect" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/AudioTab/Row"]
+modulate = Color(0.247059, 0.333333, 0.388235, 1)
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("database_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="Label" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/AudioTab/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "缓存与导入"
+
+[node name="DirtyDot" type="Panel" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/AudioTab"]
+visible = false
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -17.0
+offset_top = -3.5
+offset_right = -10.0
+offset_bottom = 3.5
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("DirtyDotStyle")
+
+[node name="StyleTab" type="Button" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+tooltip_text = "风格外观"
+theme_override_styles/normal = SubResource("SidebarNavNormal")
+theme_override_styles/hover = SubResource("SidebarNavHover")
+theme_override_styles/pressed = SubResource("SidebarNavActive")
+theme_override_styles/hover_pressed = SubResource("SidebarNavActive")
+theme_override_styles/disabled = SubResource("SidebarNavNormal")
+toggle_mode = true
+button_group = SubResource("SettingsTabs")
+
+[node name="Row" type="HBoxContainer" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/StyleTab"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_right = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="TextureRect" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/StyleTab/Row"]
+modulate = Color(0.247059, 0.333333, 0.388235, 1)
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("palette_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Text" type="Label" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/StyleTab/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "风格外观"
+
+[node name="DirtyDot" type="Panel" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/StyleTab"]
+visible = false
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -17.0
+offset_top = -3.5
+offset_right = -10.0
+offset_bottom = 3.5
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("DirtyDotStyle")
+
+[node name="SidebarSpacer" type="Control" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="VersionMargin" type="MarginContainer" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_right = 10
+
+[node name="VersionLabel" type="Label" parent="Body/Pages/Sidebar/SidebarMargin/NavColumn/VersionMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 11
+text = "AgentLuo v0.2.0.2"
+
+[node name="PagesArea" type="Control" parent="Body/Pages"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="RightColumn" type="VBoxContainer" parent="Body/Pages/PagesArea"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+[node name="Content" type="ScrollContainer" parent="Body/Pages/PagesArea/RightColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="PageMargin" type="MarginContainer" parent="Body/Pages/PagesArea/RightColumn/Content"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
+
+[node name="Sections" type="VBoxContainer" parent="Body/Pages/PagesArea/RightColumn/Content/PageMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 40
+
+[node name="ProfilePage" parent="Body/Pages/PagesArea/RightColumn/Content/PageMargin/Sections" instance=ExtResource("profile_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PreferencesPage" parent="Body/Pages/PagesArea/RightColumn/Content/PageMargin/Sections" instance=ExtResource("preferences_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ModelPage" parent="Body/Pages/PagesArea/RightColumn/Content/PageMargin/Sections" instance=ExtResource("model_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="AudioPage" parent="Body/Pages/PagesArea/RightColumn/Content/PageMargin/Sections" instance=ExtResource("audio_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="StylePage" parent="Body/Pages/PagesArea/RightColumn/Content/PageMargin/Sections" instance=ExtResource("style_page")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="UnsavedBarWrap" type="MarginContainer" parent="Body/Pages/PagesArea/RightColumn"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 14
+
+[node name="UnsavedBar" type="PanelContainer" parent="Body/Pages/PagesArea/RightColumn/UnsavedBarWrap"]
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+theme_override_styles/panel = SubResource("UnsavedBarStyle")
+
+[node name="Row" type="HBoxContainer" parent="Body/Pages/PagesArea/RightColumn/UnsavedBarWrap/UnsavedBar"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="InfoIcon" type="TextureRect" parent="Body/Pages/PagesArea/RightColumn/UnsavedBarWrap/UnsavedBar/Row"]
+modulate = Color(0.478431, 0.294118, 0, 1)
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("info_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="UnsavedSummary" type="Label" parent="Body/Pages/PagesArea/RightColumn/UnsavedBarWrap/UnsavedBar/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.478431, 0.294118, 0, 1)
+theme_override_font_sizes/font_size = 13
+text = "修改未保存"
+
+[node name="DiscardAll" type="Button" parent="Body/Pages/PagesArea/RightColumn/UnsavedBarWrap/UnsavedBar/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.478431, 0.294118, 0, 1)
+theme_override_colors/font_hover_color = Color(0.36, 0.2, 0, 1)
+theme_override_colors/font_pressed_color = Color(0.36, 0.2, 0, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("DiscardGhostNormal")
+theme_override_styles/hover = SubResource("DiscardGhostHover")
+theme_override_styles/pressed = SubResource("DiscardGhostHover")
+text = "放弃"
+
+[node name="SaveAll" type="Button" parent="Body/Pages/PagesArea/RightColumn/UnsavedBarWrap/UnsavedBar/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 34)
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SettingsPrimaryButton"
+theme_override_colors/font_color = Color(0.054902, 0.164706, 0.231373, 1)
+theme_override_font_sizes/font_size = 13
+text = "保存全部修改"
+
+[node name="CloseBar" type="MarginContainer" parent="Body/Pages/PagesArea/RightColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 14
+
+[node name="Row" type="HBoxContainer" parent="Body/Pages/PagesArea/RightColumn/CloseBar"]
+layout_mode = 2
+
+[node name="Spacer" type="Control" parent="Body/Pages/PagesArea/RightColumn/CloseBar/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CloseSettings" type="Button" parent="Body/Pages/PagesArea/RightColumn/CloseBar/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(88, 36)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+theme_override_font_sizes/font_size = 13
+text = "关闭"
+
+[node name="BusyBlocker" type="Control" parent="Body/Pages/PagesArea"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+focus_mode = 2
+
+[node name="UnsavedDialog" parent="." instance=ExtResource("Decision")]
+unique_name_in_owner = true
+title = "设置尚未保存"
+dialog_text = "可以保存全部修改后关闭，或放弃本窗口尚未保存的修改。"
+ok_button_text = "放弃修改"
+cancel_button_text = "取消"
+destructive_action = true
+show_save = true
+
+[node name="Chrome" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+script = ExtResource("window_chrome")
+
+[node name="SaveToast" parent="." instance=ExtResource("toast_overlay")]
+unique_name_in_owner = true

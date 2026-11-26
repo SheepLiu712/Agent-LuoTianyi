@@ -1,0 +1,156 @@
+[gd_scene format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+
+[ext_resource type="Resource" path="res://resources/platform/framing.tres" id="isolation_settings"]
+
+[ext_resource type="Script" path="res://src/avatar/avatar_panel.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Texture2D" path="res://assets/ui/bg2.jpg" id="3_background"]
+[ext_resource type="Script" path="res://src/platform/cubism_avatar_driver.gd" id="4_driver"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_reset_ccw.svg" id="reset_icon"]
+
+[sub_resource type="StyleBoxFlat" id="StageClipStyle"]
+bg_color = Color(0.96, 0.98, 1, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+anti_aliasing = true
+
+[sub_resource type="StyleBoxFlat" id="AvatarCardBorder"]
+draw_center = false
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[node name="AvatarPanel" type="Control"]
+clip_contents = true
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+settings = ExtResource("isolation_settings")
+
+window_system = ExtResource("isolation_window_system")
+
+[node name="Stage" type="Panel" parent="."]
+unique_name_in_owner = true
+clip_children = 2
+clip_contents = true
+layout_mode = 1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StageClipStyle")
+
+[node name="Background" type="TextureRect" parent="Stage"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("3_background")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Veil" type="ColorRect" parent="Stage"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.96, 0.98, 1, 0)
+
+[node name="Driver" type="Node2D" parent="Stage"]
+unique_name_in_owner = true
+script = ExtResource("4_driver")
+
+[node name="Heading" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchor_right = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+mouse_filter = 0
+mouse_default_cursor_shape = 2
+theme_type_variation = &"AvatarHeadingSurface"
+
+[node name="Identity" type="VBoxContainer" parent="Heading"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="Name" type="Label" parent="Heading/Identity"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 20
+text = "未读动态"
+
+[node name="Companion" type="Label" parent="Heading/Identity"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.30980393, 0.40392157, 0.45882353, 1)
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+max_lines_visible = 3
+text_overrun_behavior = 3
+[node name="BorderOverlay" type="Panel" parent="."]
+unique_name_in_owner = true
+z_index = 2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("AvatarCardBorder")
+
+[node name="Reset" type="Button" parent="."]
+unique_name_in_owner = true
+visible = false
+z_index = 3
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 1
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -48.0
+offset_top = -48.0
+offset_right = -12.0
+offset_bottom = -12.0
+icon = ExtResource("reset_icon")
+icon_alignment = 1
+theme_override_constants/icon_max_width = 18
+tooltip_text = "重置位置"
+
+[node name="Error" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 20.0
+offset_top = 128.0
+offset_right = 20.0
+offset_bottom = 128.0
+mouse_filter = 2
+autowrap_mode = 3

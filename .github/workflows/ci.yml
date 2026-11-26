@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       docs_only: ${{ steps.scope.outputs.docs_only }}
+      client_godot: ${{ steps.scope.outputs.client_godot }}
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
@@ -40,7 +41,11 @@ jobs:
           # PR 的合并提交包含目标分支父提交；合并队列可能包含多个 PR。
           fetch-depth: ${{ github.event_name == 'merge_group' && '0' || '2' }}
       - id: scope
-        run: python .github/scripts/docs_ci.py classify "$BASE_SHA" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "${BASE_SHA:-}" ] && ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" || git fetch --no-tags --unshallow origin
+          fi
+          python .github/scripts/docs_ci.py classify "$BASE_SHA" >> "$GITHUB_OUTPUT"
       - name: 检查 Markdown 链接和锚点
         if: steps.scope.outputs.docs_only == 'true'
         run: |
@@ -51,6 +56,34 @@ jobs:
           mkdir "$RUNNER_TEMP/link-checker"
           tar -xzf "$archive" --directory "$RUNNER_TEMP/link-checker" --wildcards --no-anchored 'lychee' --strip-components=1
           PATH="$RUNNER_TEMP/link-checker:$PATH" python .github/scripts/docs_ci.py check "$BASE_SHA"
+
+  godot-static:
+    needs: changes
+    if: needs.changes.outputs.client_godot == 'true'
+    name: godot-static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: client-godot/tests/requirements-complexity.txt
+      - run: python -m pip install -r client-godot/tests/requirements-complexity.txt
+      - name: 依赖边界与文档契约
+        run: |
+          python client-godot/tests/test_dependency_boundaries.py
+          python client-godot/tests/test_review_documentation.py
+      - name: 门禁与构建提示自检
+        run: |
+          python client-godot/tests/test_check_gate.py
+          python client-godot/tests/test_build_prompt.py
+          python client-godot/tests/test_complexity_check.py
+      - name: 圈复杂度门禁
+        run: python client-godot/scripts/check_complexity.py
 
   server-lint:
     needs: changes
@@ -260,7 +293,7 @@ jobs:
   offline-ci:
     name: offline-ci
     if: always()
-    needs: [changes, server-lint, server-tests, desktop-tests, cli-tests, app-checks, admin-build]
+    needs: [changes, godot-static, server-lint, server-tests, desktop-tests, cli-tests, app-checks, admin-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -273,11 +306,16 @@ jobs:
           import os
           results = json.loads(os.environ['RESULTS'])
           changes = results.pop('changes')
+          godot_static = results.pop('godot-static')
           route = changes['outputs'].get('docs_only')
+          godot_route = changes['outputs'].get('client_godot')
           if changes['result'] != 'success' or route not in ('true', 'false'):
               raise SystemExit('改动范围或文档引用检查失败')
           expected = 'skipped' if route == 'true' else 'success'
           failed = {name: job['result'] for name, job in results.items() if job['result'] != expected}
+          godot_expected = 'success' if godot_route == 'true' else 'skipped'
+          if godot_static['result'] != godot_expected:
+              failed['godot-static'] = godot_static['result']
           if failed:
               raise SystemExit(f'离线检查未全部通过：{failed}')
           print('文档引用检查通过' if route == 'true' else '全部离线检查通过')

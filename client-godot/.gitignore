@@ -1,0 +1,16 @@
+.godot/
+dist/
+artifacts/
+*.tmp
+native/*.obj
+native/*.os
+native/.sconsign*
+native/godot-cpp/
+*.db
+*.db-wal
+*.db-shm
+*.db.bak
+*.db.*.bak
+addons/windows_security/bin/*.lib
+addons/windows_security/bin/*.exp
+addons/**/bin/~*.dll

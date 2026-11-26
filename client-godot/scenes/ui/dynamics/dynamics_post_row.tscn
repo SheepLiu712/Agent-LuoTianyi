@@ -1,0 +1,124 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamics_post_row.gd" id="1_row"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_comment.svg" id="comment_icon"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[sub_resource type="StyleBoxFlat" id="UnreadBarStyle"]
+bg_color = Color(0.4, 0.8, 1, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[node name="DynamicsPostRow" type="Button"]
+custom_minimum_size = Vector2(0, 90)
+theme = ExtResource("2_theme")
+theme_type_variation = &"DynamicsPost"
+script = ExtResource("1_row")
+
+[node name="UnreadBar" type="Panel" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_left = 1.0
+offset_top = 12.0
+offset_right = 4.0
+offset_bottom = -12.0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("UnreadBarStyle")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Column" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="TopRow" type="HBoxContainer" parent="Margin/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Avatar" type="TextureRect" parent="Margin/Column/TopRow"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_avatar")
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Author" type="Label" parent="Margin/Column/TopRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 13
+text_overrun_behavior = 3
+
+[node name="Time" type="Label" parent="Margin/Column/TopRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 11
+
+[node name="ExcerptWrap" type="MarginContainer" parent="Margin/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 38
+
+[node name="Excerpt" type="Label" parent="Margin/Column/ExcerptWrap"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3
+max_lines_visible = 2
+text_overrun_behavior = 3
+
+[node name="MetaWrap" type="MarginContainer" parent="Margin/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 38
+
+[node name="MetaRow" type="HBoxContainer" parent="Margin/Column/MetaWrap"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="CommentIcon" type="TextureRect" parent="Margin/Column/MetaWrap/MetaRow"]
+modulate = Color(0.321569, 0.392157, 0.439216, 1)
+custom_minimum_size = Vector2(13, 13)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("comment_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CommentCount" type="Label" parent="Margin/Column/MetaWrap/MetaRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 11
+text = "0"

@@ -1,0 +1,79 @@
+[gd_scene format=3 uid="uid://djn5wf7dsf7sb"]
+
+[ext_resource type="Script" uid="uid://rmw8x3ftxi1" path="res://src/application.gd" id="1_app"]
+[ext_resource type="Theme" uid="uid://dxbfy2n125n1p" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/decision_dialog.tscn" id="Decision"]
+[ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="WindowChrome"]
+[ext_resource type="Resource" path="res://resources/platform/decoder.tres" id="isolation_decoder"]
+[ext_resource type="Resource" path="res://resources/platform/encryption.tres" id="isolation_password_encryption"]
+[ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
+[ext_resource type="Resource" path="res://resources/platform/secrets.tres" id="isolation_secret_protection"]
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+
+[node name="AgentLuo" type="Control" unique_id=553571457]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_app")
+decoder_factory = ExtResource("isolation_decoder")
+secret_protection = ExtResource("isolation_secret_protection")
+password_encryption = ExtResource("isolation_password_encryption")
+window_system = ExtResource("isolation_window_system")
+runtime = ExtResource("isolation_runtime")
+
+[node name="PageSlot" type="Control" parent="." unique_id=89554627]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="LogProblem" type="Label" parent="." unique_id=1100606634]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 23.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.7176471, 0.16470589, 0.16470589, 1)
+autowrap_mode = 3
+
+[node name="ExitDialog" parent="." unique_id=769923390 instance=ExtResource("Decision")]
+unique_name_in_owner = true
+destructive_action = true
+title = "放弃未保存的内容？"
+dialog_text = "退出将关闭所有窗口；尚未提交的内容不会保留。"
+ok_button_text = "放弃并继续"
+cancel_button_text = "返回继续编辑"
+
+[node name="SecurityError" type="Label" parent="." unique_id=1675096938]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+text = "凭据保护组件缺失，请重新解压完整程序。"
+
+[node name="AccountStorageWarning" type="Label" parent="." unique_id=2088089257]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+anchor_right = 1.0
+offset_left = 120.0
+offset_top = 3.0
+offset_right = -24.0
+theme_type_variation = &"AccountNotice"
+text = "本次登录有效，但未能记住本机登录状态，下次需重新输入密码。"
+autowrap_mode = 3
+
+[node name="Chrome" type="Control" parent="." unique_id=582216013]
+unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+script = ExtResource("WindowChrome")
+login_mode = true

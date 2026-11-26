@@ -1,0 +1,296 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/model_purpose_card.gd" id="1_card"]
+[ext_resource type="Script" path="res://src/ui/toggle_switch.gd" id="2_toggle"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/components/unified_dropdown.tscn" id="3_dropdown"]
+
+[sub_resource type="StyleBoxFlat" id="ModelFieldNormal"]
+content_margin_left = 10.0
+content_margin_top = 6.0
+content_margin_right = 10.0
+content_margin_bottom = 6.0
+bg_color = Color(0.956863, 0.972549, 0.984314, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="ModelFieldFocus"]
+content_margin_left = 10.0
+content_margin_top = 6.0
+content_margin_right = 10.0
+content_margin_bottom = 6.0
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.4, 0.8, 1, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="ModelPurposeCard" type="PanelContainer"]
+size_flags_horizontal = 3
+theme = ExtResource("2_theme")
+theme_type_variation = &"SettingsCard"
+script = ExtResource("1_card")
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="Column"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PurposeTitle" type="Label" parent="Column/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 15
+text = "模型用途"
+
+[node name="ChipsRow" type="HBoxContainer" parent="Column/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Spacer" type="Control" parent="Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="EnabledLabel" type="Label" parent="Column/Header"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "使用自己的 API Key"
+
+[node name="Enabled" type="BaseButton" parent="Column/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 20)
+layout_mode = 2
+size_flags_vertical = 4
+toggle_mode = true
+script = ExtResource("2_toggle")
+
+[node name="Description" type="Label" parent="Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+
+[node name="Fields" type="VBoxContainer" parent="Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TopGap" type="Control" parent="Column/Fields"]
+custom_minimum_size = Vector2(0, 2)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="EndpointRow" type="HBoxContainer" parent="Column/Fields"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BaseUrlCol" type="VBoxContainer" parent="Column/Fields/EndpointRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="BaseUrlLabel" type="Label" parent="Column/Fields/EndpointRow/BaseUrlCol"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "接口地址"
+
+[node name="base_url" type="LineEdit" parent="Column/Fields/EndpointRow/BaseUrlCol"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_type_variation = &"SettingsLineEdit"
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("ModelFieldNormal")
+theme_override_styles/focus = SubResource("ModelFieldFocus")
+placeholder_text = "https://api.example.com/v1"
+
+[node name="ModelCol" type="VBoxContainer" parent="Column/Fields/EndpointRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="ModelLabel" type="Label" parent="Column/Fields/EndpointRow/ModelCol"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "模型"
+
+[node name="ModelName" type="LineEdit" parent="Column/Fields/EndpointRow/ModelCol"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_type_variation = &"SettingsLineEdit"
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("ModelFieldNormal")
+theme_override_styles/focus = SubResource("ModelFieldFocus")
+
+[node name="ApiKeyCol" type="VBoxContainer" parent="Column/Fields"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ApiKeyLabel" type="Label" parent="Column/Fields/ApiKeyCol"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "API Key"
+
+[node name="ApiKeyRow" type="HBoxContainer" parent="Column/Fields/ApiKeyCol"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="api_key" type="LineEdit" parent="Column/Fields/ApiKeyCol/ApiKeyRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SettingsLineEdit"
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("ModelFieldNormal")
+theme_override_styles/focus = SubResource("ModelFieldFocus")
+secret = true
+
+[node name="TestButton" type="Button" parent="Column/Fields/ApiKeyCol/ApiKeyRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 36)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+theme_override_colors/font_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_font_sizes/font_size = 12
+text = "测试"
+
+[node name="IdentityAndCapsRow" type="HBoxContainer" parent="Column/Fields"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ProviderCol" type="VBoxContainer" parent="Column/Fields/IdentityAndCapsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="ProviderLabel" type="Label" parent="Column/Fields/IdentityAndCapsRow/ProviderCol"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "服务商名称"
+
+[node name="provider" type="LineEdit" parent="Column/Fields/IdentityAndCapsRow/ProviderCol"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_type_variation = &"SettingsLineEdit"
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("ModelFieldNormal")
+theme_override_styles/focus = SubResource("ModelFieldFocus")
+
+[node name="CapCol" type="VBoxContainer" parent="Column/Fields/IdentityAndCapsRow"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CapLabel" type="Label" parent="Column/Fields/IdentityAndCapsRow/CapCol"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "能力声明"
+
+[node name="CapabilityRow" type="HBoxContainer" parent="Column/Fields/IdentityAndCapsRow/CapCol"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="JsonWrap" type="HBoxContainer" parent="Column/Fields/IdentityAndCapsRow/CapCol/CapabilityRow"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Json" type="BaseButton" parent="Column/Fields/IdentityAndCapsRow/CapCol/CapabilityRow/JsonWrap"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 20)
+layout_mode = 2
+size_flags_vertical = 4
+toggle_mode = true
+script = ExtResource("2_toggle")
+
+[node name="JsonLabel" type="Label" parent="Column/Fields/IdentityAndCapsRow/CapCol/CapabilityRow/JsonWrap"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "JSON 输出"
+
+[node name="ThinkingWrap" type="HBoxContainer" parent="Column/Fields/IdentityAndCapsRow/CapCol/CapabilityRow"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Thinking" type="BaseButton" parent="Column/Fields/IdentityAndCapsRow/CapCol/CapabilityRow/ThinkingWrap"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 20)
+layout_mode = 2
+size_flags_vertical = 4
+toggle_mode = true
+script = ExtResource("2_toggle")
+
+[node name="ThinkingLabel" type="Label" parent="Column/Fields/IdentityAndCapsRow/CapCol/CapabilityRow/ThinkingWrap"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "Thinking"
+
+[node name="ParamsLabel" type="Label" parent="Column/Fields"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 12
+text = "高级 JSON 参数（非流式）"
+
+[node name="Params" type="TextEdit" parent="Column/Fields"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 78)
+layout_mode = 2
+theme_type_variation = &"MonoTextEdit"
+theme_override_font_sizes/font_size = 12
+wrap_mode = 1
+
+[node name="ActionRow" type="HBoxContainer" parent="Column/Fields"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CopySlot" parent="Column/Fields/ActionRow" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CopyButton" type="Button" parent="Column/Fields/ActionRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_type_variation = &"SettingsButton"
+theme_override_font_sizes/font_size = 13
+text = "复制该用途配置"
+
+[node name="CardStatus" type="Label" parent="Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+autowrap_mode = 3

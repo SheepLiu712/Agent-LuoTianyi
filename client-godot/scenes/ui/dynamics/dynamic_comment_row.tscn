@@ -1,0 +1,97 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamic_comment_row.gd" id="1_comment"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[sub_resource type="StyleBoxEmpty" id="CommentNormalStyle"]
+content_margin_left = 10.0
+content_margin_top = 10.0
+content_margin_right = 10.0
+content_margin_bottom = 10.0
+
+[sub_resource type="StyleBoxFlat" id="AuthorBadgeStyle"]
+content_margin_left = 6.0
+content_margin_top = 1.0
+content_margin_right = 6.0
+content_margin_bottom = 1.0
+bg_color = Color(0.901961, 0.964706, 1, 1)
+corner_radius_top_left = 99
+corner_radius_top_right = 99
+corner_radius_bottom_right = 99
+corner_radius_bottom_left = 99
+
+[node name="DynamicCommentRow" type="PanelContainer"]
+theme = ExtResource("2_theme")
+theme_override_styles/panel = SubResource("CommentNormalStyle")
+script = ExtResource("1_comment")
+
+[node name="Line" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Avatar" type="TextureRect" parent="Line"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_avatar")
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+size_flags_vertical = 0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Content" type="VBoxContainer" parent="Line"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="HeaderRow" type="HBoxContainer" parent="Line/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Author" type="Label" parent="Line/Content/HeaderRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 13
+
+[node name="AuthorBadge" type="PanelContainer" parent="Line/Content/HeaderRow"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_styles/panel = SubResource("AuthorBadgeStyle")
+
+[node name="BadgeText" type="Label" parent="Line/Content/HeaderRow/AuthorBadge"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_font_sizes/font_size = 10
+text = "作者"
+
+[node name="Time" type="Label" parent="Line/Content/HeaderRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+
+[node name="Body" type="RichTextLabel" parent="Line/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/default_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+selection_enabled = true
+
+[node name="Reply" type="Button" parent="Line"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"InlineLinkButton"
+theme_override_colors/font_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_font_sizes/font_size = 12
+text = "回复"

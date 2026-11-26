@@ -1,0 +1,235 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/chat_workspace.gd" id="1_workspace"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_at.svg" id="icon_nav_at"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_chat.svg" id="icon_nav_chat"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_scroll.svg" id="icon_nav_scroll"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/nav_settings.svg" id="icon_nav_settings"]
+[ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="avatar_icon"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="avatar_shader"]
+[ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="3_avatar"]
+[ext_resource type="PackedScene" path="res://scenes/ui/chat/chat_view.tscn" id="4_chat"]
+
+[sub_resource type="Gradient" id="WorkspaceGradient"]
+colors = PackedColorArray(0.94902, 0.972549, 0.988235, 1, 0.94902, 0.972549, 0.988235, 1)
+
+[sub_resource type="GradientTexture2D" id="WorkspaceBackdrop"]
+resource_local_to_scene = true
+gradient = SubResource("WorkspaceGradient")
+fill_to = Vector2(1, 1)
+
+[sub_resource type="StyleBoxFlat" id="ActiveMarkStyle"]
+bg_color = Color(0.4, 0.8, 1, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="NavAvatarFrame"]
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_nav_avatar"]
+shader = ExtResource("avatar_shader")
+
+[sub_resource type="StyleBoxEmpty" id="NavAvatarBtnNormal"]
+
+[sub_resource type="StyleBoxFlat" id="NavAvatarBtnHover"]
+draw_center = false
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.4, 0.8, 1, 0.85)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[node name="ChatWorkspace" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_workspace")
+
+[node name="Background" type="TextureRect" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("WorkspaceBackdrop")
+expand_mode = 1
+
+[node name="Navigation" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 80.0
+grow_vertical = 2
+theme_type_variation = &"NavigationRail"
+
+[node name="Items" type="VBoxContainer" parent="Navigation"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="NavChat" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(60, 60)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"NavigationButton"
+toggle_mode = true
+button_pressed = true
+text = "聊天"
+icon = ExtResource("icon_nav_chat")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="ActiveMark" type="Panel" parent="Navigation/Items/NavChat"]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = -8.0
+offset_top = -12.0
+offset_right = -5.0
+offset_bottom = 12.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("ActiveMarkStyle")
+
+[node name="NavDynamics" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(60, 60)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"NavigationButton"
+text = "动态"
+icon = ExtResource("icon_nav_at")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="DynamicsUnread" type="PanelContainer" parent="Navigation/Items/NavDynamics"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -22.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = 22.0
+mouse_filter = 2
+theme_type_variation = &"NavigationUnreadDot"
+
+[node name="DynamicsUnreadCount" type="Label" parent="Navigation/Items/NavDynamics/DynamicsUnread"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 11
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NavSettings" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(60, 60)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"NavigationButton"
+text = "设置"
+icon = ExtResource("icon_nav_settings")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="Spacer" type="Control" parent="Navigation/Items"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="NavLogs" type="Button" parent="Navigation/Items"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(60, 60)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"NavigationButton"
+text = "日志"
+icon = ExtResource("icon_nav_scroll")
+clip_text = true
+icon_alignment = 1
+vertical_icon_alignment = 0
+
+[node name="NavAvatarWrap" type="CenterContainer" parent="Navigation/Items"]
+layout_mode = 2
+
+[node name="NavAvatarFrame" type="PanelContainer" parent="Navigation/Items/NavAvatarWrap"]
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+theme_override_styles/panel = SubResource("NavAvatarFrame")
+
+[node name="NavAvatar" type="TextureRect" parent="Navigation/Items/NavAvatarWrap/NavAvatarFrame"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_nav_avatar")
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("avatar_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="NavAvatarButton" type="Button" parent="Navigation/Items/NavAvatarWrap/NavAvatarFrame"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "当前账号"
+theme_override_styles/normal = SubResource("NavAvatarBtnNormal")
+theme_override_styles/hover = SubResource("NavAvatarBtnHover")
+theme_override_styles/pressed = SubResource("NavAvatarBtnHover")
+theme_override_styles/focus = SubResource("NavAvatarBtnHover")
+
+[node name="Split" type="HSplitContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 96.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 14
+
+[node name="AvatarPanel" parent="Split" instance=ExtResource("3_avatar")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(290, 0)
+layout_mode = 2
+
+[node name="ChatView" parent="Split" instance=ExtResource("4_chat")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(440, 0)
+layout_mode = 2
+size_flags_horizontal = 3

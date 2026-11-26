@@ -1,0 +1,323 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamic_detail.gd" id="1_detail"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_comment.svg" id="comment_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/action_copy.svg" id="copy_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/icons/ui_more_horiz.svg" id="more_icon"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[sub_resource type="StyleBoxFlat" id="ActionGhostNormal"]
+content_margin_left = 10.0
+content_margin_top = 6.0
+content_margin_right = 10.0
+content_margin_bottom = 6.0
+bg_color = Color(1, 1, 1, 0)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="ActionGhostHover"]
+content_margin_left = 10.0
+content_margin_top = 6.0
+content_margin_right = 10.0
+content_margin_bottom = 6.0
+bg_color = Color(0.905882, 0.94902, 0.976471, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="ComposerBarStyle"]
+content_margin_left = 16.0
+content_margin_top = 12.0
+content_margin_right = 16.0
+content_margin_bottom = 12.0
+bg_color = Color(0.956863, 0.976471, 0.988235, 1)
+border_width_top = 1
+border_color = Color(0.929412, 0.94902, 0.964706, 1)
+
+[sub_resource type="StyleBoxFlat" id="ReplyChipStyle"]
+content_margin_left = 10.0
+content_margin_top = 3.0
+content_margin_right = 6.0
+content_margin_bottom = 3.0
+bg_color = Color(0.901961, 0.964706, 1, 1)
+corner_radius_top_left = 99
+corner_radius_top_right = 99
+corner_radius_bottom_right = 99
+corner_radius_bottom_left = 99
+
+[sub_resource type="StyleBoxEmpty" id="ChipCloseNormal"]
+
+[sub_resource type="StyleBoxFlat" id="ReplyInputNormal"]
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.858824, 0.905882, 0.941176, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="ReplyInputFocus"]
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.4, 0.8, 1, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="DynamicDetail" type="VBoxContainer"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme = ExtResource("2_theme")
+theme_override_constants/separation = 0
+script = ExtResource("1_detail")
+input_service = ExtResource("isolation_input_service")
+
+[node name="DetailScroll" type="ScrollContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Margin" type="MarginContainer" parent="DetailScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 16
+
+[node name="Column" type="VBoxContainer" parent="DetailScroll/Margin"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="Header" type="HBoxContainer" parent="DetailScroll/Margin/Column"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Avatar" type="TextureRect" parent="DetailScroll/Margin/Column/Header"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_avatar")
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+size_flags_vertical = 4
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Identity" type="VBoxContainer" parent="DetailScroll/Margin/Column/Header"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 2
+
+[node name="Author" type="Label" parent="DetailScroll/Margin/Column/Header/Identity"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_font_sizes/font_size = 16
+
+[node name="CreatedAt" type="Label" parent="DetailScroll/Margin/Column/Header/Identity"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.321569, 0.392157, 0.439216, 1)
+theme_override_font_sizes/font_size = 12
+
+[node name="Body" type="RichTextLabel" parent="DetailScroll/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/default_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_constants/line_separation = 5
+theme_override_font_sizes/normal_font_size = 15
+fit_content = true
+scroll_active = false
+selection_enabled = true
+
+[node name="ActionWrap" type="VBoxContainer" parent="DetailScroll/Margin/Column"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TopSep" type="HSeparator" parent="DetailScroll/Margin/Column/ActionWrap"]
+layout_mode = 2
+
+[node name="ActionBar" type="HBoxContainer" parent="DetailScroll/Margin/Column/ActionWrap"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ActionComments" type="Button" parent="DetailScroll/Margin/Column/ActionWrap/ActionBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_colors/font_hover_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_colors/font_pressed_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_colors/icon_normal_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_colors/icon_hover_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_colors/icon_pressed_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("ActionGhostNormal")
+theme_override_styles/hover = SubResource("ActionGhostHover")
+theme_override_styles/pressed = SubResource("ActionGhostHover")
+text = "评论 0"
+icon = ExtResource("comment_icon")
+
+[node name="ActionCopy" type="Button" parent="DetailScroll/Margin/Column/ActionWrap/ActionBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_constants/h_separation = 6
+theme_override_constants/icon_max_width = 16
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("ActionGhostNormal")
+theme_override_styles/hover = SubResource("ActionGhostHover")
+theme_override_styles/pressed = SubResource("ActionGhostHover")
+text = "复制"
+icon = ExtResource("copy_icon")
+
+[node name="ActionSpacer" type="Control" parent="DetailScroll/Margin/Column/ActionWrap/ActionBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="ActionMore" type="Button" parent="DetailScroll/Margin/Column/ActionWrap/ActionBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "更多操作"
+theme_override_colors/icon_normal_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_colors/icon_hover_color = Color(0.121569, 0.2, 0.25098, 1)
+theme_override_constants/icon_max_width = 16
+theme_override_styles/normal = SubResource("ActionGhostNormal")
+theme_override_styles/hover = SubResource("ActionGhostHover")
+theme_override_styles/pressed = SubResource("ActionGhostHover")
+icon = ExtResource("more_icon")
+icon_alignment = 1
+
+[node name="BottomSep" type="HSeparator" parent="DetailScroll/Margin/Column/ActionWrap"]
+layout_mode = 2
+
+[node name="CommentsHeading" type="Label" parent="DetailScroll/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.247059, 0.333333, 0.388235, 1)
+theme_override_font_sizes/font_size = 13
+text = "全部评论 · 0"
+
+[node name="Notice" type="Label" parent="DetailScroll/Margin/Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"SettingsHelpText"
+text = "此动态不可评论。"
+
+[node name="Comments" type="VBoxContainer" parent="DetailScroll/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Status" type="Label" parent="DetailScroll/Margin/Column"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="ComposerBar" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_styles/panel = SubResource("ComposerBarStyle")
+
+[node name="ComposerCol" type="VBoxContainer" parent="ComposerBar"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ReplyChipRow" type="HBoxContainer" parent="ComposerBar/ComposerCol"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="ReplyChip" type="PanelContainer" parent="ComposerBar/ComposerCol/ReplyChipRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("ReplyChipStyle")
+
+[node name="ChipHBox" type="HBoxContainer" parent="ComposerBar/ComposerCol/ReplyChipRow/ReplyChip"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ReplyLabel" type="Label" parent="ComposerBar/ComposerCol/ReplyChipRow/ReplyChip/ChipHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_font_sizes/font_size = 12
+text = "回复 @"
+
+[node name="CancelReply" type="Button" parent="ComposerBar/ComposerCol/ReplyChipRow/ReplyChip/ChipHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+tooltip_text = "取消回复对象"
+theme_override_colors/font_color = Color(0.070588, 0.470588, 0.678431, 1)
+theme_override_colors/font_hover_color = Color(0.04, 0.36, 0.53, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("ChipCloseNormal")
+theme_override_styles/hover = SubResource("ChipCloseNormal")
+theme_override_styles/pressed = SubResource("ChipCloseNormal")
+text = "×"
+
+[node name="InputRow" type="HBoxContainer" parent="ComposerBar/ComposerCol"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CommentDraft" type="TextEdit" parent="ComposerBar/ComposerCol/InputRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("ReplyInputNormal")
+theme_override_styles/focus = SubResource("ReplyInputFocus")
+placeholder_text = "写下你的留言…"
+wrap_mode = 1
+
+[node name="Send" type="Button" parent="ComposerBar/ComposerCol/InputRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 44)
+layout_mode = 2
+size_flags_vertical = 8
+theme_type_variation = &"PrimaryButton"
+theme_override_colors/font_color = Color(0.054902, 0.164706, 0.231373, 1)
+theme_override_font_sizes/font_size = 14
+text = "发送"
+
+[node name="MoreMenu" type="PopupMenu" parent="."]
+unique_name_in_owner = true
+item_count = 2
+item_0/text = "刷新评论"
+item_0/id = 0
+item_1/text = "复制动态正文"
+item_1/id = 1
