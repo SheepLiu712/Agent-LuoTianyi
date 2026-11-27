@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -90,11 +91,19 @@ class DataTransferDialog(QDialog):
         layout.addWidget(self.tabs)
         self._build_export_page()
         self._build_import_page()
+        self.toggle_details = QPushButton("显示详细信息")
+        self.toggle_details.setFlat(True)
+        self.toggle_details.setStyleSheet("QPushButton { color: #1296DB; text-align: left; padding-left: 0; }")
+        self.toggle_details.clicked.connect(self._toggle_details)
+        layout.addWidget(self.toggle_details)
         self.details = QTextEdit()
         self.details.setReadOnly(True)
         self.details.setAccessibleName("迁移预览与结果")
         self.details.setMinimumHeight(130)
-        self.details.setPlainText("导入前会显示格式、实际范围、数量与警告；确认后才会写入。")
+        self.details.setPlainText(
+            "上传与下载上限 64 MiB，展开上限 256 MiB、4096 项。\n导入前会显示格式、实际范围、数量与警告；确认后才会写入。"
+        )
+        self.details.hide()
         layout.addWidget(self.details, 1)
         self.status_label = QLabel("就绪")
         self.status_label.setWordWrap(True)
@@ -122,6 +131,7 @@ class DataTransferDialog(QDialog):
             self.file_button,
             self.folder_button,
             self.mode_combo,
+            self.advanced_group,
         )
         for label in self.findChildren(QLabel):
             label.setTextFormat(Qt.TextFormat.PlainText)
@@ -143,10 +153,7 @@ class DataTransferDialog(QDialog):
         ):
             self.export_format.addItem(label, value)
         layout.addRow("保存格式：", self.export_format)
-        hint = QLabel(
-            "ZIP 与目录包可恢复，内部结构相同；Markdown / TXT 仅供阅读。\n"
-            "上传与下载上限 64 MiB，展开上限 256 MiB、4096 项。"
-        )
+        hint = QLabel("ZIP 与目录包可恢复，内部结构相同；Markdown / TXT 仅供阅读。")
         hint.setWordWrap(True)
         layout.addRow(hint)
         self.export_button = QPushButton("导出并保存…")
@@ -157,6 +164,8 @@ class DataTransferDialog(QDialog):
     def _build_import_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.setSpacing(12)
+        # 主区域：来源与选择
         form = QFormLayout()
         form.setSpacing(10)
         self.source_path = QLineEdit()
@@ -171,6 +180,25 @@ class DataTransferDialog(QDialog):
         choices.addWidget(self.file_button)
         choices.addWidget(self.folder_button)
         form.addRow(choices)
+        layout.addLayout(form)
+
+        # 主操作按钮
+        self.preview_button = QPushButton("预览导入")
+        self.preview_button.clicked.connect(self._preview_import)
+        layout.addWidget(self.preview_button)
+
+        # 高级设置折叠区域
+        self.advanced_group = QGroupBox("高级设置")
+        self.advanced_group.setCheckable(True)
+        self.advanced_group.setChecked(False)
+        self.advanced_content = QWidget()
+        advanced_layout = QFormLayout(self.advanced_content)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(10)
+        group_layout = QVBoxLayout(self.advanced_group)
+        group_layout.addWidget(self.advanced_content)
+        self.advanced_group.toggled.connect(self.advanced_content.setVisible)
+        self.advanced_content.setVisible(False)
         self.source_format = QComboBox()
         for label, value in (
             ("自动识别", "auto"),
@@ -180,31 +208,36 @@ class DataTransferDialog(QDialog):
             ("通用 role/content JSON", "generic"),
         ):
             self.source_format.addItem(label, value)
-        form.addRow("来源格式：", self.source_format)
+        advanced_layout.addRow("来源格式：", self.source_format)
         self.import_scope = _scope_combo()
-        form.addRow("数据范围：", self.import_scope)
+        advanced_layout.addRow("数据范围：", self.import_scope)
         self.character_id = QLineEdit("luotianyi")
         self.character_id.setToolTip("外部文字记录归入的已启用角色标识")
-        form.addRow("外部记录角色：", self.character_id)
-        layout.addLayout(form)
-        self.preview_button = QPushButton("预览导入")
-        self.preview_button.clicked.connect(self._preview_import)
-        layout.addWidget(self.preview_button)
+        advanced_layout.addRow("外部记录角色：", self.character_id)
+        layout.addWidget(self.advanced_group)
+
+        # 预览后操作区域（仅预览成功后可显示）
+        self.post_preview_area = QWidget()
+        post_layout = QVBoxLayout(self.post_preview_area)
+        post_layout.setContentsMargins(0, 0, 0, 0)
+        post_layout.setSpacing(10)
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("合并并去重（默认）", "merge")
         self.mode_combo.addItem("备份后替换预览范围", "replace")
-        layout.addWidget(self.mode_combo)
+        post_layout.addWidget(self.mode_combo)
         self.extract_checkbox = QCheckBox("从本批外部聊天记录提取长期记忆（调用服务端模型）")
         self.extract_checkbox.setToolTip(
             "默认不提取，外部聊天仅进入历史。只提取用户事实，不把外部助手当当前角色；模型失败不会撤销已导入聊天。"
         )
-        layout.addWidget(self.extract_checkbox)
+        post_layout.addWidget(self.extract_checkbox)
         self.commit_button = QPushButton("确认导入")
         self.commit_button.clicked.connect(self._commit)
-        layout.addWidget(self.commit_button)
+        post_layout.addWidget(self.commit_button)
         self.retry_extraction_button = QPushButton("重试本批记忆提取")
         self.retry_extraction_button.clicked.connect(self._retry_extraction)
-        layout.addWidget(self.retry_extraction_button)
+        post_layout.addWidget(self.retry_extraction_button)
+        layout.addWidget(self.post_preview_area)
+
         self.tabs.addTab(page, "导入")
         for widget in (self.source_format, self.import_scope):
             widget.currentIndexChanged.connect(self._invalidate_preview)
@@ -221,9 +254,14 @@ class DataTransferDialog(QDialog):
         self.extract_checkbox.setEnabled(not busy and external)
         self.retry_extraction_button.setVisible(self._retry_request is not None)
         self.retry_extraction_button.setEnabled(not busy and self._retry_request is not None)
+        # 预览后操作区域仅在有预览或重试请求时显示
+        self.post_preview_area.setVisible(self._preview is not None or self._retry_request is not None)
         self.backup_button.setEnabled(not busy and bool(self._backup_id))
+        self.backup_button.setVisible(not busy and bool(self._backup_id))
         self.refresh_button.setEnabled(not busy and self._refresh_available)
+        self.refresh_button.setVisible(not busy and self._refresh_available)
         self.cancel_button.setEnabled(busy and self._action != "commit" and not self._cancelled)
+        self.cancel_button.setVisible(busy and self._action != "commit" and not self._cancelled)
         self.close_button.setEnabled(not busy or self._action != "commit")
 
     def _invalidate_preview(self, *_args):
@@ -249,6 +287,16 @@ class DataTransferDialog(QDialog):
         if path:
             self.source_path.setText(path)
 
+    def _collapse_details(self):
+        if self.details.isVisible():
+            self.details.hide()
+            self.toggle_details.setText("显示详细信息")
+
+    def _expand_details(self):
+        if not self.details.isVisible():
+            self.details.show()
+            self.toggle_details.setText("隐藏详细信息")
+
     def _start(self, action: str, message: str, **values):
         if self.operation.busy:
             return
@@ -258,6 +306,7 @@ class DataTransferDialog(QDialog):
         self._action = action
         self._cancelled = False
         self.status_label.setText(message)
+        self._collapse_details()
         self._update_controls()
 
     def _export(self):
@@ -374,11 +423,16 @@ class DataTransferDialog(QDialog):
             self._refresh_available = True
         if not success:
             self.status_label.setText(f"操作失败：{message}。可检查后重新预览或重试。")
+            if request.action == "export":
+                self._refresh_available = True
+                self.details.setPlainText(f"导出失败：{message}\n可刷新历史并重连后继续聊天。")
+                self._expand_details()
             if request.action == "commit":
                 self.details.setPlainText(
                     "未确认导入成功。若请求中断，服务器可能已完成提交，请先刷新历史；重试前重新预览。\n"
                     + self._result_text(data)
                 )
+                self._expand_details()
             return
         if request.action == "preview":
             self._preview = data
@@ -391,9 +445,11 @@ class DataTransferDialog(QDialog):
             warnings = data.get("warnings") or []
             text += "\n警告：\n" + "\n".join(str(item) for item in warnings) if warnings else "\n未报告警告。"
             self.details.setPlainText(text)
+            self._expand_details()
             self.status_label.setText("预览完成，请核对实际范围后选择合并或替换。")
         elif request.action == "commit":
             self.details.setPlainText(self._result_text(data))
+            self._expand_details()
             self.status_label.setText("数据导入完成，请查看记忆提取结果。可下载备份，并刷新历史 / 重连。")
         else:
             self.status_label.setText(f"已保存：{data.get('path', '')}")
@@ -425,6 +481,8 @@ class DataTransferDialog(QDialog):
     def _settled(self):
         if self._cancelled:
             self.status_label.setText("操作已取消。网络请求如已发出会等待结束，未提交导入。")
+            if self._action == "export":
+                self._refresh_available = True
         self._action = ""
         self._update_controls()
 
@@ -451,6 +509,11 @@ class DataTransferDialog(QDialog):
             self.operation.invalidate()
             self.status_label.setText("正在取消，等待当前网络请求结束…")
             self._update_controls()
+
+    def _toggle_details(self):
+        visible = not self.details.isVisible()
+        self.details.setVisible(visible)
+        self.toggle_details.setText("隐藏详细信息" if visible else "显示详细信息")
 
     def reject(self):
         if self.operation.busy and self._action == "commit":
