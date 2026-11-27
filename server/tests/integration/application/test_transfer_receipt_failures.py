@@ -4,6 +4,7 @@ The shared fixture uses a fresh SQLite database, local temporary media and a
 controlled vector port. No live user data or external model is accessed.
 """
 
+import logging
 from datetime import datetime
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from integration.application import test_user_data_transfer as shared
 
 from src.infrastructure.data_transfer import decode_import
 from src.infrastructure.persistence.database.sql_database import Conversation
+from src.utils.logger import get_logger
 
 transfer = shared.transfer
 
@@ -141,3 +143,35 @@ def test_sql_receipt_keeps_final_extraction_state_despite_stale_or_failed_sideca
     assert retry.json()["success"] and retry.json()["committed"]
     assert retry.json()["extraction"] == result["extraction"]
     assert len(extraction_calls) == 1 and len(_chats(transfer)) == 1
+
+
+def test_commit_failure_logs_original_cause_with_operation_id(transfer, monkeypatch):
+    """回执只暴露通用类型名时，服务端日志仍要能定位原始异常与操作标识。"""
+    view = shared.preview(transfer, DATA, source_format="generic")
+    logger = get_logger("application.user.data_transfer")
+    messages = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            messages.append(self.format(record))
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    try:
+
+        def fail_commit(*_args, **_kwargs):
+            raise RuntimeError("synthetic sqlite commit failure")
+
+        monkeypatch.setattr(transfer.repository, "apply", fail_commit)
+        response = shared.commit(transfer, view)
+    finally:
+        logger.removeHandler(handler)
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["success"] is False and result["committed"] is False
+    assert result["error"] == "TransferCommitError"
+    logged = "\n".join(messages)
+    assert view["preview_id"] in logged
+    assert "RuntimeError: synthetic sqlite commit failure" in logged
+    assert "synthetic imported history" not in logged

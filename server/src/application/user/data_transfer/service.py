@@ -8,9 +8,12 @@ from collections import defaultdict
 
 from src.infrastructure.data_transfer import decode_import, encode_archive, render_readable
 from src.infrastructure.persistence.user_data_transfer import dump_json
+from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
 from .identity import bind_import
+
+logger = get_logger("application.user.data_transfer")
 
 
 class TransferCommitError(RuntimeError):
@@ -119,10 +122,24 @@ class UserDataTransferService:
                 try:
                     await asyncio.to_thread(self._workspace.save_result, preview_id, user_id, pending)
                 except OSError as error:
+                    logger.exception(
+                        "data transfer receipt unavailable: preview_id=%s mode=%s backup_id=%s",
+                        preview_id,
+                        mode,
+                        backup_id,
+                    )
                     raise TransferCommitError("TRANSFER_RECEIPT_UNAVAILABLE", backup_id=backup_id) from error
                 try:
                     result = await self._apply(user_id, bound, mode, backup_id, preview_id, extract_memories)
                 except Exception as error:
+                    # 回执只保留类型名；原始异常链必须在此留档，否则无法定位提交失败根因。
+                    logger.exception(
+                        "data transfer commit failed: preview_id=%s mode=%s backup_id=%s rollback_error=%s",
+                        preview_id,
+                        mode,
+                        backup_id,
+                        getattr(error, "rollback_error", None),
+                    )
                     pending.update(error=type(error).__name__, rollback_error=getattr(error, "rollback_error", None))
                     await self._cache_result(user_id, preview_id, pending)
                     return pending
