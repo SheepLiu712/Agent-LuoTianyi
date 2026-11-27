@@ -88,6 +88,23 @@ function Card({ title, theme, children }: React.PropsWithChildren<{ title: strin
   </View>;
 }
 
+function Disclosure({ title, theme, children, defaultOpen = false }: React.PropsWithChildren<{ title: string; theme: AppTheme; defaultOpen?: boolean }>) {
+  const [open, setOpen] = useState(defaultOpen);
+  const labelText = open ? `收起${title}` : `展开${title}`;
+  return <View>
+    <Pressable accessibilityRole="button" accessibilityLabel={labelText} accessibilityState={{ expanded: open }}
+      onPress={() => setOpen(!open)}
+      style={({ pressed }) => [styles.disclosureHeader, {
+        backgroundColor: theme.surfaceAlt,
+        opacity: pressed ? 0.75 : 1,
+      }]}>
+      <Text style={[styles.label, { color: theme.text }]}>{title}</Text>
+      <Text style={[styles.body, { color: theme.textMuted }]}>{open ? '收起' : '展开'}</Text>
+    </Pressable>
+    {open && <View style={styles.group}>{children}</View>}
+  </View>;
+}
+
 function countsText(counts: TransferCounts) {
   const media = counts.media === undefined ? '' : `，媒体 ${counts.media} 个`;
   return `聊天 ${counts.conversations} 条，长期记忆 ${counts.memories} 条${media}`;
@@ -255,18 +272,23 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
         <Action label="下载失败操作的恢复备份" disabled={busy} theme={theme} onPress={() => saveBackup(failureBackupId)} />
       </Card>}
       <Card title="导出" theme={theme}>
-        <Choices label="导出范围" labels={SCOPE_LABELS} value={exportScope} onChange={setExportScope} disabled={busy} theme={theme} />
-        <Text style={body}>包含{SCOPE_CONTENT[exportScope]}。</Text>
-        <Choices label="保存格式" labels={EXPORT_LABELS} value={exportFormat} onChange={setExportFormat} disabled={busy} theme={theme} />
-        <Text style={body}>{exportFormat === 'zip' ? 'ZIP 保留恢复所需的目录结构。' : '阅读副本仅供查看。需要还原时请选择 ZIP。'}</Text>
+        <Text style={body}>导出 {SCOPE_LABELS[exportScope]} · {EXPORT_LABELS[exportFormat]}。</Text>
         <Action label="导出并打开系统分享" onPress={exportData} disabled={busy} theme={theme} tone="primary" />
+        <Disclosure title="导出高级设置" theme={theme}>
+          <Choices label="导出范围" labels={SCOPE_LABELS} value={exportScope} onChange={setExportScope} disabled={busy} theme={theme} />
+          <Choices label="保存格式" labels={EXPORT_LABELS} value={exportFormat} onChange={setExportFormat} disabled={busy} theme={theme} />
+          <Text style={body}>{exportFormat === 'zip' ? 'ZIP 保留恢复所需的目录结构。' : '阅读副本仅供查看。需要还原时请选择 ZIP。'}</Text>
+        </Disclosure>
       </Card>
       <Card title="导入" theme={theme}>
-        <Choices label="文件来源" labels={SOURCE_LABELS} value={source} onChange={value => { setSource(value); resetPreview(); }} disabled={busy} theme={theme} />
-        {externalSource ? <Text style={body}>外部文件导入纯文字聊天。</Text> :
-          <Choices label="导入范围" labels={SCOPE_LABELS} value={importScope} onChange={value => { setImportScope(value); resetPreview(); }} disabled={busy} theme={theme} />}
-        <Text style={body}>请选择恢复 ZIP、ChatGPT 的 conversations.json、SillyTavern 的 JSONL 或通用 JSON。上传上限 64 MiB，ZIP 展开上限 256 MiB。</Text>
+        <Text style={body}>{externalSource ? '外部文件导入纯文字聊天。' : `恢复 ${SCOPE_LABELS[importScope]}。`}</Text>
         <Action label="选择文件并预览" onPress={chooseFile} disabled={busy} theme={theme} tone="primary" />
+        <Disclosure title="导入高级设置" theme={theme}>
+          <Choices label="文件来源" labels={SOURCE_LABELS} value={source} onChange={value => { setSource(value); resetPreview(); }} disabled={busy} theme={theme} />
+          {externalSource ? <Text style={body}>外部文件导入纯文字聊天。</Text> :
+            <Choices label="导入范围" labels={SCOPE_LABELS} value={importScope} onChange={value => { setImportScope(value); resetPreview(); }} disabled={busy} theme={theme} />}
+          <Text style={body}>请选择恢复 ZIP、ChatGPT 的 conversations.json、SillyTavern 的 JSONL 或通用 JSON。上传上限 64 MiB，ZIP 展开上限 256 MiB。</Text>
+        </Disclosure>
         {preview && <View style={[styles.preview, { backgroundColor: theme.surfaceAlt }]}>
           <Text accessibilityRole="header" style={[styles.label, { color: theme.text }]}>导入预览</Text>
           <Text style={body} accessibilityLiveRegion="polite">
@@ -285,10 +307,8 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
         </View>}
       </Card>
       {result && <Card title={result.success ? '导入完成' : '导入未完成'} theme={theme}>
-        <Text accessibilityLiveRegion="polite" style={body}>{`导入 ${countsText(imported)}\n跳过 ${countsText(skipped)}`}</Text>
-        {!result.success && <Text style={body}>服务器未完成写入。{result.error ? `\n${result.error}` : ''}{result.rollback_error ? `\n回滚提示：${result.rollback_error}` : ''}</Text>}
+        {!result.success && <Text style={body} accessibilityLiveRegion="polite">服务器未完成写入。{result.error ? `${result.error}` : ''}{result.rollback_error ? `\n回滚提示：${result.rollback_error}` : ''}</Text>}
         <Text style={body}>{extractionText(extraction)}</Text>
-        {(result.warnings ?? []).map((warning, index) => <Text key={index} style={body}>• {warning}</Text>)}
         {retryPreviewId && (extraction.status === 'failed' || extraction.status === 'unavailable') &&
           <Action label="重试记忆提取" disabled={busy} theme={theme} onPress={retryExtraction} />}
         {result.backup_id && <Action label="下载替换前的恢复备份" disabled={busy} theme={theme} onPress={() => {
@@ -296,6 +316,10 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
         }} />}
         {!needsReconnect && <Action label="刷新聊天并重连" disabled={busy} theme={theme}
           onPress={() => { void run('refresh', () => reconnect(true)); }} />}
+        <Disclosure title="详细信息" theme={theme}>
+          <Text style={body}>{`导入 ${countsText(imported)}\n跳过 ${countsText(skipped)}`}</Text>
+          {(result.warnings ?? []).map((warning, index) => <Text key={index} style={body}>• {warning}</Text>)}
+        </Disclosure>
       </Card>}
     </ScrollView>
   </View>;
@@ -310,7 +334,7 @@ const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 12, padding: 16, gap: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '700' },
   label: { fontSize: 15, fontWeight: '600' },
-  body: { fontSize: 14 },
+  body: { fontSize: 14, lineHeight: 20 },
   flexText: { flex: 1 },
   group: { gap: 8 },
   choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -320,4 +344,5 @@ const styles = StyleSheet.create({
   preview: { borderRadius: 8, padding: 12, gap: 12 },
   progress: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 8 },
   switchRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, gap: 8 },
+  disclosureHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
 });
