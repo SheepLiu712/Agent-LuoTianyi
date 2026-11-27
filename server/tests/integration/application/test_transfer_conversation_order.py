@@ -12,6 +12,7 @@ from integration.application import test_user_data_transfer as shared
 from src.agent.context import ContextIdentity, ConversationCompaction, ConversationSummary
 from src.agent.context._conversation_store import EphemeralCallConversationStore
 from src.agent.context._storage import _Storage
+from src.domain import ConversationItem
 from src.infrastructure.data_transfer import decode_import, encode_archive
 from src.infrastructure.persistence.database.sql_database import Conversation, ConversationContext, User
 
@@ -144,6 +145,59 @@ def test_order_ties_from_different_origins_have_stable_tiebreak(transfer):
     first = [row["content"] for row in decode_import(_export(transfer, "bob"))[0]["conversations"]]
     _restore(transfer, _export(transfer, "bob"), owner="alice")
     assert [row["content"] for row in decode_import(_export(transfer, "alice"))[0]["conversations"]] == first
+
+
+def test_restore_preserves_archive_list_order_even_when_timestamps_disagree(transfer):
+    transfer.history.add_conversations(
+        "alice",
+        [
+            ConversationItem(
+                uuid="first-inserted",
+                timestamp="2026-01-02 12:00:00",
+                source="user",
+                type="text",
+                content="first-inserted",
+            ),
+            ConversationItem(
+                uuid="second-inserted",
+                timestamp="2026-01-02 12:01:00",
+                source="user",
+                type="text",
+                content="second-inserted",
+            ),
+            ConversationItem(
+                uuid="third-inserted",
+                timestamp="2026-01-02 12:02:00",
+                source="user",
+                type="text",
+                content="third-inserted",
+            ),
+        ],
+    )
+    payload, files = decode_import(_export(transfer, "alice"))
+    payload["conversations"] = list(reversed(payload["conversations"]))
+    reversed_archive = encode_archive(payload, files)
+    expected = ["third-inserted", "second-inserted", "first-inserted"]
+
+    result = _restore(transfer, reversed_archive, mode="replace")
+    assert result["success"], result
+    assert [
+        row["content"] for row in decode_import(_export(transfer, "bob"))[0]["conversations"]
+    ] == expected
+    with transfer.sessions() as db:
+        rows = (
+            db.query(Conversation)
+            .filter(Conversation.user_id == "bob")
+            .order_by(Conversation.index)
+            .all()
+        )
+        assert [row.index for row in rows] == [1, 2, 3]
+        # 导入只重排目标序号，不改原始时间。
+        assert [row.timestamp.isoformat() for row in rows] == [
+            "2026-01-02T12:02:00",
+            "2026-01-02T12:01:00",
+            "2026-01-02T12:00:00",
+        ]
 
 
 def test_invalid_order_metadata_is_rejected_before_write(transfer):

@@ -7,9 +7,9 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
-from src.infrastructure.persistence.conversation_order import conversation_order_columns, conversation_row_key
+from src.infrastructure.persistence.conversation_order import conversation_order_columns
 from src.infrastructure.persistence.database.sql_database import (
     AgentMemoryRecord,
     CallMaintenanceBatch,
@@ -303,7 +303,8 @@ class UserDataRepository:
                 self._delete_scope(db, user_id, scope)
                 db.flush()
             preserved = set(states) if mode == "merge" else set()
-            imported, skipped, native = self._apply_rows(db, user_id, payload, vector_ids, preserved)
+            next_indices = self._next_conversation_indices(db, user_id)
+            imported, skipped, native = self._apply_rows(db, user_id, payload, vector_ids, preserved, next_indices)
             if scope in {"memory", "all"}:
                 self._apply_edges(db, user_id, payload.get("memory_edges", []))
                 self._apply_profile(user, payload["profile"], mode)
@@ -316,17 +317,31 @@ class UserDataRepository:
                 self._write_receipt(db, user_id, receipt, payload, imported, skipped)
             return imported, skipped
 
-    def _apply_rows(self, db, user_id, payload, vector_ids, preserved):
+    @staticmethod
+    def _next_conversation_indices(db, user_id):
+        rows = (
+            db.query(Conversation.character_id, func.max(Conversation.index))
+            .filter(Conversation.user_id == user_id)
+            .group_by(Conversation.character_id)
+            .all()
+        )
+        return {character: int(value or 0) for character, value in rows}
+
+    def _apply_rows(self, db, user_id, payload, vector_ids, preserved, next_indices):
         imported = {"conversations": 0, "memories": 0}
         skipped = {"conversations": 0, "memories": 0}
         native = defaultdict(list)
         if payload["scope"] in {"chat", "all"}:
             for row in payload["conversations"]:
-                history_only = row["character_id"] in preserved
-                added = self._add_conversation(db, user_id, row, history_only=history_only)
+                character = row["character_id"]
+                candidate = next_indices.get(character, 0) + 1
+                history_only = character in preserved
+                added = self._add_conversation(db, user_id, row, history_only=history_only, index=candidate)
                 (imported if added else skipped)["conversations"] += 1
-                if added and not _external(row) and not history_only:
-                    native[row["character_id"]].append(row)
+                if added:
+                    next_indices[character] = candidate
+                    if not _external(row) and not history_only:
+                        native[character].append(row)
         if payload["scope"] in {"memory", "all"}:
             for row in payload["memories"]:
                 added = self._add_memory(db, user_id, row, vector_ids)
@@ -334,20 +349,25 @@ class UserDataRepository:
         return imported, skipped, native
 
     @staticmethod
-    def _add_conversation(db, user_id, row, *, history_only=False):
+    def _add_conversation(db, user_id, row, *, history_only=False, index):
         if row.get("user_id") != user_id:
             raise TransferConflict("CONVERSATION_OWNER_MISMATCH")
         existing = db.get(Conversation, row["uuid"])
         values = {key: row[key] for key in ("uuid", "character_id", "source", "type", "content")}
-        values.update(user_id=user_id, timestamp=parse_time(row["timestamp"]), meta_data=dump_json(row["meta_data"]))
+        values.update(
+            user_id=user_id,
+            timestamp=parse_time(row["timestamp"]),
+            index=index,
+            meta_data=dump_json(row["meta_data"]),
+        )
         if existing is not None:
-            if any(getattr(existing, key) != value for key, value in values.items() if key != "meta_data"):
+            if any(
+                getattr(existing, key) != value for key, value in values.items() if key not in {"meta_data", "index"}
+            ):
                 raise TransferConflict("CONVERSATION_IDENTITY_CONFLICT")
             if _metadata(existing.meta_data) != _metadata(row["meta_data"]):
                 raise TransferConflict("CONVERSATION_METADATA_CONFLICT")
-            # 重放不改写已存来源注释；只有主排序身份改变才是试图改序。
-            if conversation_row_key(existing)[1:3] != conversation_row_key(row, user_id)[1:3]:
-                raise TransferConflict("CONVERSATION_ORDER_CONFLICT")
+            # 目标账号序号由本账号当前时间线决定，重放不比较源包序号。
             return False
         # 缓存路径不接受包内提供的服务器路径，也不成为未来历史查询的直接文件入口。
         values["meta_data"] = dump_json(

@@ -1,4 +1,4 @@
-"""聊天记录的稳定时间线；导入身份变化不改变同一时刻内的先后。"""
+"""旧归档排序元数据的校验与回退；新记录改用 Conversation.index。"""
 
 from collections.abc import Mapping
 from typing import Any

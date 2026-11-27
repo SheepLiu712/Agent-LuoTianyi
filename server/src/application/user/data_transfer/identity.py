@@ -179,8 +179,9 @@ def _bind_rows(payload, source_user, user_id, maps):
     external = payload.get("source_format", "native") != "native"
     for row in payload["conversations"]:
         metadata = row["meta_data"]
-        order_id, order_owner, _, _ = conversation_order(row["uuid"], source_user, metadata)
-        metadata[TRANSFER_ORDER_KEY] = {"id": order_id, "user_id": order_owner}
+        if TRANSFER_ORDER_KEY in metadata:
+            # 旧归档的排序元数据仍需通过结构校验；新代码不再生成它，序号由目标库分配。
+            conversation_order(row["uuid"], source_user, metadata)
         owner, identity = _origin(metadata, source_user, row["uuid"])
         metadata["_transfer_origin"] = {"user_id": owner, "id": identity}
         if metadata.get("media_id"):

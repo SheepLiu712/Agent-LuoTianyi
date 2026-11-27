@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from src.domain.call import CallContent, CallEndReason, CallOutcome
-from src.domain.conversation_order import TRANSFER_ORDER_KEY, conversation_order
 from src.domain.conversation_type import ConversationItem
 
 from .models import (
@@ -176,7 +175,7 @@ def _decode_entry(item: dict, user_id: str = "") -> ConversationEntry:
         datetime.fromisoformat(item["timestamp"]),
         item["source"],
         content,
-        conversation_order(item["uuid"], user_id, data) if user_id or TRANSFER_ORDER_KEY in data else None,
+        item.get("index"),
     )
 
 
@@ -208,10 +207,6 @@ def _encode_entry(entry: ConversationEntry) -> ConversationItem:
         data["understanding_status"] = content.understanding_status.value
     elif isinstance(content, CallContent):
         data.update(call_id=str(content.call_id), outcome=content.outcome.value, end_reason=content.end_reason.value)
-    if entry.order_key is not None:
-        order_id, order_owner, origin_owner, origin_id = entry.order_key
-        data[TRANSFER_ORDER_KEY] = {"id": order_id, "user_id": order_owner}
-        data["_transfer_origin"] = {"id": origin_id, "user_id": origin_owner}
     return ConversationItem(
         entry.entry_id,
         entry.timestamp.isoformat(sep=" ", timespec="microseconds"),
