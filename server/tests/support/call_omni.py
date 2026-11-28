@@ -18,6 +18,8 @@ from src.agent.processing.omni_background import CallSessionPrompt
 from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.skills.cognitive.call_settlement import CallSummaryResult, CallSummaryStatus
 from types import SimpleNamespace
+from src.agent.handlers.action.proactive import RequestCallSpeechHandler
+from src.agent.handlers.stimulus.proactive_speech import ProactiveSpeechHandler
 from src.agent.handlers.action.call_memory import LookupCallMemoryHandler
 from src.agent.handlers.stimulus.call import (
     CallAnswerRequestedHandler,
@@ -255,6 +257,7 @@ async def create_stage(setup, *, retrieval=None, config=None, accept=True):
         omni_prompt=CallSessionPrompt("res/agent/prompts/realtime_call_prompt.json"),
         stimulus_router=StimulusRouter(
             (
+                (d.StimulusKind.PROACTIVE_SPEECH_DUE, ProactiveSpeechHandler(skills=None, events=None)),
                 (d.StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler(accept=accept)),
                 (d.StimulusKind.CALL_TURN_COMPLETED, CallTurnCompletedHandler()),
                 (d.StimulusKind.CALL_REPLY_CONFIRMED, CallReplyConfirmedHandler()),
@@ -272,6 +275,7 @@ async def create_stage(setup, *, retrieval=None, config=None, accept=True):
         action_router=ActionRouter(
             (
                 (d.ActionKind.FINALIZE_CALL, FinalizeCallHandler("luotianyi", Maintenance(), summary)),
+                (d.ActionKind.REQUEST_CALL_SPEECH, RequestCallSpeechHandler()),
                 (d.ActionKind.ANSWER_CALL, _NoOutputActionHandler()),
                 (d.ActionKind.SAY, _SayHandler()),
                 (d.ActionKind.LOOKUP_CALL_MEMORY, LookupCallMemoryHandler(retrieval)),

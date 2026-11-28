@@ -12,7 +12,6 @@ from src.world.event_cleanup_task import ExpiredEventCleanupTask
 from src.world.get_new_songs.task import VCPediaNewSongTask
 from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicCredentialRefreshTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
-from src.world.proactive_topic_task import ProactiveTopicCheckTask
 from src.world.world_clock import WorldClock
 from src.world.world_settlements import WorldSettlementRouter
 
@@ -48,7 +47,6 @@ class WorldRuntime:
         self.bili_event_update_tasks: List[BiliEventUpdateTask] = []
         self.dynamic_interaction_task: DynamicInteractionTask | None = None
         self.diary_tasks: List[DiaryTask] = []
-        self.proactive_topic_check_task: ProactiveTopicCheckTask | None = None
         self.expired_event_cleanup_task: ExpiredEventCleanupTask | None = None
         self.tasks: List["WorldTask"] = []
         self._startup_event_task: asyncio.Task | None = None
@@ -96,11 +94,6 @@ class WorldRuntime:
             else None
         )
         self.diary_tasks = self._build_diary_tasks()
-        self.proactive_topic_check_task = (
-            ProactiveTopicCheckTask(self.config.get("proactive_topic_check", {}))
-            if self._task_enabled("proactive_topic_check")
-            else None
-        )
         self.expired_event_cleanup_task = (
             ExpiredEventCleanupTask(self.config.get("expired_event_cleanup", {}))
             if self._task_enabled("expired_event_cleanup")
@@ -115,7 +108,6 @@ class WorldRuntime:
             *self.bili_event_update_tasks,
             self.dynamic_interaction_task,
             *self.diary_tasks,
-            self.proactive_topic_check_task,
             self.expired_event_cleanup_task,
         ]
         self.tasks = [task for task in self.tasks if task is not None]

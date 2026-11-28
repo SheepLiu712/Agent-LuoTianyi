@@ -64,6 +64,7 @@ FIXED_FILES = {
 }
 RESOURCE_PREFIXES = (
     "res/admin_ui/admin_static/",
+    "res/user_agreements/",
     "res/agent/persona/",
     "res/agent/prompts/",
     "res/agent/prepared_speech/",

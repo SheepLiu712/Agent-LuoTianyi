@@ -9,6 +9,7 @@ import src.domain.agent as d
 from src.agent.context import InteractionContext
 from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
+from src.agent.proactive_timer import ProactivePolicy, ProactiveTimer
 from src.agent.processing.execution import Execution
 from src.agent.processing.handling import Handling
 from src.agent.processing.interruptibility import _InteractionInterruptibility
@@ -62,6 +63,17 @@ class Agent:
         self._action_router = action_router if action_router is not None else ActionRouter(())
         self._inflight: set[asyncio.Future] = set()
         self._interruptibility = _InteractionInterruptibility()
+
+    def create_proactive_timer(self, *, user_id, on_due, policy=None, initial_opportunity=False, **clock):
+        """创建调用方独占的交互计时器；角色门面不保存用户的计时状态。"""
+        return ProactiveTimer(
+            character_id=self._character_id,
+            user_id=user_id,
+            on_due=on_due,
+            policy=policy or ProactivePolicy(),
+            initial_opportunity=initial_opportunity,
+            **clock,
+        )
 
     async def open_omni_session(
         self,

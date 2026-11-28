@@ -26,6 +26,7 @@ from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
 from .llm_settings_dialog import LLMSettingsDialog
 from .data_transfer_dialog import DataTransferDialog
+from .agreement_dialog import AgreementDialog
 from .async_request import start_dynamic_unread_request
 
 DYNAMIC_ICON_PATH = "res/gui/dynamic.png"
@@ -724,6 +725,8 @@ class ChatWidget(QWidget):
         prefs_action = menu.addAction("相处模式设置")
         llm_action = menu.addAction("LLM 模型设置")
         transfer_action = menu.addAction("聊天与记忆迁移")
+        menu.addSeparator()
+        agreement_action = menu.addAction("用户协议")
         chosen = menu.exec(
             self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft())
         )
@@ -736,6 +739,10 @@ class ChatWidget(QWidget):
             dialog.refresh_requested.connect(self.refresh_transferred_history)
             dialog.exec()
             dialog.deleteLater()
+
+        elif chosen == agreement_action:
+            auth_api = self.network_client.auth_api
+            AgreementDialog(self, load_document=auth_api.fetch_current_agreement).exec()
 
     def refresh_transferred_history(self):
         """迁移后显式重新取最新历史；沿用现有异步历史和 WS 自动重连入口。"""

@@ -415,6 +415,17 @@ async def call_reply_latency(
     return get_admin_shell().observability.get_call_reply_latency(days=days, limit=limit)
 
 
+@protected_router.get("/runtime/chat-diagnostics")
+async def chat_diagnostics(username: str = Query(min_length=1, max_length=256)) -> dict:
+    runtime = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="RUNTIME_UNAVAILABLE")
+    user_id = await asyncio.to_thread(runtime.database_manager.credential_service.get_user_uuid_by_username, username)
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
+    return runtime.chat_adapter.connection_diagnostics(user_id)
+
+
 @protected_router.put("/calls/{call_id}/packet-diagnostics")
 async def set_call_diagnostics(call_id: UUID, enabled: bool = Body(embed=True)) -> dict[str, bool]:
     runtime = get_admin_shell().runtime_supervisor.runtime

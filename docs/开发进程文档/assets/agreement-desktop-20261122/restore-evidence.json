@@ -1,0 +1,21 @@
+{
+  "pid": 273659,
+  "policy": {
+    "require_acceptance": true
+  },
+  "current_version": "terms-2026-10-v3",
+  "config_restored": true,
+  "manifest_restored": true,
+  "stopped_test_pids": [
+    271940,
+    273333,
+    273369
+  ],
+  "public_policy": {
+    "require_acceptance": true
+  },
+  "public_agreement_version": "terms-2026-10-v3",
+  "local_credentials_restored": true,
+  "pending_registration_exists": false,
+  "production_process": "5459 Fri Nov 20 18:34:50 2026"
+}

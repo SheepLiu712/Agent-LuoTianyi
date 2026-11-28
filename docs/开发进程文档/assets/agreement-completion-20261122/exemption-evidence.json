@@ -1,0 +1,14 @@
+{
+  "exempt_wrong_password_status": 401,
+  "exempt_valid_password_status": 200,
+  "signatures": [],
+  "ws_after_removal": [
+    "auth_ok",
+    "chat.ready"
+  ],
+  "next_login": {
+    "detail": "请升级到支持用户协议签署的版本，阅读并同意用户协议后再登录。",
+    "code": "AGREEMENT_REQUIRED",
+    "agreement_version": "terms-2026-10-v3"
+  }
+}

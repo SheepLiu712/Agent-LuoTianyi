@@ -10,7 +10,7 @@ import type {
 } from '../features/call/call_audio_contracts';
 import { ProductionCallResolver } from '../features/call/call_session/production_resolver';
 import { NetworkClient, type ConnectCallbacks } from '../features/chat/connection/network_client';
-import { launchCallServer, resolveCallServerSource, waitUntil } from './support/call_network_server';
+import { registrationAgreement, launchCallServer, resolveCallServerSource, waitUntil } from './support/call_network_server';
 
 jest.mock('expo-file-system/legacy', () => ({}));
 jest.mock('../features/chat/image_compression', () => ({
@@ -245,7 +245,7 @@ async function registerAndLogin(url: string, username: string, password: string)
   const encrypted = await encryptedPassword(url, password);
   const registered = await fetch(`${url}/auth/register`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: encrypted, invite_code: 'invite' }),
+    body: JSON.stringify({ username, password: encrypted, invite_code: 'invite', ...await registrationAgreement(url) }),
   });
   expect(registered.ok).toBe(true);
   return await login(url, username, password);

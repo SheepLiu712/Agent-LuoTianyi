@@ -1,3 +1,4 @@
+import AgreementScreen from '../features/account/AgreementScreen';
 import { ChatScreen } from '../features/chat/ChatScreen';
 import { VoicePermissionNotice } from '../features/chat/VoicePermissionNotice';
 import { CallFailureBanner } from '../features/call/CallFailureBanner';
@@ -56,6 +57,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
+  const [showAgreement, setShowAgreement] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showLlmSettings, setShowLlmSettings] = useState(false);
   const [showDynamics, setShowDynamics] = useState(false);
@@ -102,7 +104,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     onCallRecord: addLocalCallRecord,
   });
   callHangupRef.current = call.hangup;
-  const page = showDataTransfer ? 'data-transfer'
+  const page = showAgreement ? 'agreement' : showDataTransfer ? 'data-transfer'
     : showPreferences ? 'preferences' : showLlmSettings ? 'models' : showDynamics ? 'dynamics'
       : call.state.phase === 'IDLE' ? 'chat' : 'call';
   const showNotice = usePageNotices(page);
@@ -400,6 +402,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         ) : null}
       </View>
 
+      {showAgreement ? <AgreementScreen onClose={() => setShowAgreement(false)} theme={theme} /> : null}
       {showPreferences ? <PreferencesScreen session={session} onClose={() => setShowPreferences(false)} theme={theme} /> : null}
       {showLlmSettings ? <LlmSettingsScreen onClose={() => setShowLlmSettings(false)} theme={theme} /> : null}
       {showDynamics ? (
@@ -470,6 +473,10 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
               </View>
             ) : null}
           </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={() => { setShowAgreement(true); closeDrawer(); }} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>用户协议</Text>
         </TouchableOpacity>
 
         {Platform.OS === 'android' ? (

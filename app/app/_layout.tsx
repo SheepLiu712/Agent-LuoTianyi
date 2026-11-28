@@ -9,7 +9,7 @@ import MainScreen from '../shell/MainScreen';
 import LoginScreen from '../features/account/LoginScreen';
 
 export default function RootLayout() {
-  const { session, isLoading, login, register, logout } = useAuth();
+  const { session, isLoading, login, register, logout, pendingAgreement, acceptAgreement, dismissAgreement, retryAgreement } = useAuth();
 
   const [leaving, setLeaving] = useState(false);
   const exitStarted = useRef(false);
@@ -35,7 +35,7 @@ export default function RootLayout() {
   } else if (session) {
     screen = <MainScreen key={session.token} session={session} onLogout={leaveAccount} />;
   } else {
-    screen = <LoginScreen onLogin={login} onRegister={register} resetAccount={resetAccount} />;
+    screen = <LoginScreen onLogin={login} onRegister={register} resetAccount={resetAccount} pendingAgreement={pendingAgreement} onAcceptAgreement={() => acceptAgreement(pendingAgreement!)} onAgreementClose={dismissAgreement} onRetryAgreement={retryAgreement} />;
   }
   return (
     <SafeAreaProvider>

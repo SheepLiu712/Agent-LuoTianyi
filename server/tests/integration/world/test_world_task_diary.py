@@ -1,8 +1,9 @@
 import asyncio
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -123,9 +124,10 @@ def test_run_once_randomly_samples_and_submits_one_world_fact_per_user(monkeypat
     assert [fact.owner_user_id for fact in sink.facts] == users[-20:]
     assert result.data["selected_users_count"] == 20
     assert result.data["diaries_pending"] == 20
-    # 若任务恰好跨过零点，以本批记录的触发时刻确定所属的上海日期。
-    expected_date = sink.facts[0].occurred_at.astimezone(shanghai).date()
-    assert start_date <= expected_date <= end_date
+    # 日记归属前一天，事件发生时间仍保留实际执行时间。
+    occurred_date = sink.facts[0].occurred_at.astimezone(shanghai).date()
+    assert start_date <= occurred_date <= end_date
+    expected_date = occurred_date - timedelta(days=1)
     assert {fact.trigger_id for fact in sink.facts} == {f"diary:luotianyi:{expected_date.isoformat()}"}
     for fact in sink.facts:
         assert fact.local_date == expected_date
@@ -212,4 +214,64 @@ def test_find_active_users_applies_threshold_character_and_existing_diary_dedup(
         assert task._find_active_users("2026-07-16") == ["eligible"]
     finally:
         session.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("run_at", "diary_date"),
+    [
+        (datetime(2026, 11, 22, 0, 0), date(2026, 11, 21)),
+        (datetime(2027, 1, 1, 0, 0), date(2026, 12, 31)),
+        (datetime(2028, 3, 1, 0, 0), date(2028, 2, 29)),
+    ],
+)
+def test_midnight_selects_previous_day_users_and_deduplicates_published_diaries(monkeypatch, run_at, diary_date):
+    shanghai = ZoneInfo("Asia/Shanghai")
+    now = run_at.replace(tzinfo=shanghai)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+
+    monkeypatch.setattr("src.world.diary.task.datetime", FrozenDateTime)
+    engine, session_factory = _diary_query_database()
+    sink = FactSink()
+    task = DiaryTask({}, settlements=WorldSettlementRouter())
+    task.initialize(SimpleNamespace(
+        database_manager=SimpleNamespace(get_sql_session=session_factory),
+        get_world_stage=lambda character_id: _stage(sink, character_id),
+    ))
+    try:
+        with session_factory() as session:
+            for user_id, timestamp, count in (
+                ("yesterday", datetime.combine(diary_date, datetime.min.time()), 50),
+                ("already-written", run_at - timedelta(seconds=1), 50),
+                ("below-threshold", run_at - timedelta(seconds=1), 49),
+                ("today-only", run_at, 50),
+                ("older-only", run_at - timedelta(days=2), 50),
+            ):
+                session.add(User(uuid=user_id, username=user_id, password="hash"))
+                for index in range(count):
+                    session.add(Conversation(
+                        uuid=f"{user_id}-{index}", user_id=user_id, character_id="luotianyi",
+                        timestamp=timestamp, source="user", type="text", content="当天互动",
+                    ))
+            session.add(DynamicPost(
+                id="existing", author_type="agent", author_id="luotianyi",
+                owner_user_id="already-written", visibility="private", content="前一天的日记",
+                source_type="diary", source_id=f"diary:luotianyi:already-written:{diary_date.isoformat()}",
+                status="published", created_at=run_at,
+            ))
+            session.commit()
+
+        result = asyncio.run(task.run_once())
+
+        assert result.data["active_users_count"] == 1
+        assert [fact.owner_user_id for fact in sink.facts] == ["yesterday"]
+        fact = sink.facts[0]
+        assert fact.local_date == diary_date
+        assert fact.trigger_id == f"diary:luotianyi:{diary_date.isoformat()}"
+        assert fact.occurred_at == now
+    finally:
         engine.dispose()

@@ -9,6 +9,7 @@ from support.chat_connection import StubChatConnection
 from support.stage_manager import make_stage_manager
 
 import src.domain.agent as d
+from src.agent.facade import Agent
 from src.adapter.websocket.chat import WebSocketAdapter
 from src.agent.context import ConversationMode
 
@@ -53,8 +54,9 @@ def completed_report(request: d.HandleStimulusRequest) -> d.HandlingReport:
     )
 
 
-class RecordingAgent:
+class RecordingAgent(Agent):
     def __init__(self, character_id: str, typing_gate: asyncio.Event | None = None) -> None:
+        super().__init__(character_id=character_id)
         self.character_id = character_id
         self.typing_gate = typing_gate
         self.first_logins: list[d.ProactivePromptDue] = []

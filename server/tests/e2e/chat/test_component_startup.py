@@ -16,6 +16,7 @@ import requests
 import websocket
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from support.agreement import registration_agreement
 
 
 def _child_environment(server):
@@ -121,6 +122,7 @@ def register_login(http, url, headers, username):
     register = http.post(
         url + "/auth/register",
         json={
+            **registration_agreement(http, url),
             "username": username,
             "password": encrypted_password(http, url, password),
             "invite_code": invite,

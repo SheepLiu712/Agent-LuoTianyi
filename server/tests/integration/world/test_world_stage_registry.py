@@ -62,6 +62,8 @@ def runtime() -> ServerRuntime:
         llm_service=SimpleNamespace(),
         client_llm_executor=SimpleNamespace(),
         observability=SimpleNamespace(),
+        agreement_service=SimpleNamespace(),
+        registration_service=SimpleNamespace(),
         owns_observability=False,
     )
 

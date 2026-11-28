@@ -16,7 +16,7 @@ from src.agent import Agent
 from src.agent.context import UserContextSnapshot
 from src.agent.handlers.reply_skills import ReplySkills
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
-from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+from src.agent.handlers.stimulus.proactive_speech import ProactiveSpeechHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import JargonRecognitionSkill
 from src.agent.skills.cognitive._prompt_assembly import RealizationPromptAssembler
@@ -130,30 +130,13 @@ async def run_handler(composition, mode="chat"):
             ),
         )
     if mode == "proactive":
-        stimulus = d.ProactivePromptDue(
-            stimulus_id="reminder",
-            schema_version=1,
-            occurred_at=req.interaction.now,
-            source=d.StimulusSource.STAGE,
-            target_character_ids=("luotianyi",),
-            user_id="u",
-            ephemeral=True,
-            reason=d.ProactiveReason(value="birthday"),
-            due_at=req.interaction.now,
-            dedup_key="birthday:u",
-            fact_refs=(),
-            events=(
-                d.EventReminder(
-                    event_id="birthday",
-                    event_type="birthday",
-                    title="用户的生日",
-                    description="一起庆祝生日",
-                    trigger_key="day_of_event",
-                ),
-            ),
+        stimulus = d.ProactiveSpeechDue(
+            stimulus_id="proactive", schema_version=1, occurred_at=req.interaction.now,
+            source=d.StimulusSource.AGENT, target_character_ids=("luotianyi",), user_id="u",
+            ephemeral=True, generation=1,
         )
-        req = replace(req, stimulus=stimulus)
-        handler = FirstLoginHandler(prepared_names=(), prepared_speech=None, skills=composition)
+        req = replace(req, stimulus=stimulus, prepared_inputs=(), interaction=replace(req.interaction, pending_stimuli=()))
+        handler = ProactiveSpeechHandler(skills=composition, events=SimpleNamespace(list_due=lambda **kwargs: ()))
     agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(req.stimulus.kind, handler)]))
     sink = Sink()
     ctx = context()
