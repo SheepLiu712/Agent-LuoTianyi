@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import pytest
 from support.call_protocol import ProtocolDriver
@@ -12,6 +13,7 @@ from src.adapter.websocket.call_v1._messages import (
     TransportConfig,
 )
 from src.adapter.websocket.call_v1.errors import CallTransportError
+from src.infrastructure.observability.call_latency import set_call_packet_diagnostics
 from src.stage.call.call_stage import CallIngressReceipt
 
 CALL_ID = "606ec5e6-a330-4e6c-b07a-8432a5716c8f"
@@ -61,13 +63,8 @@ def message(output) -> dict:
     return json.loads(output.text)
 
 
-def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields(monkeypatch) -> None:
-    import src.adapter.websocket.call_v1._delivery as delivery_module
-
-    events = []
-    monkeypatch.setattr(
-        delivery_module, "call_latency", lambda event, call_id, **fields: events.append((event, fields))
-    )
+def test_transport_keeps_ack_retry_metric_without_recording_buffer_per_packet(capture_project_log, caplog) -> None:
+    capture_project_log("src.infrastructure.observability.call_latency")
     captured = []
 
     class Metrics:
@@ -98,20 +95,77 @@ def test_transport_metrics_capture_only_numeric_backlog_and_retry_fields(monkeyp
     transport._send_audio(WireAudioFrame(1, 2, 1, 1, 2, b"\x00\x01"))
     transport.acknowledge_server(2)
     transport.acknowledge_server(2)
-    assert [event for event, _ in events] == ["audio.enqueued", "audio.ack"]
-    assert events[-1][1]["measurement"] == "client_ack_not_playback"
-    assert events[-1][1]["seq"] == 2
+    events = [json.loads(record.getMessage().removeprefix("CALL_LATENCY ")) for record in caplog.records]
+    assert [event["event"] for event in events] == ["audio.enqueued", "audio.ack"]
+    assert events[-1]["measurement"] == "client_ack_not_playback"
+    assert events[-1]["seq"] == 2
     assert transport.audio_acks == ["response-1"]
     with pytest.raises(CallTransportError, match="REPLAY_NOT_AVAILABLE"):
         transport.replay_missing(2)
 
-    assert [metric.name.value for metric in captured] == [
-        "buffer",
-        "playback_ack_retry",
-    ]
-    assert captured[0].numeric == {"buffered_bytes": captured[0].numeric["buffered_bytes"]}
-    assert captured[1].numeric == {"ack_retry_count": 1}
+    assert [metric.name.value for metric in captured] == ["playback_ack_retry"]
+    assert captured[0].numeric == {"ack_retry_count": 1}
     assert all("response_id" not in (metric.labels or {}) for metric in captured)
+
+
+@pytest.mark.asyncio
+async def test_audio_packet_logs_keep_first_events_and_enable_diagnostics_only_for_selected_call(
+    capture_project_log, caplog, monkeypatch
+) -> None:
+    from scripts.analyze_call_latency import analyze
+    from src.infrastructure.observability.call_latency import call_latency
+
+    logger = capture_project_log("src.infrastructure.observability.call_latency")
+    caplog.set_level(logging.DEBUG, logger=logger.name)
+    transport = session()
+    sent = []
+    monkeypatch.setattr(transport.session._stage, "audio_sent", sent.append, raising=False)
+    transport._send_control(
+        {
+            "protocol": "call.v1",
+            "type": "audio.stream_started",
+            "seq": 1,
+            "call_id": CALL_ID,
+            "audio_route": "CALL",
+            "stream_id": 1,
+            "response_id": "response-1",
+            "encoding": "pcm_s16le",
+            "sample_rate": 24000,
+            "channels": 1,
+        }
+    )
+    call_latency("input.provider_speech_stopped", CALL_ID, turn_seq=1)
+    call_latency("reply.response", CALL_ID, response_id="response-1", turn_seq=1)
+    set_call_packet_diagnostics("other-call", True)
+    try:
+        for seq, diagnostics in ((2, False), (3, False), (4, True), (5, False)):
+            set_call_packet_diagnostics(CALL_ID, diagnostics)
+            transport._send_audio(WireAudioFrame(1, 2, 0, 1, seq, b"\x00\x01"))
+            transport.session._audio_sent("response-1", seq)
+            transport.acknowledge_server(seq)
+        with pytest.raises(CallTransportError, match="REPLAY_NOT_AVAILABLE"):
+            transport.replay_missing(4)
+    finally:
+        set_call_packet_diagnostics("other-call", False)
+        await transport.session.close()
+
+    assert sent == transport.audio_acks == ["response-1"] * 4
+    events_by_level = [
+        (record.levelno, json.loads(record.getMessage().removeprefix("CALL_LATENCY "))) for record in caplog.records
+    ]
+    packet_events = [(level, event["event"], event["seq"]) for level, event in events_by_level if "seq" in event]
+    assert packet_events == [
+        (level, event, seq)
+        for level, seq in ((logging.INFO, 2), (logging.DEBUG, 4))
+        for event in ("audio.enqueued", "audio.sent", "audio.ack")
+    ]
+    assert any(level == logging.INFO and event["event"] == "audio.replay_requested" for level, event in events_by_level)
+    full = analyze(event for _, event in events_by_level)
+    normal = analyze(event for level, event in events_by_level if level == logging.INFO)
+    assert full["turns"] == normal["turns"]
+    assert normal["turns"][0]["first_response_id"] == normal["turns"][0]["first_ack_response_id"] == "response-1"
+    assert len(full["responses"][0]["wire_packets"]) == 2
+    assert len(normal["responses"][0]["wire_packets"]) == 1
 
 
 @pytest.mark.asyncio
@@ -228,17 +282,19 @@ async def test_cached_audio_drains_on_capacity_without_new_client_message() -> N
 
 
 @pytest.mark.asyncio
-async def test_stage_pcm_consumption_wakes_capacity_waiter() -> None:
+async def test_stage_pcm_consumption_wakes_capacity_waiter(capture_project_log, caplog) -> None:
     from types import SimpleNamespace
+
     from src.domain.call import CallState
     from src.stage.call.call_stage import CallStage
 
+    capture_project_log("src.infrastructure.observability.call_latency")
     stage = CallStage.__new__(CallStage)
     stage._pcm = asyncio.Queue(1)
     stage._pcm_capacity_changed = asyncio.Event()
     stage._pcm_buffered_bytes = 2
     stage._termination_reason = None
-    stage._record = SimpleNamespace(state=CallState.ACTIVE)
+    stage._record = SimpleNamespace(state=CallState.ACTIVE, call_id=CALL_ID)
     stage._provider = None
     stage._schedule_output = lambda: None
     stage._pcm.put_nowait(SimpleNamespace(payload=b"\0\0"))
@@ -249,6 +305,8 @@ async def test_stage_pcm_consumption_wakes_capacity_waiter() -> None:
     try:
         await asyncio.wait_for(waiter, timeout=1)
         assert stage._pcm.empty()
+        events = [json.loads(record.getMessage().removeprefix("CALL_LATENCY ")) for record in caplog.records]
+        assert [(event["event"], event["buffered_bytes"]) for event in events] == [("input.audio_capacity_wait", 2)]
     finally:
         consumer.cancel()
         await asyncio.gather(consumer, return_exceptions=True)
@@ -821,7 +879,10 @@ def test_audio_ack_releases_response_budget_and_other_response_is_isolated() -> 
 
 
 @pytest.mark.asyncio
-async def test_audio_capacity_waits_for_target_response_ack_and_sends_same_next_seq() -> None:
+async def test_audio_capacity_waits_for_target_response_ack_and_sends_same_next_seq(
+    capture_project_log, caplog
+) -> None:
+    capture_project_log("src.infrastructure.observability.call_latency")
     transport = session(max_replay_bytes=4_000_000)
     start_stream(transport)
     payload = b"\x00\x01" * 8_000
@@ -832,6 +893,11 @@ async def test_audio_capacity_waits_for_target_response_ack_and_sends_same_next_
     waiter = asyncio.create_task(transport._wait_for_audio_capacity("response-1", wire_bytes, 2))
     await asyncio.sleep(0)
     assert not waiter.done()
+    events = [json.loads(record.getMessage().removeprefix("CALL_LATENCY ")) for record in caplog.records]
+    capacity_waits = [event for event in events if event["event"] == "audio.capacity_wait"]
+    assert len(capacity_waits) == 1
+    assert capacity_waits[0]["response_full"]
+    assert capacity_waits[0]["buffered_bytes"] >= 90 * len(payload)
 
     transport.acknowledge_server(2)
     await waiter

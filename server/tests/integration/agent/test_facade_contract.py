@@ -126,6 +126,7 @@ def test_facade_exports_only_agent_and_has_two_documented_business_methods(runti
         "is_handle_interruptible",
         "is_realize_interruptible",
         "open_omni_session",
+        "create_proactive_timer",
     }
     for name in methods:
         method = getattr(agent, name)

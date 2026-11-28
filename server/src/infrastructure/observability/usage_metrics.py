@@ -15,10 +15,11 @@ CHAT = (
 )
 CALL = (
     ("ack", "供应商判停至首个音频 ACK"),
-    ("endpointing", "判断说话结束（估计）"),
+    ("endpointing", "估计说话结束至收到供应商判停"),
     ("retrieval", "记忆检索"),
     ("generation", "LLM 启动至首段回复"),
-    ("tts", "首段回复至 TTS 首包产出"),
+    ("tts", "首段回复提交至 TTS 首包产出"),
+    ("tts_to_ack", "TTS 首包产出至首个音频 ACK"),
 )
 
 
@@ -206,10 +207,11 @@ class UsageMetricsStore:
 
     def _span_group(self, kind, title, phases, spans):
         selected = [row for row in spans if row["span_name"].startswith(f"{kind}.v2.")]
+        terminals = [row for row in selected if row["span_name"] == f"{kind}.v2.terminal"]
         return {
             "id": kind,
             "title": title,
-            "outcomes": _outcomes([row for row in selected if row["span_name"] == f"{kind}.v2.terminal"]),
+            "outcomes": _call_outcomes(selected) if kind == "call" else _outcomes(terminals),
             "rows": [
                 self._latency_row(key, label, _phase_values(selected, f"{kind}.v2.{key}")) for key, label in phases
             ],
@@ -256,3 +258,24 @@ def _outcomes(rows):
     for row in rows:
         result[row["status"]] += 1
     return dict(result)
+
+
+def _call_outcomes(rows):
+    terminals = {}
+    rounds = set()
+    acknowledged = set()
+    for row in rows:
+        phase = row["span_name"].removeprefix("call.v2.")
+        if phase not in {"started", "endpointing", "generation", "ack", "terminal"}:
+            continue
+        identity = row["trace_id"]
+        rounds.add(identity)
+        if phase == "terminal":
+            terminals[identity] = row["status"]
+        elif phase == "ack" and row["status"] == "success":
+            acknowledged.add(identity)
+    outcomes = defaultdict(int)
+    for identity in rounds:
+        status = "success" if identity in acknowledged else terminals.get(identity, "pending")
+        outcomes[status] += 1
+    return dict(outcomes)

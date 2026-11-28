@@ -13,6 +13,7 @@ import socket
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,8 +25,11 @@ from src.adapter.websocket.chat import WebSocketAdapter
 from src.adapter.websocket.chat.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.application.host_context import ServerHostContext
+from src.application.user.agreement_service import init_agreements
+from src.application.user.registration_service import RegistrationService
 from src.infrastructure.observability import CallMetrics, ObservabilityService
 from src.infrastructure.persistence.database import DatabaseManager, InviteCode
+from src.infrastructure.persistence.database.sql_database import User
 from src.server_runtime import ServerRuntime
 from src.web.http import routes
 from src.web.http.user_interface import UserInterface
@@ -56,6 +60,11 @@ def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntim
     registered, message = database.credential_service.register_user("alice", "offline-password", "invite")
     assert registered, message
     assert database.credential_service.authenticate_password_login("alice", "offline-password") is not None
+    with database.open_sql_session() as session:
+        agreement_service = init_agreements(session, files("res.user_agreements"))
+        user = session.query(User).filter_by(username="alice").one()
+        agreement_service.accept(session, user_uuid=user.uuid, version=agreement_service.current_version, accepted=True)
+        session.commit()
     llm = DeterministicLLMService()
     agents = agent_runtime_module.AgentRuntime(runtime_config(root), llm, database, media_resolver=NoopMediaResolver())
     adapter = WebSocketAdapter(default_character_id=agents.default_character_id)
@@ -77,6 +86,10 @@ def make_runtime(root: Path, *, host_context: ServerHostContext) -> ServerRuntim
     interface = UserInterface(database, resolver)
     interface.generate_rsa_keys()
     return ServerRuntime(
+        agreement_service=agreement_service,
+        registration_service=RegistrationService(
+            agreement_service=agreement_service, credential_service=database.credential_service
+        ),
         user_interface=interface,
         websocket_service=WebSocketService(),
         world=WorldRuntime({}),

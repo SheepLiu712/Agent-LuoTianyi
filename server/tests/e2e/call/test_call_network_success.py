@@ -15,6 +15,7 @@ import requests
 import websocket
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from support.agreement import registration_agreement
 
 from src.adapter.websocket.call_v1._audio_codec import (
     CALL_ROUTE,
@@ -239,6 +240,7 @@ def test_production_entry_finalization_blocks_then_restores_chat_and_call(
     assert http.post(
         url + "/auth/register",
         json={
+            **registration_agreement(http, url),
             "username": "alice",
             "password": _encrypted_password(http, url, password),
             "invite_code": "invite",
@@ -366,7 +368,7 @@ def test_successful_call_loopback_preserves_privacy_and_reset_credentials(
     encrypted = _encrypted_password(http, url, password)
     assert http.post(
         url + "/auth/register",
-        json={"username": "alice", "password": encrypted, "invite_code": "invite"},
+        json={**registration_agreement(http, url), "username": "alice", "password": encrypted, "invite_code": "invite"},
         timeout=10,
     ).ok
     login = http.post(

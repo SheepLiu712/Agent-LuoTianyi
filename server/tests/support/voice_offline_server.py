@@ -7,6 +7,7 @@ import socket
 import sys
 import wave
 from contextlib import asynccontextmanager
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,6 +30,7 @@ from src.agent.skills.cognitive._reply_resources import ReplyResources
 from src.agent.skills.cognitive_maintenance import CognitiveMaintenanceSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.application.user.agreement_service import init_agreements
 from src.domain import CharacterProfile
 from src.infrastructure.media import PermanentMediaStore, create_media_resolver
 from src.infrastructure.persistence.database import DatabaseManager, InviteCode
@@ -143,6 +145,13 @@ def make_runtime(root):
         assert ok, message
         # Existing-user scenario avoids unrelated welcome/reminder plans.
         users[name] = database.credential_service.authenticate_password_login(name, "offline-password")["user_uuid"]
+    with database.open_sql_session() as session:
+        agreement_service = init_agreements(session, files("res.user_agreements"))
+        for user_uuid in users.values():
+            agreement_service.accept(
+                session, user_uuid=user_uuid, version=agreement_service.current_version, accepted=True
+            )
+        session.commit()
     config = {"media_store": {"root": str(root / "media")}}
     resolver = create_media_resolver(config["media_store"])
     models = OfflineModels()
@@ -154,6 +163,7 @@ def make_runtime(root):
     interface.generate_rsa_keys()
     return SimpleNamespace(
         database_manager=database,
+        agreement_service=agreement_service,
         user_interface=interface,
         stage_manager=manager,
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),

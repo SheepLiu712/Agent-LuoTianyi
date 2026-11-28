@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from src.agent.context import ContextFactory
 from src.domain.stage import StageState
-from src.domain.stage.due_events import DueEventProvider
 from src.domain.stage.lifecycle import (
     ConnectedStage,
     ManagedStage,
@@ -57,7 +56,6 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class _ManagerConfig:
     offline_timeout: float
-    return_user_threshold_seconds: float
     call_setup_timeout: float
 
     @classmethod
@@ -67,9 +65,6 @@ class _ManagerConfig:
         timeout = config.get("offline_timeout", 60.0)
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout < 0:
             raise ValueError("offline_timeout must be finite and nonnegative")
-        return_threshold = config.get("return_user_threshold_seconds", 5 * 24 * 60 * 60)
-        if type(return_threshold) not in (int, float) or not math.isfinite(return_threshold) or return_threshold <= 0:
-            raise ValueError("return_user_threshold_seconds must be positive and finite")
         call_setup_timeout = config.get("call_setup_timeout", 10.0)
         if (
             type(call_setup_timeout) not in (int, float)
@@ -79,7 +74,6 @@ class _ManagerConfig:
             raise ValueError("call_setup_timeout must be positive and finite")
         return cls(
             offline_timeout=timeout,
-            return_user_threshold_seconds=return_threshold,
             call_setup_timeout=call_setup_timeout,
         )
 
@@ -148,7 +142,6 @@ class StageManager:
         detach_stage_binding: Callable[[ChatStage, InteractionConnection | None], Awaitable[None]],
         get_context_factory: Callable[[str], ContextFactory],
         call_output_sink: Callable[[str, CallStageOutput], Awaitable[None]] | None = None,
-        due_event_provider: DueEventProvider | None = None,
         lease_registry: InteractionLeaseRegistry | None = None,
         call_sessions: CallSessionRepository | None = None,
         conversation_service: ConversationService | None = None,
@@ -174,7 +167,6 @@ class StageManager:
         self._chat_output_sink = chat_output_sink
         self._detach_stage_binding = detach_stage_binding
         self._get_context_factory = get_context_factory
-        self._due_event_provider = due_event_provider
         self._lease_registry = lease_registry or InteractionLeaseRegistry()
         self._call_records = CallRecords(call_sessions=call_sessions, wall_clock=wall_clock)
         self._call_stage_creator = bind_call_stage_creator(
@@ -206,7 +198,6 @@ class StageManager:
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
         self._pending_first_logins: set[tuple[str, str]] = set()
-        self._pending_regular_logins: set[tuple[str, str]] = set()
         self._call_starts: dict[str, asyncio.Task[_CallStartClaim]] = {}
         self._call_start_operations: dict[str, tuple[str, str, str | None]] = {}
         self._call_setup_deadlines: dict[str, float] = {}
@@ -464,6 +455,58 @@ class StageManager:
             raise StageHandoffFailed("call ended during source finalization")
         self._finish_transition(handoff.ownership, call_id=call.call_id)
 
+    async def begin_user_data_transfer(self, user_id: str) -> object:
+        """暂停本人聊天并等待维护收尾；通话或未完成生命周期始终拒绝迁移。"""
+        async with self._lock:
+            self._require_transfer_idle(user_id)
+            if self._user_reset_fence is None:
+                raise RuntimeError("user reset fence is not configured")
+            token = await self._user_reset_fence.begin(user_id)
+            stages = tuple(stage for (owner, _), stage in self._stages.items() if owner == user_id)
+            for stage in stages:
+                stage.set_input_suspended(True)
+                stage.begin_termination(StageEndReason.USER_REQUESTED)
+        try:
+            results = await asyncio.gather(
+                *(stage.terminate(StageEndReason.USER_REQUESTED) for stage in stages), return_exceptions=True
+            )
+            if any(
+                isinstance(result, BaseException)
+                or result.finalization_error
+                or result.cleanup_error
+                or not result.resources_released
+                for result in results
+            ):
+                raise RuntimeError("USER_DATA_TRANSFER_FINALIZATION_FAILED")
+            return token
+        except BaseException:
+            await self._user_reset_fence.end(user_id, token)
+            raise
+
+    def _require_transfer_idle(self, user_id: str) -> None:
+        if self._closed:
+            raise RuntimeError("STAGE_MANAGER_CLOSED")
+        if self._finalizations.has_user(user_id):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner == user_id for owner, _ in self._chat_creations):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(entry.user_id == user_id and not isinstance(entry.stage, ChatStage) for entry in self._managed.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner.user_id == user_id for owner in self._call_ownerships.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(claim.prepared.user_id == user_id for claim in self._call_claims.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner[0] == user_id for owner in self._call_start_operations.values()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(owner == user_id and not task.done() for task, owner in self._call_stage_creations.items()):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+        if any(
+            stage.lifecycle_state is not StageLifecycleState.RUNNING
+            for (owner, _), stage in self._stages.items()
+            if owner == user_id
+        ):
+            raise RuntimeError("USER_INTERACTION_BUSY")
+
     async def begin_user_data_reset(self, user_id: str) -> object:
         async with self._lock:
             if self._closed:
@@ -507,26 +550,7 @@ class StageManager:
             else:
                 self._pending_first_logins.add(key)
             return True
-        now = time.localtime()
-        seconds_since_midnight = now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec
-        if seconds_since_midnight <= elapsed_from_last_login < self._config.return_user_threshold_seconds:
-            key = (user_id, character_id)
-            stage = self._stages.get(key)
-            if stage is not None and stage.state is StageState.ONLINE:
-                stage.schedule_login_reminders()
-            else:
-                self._pending_regular_logins.add(key)
-            return True
         return False
-
-    async def scan_due_events(self) -> int:
-        """唤醒在线 Stage；每个 Stage 自行执行空闲检查与单项选择。"""
-        async with self._lock:
-            stages = tuple(self._connections)
-        sent = 0
-        for stage in stages:
-            sent += int(await stage.dispatch_due_events(merge_all=False))
-        return sent
 
     async def propose_relationship(self, user_id: str, relationship: str) -> int:
         """将已保存的关系提议投递给用户当前及离线保留中的全部 Stage。"""
@@ -622,9 +646,6 @@ class StageManager:
             if key in self._pending_first_logins:
                 self._pending_first_logins.remove(key)
                 stage.schedule_first_login()
-            if key in self._pending_regular_logins:
-                self._pending_regular_logins.remove(key)
-                stage.schedule_login_reminders()
             return stage
 
     def _require_chat_connection(self, connection, key) -> None:
@@ -643,7 +664,6 @@ class StageManager:
             output_sink=self._chat_output_sink,
             config=self._stage_config,
             context_factory=self._get_context_factory(key[1]),
-            due_event_provider=self._due_event_provider,
             own_initialization=partial(self._own_initialization, user_id=key[0], release=self._release_chat_stage),
             own_termination=self._own_termination,
             retention_changed=self._update_retention,

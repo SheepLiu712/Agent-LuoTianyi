@@ -26,11 +26,14 @@ export const useChatLogic = (
   const [inputText, setInputText] = useState('');
   const [thinking, setThinking] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const historyRevisionRef = useRef(0);
   const flatListRef = useRef<FlatList>(null);
 
   const networkClientRef = useRef<NetworkClient | null>(null);
   const chatCallbacksRef = useRef<ConnectCallbacks | null>(null);
   const chatConnectionGenerationRef = useRef(0);
+  const chatPausedForDataTransfer = useRef(false);
   const messageProcessorRef = useRef<MessageProcessor | null>(null);
   const recordingAudioRef = useRef(false);
   const playbackGeneration = useRef(0);
@@ -211,7 +214,9 @@ export const useChatLogic = (
       getLlmMode: () => processor.getLlmMode(),
     };
     chatCallbacksRef.current = callbacks;
-    networkClient.connectWs(username, messageToken, characterId, callbacks);
+    if (!chatPausedForDataTransfer.current) {
+      networkClient.connectWs(username, messageToken, characterId, callbacks);
+    }
 
     return () => {
       chatConnectionGenerationRef.current += 1;
@@ -236,7 +241,7 @@ export const useChatLogic = (
       }
       if (data.type === 'touch') {
         // WebView 已经绘制触摸圆环；在线音频期间不再统计或发送触摸。
-        if (messageProcessorRef.current?.isServerAudioActive()) {
+        if (chatPausedForDataTransfer.current || messageProcessorRef.current?.isServerAudioActive()) {
           return;
         }
         const now = Date.now();
@@ -268,6 +273,7 @@ export const useChatLogic = (
   }, []);
 
   const handleInputChange = useCallback((text: string) => {
+    if (chatPausedForDataTransfer.current) return;
     setInputText(text);
     const trimmedLength = text.trim().length;
     // 清空输入时也发送 text_length=0 事件，通知服务端"用户已清空输入"并立即提取，而非继续等待补全
@@ -275,7 +281,7 @@ export const useChatLogic = (
   }, []);
 
   const handleSendText = useCallback(async () => {
-    if (!canSend) {
+    if (chatPausedForDataTransfer.current || !canSend) {
       return;
     }
 
@@ -300,6 +306,7 @@ export const useChatLogic = (
   }, [canSend, inputText]);
 
   const handleSendImage = useCallback(async () => {
+    if (chatPausedForDataTransfer.current) return;
     await runImageSelection({
       sendSelecting: async () => {
         await messageProcessorRef.current?.sendImageSelecting();
@@ -316,6 +323,7 @@ export const useChatLogic = (
         }),
       emitError: (message) => appendSystemMessage(message),
       onSelected: async (asset) => {
+        if (chatPausedForDataTransfer.current) return;
         const imageUri = asset.uri;
         const mimeType = asset.mimeType || 'image/jpeg';
         const uuid = createUuid('user-img');
@@ -341,7 +349,7 @@ export const useChatLogic = (
   // Both history controls share one toggle/preemption gate. The existing players
   // retain their own storage and native-load cancellation responsibilities.
   const toggleHistoryAudio = useCallback(async (uuid: string) => {
-    if (recordingAudioRef.current || messageProcessorRef.current?.isServerAudioActive()) return;
+    if (chatPausedForDataTransfer.current || recordingAudioRef.current || messageProcessorRef.current?.isServerAudioActive()) return;
     const target = messages.find((msg) => msg.uuid === uuid);
     if (!target || target.audioAvailable === false || (target.isUser && target.sendStatus === 'waiting')) return;
     const generation = ++playbackGeneration.current;
@@ -399,6 +407,8 @@ export const useChatLogic = (
   }, []);
 
   const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
+    // 旧分页请求可能在迁移后返回，丢弃它，避免把已替换的记录加回列表。
+    if (historyRevision !== historyRevisionRef.current) return;
     for (const msg of newMessages) {
       if (!msg.isUser && msg.audioAvailable && msg.audioLocalUri) {
         messageProcessorRef.current?.setLocalAudioPath(msg.uuid, msg.audioLocalUri);
@@ -441,9 +451,10 @@ export const useChatLogic = (
       }
       return next;
     });
-  }, []);
+  }, [historyRevision]);
 
   const retryVoice = async (uuid: string) => {
+    if (chatPausedForDataTransfer.current) return;
     const target = messages.find((message) => message.uuid === uuid);
     if (!target?.isUser || target.type !== 'audio' || target.sendStatus !== 'failed') return;
     if (!voiceInput.beginRetryUpload(uuid)) return;
@@ -462,9 +473,46 @@ export const useChatLogic = (
     }
   };
 
+  const pauseChatForDataTransfer = useCallback(() => {
+    if (chatPausedForDataTransfer.current || recordingAudioRef.current || messageProcessorRef.current?.queueLength()) {
+      return false;
+    }
+    chatPausedForDataTransfer.current = true;
+    chatConnectionGenerationRef.current += 1;
+    networkClientRef.current?.disconnectWs();
+    setThinking(false);
+    webviewRef.current?.injectJavaScript('window.stopServerAudio(); true;');
+    messageProcessorRef.current?.onServerAudioFinished();
+    void messageProcessorRef.current?.stopLocalTts().catch(() => undefined);
+    void stopUserVoicePlayback().catch(() => undefined);
+    return true;
+  }, [stopUserVoicePlayback, webviewRef]);
+
+  const resumeChat = useCallback(async () => {
+    const client = networkClientRef.current;
+    const callbacks = chatCallbacksRef.current;
+    if (chatPausedForDataTransfer.current || !client || !callbacks || !username || !messageToken) return false;
+    const generation = ++chatConnectionGenerationRef.current;
+    const ready = await client.reconnectWs(username, messageToken, characterId, callbacks);
+    return ready && generation === chatConnectionGenerationRef.current && client === networkClientRef.current;
+  }, [characterId, messageToken, username]);
+
+  const resumeChatAfterDataTransfer = useCallback((refreshHistory: boolean) => {
+    if (refreshHistory) {
+      historyRevisionRef.current += 1;
+      setHistoryRevision(historyRevisionRef.current);
+      voiceAckMapRef.current.clear();
+      voiceFilesRef.current.clear();
+      setMessages([]);
+    }
+    chatPausedForDataTransfer.current = false;
+    return resumeChat();
+  }, [resumeChat]);
+
   return {
     inputText,
     messages,
+    historyRevision,
     flatListRef,
     canSend,
     canSendImage,
@@ -481,19 +529,14 @@ export const useChatLogic = (
     voiceInput,
     callSwitch: {
       prepare: async (clientRequestId: string, characterId: string) => {
+        if (chatPausedForDataTransfer.current) throw new Error('CHAT_PAUSED_FOR_DATA_TRANSFER');
         const client = networkClientRef.current;
         if (!client) throw new Error('CHAT_TRANSPORT_UNAVAILABLE');
         await client.prepareCallSwitch(clientRequestId, characterId);
       },
     },
-    resumeChat: async () => {
-      const client = networkClientRef.current;
-      const callbacks = chatCallbacksRef.current;
-      if (!client || !callbacks || !username || !messageToken) return false;
-      const generation = ++chatConnectionGenerationRef.current;
-      const ready = await client.reconnectWs(username, messageToken, characterId, callbacks);
-      return ready && generation === chatConnectionGenerationRef.current
-        && client === networkClientRef.current;
-    },
+    resumeChat,
+    pauseChatForDataTransfer,
+    resumeChatAfterDataTransfer,
   };
 };

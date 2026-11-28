@@ -89,6 +89,34 @@ class WsTransport:
         self._thread.start()
         self.logger.debug("WebSocket thread started")
 
+    def request_reconnect(self) -> None:
+        """迁移解绑后重新鉴权；仅排程关闭当前连接，不阻塞 UI 或重建运行线程。"""
+        self._ready_event.clear()
+        self._connected_event.clear()
+        self._notify_ack_failure("WebSocket reconnecting", drop=False, code="RECONNECTING", retryable=True)
+        if not self._thread or not self._thread.is_alive():
+            self.start()
+            return
+        loop, ws = self._loop, self._ws
+        if loop is None or ws is None or self._stop_event.is_set():
+            return  # 连接已在创建或退出；由现有运行循环处理。
+
+        def close_current():
+            loop.create_task(self._close_for_reconnect(ws))
+
+        try:
+            loop.call_soon_threadsafe(close_current)
+        except RuntimeError:
+            pass  # 运行循环正在退出，不复活显式停止的连接。
+
+    async def _close_for_reconnect(self, ws) -> None:
+        if self._ws is not ws or self._stop_event.is_set():
+            return  # 排程期间已换连接，不关闭新连接。
+        try:
+            await ws.close()
+        except Exception as exc:
+            self.logger.warning(f"WebSocket reconnect close failed: {type(exc).__name__}")
+
     def stop(self) -> None:
         self._stop_event.set()
         self._ready_event.clear()

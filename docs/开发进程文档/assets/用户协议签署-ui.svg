@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1580" viewBox="0 0 1440 1580" role="img" aria-labelledby="title desc"><title id="title">用户协议签署 UI 草图</title><desc id="desc">App 阅读倒计时、可确认状态、设置只读查阅，以及桌面独立模态协议窗口和状态转换。正文仅为排版样例。</desc><style>text{font-family:Microsoft YaHei, Noto Sans CJK SC, sans-serif;fill:#17283d} .muted{fill:#64748b}</style>
+<rect x="0" y="0" width="1440" height="1580" rx="0" fill="#f1f5f9" stroke="none" />
+<text x="48" y="56" font-size="30" style="fill:#17283d" font-weight="700" xml:space="preserve">用户协议 · 阅读、签署与查阅</text>
+<text x="48" y="87" font-size="16" style="fill:#64748b" font-weight="400" xml:space="preserve">布局与交互状态草图  /  App + 桌面  /  正文为展示样例</text>
+<text x="48" y="132" font-size="21" style="fill:#17283d" font-weight="700" xml:space="preserve">01  App · 阅读中</text>
+<text x="48" y="160" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">新注册用户 / 尚未满足阅读条件</text>
+<rect x="48" y="183" width="416" height="640" rx="26" fill="#ffffff" stroke="#cbd5e1" />
+<text x="74" y="215" font-size="13" style="fill:#17283d" font-weight="700" xml:space="preserve">9:41</text>
+<text x="376" y="215" font-size="12" style="fill:#17283d" font-weight="400" xml:space="preserve">▰  100%</text>
+<text x="80" y="274" font-size="26" style="fill:#17283d" font-weight="700" xml:space="preserve">AgentLuo</text>
+<text x="80" y="322" font-size="18" style="fill:#17283d" font-weight="400" xml:space="preserve">登录 / 注册</text>
+<rect x="80" y="348" width="352" height="48" rx="8" fill="#e2e8f0" stroke="none" />
+<text x="96" y="378" font-size="15" style="fill:#64748b" font-weight="400" xml:space="preserve">用户名</text>
+<rect x="80" y="416" width="352" height="48" rx="8" fill="#e2e8f0" stroke="none" />
+<text x="96" y="446" font-size="15" style="fill:#64748b" font-weight="400" xml:space="preserve">密码</text>
+<rect x="48" y="230" width="416" height="593" rx="0" fill="#1f2937" stroke="none" fill-opacity="0.72"/>
+<rect x="66" y="258" width="380" height="513" rx="18" fill="#ffffff" stroke="none" />
+<text x="86" y="295" font-size="22" style="fill:#17283d" font-weight="700" xml:space="preserve">用户协议</text>
+<text x="86" y="322" font-size="13" style="fill:#64748b" font-weight="400" xml:space="preserve">版本：terms-2026-10-v1</text>
+<text x="250" y="363" text-anchor="middle" font-size="22" style="fill:#17283d" font-weight="700" xml:space="preserve">一、使用说明</text>
+<text x="86" y="399" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">以下仅为排版样例，不是正式协议。</text>
+<text x="86" y="429" font-size="15" style="fill:#17283d" font-weight="700" xml:space="preserve">请仔细阅读本协议的重要内容。</text>
+<text x="86" y="459" textLength="314" lengthAdjust="spacing" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">正文示例：自动折行采用两端对齐。</text>
+<text x="86" y="489" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">示例：甲  乙    丙</text>
+<text x="86" y="519" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">长行在正文区域内自动换行，</text>
+<text x="86" y="547" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">滚动正文不会移动底部操作区。</text>
+<text x="86" y="583" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">继续向下滚动阅读……</text>
+<rect x="419" y="347" width="4" height="250" rx="2" fill="#e2e8f0" stroke="none" />
+<rect x="419" y="363" width="4" height="64" rx="2" fill="#94a3b8" stroke="none" />
+<rect x="66" y="616" width="380" height="1" rx="0" fill="#e2e8f0" stroke="none" />
+<text x="86" y="645" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">请阅读至协议底部</text>
+<rect x="86" y="663" width="340" height="44" rx="8" fill="#D1D5DB" stroke="none" />
+<text x="256.0" y="691" text-anchor="middle" font-size="14">我已阅读并同意（剩余 3 秒）</text>
+<text x="202" y="743" font-size="15" style="fill:#475569" font-weight="400" xml:space="preserve">不同意</text>
+<text x="68" y="856" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">每秒刷新倒计时；后台暂停</text>
+<text x="508" y="132" font-size="21" style="fill:#17283d" font-weight="700" xml:space="preserve">02  App · 可确认</text>
+<text x="508" y="160" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">老用户 / 满 5 秒且到过底部</text>
+<rect x="508" y="183" width="416" height="640" rx="26" fill="#ffffff" stroke="#cbd5e1" />
+<text x="534" y="215" font-size="13" style="fill:#17283d" font-weight="700" xml:space="preserve">9:41</text>
+<text x="836" y="215" font-size="12" style="fill:#17283d" font-weight="400" xml:space="preserve">▰  100%</text>
+<text x="540" y="274" font-size="26" style="fill:#17283d" font-weight="700" xml:space="preserve">AgentLuo</text>
+<text x="540" y="322" font-size="18" style="fill:#17283d" font-weight="400" xml:space="preserve">登录 / 注册</text>
+<rect x="540" y="348" width="352" height="48" rx="8" fill="#e2e8f0" stroke="none" />
+<text x="556" y="378" font-size="15" style="fill:#64748b" font-weight="400" xml:space="preserve">用户名</text>
+<rect x="540" y="416" width="352" height="48" rx="8" fill="#e2e8f0" stroke="none" />
+<text x="556" y="446" font-size="15" style="fill:#64748b" font-weight="400" xml:space="preserve">密码</text>
+<rect x="508" y="230" width="416" height="593" rx="0" fill="#1f2937" stroke="none" fill-opacity="0.72"/>
+<rect x="526" y="258" width="380" height="513" rx="18" fill="#ffffff" stroke="none" />
+<text x="546" y="295" font-size="22" style="fill:#17283d" font-weight="700" xml:space="preserve">用户协议</text>
+<text x="546" y="322" font-size="13" style="fill:#64748b" font-weight="400" xml:space="preserve">版本：terms-2026-10-v1</text>
+<text x="710" y="363" text-anchor="middle" font-size="22" style="fill:#17283d" font-weight="700" xml:space="preserve">二、确认与使用</text>
+<text x="546" y="399" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">以下仅为排版样例，不是正式协议。</text>
+<text x="546" y="429" font-size="15" style="fill:#17283d" font-weight="700" xml:space="preserve">请仔细阅读本协议的重要内容。</text>
+<text x="546" y="459" textLength="314" lengthAdjust="spacing" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">正文示例：自动折行采用两端对齐。</text>
+<text x="546" y="489" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">示例：甲  乙    丙</text>
+<text x="546" y="519" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">长行在正文区域内自动换行，</text>
+<text x="546" y="547" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">滚动正文不会移动底部操作区。</text>
+<text x="546" y="583" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">— 协议正文结束 —</text>
+<rect x="879" y="347" width="4" height="250" rx="2" fill="#e2e8f0" stroke="none" />
+<rect x="879" y="533" width="4" height="64" rx="2" fill="#94a3b8" stroke="none" />
+<rect x="526" y="616" width="380" height="1" rx="0" fill="#e2e8f0" stroke="none" />
+<rect x="546" y="663" width="340" height="44" rx="8" fill="#93C5FD" stroke="none" />
+<text x="716.0" y="691" text-anchor="middle" font-size="14">我已阅读并同意用户协议</text>
+<text x="641" y="743" font-size="15" style="fill:#475569" font-weight="400" xml:space="preserve">不同意并退出</text>
+<text x="528" y="856" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">点击同意后提交；拒绝直接退出</text>
+<text x="968" y="132" font-size="21" style="fill:#17283d" font-weight="700" xml:space="preserve">03  App · 设置查阅</text>
+<text x="968" y="160" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">只读查看 / 不触发签署</text>
+<rect x="968" y="183" width="416" height="640" rx="26" fill="#ffffff" stroke="#cbd5e1" />
+<text x="994" y="215" font-size="13" style="fill:#17283d" font-weight="700" xml:space="preserve">9:41</text>
+<text x="1296" y="215" font-size="12" style="fill:#17283d" font-weight="400" xml:space="preserve">▰  100%</text>
+<text x="994" y="265" font-size="16" style="fill:#2563eb" font-weight="400" xml:space="preserve">‹  设置</text>
+<text x="994" y="311" font-size="24" style="fill:#17283d" font-weight="700" xml:space="preserve">用户协议</text>
+<text x="994" y="339" font-size="13" style="fill:#64748b" font-weight="400" xml:space="preserve">版本：terms-2026-10-v1</text>
+<text x="1168" y="390" text-anchor="middle" font-size="22" style="fill:#17283d" font-weight="700" xml:space="preserve">二、确认与使用</text>
+<text x="994" y="426" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">以下仅为排版样例，不是正式协议。</text>
+<text x="994" y="456" font-size="15" style="fill:#17283d" font-weight="700" xml:space="preserve">请仔细阅读本协议的重要内容。</text>
+<text x="994" y="486" textLength="336" lengthAdjust="spacing" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">正文示例：自动折行采用两端对齐。</text>
+<text x="994" y="516" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">示例：甲  乙    丙</text>
+<text x="994" y="546" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">长行在正文区域内自动换行，</text>
+<text x="994" y="574" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">滚动正文不会移动底部操作区。</text>
+<text x="994" y="610" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">— 协议正文结束 —</text>
+<rect x="1349" y="374" width="4" height="250" rx="2" fill="#e2e8f0" stroke="none" />
+<rect x="1349" y="560" width="4" height="64" rx="2" fill="#94a3b8" stroke="none" />
+<rect x="988" y="711" width="376" height="1" rx="0" fill="#e2e8f0" stroke="none" />
+<rect x="994" y="739" width="364" height="44" rx="8" fill="#93C5FD" stroke="none" />
+<text x="1176.0" y="767" text-anchor="middle" font-size="14">返回设置</text>
+<text x="988" y="856" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">无倒计时、无同意按钮</text>
+<text x="48" y="914" font-size="22" style="fill:#17283d" font-weight="700" xml:space="preserve">04  桌面 · 独立模态窗口</text>
+<text x="48" y="942" font-size="15" style="fill:#64748b" font-weight="400" xml:space="preserve">原登录窗口不可操作；关闭协议窗口按新用户取消 / 老用户退出处理。</text>
+<rect x="48" y="963" width="840" height="470" rx="12" fill="#e2e8f0" stroke="#cbd5e1" />
+<text x="68" y="994" font-size="16" style="fill:#64748b" font-weight="400" xml:space="preserve">AgentLuo · 登录</text>
+<rect x="68" y="1040" width="170" height="42" rx="8" fill="#ffffff" stroke="none" />
+<text x="85" y="1068" font-size="14" style="fill:#94a3b8" font-weight="400" xml:space="preserve">用户名</text>
+<rect x="68" y="1100" width="170" height="42" rx="8" fill="#ffffff" stroke="none" />
+<text x="85" y="1128" font-size="14" style="fill:#94a3b8" font-weight="400" xml:space="preserve">密码</text>
+<rect x="250" y="987" width="614" height="422" rx="10" fill="#ffffff" stroke="#94a3b8" />
+<rect x="250" y="987" width="614" height="42" rx="10" fill="#f8fafc" stroke="none" />
+<text x="270" y="1015" font-size="17" style="fill:#17283d" font-weight="700" xml:space="preserve">用户协议</text>
+<text x="832" y="1016" font-size="22" style="fill:#17283d" font-weight="400" xml:space="preserve">×</text>
+<text x="272" y="1056" font-size="13" style="fill:#64748b" font-weight="400" xml:space="preserve">版本：terms-2026-10-v1</text>
+<text x="548" y="1095" text-anchor="middle" font-size="23" style="fill:#17283d" font-weight="700" xml:space="preserve">一、使用说明</text>
+<text x="272" y="1130" font-size="16" style="fill:#17283d" font-weight="400" xml:space="preserve">以下仅为排版样例。请仔细阅读本协议的重要内容。</text>
+<text x="272" y="1162" textLength="544" lengthAdjust="spacing" font-size="16" style="fill:#17283d" font-weight="700" xml:space="preserve">标题居中；正文两端对齐，重点可加粗。</text>
+<text x="272" y="1194" font-size="16" style="fill:#17283d" font-weight="400" xml:space="preserve">保留换行与空格：甲  乙    丙。长行自动换行。</text>
+<text x="272" y="1226" font-size="16" style="fill:#64748b" font-weight="400" xml:space="preserve">继续向下滚动阅读……</text>
+<rect x="840" y="1080" width="4" height="174" rx="2" fill="#e2e8f0" stroke="none" />
+<rect x="840" y="1080" width="4" height="48" rx="2" fill="#94a3b8" stroke="none" />
+<rect x="250" y="1272" width="614" height="1" rx="0" fill="#e2e8f0" stroke="none" />
+<text x="272" y="1300" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">请阅读至协议底部</text>
+<rect x="272" y="1324" width="190" height="44" rx="8" fill="#f1f5f9" stroke="none" />
+<text x="314" y="1352" font-size="14" style="fill:#17283d" font-weight="400" xml:space="preserve">不同意并退出</text>
+<rect x="482" y="1324" width="360" height="44" rx="8" fill="#D1D5DB" stroke="none" />
+<text x="662.0" y="1352" text-anchor="middle" font-size="14">我已阅读并同意（剩余 3 秒）</text>
+<rect x="920" y="963" width="472" height="470" rx="12" fill="#ffffff" stroke="none" />
+<text x="944" y="1001" font-size="21" style="fill:#17283d" font-weight="700" xml:space="preserve">共同状态与行为</text>
+<text x="944" y="1040" font-size="16" style="fill:#17283d" font-weight="700" xml:space="preserve">阅读中 → 可确认</text>
+<text x="944" y="1067" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">累计前台 5 秒，并且到过正文底部。</text>
+<text x="944" y="1110" font-size="16" style="fill:#17283d" font-weight="700" xml:space="preserve">可确认 → 正在提交…</text>
+<text x="944" y="1137" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">按钮禁用，避免重复提交。</text>
+<text x="944" y="1180" font-size="16" style="fill:#17283d" font-weight="700" xml:space="preserve">网络失败 → 可重试</text>
+<text x="944" y="1207" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">同版本、同窗口保留阅读完成状态。</text>
+<text x="944" y="1250" font-size="16" style="fill:#17283d" font-weight="700" xml:space="preserve">协议换版 → 重新阅读</text>
+<text x="944" y="1277" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">加载新版，重置计时与底部状态。</text>
+<text x="944" y="1320" font-size="16" style="fill:#17283d" font-weight="700" xml:space="preserve">关闭 / 拒绝</text>
+<text x="944" y="1347" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">新用户回表单；老用户直接退出。</text>
+<text x="48" y="1483" font-size="16" style="fill:#475569" font-weight="400" xml:space="preserve">浅灰 = 禁用    浅蓝 = 可点击    深灰蒙版 = 背景不可操作</text>
+<text x="48" y="1516" font-size="15" style="fill:#64748b" font-weight="400" xml:space="preserve">设置查阅复用正文渲染；桌面只读窗口底部显示“关闭”，不显示签署操作。</text>
+<text x="48" y="1548" font-size="14" style="fill:#64748b" font-weight="400" xml:space="preserve">对齐样例：段落标题居中，正文非末行两端对齐，末行及显式换行前的行不拉伸。</text>
+</svg>

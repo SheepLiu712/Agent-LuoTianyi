@@ -1,3 +1,4 @@
+jest.mock('../features/account/AgreementModal', () => ({ AgreementModal: () => null }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';

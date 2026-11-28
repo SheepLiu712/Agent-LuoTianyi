@@ -92,7 +92,6 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
     handler = FirstLoginHandler(
         prepared_names=("welcome_1", "welcome_2"),
         prepared_speech=resources,
-        skills=SimpleNamespace(),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -168,7 +167,10 @@ async def test_return_login_remains_disabled_after_stage_connection():
     # Given: a long-absence login is recorded and a real Stage is connected.
     requests = []
 
-    class RecordingAgent:
+    class RecordingAgent(Agent):
+        def __init__(self):
+            super().__init__(character_id="luotianyi")
+
         def is_handle_interruptible(self, interaction_id, request_id=None):
             return True
 

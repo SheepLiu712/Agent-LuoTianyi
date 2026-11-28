@@ -1,3 +1,4 @@
+import AgreementScreen from '../features/account/AgreementScreen';
 import { ChatScreen } from '../features/chat/ChatScreen';
 import callAudio from '../modules/call-audio/src/CallAudioModule';
 import { VoicePermissionNotice } from '../features/chat/VoicePermissionNotice';
@@ -12,6 +13,7 @@ import {
   Animated,
   Easing,
   Image,
+  Keyboard,
   PanResponder,
   Pressable,
   ScrollView,
@@ -33,6 +35,7 @@ import { useDynamicsUnread } from '../features/dynamics/useDynamicsUnread';
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, formatDebugTraceReport, subscribeDebugTrace } from '../utils/debug_trace';
 import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../shared/ui/theme';
 import DynamicsScreen from '../features/dynamics/DynamicsScreen';
+import { DataTransferScreen } from '../features/data-transfer/DataTransferScreen';
 import PreferencesScreen from '../features/settings/PreferencesScreen';
 import LlmSettingsScreen from '../features/settings/ModelSettingsScreen';
 import { useCallFeature } from '../features/call/useCallFeature';
@@ -59,9 +62,11 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     return () => subscription?.remove();
   }, []);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
+  const [showAgreement, setShowAgreement] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showLlmSettings, setShowLlmSettings] = useState(false);
   const [showDynamics, setShowDynamics] = useState(false);
+  const [showDataTransfer, setShowDataTransfer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorMode, setColorMode] = useState<ColorMode>('light');
   const [live2dReady, setLive2dReady] = useState(false);
@@ -104,8 +109,9 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     onCallRecord: addLocalCallRecord,
   });
   callHangupRef.current = call.hangup;
-  const page = showPreferences ? 'preferences' : showLlmSettings ? 'models' : showDynamics ? 'dynamics'
-    : call.state.phase === 'IDLE' ? 'chat' : 'call';
+  const page = showAgreement ? 'agreement' : showDataTransfer ? 'data-transfer'
+    : showPreferences ? 'preferences' : showLlmSettings ? 'models' : showDynamics ? 'dynamics'
+      : call.state.phase === 'IDLE' ? 'chat' : 'call';
   const showNotice = usePageNotices(page);
   const { failureNotice, dismissFailure } = call;
   useEffect(() => {
@@ -281,6 +287,15 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     closeDrawer();
   };
 
+  const handleOpenDataTransfer = () => {
+    if (call.state.phase !== 'IDLE') return;
+    Keyboard.dismiss();
+    voiceInput.leavePermissionPage();
+    void voiceInput.cancelBySystem('data-transfer').catch(() => undefined);
+    setShowDataTransfer(true);
+    closeDrawer();
+  };
+
   const handleCloseDynamics = useCallback(() => {
     setShowDynamics(false);
     refreshDynamicsUnread();
@@ -305,8 +320,10 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     });
   };
 
-  return (
-    <View style={[styles.root, { backgroundColor: theme.root }]}>
+  return <>
+    <View style={[styles.root, { backgroundColor: theme.root }]} pointerEvents={showDataTransfer ? 'none' : 'auto'}
+      accessibilityElementsHidden={showDataTransfer}
+      importantForAccessibility={showDataTransfer ? 'no-hide-descendants' : 'auto'}>
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
       {page === 'chat' && voiceInput.permissionNotice && <VoicePermissionNotice
@@ -390,6 +407,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         ) : null}
       </View>
 
+      {showAgreement ? <AgreementScreen onClose={() => setShowAgreement(false)} theme={theme} /> : null}
       {showPreferences ? <PreferencesScreen session={session} onClose={() => setShowPreferences(false)} theme={theme} /> : null}
       {showLlmSettings ? <LlmSettingsScreen onClose={() => setShowLlmSettings(false)} theme={theme} /> : null}
       {showDynamics ? (
@@ -400,7 +418,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         />
       ) : null}
 
-      <ChatScreen chat={chat} session={session} theme={theme} topOffset={live2dHeight} />
+      <ChatScreen key={chat.historyRevision} chat={chat} session={session} theme={theme} topOffset={live2dHeight} />
 
       <Animated.View
         pointerEvents={drawerOpen ? 'auto' : 'none'}
@@ -424,6 +442,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
           },
         ]}
       >
+        <ScrollView style={styles.drawerScroll} contentContainerStyle={styles.drawerScrollContent}>
         <Text style={[styles.drawerTitle, { color: theme.text }]}>菜单</Text>
         <Text style={[styles.drawerSubtitle, { color: theme.textMuted }]}>洛天依 Agent</Text>
 
@@ -434,6 +453,15 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
         </TouchableOpacity>
+
+        {Platform.OS === 'android' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="聊天与记忆迁移"
+          accessibilityState={{ disabled: call.state.phase !== 'IDLE' }} disabled={call.state.phase !== 'IDLE'}
+          style={[styles.drawerItem, styles.dataTransferItem, { backgroundColor: theme.surfaceAlt }]}
+          onPress={handleOpenDataTransfer} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: call.state.phase === 'IDLE' ? theme.text : theme.textSoft }]}>
+            聊天与记忆迁移
+          </Text>
+        </TouchableOpacity>}
 
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenLlmSettings} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.text }]}>LLM 模型设置</Text>
@@ -450,6 +478,10 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
               </View>
             ) : null}
           </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={() => { setShowAgreement(true); closeDrawer(); }} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>用户协议</Text>
         </TouchableOpacity>
 
         {Platform.OS === 'android' ? (
@@ -491,9 +523,13 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.dangerSurface }]} onPress={handleLogout} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.dangerText }]}>登出</Text>
         </TouchableOpacity>
+        </ScrollView>
       </Animated.View>
     </View>
-  );
+    {showDataTransfer && <DataTransferScreen session={session} characterId="luotianyi" theme={theme}
+      pauseChat={chat.pauseChatForDataTransfer} resumeChat={chat.resumeChatAfterDataTransfer}
+      onClose={() => setShowDataTransfer(false)} />}
+  </>;
 }
 
 const styles = StyleSheet.create({
@@ -632,6 +668,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 4, height: 0 },
   },
+  drawerScroll: { flex: 1 },
+  drawerScrollContent: { flexGrow: 1 },
   drawerTitle: {
     fontSize: 19,
     fontWeight: '700',
@@ -652,6 +690,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f8fb',
     marginBottom: 10,
   },
+  dataTransferItem: { minHeight: 48 },
   drawerItemText: {
     fontSize: 14,
     fontWeight: '600',

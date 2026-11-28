@@ -302,23 +302,24 @@ def test_batch_allows_covered_history_before_marker_but_not_maintained_history(t
         engine.dispose()
 
 
-def test_identical_timestamps_use_entry_id_for_window_and_progress_order(tmp_path):
+def test_identical_timestamps_follow_assigned_index(tmp_path):
     service, engine = _service(tmp_path)
     try:
         service.add_conversations(
             "user",
             [_item("z-last", "2026-10-09 10:00:00"), _item("a-first", "2026-10-09 10:00:00")],
         )
-        assert [item.uuid for item in service.get_history_from_db("user", 0, 10)] == ["a-first", "z-last"]
+        # 同时间消息按落库时分配的单调序号排列，而不是 UUID 字符串顺序。
+        assert [item.uuid for item in service.get_history_from_db("user", 0, 10)] == ["z-last", "a-first"]
         assert (
             service.advance_cognitive_maintenance_progress(
-                "user", character_id="luotianyi", expected_entry_id=None, new_entry_id="a-first"
+                "user", character_id="luotianyi", expected_entry_id=None, new_entry_id="z-last"
             )
             is True
         )
         assert (
             service.advance_cognitive_maintenance_progress(
-                "user", character_id="luotianyi", expected_entry_id="a-first", new_entry_id="z-last"
+                "user", character_id="luotianyi", expected_entry_id="z-last", new_entry_id="a-first"
             )
             is True
         )

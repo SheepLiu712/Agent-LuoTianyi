@@ -180,6 +180,10 @@ class CallReplyTiming:
     def delivered(self, delivery_id):
         self._first_delivery_mark("first_sent", delivery_id)
 
+    @property
+    def first_packet_synthesized_at(self):
+        return self._marks.get("tts_synthesized")
+
     def acknowledged(self, delivery_id):
         self._first_delivery_mark("first_ack", delivery_id)
 

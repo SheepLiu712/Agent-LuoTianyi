@@ -15,7 +15,6 @@ TASK_CLASSES = {
     "bili_dynamic_fetcher": "BiliEventUpdateTask",
     "dynamic_interaction": "DynamicInteractionTask",
     "diary": "DiaryTask",
-    "proactive_topic_check": "ProactiveTopicCheckTask",
     "expired_event_cleanup": "ExpiredEventCleanupTask",
 }
 

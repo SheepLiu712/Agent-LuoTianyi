@@ -60,8 +60,7 @@ class RedisBuffer:
 
     def clear_user(self, user_id: str) -> None:
         with self._user_lock(user_id):
-            suffix = f":{user_id}"
-            keys = [k for k in self._store.keys() if k.endswith(suffix)]
+            keys = [k for k in self._store.keys() if self._extract_user_id(k) == user_id]
             for k in keys:
                 self._store.pop(k, None)
 
@@ -87,6 +86,8 @@ class RedisBuffer:
     def _extract_user_id(self, key: str) -> Optional[str]:
         if ":" not in key:
             return None
+        if key.startswith("user_context:"):
+            return key.split(":", 2)[1] or None
         _, user_id = key.rsplit(":", 1)
         return user_id or None
 

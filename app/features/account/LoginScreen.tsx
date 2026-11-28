@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  BackHandler,
   Keyboard,
   KeyboardAvoidingView, Modal, Platform, ScrollView,
   StyleSheet,
@@ -16,15 +17,23 @@ import { addDebugTrace } from '../../utils/debug_trace';
 import { COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../../shared/ui/theme';
 import { switchServer } from './credentials';
 
+import { AgreementModal } from './AgreementModal';
+import { AgreementPayload } from '../../utils/agreement';
+import { clearRegistrationResume, loadRegistrationResume } from '../../utils/registration_resume';
+
 interface LoginScreenProps {
   resetAccount: (username: string, password: string, inviteCode: string) => Promise<void>;
   onLogin: (username: string, password: string, autoLogin: boolean) => Promise<{ success: boolean; message: string }>;
-  onRegister: (username: string, password: string, confirmPassword: string, inviteCode: string) => Promise<{ success: boolean; message: string }>;
+  onRegister: (username: string, password: string, confirmPassword: string, inviteCode: string, requestId?: string, agreementVersion?: string) => Promise<{ success: boolean; message: string; code?: string; agreement?: AgreementPayload }>;
+  pendingAgreement?: { agreement: AgreementPayload | null; credential: { kind: 'password' | 'auto_login'; username: string; password?: string; token?: string; autoLogin?: boolean } } | null;
+  onAcceptAgreement?: () => Promise<{ success: boolean; message: string }>;
+  onRetryAgreement?: () => Promise<void>;
+  onAgreementClose?: () => void;
 }
 
 type TabType = 'login' | 'register';
 
-export default function LoginScreen({ onLogin, onRegister, resetAccount }: LoginScreenProps) {
+export default function LoginScreen({ onLogin, onRegister, resetAccount, pendingAgreement, onAcceptAgreement, onAgreementClose, onRetryAgreement }: LoginScreenProps) {
   const insets = useSafeAreaInsets();
   const systemScheme = useColorScheme();
   const [activeTab, setActiveTab] = useState<TabType>('login');
@@ -55,6 +64,14 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount }: Login
   const [showServer, setShowServer] = useState(false);
   const [serverUrl, setServerUrl] = useState(server_config.BASE_URL);
   const [serverPhase, setServerPhase] = useState<'idle' | 'verifying' | 'saving'>('idle');
+  const [registrationAgreement, setRegistrationAgreement] = useState<AgreementPayload | null>(null);
+  const [agreementLoading, setAgreementLoading] = useState(false);
+  const [agreementError, setAgreementError] = useState('');
+  const registrationIdentity = useRef('');
+  const registrationRequestId = useRef('');
+  const registrationSubmitVersion = useRef('');
+
+
   const serverRequest = useRef<AbortController | 'saving' | null>(null);
 
   useEffect(() => () => {
@@ -106,23 +123,132 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount }: Login
     }
   };
 
+  const loadRegistrationAgreement = async () => {
+    setAgreementError('');
+    setAgreementLoading(true);
+    const agreement = await (await import('./useAuth')).fetchCurrentAgreement();
+    setAgreementLoading(false);
+    if (!agreement.success) { setAgreementError(agreement.message); return; }
+    if (!registrationSubmitVersion.current) registrationSubmitVersion.current = agreement.data.version;
+    setRegistrationAgreement(agreement.data);
+  };
+
   const handleRegister = async () => {
     Keyboard.dismiss();
+    if (!regUsername.trim() || !regPassword.trim() || !inviteCode.trim()) {
+      Alert.alert('注册失败', '请填写用户名、密码和邀请码');
+      return;
+    }
     if (regPassword !== regConfirmPassword) {
       Alert.alert('注册失败', '两次输入的密码不一致');
       return;
     }
+    setLoading(true); setAgreementError('');
+    const identity = `${regUsername}\u0000${regPassword}\u0000${regConfirmPassword}\u0000${inviteCode}`;
+    const savedResume = await loadRegistrationResume(server_config.BASE_URL).catch(() => null);
+    if (savedResume?.state === 'same_user_login') {
+      setLoading(false);
+      setActiveTab('login');
+      setLoginUsername(savedResume.username);
+      Alert.alert('请先登录确认', '检测到原注册结果待确认，请先登录确认原注册结果。');
+      return;
+    }
+    if (savedResume?.state === 'unknown' && savedResume.username !== regUsername) {
+      setLoading(false);
+      Alert.alert('请先确认原注册结果', `请使用原用户名“${savedResume.username}”、密码和邀请码重试，确认结果后才能注册其他账号。`);
+      return;
+    }
+    if (!savedResume) {
+      const policy = await (await import('./useAuth')).fetchAgreementPolicy();
+      if (!policy.success) {
+        setLoading(false);
+        Alert.alert('注册失败', policy.message);
+        return;
+      }
+      if (!policy.required) {
+        try {
+          const result = await onRegister(regUsername, regPassword, regConfirmPassword, inviteCode);
+          if (result.success) {
+            Alert.alert('注册成功', '注册成功，请使用新账号登录！');
+            setActiveTab('login'); setLoginUsername(regUsername);
+          } else {
+            Alert.alert('注册失败', result.message);
+          }
+        } finally { setLoading(false); }
+        return;
+      }
+    }
+    setLoading(false);
+    const restoredRequestId = savedResume && savedResume.username === regUsername && savedResume.state === 'unknown'
+      ? savedResume.requestId
+      : '';
+    if (restoredRequestId || identity !== registrationIdentity.current || !registrationRequestId.current) {
+      registrationIdentity.current = identity;
+      registrationRequestId.current = restoredRequestId || `app-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    registrationSubmitVersion.current = restoredRequestId && savedResume?.state === 'unknown'
+      ? savedResume.agreementVersion
+      : '';
+    await loadRegistrationAgreement();
+  };
+
+  const submitRegistration = async () => {
+    if (!registrationAgreement) return { success: false, message: '协议未加载' };
     setLoading(true);
-    const result = await onRegister(regUsername, regPassword, regConfirmPassword, inviteCode);
+    const result = await onRegister(
+      regUsername,
+      regPassword,
+      regConfirmPassword,
+      inviteCode,
+      registrationRequestId.current,
+      registrationSubmitVersion.current || registrationAgreement.version,
+    );
+    const changedAgreement = result.agreement;
+    if (!result.success && result.code === 'AGREEMENT_CHANGED') {
+      registrationRequestId.current = `app-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      registrationSubmitVersion.current = changedAgreement?.version || '';
+      registrationIdentity.current = '';
+      setRegistrationAgreement(changedAgreement || null);
+      setAgreementError(changedAgreement ? '' : '用户协议已更新，请重新阅读。新版协议加载失败，请重试');
+    }
+    if (!result.success && result.code === 'REGISTRATION_REQUEST_CONFLICT') {
+      const conflictRequestId = registrationRequestId.current;
+      Alert.alert(
+        '注册请求冲突',
+        '这个注册请求与服务器记录不一致。继续清除恢复记录将放弃确认原结果，可能导致无法恢复先前注册。',
+        [
+          { text: '取消', style: 'cancel' },
+           {
+             text: '确认清除',
+             style: 'destructive',
+             onPress: () => {
+               if (registrationRequestId.current !== conflictRequestId) {
+                 return;
+               }
+               void loadRegistrationResume(server_config.BASE_URL).then((current) => {
+                 if (current?.requestId !== conflictRequestId) return;
+                 return clearRegistrationResume(server_config.BASE_URL).then(() => {
+                   registrationRequestId.current = '';
+                   registrationSubmitVersion.current = '';
+                   registrationIdentity.current = '';
+                   setRegistrationAgreement(null);
+                   setAgreementError('');
+                 });
+               }).catch(() => undefined);
+            },
+          },
+        ],
+      );
+    }
     setLoading(false);
     if (result.success) {
+      await clearRegistrationResume(server_config.BASE_URL).catch(() => undefined);
+      setRegistrationAgreement(null);
       Alert.alert('注册成功', '注册成功，请使用新账号登录！');
-      // 自动切换到登录页
       setActiveTab('login');
       setLoginUsername(regUsername);
-    } else {
-      Alert.alert('注册失败', result.message);
     }
+    return result;
   };
 
   const handleResetAccount = () => {
@@ -443,6 +569,29 @@ export default function LoginScreen({ onLogin, onRegister, resetAccount }: Login
             </View>
           </View>
         </Modal>
+        <AgreementModal
+          visible={Boolean(registrationAgreement || pendingAgreement || agreementLoading || agreementError)}
+          agreement={registrationAgreement || pendingAgreement?.agreement || null}
+          loading={agreementLoading}
+          error={agreementError || (pendingAgreement && !pendingAgreement.agreement && !agreementLoading ? '用户协议加载失败，请重试' : '')}
+          theme={theme}
+          onRetry={pendingAgreement ? async () => { setAgreementLoading(true); try { await onRetryAgreement?.(); } finally { setAgreementLoading(false); } } : loadRegistrationAgreement}
+          onCancel={() => {
+            if (pendingAgreement) {
+              onAgreementClose?.();
+              // AC-06: an existing user who refuses or backs out must leave the
+              // login flow; this is intentionally not the registration cancel path.
+              BackHandler.exitApp();
+              return;
+            }
+            setRegistrationAgreement(null);
+            setAgreementError('');
+          }}
+          onSubmit={registrationAgreement ? submitRegistration : async () => {
+            const result = await onAcceptAgreement?.();
+            return result || { success: false, message: '协议提交失败，请重试' };
+          }}
+        />
       </View>
     </KeyboardAvoidingView>
   );

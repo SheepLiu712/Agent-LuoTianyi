@@ -36,6 +36,107 @@ def test_call_reply_endpoint_requires_admin_and_returns_empty_statistics(tmp_pat
         service.close()
 
 
+def test_packet_diagnostics_endpoint_requires_admin_and_an_active_call(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.adapter.websocket.call_v1 import CallWebSocketAdapter
+    from src.application.admin.auth import AdminAuthService
+    from src.web.admin import admin_interface
+
+    auth = AdminAuthService(tmp_path / "auth.json", tmp_path / "setup-token")
+    auth.setup((tmp_path / "setup-token").read_text(), "test-password-123")
+    headers = {"Authorization": f"Bearer {auth.login('test-password-123')['token']}"}
+    call_id = str(uuid4())
+    adapter = CallWebSocketAdapter(manager=None)
+    shell = SimpleNamespace(
+        auth=auth, runtime_supervisor=SimpleNamespace(runtime=SimpleNamespace(call_adapter=adapter))
+    )
+    monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
+    app = FastAPI()
+    app.include_router(admin_interface.router)
+    path = f"/admin/api/calls/{call_id}/packet-diagnostics"
+    with TestClient(app) as client:
+        assert client.put(path, json={"enabled": True}).status_code == 401
+        assert client.put(path, headers=headers, json={"enabled": True}).status_code == 404
+        adapter._sessions[call_id] = object()
+        try:
+            for enabled in (True, False):
+                response = client.put(path, headers=headers, json={"enabled": enabled})
+                assert response.status_code == 200
+                assert response.json() == {"enabled": enabled}
+        finally:
+            adapter.set_packet_diagnostics(call_id, False)
+
+
+def test_call_latency_panel_counts_legacy_ack_even_when_old_terminal_says_incomplete(tmp_path):
+    from contextlib import closing
+
+    with closing(ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})) as store:
+        now = datetime.now(timezone.utc)
+        for turn, name, status in (
+            (1, "call.v2.terminal", "incomplete"),
+            (1, "call.v2.ack", "success"),
+            (2, "call.v2.terminal", "incomplete"),
+            (3, "call.v2.started", "success"),
+            (4, "call.buffer", "success"),
+        ):
+            store.record_pipeline_span(
+                trace_id=f"call:fixture:{turn}",
+                span_name=name,
+                start_ts=now.isoformat(),
+                end_ts=now.isoformat(),
+                duration_ms=0,
+                status=status,
+            )
+        panel = next(group for group in store.latency_groups(now=now)["groups"] if group["id"] == "call")
+
+    assert panel["outcomes"] == {"success": 1, "incomplete": 1, "pending": 1}
+
+
+def test_call_latency_panel_is_identical_with_and_without_historical_buffer_samples(tmp_path):
+    from contextlib import closing
+
+    with closing(ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})) as store:
+        now = datetime.now(timezone.utc)
+
+        def record(turn, name, duration_ms):
+            store.record_pipeline_span(
+                trace_id=f"call:fixture:{turn}",
+                span_name=name,
+                start_ts=now.isoformat(),
+                end_ts=now.isoformat(),
+                duration_ms=duration_ms,
+                status="success",
+            )
+
+        def call_panel():
+            return next(group for group in store.latency_groups(now=now)["groups"] if group["id"] == "call")
+
+        phases = {
+            "ack": 500,
+            "endpointing": 90,
+            "retrieval": 40,
+            "generation": 100,
+            "tts": 200,
+            "tts_to_ack": 150,
+        }
+        for phase, duration in phases.items():
+            record(1, f"call.v2.{phase}", duration)
+            record(2, f"call.v2.{phase}", duration * 2)
+        without_buffer = call_panel()
+        for turn in (1, 2, 3):
+            for _ in range(5):
+                record(turn, "call.buffer", 0)
+        with_buffer = call_panel()
+
+    assert without_buffer == with_buffer
+    assert without_buffer["outcomes"] == {"success": 2}
+    assert {row["key"]: row["avg_ms"] for row in without_buffer["rows"]} == {
+        phase: duration * 1.5 for phase, duration in phases.items()
+    }
+
+
 def test_reply_latency_summary_keeps_failed_and_missing_samples_out_of_success_statistics(tmp_path):
     service = ObservabilityService({"db_path": str(tmp_path / "metrics.sqlite3")})
     clock = [10.0]

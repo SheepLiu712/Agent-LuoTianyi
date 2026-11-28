@@ -91,12 +91,25 @@ class Conversation(Base):
     user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
     character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi", index=True)
     timestamp = Column(DateTime, default=datetime.now)
+    # 每个 (user_id, character_id) 内单调递增的消息顺序；允许缺口，不要求连续。
+    index = Column("index", Integer, nullable=True)
     source = Column(String, nullable=False)  # 'user' or 'agent'
     type = Column(String, nullable=False)  # 'text' or 'audio' or 'image'
     content = Column(Text, nullable=False)
     meta_data = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="conversations")
+
+    __table_args__ = (
+        Index(
+            "uq_conversations_user_character_index",
+            "user_id",
+            "character_id",
+            "index",
+            unique=True,
+            sqlite_where=text('"index" IS NOT NULL'),
+        ),
+    )
 
 
 class ConversationContext(Base):
@@ -514,6 +527,49 @@ class DynamicReadState(Base):
     user = relationship("User", back_populates="dynamic_read_state")
 
 
+# ————————————
+# 协议表
+# ————————————
+
+
+class AgreementVersion(Base):
+    __tablename__ = "agreement_versions"
+
+    version = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    format = Column(String, nullable=False)
+    content_json = Column(Text, nullable=False)
+    content_sha256 = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
+class AgreementSignature(Base):
+    """账号对某个协议版本的首次成功签署；重复同意不新增记录，也不覆盖首次时间。"""
+
+    __tablename__ = "agreement_signatures"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_uuid = Column(String, ForeignKey("users.uuid"), nullable=False)
+    agreement_version = Column(String, ForeignKey("agreement_versions.version"), nullable=False)
+    accepted_at = Column(String, nullable=False)
+
+    __table_args__ = (UniqueConstraint("user_uuid", "agreement_version", name="uq_agreement_signature_user_version"),)
+
+
+class RegistrationRequest(Base):
+    """已成功注册请求的结果，用于响应丢失后按同一请求 ID 恢复原结果。"""
+
+    __tablename__ = "registration_requests"
+
+    registration_request_id = Column(String, primary_key=True)
+    user_uuid = Column(String, ForeignKey("users.uuid"), nullable=False)
+    # 原注册密码的指纹（HMAC，非明文）：账号重置改密后仍能核验"原操作"。
+    password_fingerprint = Column(String, nullable=True)
+    agreement_version = Column(String, ForeignKey("agreement_versions.version"), nullable=False)
+    response_json = Column(Text, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
 # Database URL
 SessionLocal = None
 engine = None
@@ -532,6 +588,7 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
 
     engine = create_engine(
         DATABASE_URL,
+        hide_parameters=True,
         connect_args={"check_same_thread": False, "timeout": 30},
     )
 
@@ -553,7 +610,16 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         _migrate_sqlite_schema(engine)
         with engine.begin() as connection:
             stamp(connection.connection.driver_connection, "main")
+    # 契约版本未变时仍要为既有库补加列；只跑本项加列迁移，避免重放其它一次性升级。
+    _migrate_conversation_index_schema(engine)
     # 迁移：为已存在的数据库添加新列
+    # Agreement tables are additive to schema 1; old dev installations may not have them yet.
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[AgreementVersion.__table__, AgreementSignature.__table__, RegistrationRequest.__table__],
+    )
+    with engine.begin() as connection:
+        _migrate_registration_schema(connection)
 
 
 def _migrate_sqlite_schema(db_engine: Engine) -> None:
@@ -567,10 +633,17 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
         _migrate_memory_chunk_schema(connection)
         _migrate_call_session_schema(connection)
         _migrate_call_maintenance_schema(connection)
+        _migrate_registration_schema(connection)
 
 
 def _table_columns(connection, table_name: str) -> set[str]:
     return {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _migrate_registration_schema(connection) -> None:
+    columns = _table_columns(connection, "registration_requests")
+    if columns and "password_fingerprint" not in columns:
+        connection.exec_driver_sql("ALTER TABLE registration_requests ADD COLUMN password_fingerprint VARCHAR")
 
 
 def _migrate_call_session_schema(connection) -> None:
@@ -627,6 +700,53 @@ def _migrate_conversation_schema(connection) -> None:
     context_columns = _table_columns(connection, "conversation_contexts")
     if context_columns and "maintenance_entry_id" not in context_columns:
         connection.exec_driver_sql("ALTER TABLE conversation_contexts ADD COLUMN maintenance_entry_id VARCHAR")
+
+
+def _migrate_conversation_index_schema(db_engine: Engine) -> None:
+    """Add the per-(user, character) message sequence to existing databases.
+
+    The schema contract version intentionally stays unchanged: bumping it would
+    make ``guard_version`` reject every existing version-1 database before this
+    additive migration can run.  Legacy rows keep their old observable order by
+    being numbered ``timestamp, uuid``; gaps are allowed and never repaired.
+    """
+    with db_engine.begin() as connection:
+        columns = _table_columns(connection, "conversations")
+        if not columns:
+            return
+        if "index" not in columns:
+            connection.exec_driver_sql('ALTER TABLE conversations ADD COLUMN "index" INTEGER')
+        connection.exec_driver_sql("""
+            WITH missing AS (
+                SELECT uuid, user_id, character_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY user_id, character_id
+                           ORDER BY timestamp, uuid
+                       ) AS offset
+                FROM conversations
+                WHERE "index" IS NULL
+            ),
+            base AS (
+                SELECT user_id, character_id, MAX("index") AS current
+                FROM conversations
+                WHERE "index" IS NOT NULL
+                GROUP BY user_id, character_id
+            )
+            UPDATE conversations
+            SET "index" = (
+                SELECT COALESCE(base.current, 0) + missing.offset
+                FROM missing
+                LEFT JOIN base
+                  ON base.user_id = missing.user_id
+                 AND base.character_id = missing.character_id
+                WHERE missing.uuid = conversations.uuid
+            )
+            WHERE "index" IS NULL
+            """)
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_user_character_index "
+            'ON conversations (user_id, character_id, "index") WHERE "index" IS NOT NULL'
+        )
 
 
 def _migrate_event_schema(connection) -> None:

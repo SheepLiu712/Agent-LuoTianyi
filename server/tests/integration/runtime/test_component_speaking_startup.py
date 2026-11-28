@@ -69,7 +69,7 @@ async def test_shared_skills_disabled_speaking_never_constructs_tts_resources(tm
     assert not (tmp_path / "tts").exists()
     engine = create_engine(f"sqlite:///{tmp_path / 'memory.sqlite'}")
     sessions = sessionmaker(bind=engine)
-    database = SimpleNamespace(memory_store=MemoryStore({}, sessions, redis_buffer=None))
+    database = SimpleNamespace(memory_store=MemoryStore({}, sessions, redis_buffer=None), open_sql_session=sessions)
     # 模型端口仅注册测试模型；没有替换 SharedSkills、AgentMemory 或 SpeakingSkill。
     models = SimpleNamespace(
         register_llm_module=lambda *args, **kwargs: SimpleNamespace(

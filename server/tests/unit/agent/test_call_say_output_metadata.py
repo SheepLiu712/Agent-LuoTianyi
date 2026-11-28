@@ -1,3 +1,5 @@
+import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +8,7 @@ import src.domain.agent as d
 from src.agent.handlers.action.say import SayHandler
 from src.agent.processing.execution import Execution
 from src.domain.call import CallAudioRoute, CallSpeechDelivery
+from src.infrastructure.observability.call_latency import set_call_packet_diagnostics
 
 
 class Stream:
@@ -53,12 +56,12 @@ class Sink:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("packet_count", [1, 2])
-async def test_real_say_handler_propagates_call_metadata_to_every_output(monkeypatch, packet_count):
-    import src.agent.handlers.action.say as say_module
-
-    events = []
-    monkeypatch.setattr(say_module, "call_latency", lambda event, call_id, **fields: events.append((event, fields)))
+@pytest.mark.parametrize(("packet_count", "diagnostics"), [(1, False), (2, False), (2, True)])
+async def test_real_say_handler_propagates_call_metadata_to_every_output(
+    monkeypatch, packet_count, diagnostics, capture_project_log, caplog
+):
+    logger = capture_project_log("src.infrastructure.observability.call_latency")
+    caplog.set_level(logging.DEBUG, logger=logger.name)
     monkeypatch.setattr(
         Stream,
         "__init__",
@@ -126,7 +129,11 @@ async def test_real_say_handler_propagates_call_metadata_to_every_output(monkeyp
         ),
     )
 
-    report = await Execution(agent, plan, context, sink).run()
+    set_call_packet_diagnostics(context.interaction_id, diagnostics)
+    try:
+        report = await Execution(agent, plan, context, sink).run()
+    finally:
+        set_call_packet_diagnostics(context.interaction_id, False)
 
     assert report.status is d.ExecutionStatus.COMPLETED
     assert [type(output) for output in sink.outputs] == [
@@ -141,13 +148,21 @@ async def test_real_say_handler_propagates_call_metadata_to_every_output(monkeyp
     assert audio.framing is d.AudioFraming.RAW_PCM
     assert audio.audio_format == d.CALL_PCM_FORMAT
     assert audio.final is True
-    assert [event for event, _ in events].count("audio.generated") == packet_count
-    assert [event for event, _ in events].count("audio.hold_released") == packet_count
-    if packet_count == 2:
-        assert [event for event, _ in events][:3] == ["audio.generated", "audio.generated", "audio.hold_released"]
-        assert events[2][1]["packet_index"] == 0
-    assert events[-1][0] == "audio.emit_completed"
-    assert events[-1][1]["final"] is True
+    events = [
+        (record.levelno, json.loads(record.getMessage().removeprefix("CALL_LATENCY "))) for record in caplog.records
+    ]
+    packet_events = [(level, event) for level, event in events if "packet_index" in event]
+    for event_name in ("audio.generated", "audio.hold_released", "audio.emit_completed"):
+        matching = [(level, event["packet_index"]) for level, event in packet_events if event["event"] == event_name]
+        assert matching == ([(logging.INFO, 0), (logging.DEBUG, 1)] if diagnostics else [(logging.INFO, 0)])
+    if diagnostics:
+        assert [event["event"] for _, event in packet_events[:3]] == [
+            "audio.generated",
+            "audio.generated",
+            "audio.hold_released",
+        ]
+    assert packet_events[-1][1]["event"] == "audio.emit_completed"
+    assert packet_events[-1][1].get("final", False) is (diagnostics or packet_count == 1)
 
 
 def test_chat_output_metadata_defaults_remain_unchanged():

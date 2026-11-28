@@ -800,7 +800,7 @@ function PipelinePage() {
   const { data, error, loading } = usePolling<LatencyGroups>(`/admin/api/metrics/latency?window=${window}`, 60000);
   const notes: Record<string, string> = {
     chat: '总耗时从本批最早输入准备完成算起，结束于首段文本被服务端输出层接纳；不代表客户端收到。',
-    call: '首个 ACK 是客户端确认的代理指标；判停使用音频结束估计。实时模型自动触发，LLM 启动以收到供应商开始回复事件为起点。',
+    call: 'ACK 表示客户端确认接纳音频。说话结束估计到供应商判停发生在 ACK 总耗时之前。检索可能与模型生成重叠，各行的样本范围也可能不同。',
     tts: '首包以 worker 生成有效音频为准。排队包含线程池、合成锁和 worker 等待；无首包的请求不填零。',
     stage_chat: '完整回收包含停止任务、维护和上下文关闭；90秒预算仅针对维护。',
     stage_call: '同次回收的多次停止或清理先累计再统计；清理包含部分停止任务，不能将所有行直接相加。',
@@ -814,7 +814,9 @@ function PipelinePage() {
       {window === 'all' && ' · 所有数据指指标库当前保留的数据'}</p>}
     {data?.groups.map(group => <Panel key={group.id} title={group.title}>
       <p className="metrics-note">{notes[group.id]}</p>
-      <p className="metrics-outcomes">{Object.entries(group.outcomes).map(([key, count]) => `${outcomeLabels[key] || key} ${count}`).join(' · ') || '暂无请求记录'}</p>
+      <p className="metrics-outcomes">{group.id === 'call'
+        ? `全部轮次 ${Object.values(group.outcomes).reduce((sum, count) => sum + count, 0)} · 已收到首包 ACK ${group.outcomes.success ?? 0} · 已结束且无 ACK ${group.outcomes.incomplete ?? 0} · 待确认 ${group.outcomes.pending ?? 0}`
+        : Object.entries(group.outcomes).map(([key, count]) => `${outcomeLabels[key] || key} ${count}`).join(' · ') || '暂无请求记录'}</p>
       <div className="table-overflow"><table><thead><tr><th>环节</th><th>样本数</th><th>平均</th><th>P50</th><th>P90</th><th>P99</th></tr></thead>
         <tbody>{group.rows.map(row => <tr key={row.key}><td>{row.label}</td><td>{row.count}</td>
           {(['avg_ms', 'p50_ms', 'p90_ms', 'p99_ms'] as const).map(field => <td key={field}>{row.count ? formatMs(row[field]) : '—'}</td>)}

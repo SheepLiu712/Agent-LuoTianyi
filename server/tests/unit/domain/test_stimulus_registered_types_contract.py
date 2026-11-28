@@ -241,6 +241,7 @@ def test_agent_domain_exports_the_registered_stimulus_contract() -> None:
         "DEVICE_CONNECTED": "device_connected",
         "DEVICE_DISCONNECTED": "device_disconnected",
         "PROACTIVE_PROMPT_DUE": "proactive_prompt_due",
+        "PROACTIVE_SPEECH_DUE": "proactive_speech_due",
         "INTERACTION_DEADLINE": "interaction_deadline",
         "INTERACTION_ENDING": "interaction_ending",
         "DYNAMIC_OBSERVED": "dynamic_observed",

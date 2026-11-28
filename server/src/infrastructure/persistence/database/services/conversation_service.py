@@ -1,10 +1,12 @@
 import json
+import threading
 import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text, tuple_, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
 from src.domain import ConversationItem
 from src.domain.conversation_type import ContextInfo
@@ -13,6 +15,7 @@ from src.infrastructure.persistence.cognitive_maintenance import (
     CognitiveMaintenanceBatch,
     CognitiveMaintenanceBatchDraft,
 )
+from src.infrastructure.persistence.conversation_order import conversation_order_columns, conversation_row_key
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer, WatchError
 from src.infrastructure.persistence.database.sql_database import (
     CognitiveMaintenanceBatch as CognitiveMaintenanceBatchRecord,
@@ -32,6 +35,10 @@ if TYPE_CHECKING:
 
 
 logger = get_logger("database.conversation")
+# 外部归档只用于历史展示；提取必须走用户显式选择的迁移用例。
+_CONTEXT_ELIGIBLE = (func.coalesce(func.json_extract(Conversation.meta_data, "$._transfer_external"), 0) != 1) & (
+    func.coalesce(func.json_extract(Conversation.meta_data, "$._transfer_history_only"), 0) != 1
+)
 
 
 class ConversationIdentityConflict(RuntimeError):
@@ -51,6 +58,8 @@ class ConversationService:
         self._sql_session_factory = sql_session_factory
         self._redis = redis_buffer
         self.user_store = user_store
+        # 序号分配是读 MAX 再写入；SQLite 只在写入时加锁，进程内用窄锁避免同 MAX 并发。
+        self._conversation_index_lock = threading.RLock()
 
     def _new_session(self) -> Any:
         """创建一个新的 SQL 会话；调用者负责关闭。"""
@@ -142,6 +151,7 @@ class ConversationService:
             db.query(Conversation.timestamp)
             .filter(Conversation.user_id == user_id)
             .filter(Conversation.character_id == character_id)
+            .filter(_CONTEXT_ELIGIBLE)
             .order_by(Conversation.timestamp.desc())
             .first()
         )
@@ -262,6 +272,10 @@ class ConversationService:
         types: List[str] = ["all"],
         character_id: str = "luotianyi",
     ) -> bool:
+        with self._conversation_index_lock:
+            return self._prefill_buffer_locked(user_id, types, character_id)
+
+    def _prefill_buffer_locked(self, user_id, types, character_id):
         """
         将用户的上下文信息预加载到 Redis 中，提升响应速度。
         """
@@ -283,7 +297,8 @@ class ConversationService:
                     db.query(Conversation)
                     .filter(Conversation.user_id == user_id)
                     .filter(Conversation.character_id == character_id)
-                    .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+                    .filter(_CONTEXT_ELIGIBLE)
+                    .order_by(*(column.desc() for column in conversation_order_columns()))
                     .limit(context_memory_count)
                     .all()
                 )
@@ -293,6 +308,7 @@ class ConversationService:
                         {
                             "uuid": conv.uuid,
                             "timestamp": conv.timestamp.isoformat(sep=" ", timespec="microseconds"),
+                            "index": conv.index,
                             "source": conv.source,
                             "content": conv.content,
                             "type": conv.type,
@@ -345,6 +361,10 @@ class ConversationService:
         commit: bool = True,
         character_id: str = "luotianyi",
     ) -> List[str]:
+        with self._conversation_index_lock:
+            return self._add_conversations_locked(user_id, conversation_data, commit, character_id)
+
+    def _add_conversations_locked(self, user_id, conversation_data, commit, character_id):
         """
         在数据库中增加对话记录，同时更新 user 的对话计数。
         在 Redis 中相应更新。
@@ -353,10 +373,14 @@ class ConversationService:
         redis = self._ensure_redis()
         db = self._new_session()
         try:
-            result_rows, new_rows = run_sql_write(
+            result_rows, new_rows, reordered = run_sql_write(
                 lambda: self._persist_conversations(db, user_id, character_id, conversation_data, commit)
             )
-            self._append_conversations_to_cache(redis, user_id, character_id, new_rows)
+            if commit and reordered:
+                # 旧缓存中的序号已失效；重建与写入共用锁，防止旧快照在提交后重新发布。
+                redis.delete(self._context_redis_key(user_id, character_id))
+            elif commit:
+                self._append_conversations_to_cache(redis, user_id, character_id, new_rows)
             return [conv["uuid"] for conv in result_rows]
         except ConversationIdentityConflict:
             db.rollback()
@@ -369,6 +393,10 @@ class ConversationService:
             db.close()
 
     def add_call_conversation(self, user_id: str, character_id: str, item: ConversationItem) -> str:
+        with self._conversation_index_lock:
+            return self._add_call_conversation_locked(user_id, character_id, item)
+
+    def _add_call_conversation_locked(self, user_id, character_id, item):
         """Persist one idempotent call record, rejecting any same-UUID content conflict."""
         if item.type != "call" or item.source != "user":
             raise ValueError("call conversation must be a user call item")
@@ -378,7 +406,9 @@ class ConversationService:
             if existing is not None:
                 self._validate_call_conversation_identity(existing, user_id, character_id, item)
                 return existing.uuid
-            result_rows, _ = run_sql_write(lambda: self._persist_conversations(db, user_id, character_id, [item], True))
+            result_rows, _, _ = run_sql_write(
+                lambda: self._persist_conversations(db, user_id, character_id, [item], True)
+            )
             if len(result_rows) != 1:
                 raise RuntimeError("call conversation owner does not exist")
             self._invalidate_context_cache(user_id, character_id)
@@ -490,49 +520,28 @@ class ConversationService:
         try:
 
             def _write() -> bool:
-                result = db.execute(
-                    text("""
-                    UPDATE conversation_contexts
-                    SET maintenance_entry_id = :new_entry_id
-                    WHERE user_id = :user_id
-                      AND character_id = :character_id
-                      AND (
-                          (:expected_entry_id IS NULL AND maintenance_entry_id IS NULL)
-                          OR maintenance_entry_id = :expected_entry_id
-                      )
-                      AND EXISTS (
-                          SELECT 1
-                          FROM conversations AS target
-                          WHERE target.uuid = :new_entry_id
-                            AND target.user_id = :user_id
-                            AND target.character_id = :character_id
-                      )
-                      AND (
-                          :expected_entry_id IS NULL
-                          OR EXISTS (
-                              SELECT 1
-                              FROM conversations AS current
-                              JOIN conversations AS target
-                                ON target.uuid = :new_entry_id
-                               AND target.user_id = :user_id
-                               AND target.character_id = :character_id
-                              WHERE current.uuid = :expected_entry_id
-                                AND current.user_id = :user_id
-                                AND current.character_id = :character_id
-                                AND (
-                                    target.timestamp > current.timestamp
-                                    OR (target.timestamp = current.timestamp AND target.uuid > current.uuid)
-                                )
-                          )
-                      )
-                        """),
-                    {
-                        "user_id": user_id,
-                        "character_id": character_id,
-                        "expected_entry_id": expected_entry_id,
-                        "new_entry_id": new_entry_id,
-                    },
+                target, current = aliased(Conversation), aliased(Conversation)
+                eligible_target = select(target.uuid).where(
+                    target.uuid == new_entry_id, target.user_id == user_id, target.character_id == character_id
                 )
+                if expected_entry_id is not None:
+                    eligible_target = eligible_target.where(
+                        current.uuid == expected_entry_id,
+                        current.user_id == user_id,
+                        current.character_id == character_id,
+                        tuple_(*conversation_order_columns(target)) > tuple_(*conversation_order_columns(current)),
+                    )
+                statement = (
+                    update(ConversationContext)
+                    .where(
+                        ConversationContext.user_id == user_id,
+                        ConversationContext.character_id == character_id,
+                        ConversationContext.maintenance_entry_id == expected_entry_id,
+                        eligible_target.exists(),
+                    )
+                    .values(maintenance_entry_id=new_entry_id)
+                )
+                result = db.execute(statement.execution_options(synchronize_session=False))
                 if result.rowcount != 1:
                     return False
                 db.commit()
@@ -781,17 +790,17 @@ class ConversationService:
     def _validate_draft_entry_order(by_id, previous_progress, draft) -> None:
         target = by_id[draft.target_entry_id]
         previous = by_id.get(previous_progress) if previous_progress is not None else None
-        if previous is not None and (target.timestamp, target.uuid) <= (previous.timestamp, previous.uuid):
+        if previous is not None and conversation_row_key(target) <= conversation_row_key(previous):
             raise ValueError("认知维护目标不能倒退")
         for entry_id in draft.covered_entry_ids:
             entry = by_id[entry_id]
-            if (entry.timestamp, entry.uuid) > (target.timestamp, target.uuid):
+            if conversation_row_key(entry) > conversation_row_key(target):
                 raise ValueError("认知维护记录不能超过目标记录")
         for entry_id in draft.maintained_entry_ids:
             entry = by_id[entry_id]
-            if previous is not None and (entry.timestamp, entry.uuid) <= (previous.timestamp, previous.uuid):
+            if previous is not None and conversation_row_key(entry) <= conversation_row_key(previous):
                 raise ValueError("认知维护记录必须位于 predecessor 之后")
-            if (entry.timestamp, entry.uuid) > (target.timestamp, target.uuid):
+            if conversation_row_key(entry) > conversation_row_key(target):
                 raise ValueError("认知维护记录不能超过目标记录")
 
     @staticmethod
@@ -818,7 +827,8 @@ class ConversationService:
         rows = (
             db.query(Conversation)
             .filter(Conversation.user_id == user_id, Conversation.character_id == character_id)
-            .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+            .filter(_CONTEXT_ELIGIBLE)
+            .order_by(*(column.desc() for column in conversation_order_columns()))
             .limit(context.context_memory_count)
             .all()
         )
@@ -850,7 +860,7 @@ class ConversationService:
             )
             .first()
         )
-        return previous is not None and (target.timestamp, target.uuid) > (previous.timestamp, previous.uuid)
+        return previous is not None and conversation_row_key(target) > conversation_row_key(previous)
 
     def _apply_maintenance_compaction(self, db, context, user, character_id, compaction) -> bool:
         if not all(hasattr(compaction, name) for name in ("previous_summary", "covered_entry_ids", "summary")):
@@ -866,7 +876,8 @@ class ConversationService:
         rows = (
             db.query(Conversation)
             .filter(Conversation.user_id == user.uuid, Conversation.character_id == character_id)
-            .order_by(Conversation.timestamp.desc(), Conversation.uuid.desc())
+            .filter(_CONTEXT_ELIGIBLE)
+            .order_by(*(column.desc() for column in conversation_order_columns()))
             .limit(count)
             .all()
         )
@@ -887,17 +898,28 @@ class ConversationService:
             logger.warning(f"Failed to invalidate conversation context cache: {error}")
 
     def _persist_conversations(self, db, user_id, character_id, conversation_data, commit):
+        with self._conversation_index_lock:
+            return self._persist_conversations_locked(db, user_id, character_id, conversation_data, commit)
+
+    def _persist_conversations_locked(self, db, user_id, character_id, conversation_data, commit):
         user = db.query(User).filter(User.uuid == user_id).first()
         if not user:
-            return [], []
+            return [], [], False
         context = self._get_or_create_conversation_context(db, user, character_id)
         result_rows = []
         new_rows = []
+        reordered = False
         pending_by_uuid = {}
         requested_uuids = [item.uuid for item in conversation_data if item.uuid]
         existing_by_uuid = {
             row.uuid: row for row in db.query(Conversation).filter(Conversation.uuid.in_(requested_uuids)).all()
         }
+        next_index = (
+            db.query(func.max(Conversation.index))
+            .filter(Conversation.user_id == user_id, Conversation.character_id == character_id)
+            .scalar()
+        )
+        next_index = int(next_index or 0)
         for item in conversation_data:
             item_uuid = item.uuid or str(uuid.uuid4())
             existing = existing_by_uuid.get(item_uuid) or pending_by_uuid.get(item_uuid)
@@ -905,7 +927,12 @@ class ConversationService:
                 self._validate_conversation_identity(existing, user_id, character_id, item)
                 result_rows.append(self._conversation_dict(existing))
                 continue
-            conversation, row = self._conversation_row(db, user_id, character_id, item, item_uuid)
+            timestamp = self._conversation_timestamp(item)
+            index = self._allocate_conversation_index(db, user_id, character_id, timestamp, next_index)
+            reordered = reordered or index <= next_index
+            next_index += 1
+            conversation, row = self._conversation_row(db, user_id, character_id, item, item_uuid, index, timestamp)
+            db.flush()
             pending_by_uuid[item_uuid] = conversation
             result_rows.append(row)
             new_rows.append(row)
@@ -915,14 +942,51 @@ class ConversationService:
             user.context_memory_count = context.context_memory_count
         if commit:
             db.commit()
-        return result_rows, new_rows
+        return result_rows, new_rows, reordered
 
     @staticmethod
-    def _conversation_row(db, user_id, character_id, item, item_uuid):
+    def _conversation_timestamp(item):
         try:
-            timestamp = datetime.fromisoformat(item.timestamp)
+            return datetime.fromisoformat(item.timestamp)
         except ValueError:
-            timestamp = datetime.now()
+            return datetime.now()
+
+    def _allocate_conversation_index(self, db, user_id, character_id, timestamp, max_index):
+        """按事实时间定位插入点；只在并发晚到的旧时间消息出现时移动后续序号。"""
+        following = (
+            db.query(func.min(Conversation.index))
+            .filter(
+                Conversation.user_id == user_id,
+                Conversation.character_id == character_id,
+                Conversation.timestamp > timestamp,
+            )
+            .scalar()
+        )
+        if following is None:
+            return max_index + 1
+        target = int(following)
+        # 留出空位后整体后移，避免唯一索引在逐行 +1 时冲突。
+        offset = max_index + 1
+        scope = (
+            Conversation.user_id == user_id,
+            Conversation.character_id == character_id,
+        )
+        db.execute(
+            update(Conversation)
+            .where(*scope, Conversation.index >= target)
+            .values(index=Conversation.index + offset)
+            .execution_options(synchronize_session=False)
+        )
+        db.execute(
+            update(Conversation)
+            .where(*scope, Conversation.index > offset)
+            .values(index=Conversation.index - offset + 1)
+            .execution_options(synchronize_session=False)
+        )
+        return target
+
+    @staticmethod
+    def _conversation_row(db, user_id, character_id, item, item_uuid, index, timestamp):
         meta_data = None
         if item.data is not None:
             try:
@@ -933,6 +997,7 @@ class ConversationService:
             user_id=user_id,
             character_id=character_id,
             timestamp=timestamp,
+            index=index,
             source=item.source,
             content=item.content,
             type=item.type,
@@ -943,6 +1008,7 @@ class ConversationService:
         return conversation, {
             "uuid": conversation.uuid,
             "timestamp": item.timestamp,
+            "index": index,
             "source": item.source,
             "content": item.content,
             "type": item.type,
@@ -954,6 +1020,7 @@ class ConversationService:
         return {
             "uuid": conversation.uuid,
             "timestamp": conversation.timestamp.isoformat(sep=" ", timespec="microseconds"),
+            "index": conversation.index,
             "source": conversation.source,
             "content": conversation.content,
             "type": conversation.type,
@@ -1065,7 +1132,7 @@ class ConversationService:
                     updated = ContextInfo(
                         summary=data.summary,
                         conversations=sorted(
-                            [*data.conversations, *rows], key=lambda row: (row["timestamp"], row["uuid"])
+                            [*data.conversations, *rows], key=lambda row: conversation_row_key(row, user_id)
                         ),
                         context_count=(data.context_count or 0) + len(rows),
                     )
@@ -1233,9 +1300,11 @@ class ConversationService:
                 db.execute(
                     text("""
                     WITH scoped_conversations AS (
-                        SELECT uuid, timestamp, source, content, type, meta_data
+                        SELECT uuid, timestamp, "index", source, content, type, meta_data
                         FROM conversations
                         WHERE user_id = :user_id AND character_id = :character_id
+                          AND COALESCE(json_extract(meta_data, '$._transfer_external'), 0) != 1
+                          AND COALESCE(json_extract(meta_data, '$._transfer_history_only'), 0) != 1
                     ),
                     metadata AS (
                         SELECT
@@ -1254,11 +1323,12 @@ class ConversationService:
                         SELECT
                             uuid,
                             timestamp,
+                            "index",
                             source,
                             content,
                             type,
                             meta_data,
-                            ROW_NUMBER() OVER (ORDER BY timestamp DESC, uuid DESC) AS recency_rank
+                            ROW_NUMBER() OVER (ORDER BY "index" DESC, timestamp DESC, uuid DESC) AS recency_rank
                         FROM scoped_conversations
                         WHERE timestamp <= :requested_at
                     )
@@ -1271,6 +1341,7 @@ class ConversationService:
                         metadata.eligible_count,
                         ranked_eligible.uuid,
                         ranked_eligible.timestamp,
+                        ranked_eligible."index",
                         ranked_eligible.source,
                         ranked_eligible.content,
                         ranked_eligible.type,
@@ -1278,7 +1349,7 @@ class ConversationService:
                         ranked_eligible.recency_rank
                     FROM metadata
                     LEFT JOIN ranked_eligible ON ranked_eligible.recency_rank <= 30
-                    ORDER BY ranked_eligible.timestamp ASC, ranked_eligible.uuid ASC
+                    ORDER BY ranked_eligible.recency_rank DESC
                     """),
                     {
                         "user_id": user_id,
@@ -1333,6 +1404,7 @@ class ConversationService:
                 {
                     "uuid": row["uuid"],
                     "timestamp": timestamp.isoformat(sep=" ", timespec="microseconds"),
+                    "index": row["index"],
                     "source": row["source"],
                     "content": row["content"],
                     "type": row["type"],
@@ -1371,7 +1443,7 @@ class ConversationService:
         end: int,
         character_id: Optional[str] = None,
     ) -> List[ConversationItem]:
-        """从数据库获取指定范围的历史对话，按时间顺序排列 (0 is oldest)。"""
+        """从数据库获取指定范围的历史对话，按显式序号排列 (0 is oldest)。"""
         limit = end - start
         if limit <= 0:
             return []
@@ -1381,9 +1453,7 @@ class ConversationService:
             query = db.query(Conversation).filter(Conversation.user_id == user_id)
             if character_id is not None:
                 query = query.filter(Conversation.character_id == character_id)
-            conversations = (
-                query.order_by(Conversation.timestamp.asc(), Conversation.uuid.asc()).offset(start).limit(limit).all()
-            )
+            conversations = query.order_by(*conversation_order_columns()).offset(start).limit(limit).all()
             result = []
             for conv in conversations:
                 result.append(

@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.infrastructure.persistence.database import vector_store as stores
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
+from src.infrastructure.persistence.database.services.event_store import EventStore
 from src.infrastructure.persistence.database.services.memory_store import MemoryStore
 from src.infrastructure.persistence.database.sql_database import Base
 from tests.integration.runtime.test_component_speaking_startup import runtime_config
@@ -38,7 +39,12 @@ async def test_agent_runtime_disabled_vector_store_constructs_no_vector_resource
     engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine)
-    database = SimpleNamespace(memory_store=MemoryStore({}, sessions, RedisBuffer()), conversation_service=object())
+    database = SimpleNamespace(
+        memory_store=MemoryStore({}, sessions, RedisBuffer()),
+        event_store=EventStore({}, sessions, RedisBuffer()),
+        conversation_service=object(),
+        open_sql_session=sessions,
+    )
     models = SimpleNamespace(
         register_llm_module=lambda *args, **kwargs: SimpleNamespace(
             prompt_template=SimpleNamespace(get_variables=list)

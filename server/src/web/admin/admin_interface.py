@@ -5,6 +5,7 @@ import copy
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -412,6 +413,26 @@ async def call_reply_latency(
     limit: int = Query(default=100, ge=1, le=200),
 ) -> dict[str, Any]:
     return get_admin_shell().observability.get_call_reply_latency(days=days, limit=limit)
+
+
+@protected_router.get("/runtime/chat-diagnostics")
+async def chat_diagnostics(username: str = Query(min_length=1, max_length=256)) -> dict:
+    runtime = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="RUNTIME_UNAVAILABLE")
+    user_id = await asyncio.to_thread(runtime.database_manager.credential_service.get_user_uuid_by_username, username)
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
+    return runtime.chat_adapter.connection_diagnostics(user_id)
+
+
+@protected_router.put("/calls/{call_id}/packet-diagnostics")
+async def set_call_diagnostics(call_id: UUID, enabled: bool = Body(embed=True)) -> dict[str, bool]:
+    runtime = get_admin_shell().runtime_supervisor.runtime
+    adapter = runtime.call_adapter if runtime is not None else None
+    if adapter is None or not adapter.set_packet_diagnostics(str(call_id), enabled):
+        raise HTTPException(status_code=404, detail="CALL_SESSION_UNAVAILABLE")
+    return {"enabled": enabled}
 
 
 @protected_router.get("/traces")

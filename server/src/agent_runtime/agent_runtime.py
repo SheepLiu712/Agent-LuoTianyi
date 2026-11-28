@@ -11,6 +11,7 @@ from src.agent.handlers.action.call_settlement import FinalizeCallHandler
 from src.agent.handlers.action.cognitive_maintenance import CognitiveMaintenanceActionHandler
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
+from src.agent.handlers.action.proactive import MarkTopicSharedHandler, RequestCallSpeechHandler
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -39,6 +40,7 @@ from src.agent.handlers.stimulus.diary_due import DiaryPlanningDueHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+from src.agent.handlers.stimulus.proactive_speech import ProactiveSpeechHandler
 from src.agent.handlers.stimulus.relationship import NewRelationshipProposeHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.handlers.stimulus.song_knowledge import SongKnowledgeHandler
@@ -62,6 +64,7 @@ from src.infrastructure.persistence.database.vector_store import (
     get_vector_store,
     init_vector_store,
 )
+from src.infrastructure.persistence.due_events import EventStoreDueEventProvider
 from src.utils.asyncio_helpers import (
     DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
     run_sync_owned,
@@ -82,6 +85,10 @@ class AgentRuntime:
     def singing_backend(self) -> SingingBackend:
         """Expose the shared singing port only to the application composition root."""
         return self.skills.song_learning_tasks.world_resources
+
+    async def extract_imported_memories(self, user_id, character_id, batch_id, rows):
+        """向组合根提供显式导入提取端口，技能实现仍封装在角色运行时内。"""
+        return await self.skills.imported_memory.extract(user_id, character_id, batch_id, rows)
 
     @property
     def call_tts_character_ids(self) -> tuple[str, ...]:
@@ -116,6 +123,7 @@ class AgentRuntime:
         self.llm_service = llm_service
         self.media_resolver = media_resolver
         self.database_manager = database_manager
+        self._topic_events = EventStoreDueEventProvider(database_manager.event_store)
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_complete = False
         self._shutdown_task: asyncio.Task | None = None
@@ -206,6 +214,7 @@ class AgentRuntime:
             reply=self.skills.reply,
         )
         registrations = [
+            (StimulusKind.PROACTIVE_SPEECH_DUE, ProactiveSpeechHandler(skills=reply_skills, events=self._topic_events)),
             (StimulusKind.CALL_ANSWER_REQUESTED, CallAnswerRequestedHandler()),
             (StimulusKind.CALL_REPLY_SEGMENT_READY, CallReplySegmentReadyHandler(self.skills.reply)),
             (StimulusKind.CALL_MEMORY_LOOKUP_REQUESTED, CallMemoryLookupRequestedHandler()),
@@ -220,8 +229,6 @@ class AgentRuntime:
                 FirstLoginHandler(
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
-                    skills=reply_skills,
-                    reply=self.reply_delivery,
                 ),
             ),
             (
@@ -311,6 +318,8 @@ class AgentRuntime:
                     CognitiveMaintenanceActionHandler(character_id, self.skills.cognitive_maintenance),
                 ),
                 (ActionKind.ANSWER_CALL, AnswerCallHandler()),
+                (ActionKind.REQUEST_CALL_SPEECH, RequestCallSpeechHandler()),
+                (ActionKind.MARK_TOPIC_SHARED, MarkTopicSharedHandler(self._topic_events)),
                 (ActionKind.END_CALL, EndCallHandler()),
                 (
                     ActionKind.FINALIZE_CALL,
