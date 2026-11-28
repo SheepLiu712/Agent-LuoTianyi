@@ -635,7 +635,7 @@ def test_settings_entry_refreshes_history_through_existing_async_binder(qapp, ne
 
     class TransferMenu(main_ui.QMenu):
         def exec(self, *_args):
-            return self.actions()[-1]
+            return next(action for action in self.actions() if action.text() == "聊天与记忆迁移")
 
     class ImmediateTransferDialog(DataTransferDialog):
         def exec(self):
