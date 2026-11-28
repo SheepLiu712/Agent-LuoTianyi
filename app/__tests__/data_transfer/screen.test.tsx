@@ -100,7 +100,7 @@ it('默认不提取；外部chat有效范围确认不声称替换记忆，提取
   await mount();
   await press('展开导入高级设置');
   await press('ChatGPT');
-  await press('返回迁移页面');
+  await press('收起导入高级设置');
   jest.mocked(api.previewImport).mockResolvedValue({ ...nativePreview, source_format: 'chatgpt', scope: 'chat' });
   await press('选择文件并预览');
   expect(api.previewImport).toHaveBeenCalledWith(session, expect.any(Object), 'chatgpt', 'chat', 'luotianyi');
@@ -145,7 +145,7 @@ it('导出选项传递正确，分享前恢复聊天；重连失败提供显式�
   await press('导出');
   await press('展开导出高级设置');
   await press('Markdown');
-  await press('返回迁移页面');
+  await press('收起导出高级设置');
   resume.mockResolvedValueOnce(false);
   await press('导出并打开系统分享');
   expect(api.downloadExport).toHaveBeenCalledWith(session, 'all', 'markdown');
@@ -172,7 +172,7 @@ it.each([THEMES.light, THEMES.dark])('沿用$name主题，小屏大字使用可�
   expect(selected?.props.accessibilityRole).toBe('radio');
 });
 
-it('默认隐藏高级设置和详细统计；二级页面返回后常用路径仍畅通', async () => {
+it('高级设置在原位展开收起，详细统计仍在二级页面查看', async () => {
   await mount();
   expect(text()).not.toContain('保存格式');
   expect(text()).not.toContain('文件来源');
@@ -180,11 +180,15 @@ it('默认隐藏高级设置和详细统计；二级页面返回后常用路径�
   await press('导出');
   await press('展开导出高级设置');
   expect(text()).toContain('保存格式');
-  await press('返回迁移页面');
+  expect(root.root.findAllByType(Modal)).toHaveLength(0);
+  await press('收起导出高级设置');
+  expect(text()).not.toContain('保存格式');
   await press('导入');
   await press('展开导入高级设置');
   expect(text()).toContain('文件来源');
-  await press('返回迁移页面');
+  expect(root.root.findAllByType(Modal)).toHaveLength(0);
+  await press('收起导入高级设置');
+  expect(text()).not.toContain('文件来源');
 
   await press('选择文件并预览');
   expect(text()).toContain('导入预览');

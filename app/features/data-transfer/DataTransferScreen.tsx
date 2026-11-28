@@ -88,17 +88,18 @@ function Card({ title, theme, children }: React.PropsWithChildren<{ title?: stri
   </View>;
 }
 
-function Disclosure({ title, theme, children }: React.PropsWithChildren<{ title: string; theme: AppTheme }>) {
+function Disclosure({ title, theme, children, inline = false }: React.PropsWithChildren<{ title: string; theme: AppTheme; inline?: boolean }>) {
   const [open, setOpen] = useState(false);
   const insets = useSafeAreaInsets();
   return <View>
-    <Pressable accessibilityRole="button" accessibilityLabel={`展开${title}`} accessibilityState={{ expanded: open }}
-      onPress={() => setOpen(true)}
+    <Pressable accessibilityRole="button" accessibilityLabel={`${open && inline ? '收起' : '展开'}${title}`} accessibilityState={{ expanded: open }}
+      onPress={() => setOpen(!open)}
       style={({ pressed }) => [styles.disclosureHeader, { opacity: pressed ? 0.75 : 1 }]}>
       <Text style={[styles.label, { color: theme.text }]}>{title}</Text>
-      <Text style={[styles.body, { color: theme.textMuted }]}>›</Text>
+      <Text style={[styles.body, { color: theme.textMuted }]}>{inline ? (open ? '▾' : '▸') : '›'}</Text>
     </Pressable>
-    {open && <Modal visible animationType="slide" onRequestClose={() => setOpen(false)}>
+    {open && inline && <View style={styles.group}>{children}</View>}
+    {open && !inline && <Modal visible animationType="slide" onRequestClose={() => setOpen(false)}>
       <View style={[styles.secondary, { backgroundColor: theme.surface, paddingTop: insets.top }]}>
         <View style={[styles.header, { borderBottomColor: theme.border }]}>
           <Action label="返回迁移页面" disabled={false} onPress={() => setOpen(false)} theme={theme} />
@@ -307,7 +308,7 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
       {tab === 'export' && <Card theme={theme}>
         <Text style={body}>导出 {SCOPE_LABELS[exportScope]} · {EXPORT_LABELS[exportFormat]}。</Text>
         <Action label="导出并打开系统分享" onPress={exportData} disabled={busy} theme={theme} tone="primary" />
-        <Disclosure title="导出高级设置" theme={theme}>
+        <Disclosure title="导出高级设置" theme={theme} inline>
           <Choices label="导出范围" labels={SCOPE_LABELS} value={exportScope} onChange={setExportScope} disabled={busy} theme={theme} />
           <Choices label="保存格式" labels={EXPORT_LABELS} value={exportFormat} onChange={setExportFormat} disabled={busy} theme={theme} />
           <Text style={body}>{exportFormat === 'zip' ? 'ZIP 保留恢复所需的目录结构。' : '阅读副本仅供查看。需要还原时请选择 ZIP。'}</Text>
@@ -316,7 +317,7 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
       {tab === 'import' && <Card theme={theme}>
         <Text style={body}>{externalSource ? '外部文件导入纯文字聊天。' : `恢复 ${SCOPE_LABELS[importScope]}。`}</Text>
         <Action label="选择文件并预览" onPress={chooseFile} disabled={busy} theme={theme} tone="primary" />
-        <Disclosure title="导入高级设置" theme={theme}>
+        <Disclosure title="导入高级设置" theme={theme} inline>
           <Choices label="文件来源" labels={SOURCE_LABELS} value={source} onChange={value => { setSource(value); resetPreview(); }} disabled={busy} theme={theme} />
           {externalSource ? <Text style={body}>外部文件导入纯文字聊天。</Text> :
             <Choices label="导入范围" labels={SCOPE_LABELS} value={importScope} onChange={value => { setImportScope(value); resetPreview(); }} disabled={busy} theme={theme} />}
