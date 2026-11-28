@@ -1,5 +1,6 @@
 // Jest setup: define React Native globals
 (globalThis as any).__DEV__ = false;
+jest.mock('./modules/call-audio/src/CallAudioModule', () => ({ __esModule: true, default: null }));
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) =>
   setTimeout(cb, 0);

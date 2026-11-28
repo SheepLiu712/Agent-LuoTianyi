@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useCallFeature } from '../features/call/useCallFeature';
+import { useCallSession } from '../features/call/useCallSession';
 import { NativeCallOwnership, ProductionCallResolver, requestCallMicrophonePermission } from '../features/call/call_session/production_resolver';
 import { Audio } from 'expo-av';
 let credentials: { username: string; token: string };
@@ -251,6 +252,75 @@ describe('production call resolver', () => {
     const replacement = resolver.createAttempt();
     await replacement.close();
     await resolver.close();
+  });
+
+  it.each([
+    ['headset_route_timeout', '耳机连接超时'],
+    ['headset_route_lost', '耳机通话已中断'],
+    ['headset_route_probe_failed', '耳机音频启动失败'],
+  ])('shows asynchronous %s from the production native coordinator and releases the attempt', async (code, title) => {
+    const audio = new (jest.requireMock('../features/call/call_audio/native_call_audio').AndroidCallAudio)();
+    let events!: { onFailure(event: { code: string }): void };
+    audio.setCoordinatorEvents.mockImplementation((value: typeof events) => { events = value; });
+    const socket = new Socket();
+    socket.readyState = 1;
+    const ownership = new NativeCallOwnership();
+    const resolver = new ProductionCallResolver({ credentials,
+      characterId: 'luotianyi', switchPort: { prepare: jest.fn() },
+      fetchImpl: jest.fn(async () => ({
+        ok: true, status: 200, json: async () => ({ available: true, character_id: 'luotianyi', reason: 'available' }),
+      })) as unknown as typeof fetch,
+      sockets: { create: () => socket }, createNativeAudio: () => audio, nativeOwnership: ownership,
+    });
+    await resolver.refreshCapability();
+    const onFailure = jest.fn();
+    let requestId: string | undefined;
+    let call!: ReturnType<typeof useCallSession>;
+    function Harness() {
+      call = useCallSession({
+        capabilities: { serverAvailable: true, nativeAvailable: true },
+        createAttempt: () => {
+          const attempt = resolver.createAttempt();
+          attempt.session.subscribe(snapshot => { requestId = snapshot.clientRequestId; });
+          return attempt;
+        },
+        requestPermission: async () => 'granted', onFailure,
+      });
+      return null;
+    }
+    let tree: ReactTestRenderer | undefined;
+    const receive = (message: object) => {
+      socket.listeners.get('message')?.forEach(listener => listener({ data: JSON.stringify(message) }));
+    };
+    const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+    try {
+      await act(async () => { tree = create(React.createElement(Harness)); });
+      await act(async () => { expect(await call.start(false)).toBe(true); await flush(); });
+      await act(async () => {
+        receive({ type: 'system_ready', payload: {} });
+        receive({ type: 'auth_ok', payload: {} });
+        await flush();
+        receive({ protocol: 'call.v1', type: 'call.state', seq: 1,
+          call_id: '11111111-1111-1111-1111-111111111111', client_request_id: requestId, state: 'ringing' });
+        await flush();
+        receive({ protocol: 'call.v1', type: 'call.active', seq: 2,
+          call_id: '11111111-1111-1111-1111-111111111111', connected_at_ms: Date.now() });
+        await flush();
+      });
+      expect(call.state.phase).toBe('ACTIVE');
+      await act(async () => { events.onFailure({ code }); await flush(); });
+      expect(call.failureNotice?.title).toBe(title);
+      expect(onFailure).toHaveBeenCalledTimes(1);
+      expect(audio.close).toHaveBeenCalledTimes(1);
+      expect(socket.close).toHaveBeenCalled();
+      expect(ownership.available()).toBe(true);
+      await act(async () => { events.onFailure({ code }); await flush(); });
+      expect(onFailure).toHaveBeenCalledTimes(1);
+      expect(audio.close).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => { tree?.unmount(); });
+      await resolver.close();
+    }
   });
 
   it('wires production native playback progress to the visual-only mouth bridge', async () => {

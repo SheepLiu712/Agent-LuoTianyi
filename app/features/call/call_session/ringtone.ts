@@ -1,6 +1,7 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 interface RingtoneModule {
+  traceRingtonePhase(event: string, phase: string): void;
   startRingtone(): void;
   stopRingtone(): void;
 }
@@ -8,6 +9,11 @@ interface RingtoneModule {
 export class NativeCallRingtone {
   private playing = false;
   private native: RingtoneModule | null = null;
+
+  tracePhase(event: string, phase: string): void {
+    this.native ??= requireOptionalNativeModule<RingtoneModule>('CallAudio');
+    this.native?.traceRingtonePhase(event, phase);
+  }
 
   playLoop(): void {
     if (this.playing) return;

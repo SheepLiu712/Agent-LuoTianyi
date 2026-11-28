@@ -141,6 +141,10 @@ export class CallTransportSession {
     void this.terminate('closed', undefined, this.snapshot.activeDurationMs);
   }
 
+  reportNativeFailure(code: string): void {
+    this.fail(code);
+  }
+
   forceRecovery(_reason: 'AUDIO_FOCUS_LOST'): void {
     if (this.snapshot.status !== 'connected' || !this.snapshot.callId) {
       this.fail('AUDIO_FOCUS_LOST');

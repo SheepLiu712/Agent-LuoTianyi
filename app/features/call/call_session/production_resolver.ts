@@ -179,6 +179,9 @@ export class ProductionCallResolver {
         transport.forceRecovery('AUDIO_FOCUS_LOST');
         return;
       }
+      if (event?.code === 'headset_route_timeout' || event?.code === 'headset_route_lost' || event?.code === 'headset_route_probe_failed') {
+        transport.reportNativeFailure(event.code);
+      }
       void attempt.close();
     };
     nativeAudio.setCoordinatorEvents({ onFailure: fatalNativeFailure, onBackgrounded: fatalNativeFailure });
