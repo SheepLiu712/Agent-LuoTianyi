@@ -19,6 +19,7 @@ from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchReactionSkill
+from src.agent.skills.imported_memory import ImportedMemorySkill
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeStore
 from src.agent.skills.memory_retrieval import MemoryRetrievalSkill
 from src.agent.skills.memory_write import MemoryWriteSkill
@@ -55,6 +56,7 @@ class SharedSkills:
             for key in characters
         }
         self._memories = memories
+        self.imported_memory = ImportedMemorySkill(memories=memories, session_factory=database_manager.open_sql_session)
         self.reply = ReplySkill(config.get("reply"), llm_service=llm_service, characters=characters)
         narratives = self.reply.narratives()
         prepared_speech = PreparedSpeechCatalog(config.get("prepared_speech").get("characters", {}))

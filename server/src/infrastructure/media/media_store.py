@@ -14,7 +14,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from src.domain.agent import MediaRef
 
 from .audio_validation import parse_m4a_audio
-from .image_validation import prepare_image_content
+from .image_validation import prepare_image_content, validate_image_content
 from .media_resolver import MediaResolutionError, MediaResolutionErrorCode
 
 
@@ -28,6 +28,15 @@ class MediaDeletionFailure:
 class MediaDeletionReport:
     deleted_count: int
     failures: tuple[MediaDeletionFailure, ...]
+
+
+@dataclass(frozen=True)
+class PreparedTransferMedia:
+    """内容与归属已验证、尚未落盘的迁移媒体。"""
+
+    media_ref: MediaRef
+    data: bytes
+    metadata: dict[str, object]
 
 
 class PermanentMediaStore:
@@ -185,11 +194,95 @@ class PermanentMediaStore:
                 deleted_count += 1
         return MediaDeletionReport(deleted_count=deleted_count, failures=tuple(failures))
 
-    def _persist(self, *, media_ref: MediaRef, data: bytes, metadata: dict[str, object]) -> None:
-        final_dir = self._root / media_ref.media_id
+    def prepare_transfer(
+        self,
+        *,
+        media_ref: MediaRef,
+        owner_user_id: str,
+        data: bytes,
+        kind: str,
+        mime_type: str,
+        duration_ms: int | None = None,
+    ) -> PreparedTransferMedia:
+        """只接收受控引用和字节，完整校验后返回无文件副作用的发布材料。"""
+        directory = self._transfer_directory(media_ref)
+        if not isinstance(data, bytes) or not data:
+            raise MediaResolutionError(code=MediaResolutionErrorCode.EMPTY, media_id=media_ref.media_id)
+        if len(data) > self.max_bytes:
+            raise MediaResolutionError(code=MediaResolutionErrorCode.TOO_LARGE, media_id=media_ref.media_id)
+        metadata: dict[str, object] = {
+            "media_kind": kind,
+            "owner_user_id": owner_user_id,
+            "byte_length": len(data),
+            "sha256": sha256(data).hexdigest(),
+        }
+        if kind == "image":
+            metadata["mime_type"] = validate_image_content(data, mime_type, media_ref.media_id)
+        elif kind == "audio":
+            parsed = parse_m4a_audio(data, mime_type, media_ref.media_id)
+            if duration_ms is not None and (type(duration_ms) is not int or duration_ms != parsed.duration_ms):
+                raise MediaResolutionError(code=MediaResolutionErrorCode.INVALID_DURATION, media_id=media_ref.media_id)
+            metadata.update(
+                mime_type=mime_type, duration_ms=parsed.duration_ms, container=parsed.container, codec=parsed.codec
+            )
+        else:
+            raise MediaResolutionError(code=MediaResolutionErrorCode.UNSUPPORTED_TYPE, media_id=media_ref.media_id)
+        if directory.exists():
+            self._verify_replay(directory, data, metadata, media_ref)
+        return PreparedTransferMedia(media_ref, data, metadata)
+
+    def read_for_transfer(
+        self, *, media_ref: MediaRef, owner_user_id: str, expected_kind: str
+    ) -> PreparedTransferMedia:
+        """读取本人媒体并核对文件内容、存储校验和与归属，不接受包内文件路径。"""
+        directory = self._transfer_directory(media_ref)
+        try:
+            metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
+            content = directory / "content.bin"
+            if content.stat().st_size > self.max_bytes:
+                raise MediaResolutionError(code=MediaResolutionErrorCode.TOO_LARGE, media_id=media_ref.media_id)
+            data = content.read_bytes()
+        except (json.JSONDecodeError, OSError):
+            raise MediaResolutionError(code=MediaResolutionErrorCode.UNKNOWN, media_id=media_ref.media_id) from None
+        if not isinstance(metadata, dict) or metadata.get("owner_user_id") != owner_user_id:
+            raise MediaResolutionError(code=MediaResolutionErrorCode.UNAUTHORIZED, media_id=media_ref.media_id)
+        if metadata.get("media_kind", expected_kind) != expected_kind:
+            raise MediaResolutionError(code=MediaResolutionErrorCode.UNSUPPORTED_TYPE, media_id=media_ref.media_id)
+        return self.prepare_transfer(
+            media_ref=media_ref,
+            owner_user_id=owner_user_id,
+            data=data,
+            kind=expected_kind,
+            mime_type=metadata.get("mime_type", ""),
+            duration_ms=metadata.get("duration_ms"),
+        )
+
+    def publish_transfer(self, prepared: PreparedTransferMedia) -> bool:
+        """返回是否确由本次发布新建；重放既有目录不会进入失败清理清单。"""
+        return self._persist(media_ref=prepared.media_ref, data=prepared.data, metadata=prepared.metadata)
+
+    def rollback_transfer(self, prepared: PreparedTransferMedia) -> None:
+        """只回收调用方明确记录的新发布目录，删除前再次核对完整内容和归属。"""
+        directory = self._transfer_directory(prepared.media_ref)
+        if not directory.exists():
+            return
+        self._verify_replay(directory, prepared.data, prepared.metadata, prepared.media_ref)
+        shutil.rmtree(directory)
+
+    def _transfer_directory(self, media_ref: MediaRef) -> Path:
+        identity = str(UUID(media_ref.media_id))
+        directory = self._root / identity
+        if identity != media_ref.media_id or directory.is_symlink() or directory.resolve().parent != self._root:
+            raise ValueError("invalid transfer media identity")
+        if any((directory / name).is_symlink() for name in ("content.bin", "metadata.json")):
+            raise ValueError("invalid transfer media content path")
+        return directory
+
+    def _persist(self, *, media_ref: MediaRef, data: bytes, metadata: dict[str, object]) -> bool:
+        final_dir = self._transfer_directory(media_ref)
         if final_dir.exists():
             self._verify_replay(final_dir, data, metadata, media_ref)
-            return
+            return False
         staging_dir = Path(tempfile.mkdtemp(prefix=".media-", dir=self._root))
         try:
             (staging_dir / "content.bin").write_bytes(data)
@@ -201,6 +294,8 @@ class PermanentMediaStore:
                 os.rename(staging_dir, final_dir)
             except FileExistsError:
                 self._verify_replay(final_dir, data, metadata, media_ref)
+                return False
+            return True
         finally:
             if staging_dir.exists():
                 shutil.rmtree(staging_dir)
@@ -222,6 +317,8 @@ class PermanentMediaStore:
                 code=MediaResolutionErrorCode.UNKNOWN,
                 media_id=media_ref.media_id,
             ) from None
+        if not isinstance(existing_metadata, dict):
+            raise MediaResolutionError(code=MediaResolutionErrorCode.UNKNOWN, media_id=media_ref.media_id)
         required_identity = {"mime_type", "owner_user_id"}
         identity_matches = all(existing_metadata.get(key) == expected_metadata[key] for key in required_identity)
         new_fields_match = all(

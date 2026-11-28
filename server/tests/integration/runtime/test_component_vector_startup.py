@@ -43,6 +43,7 @@ async def test_agent_runtime_disabled_vector_store_constructs_no_vector_resource
         memory_store=MemoryStore({}, sessions, RedisBuffer()),
         event_store=EventStore({}, sessions, RedisBuffer()),
         conversation_service=object(),
+        open_sql_session=sessions,
     )
     models = SimpleNamespace(
         register_llm_module=lambda *args, **kwargs: SimpleNamespace(

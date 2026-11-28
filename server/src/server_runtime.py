@@ -13,16 +13,20 @@ from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.application.host_context import ServerHostContext
 from src.application.user import UserResetFence, UserResetService
 from src.application.user.agreement_service import AgreementService, prepare_agreements, publish_agreements
+from src.application.user.data_transfer import TransferWorkspace, UserDataTransferService
 from src.application.user.registration_service import RegistrationService
 from src.domain.stage import StageState
 from src.infrastructure.config.skills import SkillsConfig
 from src.infrastructure.media import MediaResolver, PermanentMediaStore, create_media_resolver
+from src.infrastructure.media.legacy_image import LegacyImageReader
 from src.infrastructure.models.realtime_speech.omni import QwenOmniSessionFactory
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import CallMetrics, ObservabilityService, set_observability_service
 from src.infrastructure.observability.population import PopulationSampler
 from src.infrastructure.persistence.database import DatabaseManager, set_default_database_manager
 from src.infrastructure.persistence.database.sql_database import User
+from src.infrastructure.persistence.transfer_projections import TransferProjections
+from src.infrastructure.persistence.user_data_transfer import UserDataRepository
 from src.stage import StageManager, WorldStage
 from src.utils.logger import (
     get_logger,
@@ -30,6 +34,7 @@ from src.utils.logger import (
     uninstall_observability_log_handler,
 )
 from src.utils.owned_operation import complete_owned
+from src.utils.server_paths import resolve_server_path
 from src.web.http import UserInterface
 from src.web.websocket import WebSocketService
 from src.world import WorldRuntime
@@ -63,6 +68,7 @@ class ServerRuntime:
     user_reset_fence: UserResetFence | None = None
     realtime_speech_factory: QwenOmniSessionFactory | None = None
     user_reset_service: UserResetService | None = None
+    user_data_transfer_service: UserDataTransferService | None = None
     _call_transport_requested: bool = field(default=False, repr=False)
     _host_context: ServerHostContext = field(default_factory=ServerHostContext, repr=False)
     default_world_id: str = DEFAULT_WORLD_ID
@@ -253,9 +259,30 @@ class ServerRuntime:
                 call_sessions=database_manager.call_sessions,
                 call_maintenance_batches=database_manager.call_maintenance_batches,
             )
+            transfer_repository = UserDataRepository(database_manager.open_sql_session)
+            runtime.user_data_transfer_service = UserDataTransferService(
+                repository=transfer_repository,
+                projections=TransferProjections(
+                    agent_runtime.vector_store,
+                    media_store,
+                    runtime.media_resolver,
+                    legacy_image_reader=LegacyImageReader(
+                        database_manager.conversation_service, resolve_server_path("data/images"), media_store.max_bytes
+                    ),
+                ),
+                vectors=agent_runtime.vector_store,
+                interactions=runtime.stage_manager,
+                redis=database_manager.redis,
+                workspace=TransferWorkspace(
+                    resolve_server_path(config.get("database", {}).get("sql_db_folder", "data/database")) / "transfers"
+                ),
+                characters=agent_runtime.character_ids,
+                extract=agent_runtime.extract_imported_memories,
+            )
             runtime._wire_dependencies()
             # No new call admission until all previous-runtime candidates converge.
             await runtime.stage_manager.initialize()
+            await runtime.user_data_transfer_service.start()
             runtime._start_background_services()
             runtime.user_interface.generate_rsa_keys()
 
@@ -381,6 +408,10 @@ class ServerRuntime:
                 uninstall_observability_log_handler()
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
+            (
+                "transfer cleanup",
+                runtime.user_data_transfer_service.close if runtime and runtime.user_data_transfer_service else None,
+            ),
             ("population sampler", runtime.population_sampler.stop if runtime and runtime.population_sampler else None),
             ("world stages", runtime.close_world_stages if runtime is not None else None),
             ("chat adapter", runtime.chat_adapter.close if runtime is not None else None),
@@ -442,6 +473,10 @@ class ServerRuntime:
                 return
             errors: list[str] = []
             shutdown_steps = (
+                (
+                    "transfer cleanup",
+                    self.user_data_transfer_service.close if self.user_data_transfer_service else None,
+                ),
                 ("population sampler", self.population_sampler.stop if self.population_sampler else None),
                 ("world runtime", self.world.stop_background_services),
                 ("world stages", self.close_world_stages),
