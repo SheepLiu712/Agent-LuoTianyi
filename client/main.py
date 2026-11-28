@@ -33,6 +33,7 @@ from src.live2d import live2d  # noqa: E402
 from src.network.network_client import NetworkClient  # noqa: E402
 from src.message_process import MessageProcessor  # noqa: E402
 from src.gui.login_dialog import ExistingAgreementResult, LoginDialog  # noqa: E402
+from src.gui.avatar_controller import AvatarController  # noqa: E402
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
@@ -105,9 +106,11 @@ if __name__ == "__main__":
             if login_dialog.exec() != QDialog.DialogCode.Accepted:
                 raise SystemExit("Login cancelled")
         print(f"Logged in as {network_client.user_id}")
+        avatars = AvatarController(network_client, app)
         window = MainWindow(
-            config["gui"], config["live2d"], binder, network_client=network_client
+            config["gui"], config["live2d"], binder, network_client=network_client, avatars=avatars
         )
+        app.aboutToQuit.connect(avatars.close)
         window.show()
         ret = app.exec()
     except SystemExit as e:

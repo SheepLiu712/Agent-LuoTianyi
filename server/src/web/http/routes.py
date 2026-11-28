@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from src.application.admin import get_admin_shell
@@ -13,6 +13,7 @@ from .runtime_access import require_bearer_token, runtime_not_ready_detail
 from .types import (
     AgreementAcceptRequest,
     AutoLoginRequest,
+    AvatarUpdateRequest,
     CallCapabilityQuery,
     CallCapabilityResponse,
     DynamicCommentCreateRequest,
@@ -142,6 +143,38 @@ async def login(
 ):
     logger.info("Login request: %s", req.username)
     return await server_runtime.user_interface.login(req, background_tasks, server_runtime, request)
+
+
+@router.get("/avatars")
+async def get_avatars(
+    username: str,
+    authorization: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    snapshot = await server_runtime.user_interface.get_avatars(username, require_bearer_token(authorization))
+    headers = {
+        "ETag": f'"{snapshot["revision"]}"',
+        "Cache-Control": "no-store",
+        "X-Avatar-Token": snapshot["sync_token"],
+    }
+    if if_none_match and if_none_match.strip('"') == snapshot["revision"]:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(snapshot, headers=headers)
+
+
+@router.put("/avatars/{side}")
+async def put_avatar(
+    side: Literal["user", "agent"],
+    username: str,
+    request: AvatarUpdateRequest,
+    authorization: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    snapshot = await server_runtime.user_interface.put_avatar(
+        username, require_bearer_token(authorization), side, request.image
+    )
+    return JSONResponse(snapshot, headers={"Cache-Control": "no-store", "ETag": f'"{snapshot["revision"]}"'})
 
 
 @router.post("/preference/get")

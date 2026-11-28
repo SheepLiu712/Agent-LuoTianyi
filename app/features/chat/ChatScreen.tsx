@@ -9,14 +9,18 @@ import { VoiceInputBar } from './VoiceInputBar';
 import { VoiceRecordingOverlay } from './VoiceRecordingOverlay';
 import type { useChatLogic } from './useChatLogic';
 import { useHistoryLogic } from './useHistoryLogic';
+import type { AvatarImage, AvatarSide } from '../avatars/avatar_sync';
+import { AvatarRow } from '../avatars/Avatar';
 
 interface Props {
   chat: ReturnType<typeof useChatLogic>;
   session: AccountSession;
   theme: AppTheme;
   topOffset: number;
+  avatars?: { user: AvatarImage; agent: AvatarImage };
+  onEditAvatar?(side: AvatarSide): void;
 }
-export function ChatScreen({ chat, session, theme, topOffset }: Props) {
+export function ChatScreen({ chat, session, theme, topOffset, avatars, onEditAvatar }: Props) {
   const { username, token } = session;
   const { inputText, messages, flatListRef, canSend, canSendImage, setInputText, addHistoryMessage,
     handleSendText, handleSendImage, handleToggleAgentAudio, toggleVoicePlayback, retryVoice, voiceInput } = chat;
@@ -67,8 +71,11 @@ export function ChatScreen({ chat, session, theme, topOffset }: Props) {
           <FlatList
             ref={flatListRef}
             data={messages}
+            extraData={avatars}
             inverted={true}
-            renderItem={({ item }) => <MessageItem session={session} message={item} onToggleAgentAudio={handleToggleAgentAudio} onToggleVoicePlayback={toggleVoicePlayback} onRetryVoice={retryVoice} theme={theme} />}
+            renderItem={({ item }) => <AvatarRow onEdit={onEditAvatar} side={item.type === 'system' ? null : item.isUser ? 'user' : 'agent'} image={avatars?.[item.isUser ? 'user' : 'agent'] ?? null}>
+              <MessageItem session={session} message={item} onToggleAgentAudio={handleToggleAgentAudio} onToggleVoicePlayback={toggleVoicePlayback} onRetryVoice={retryVoice} theme={theme} />
+            </AvatarRow>}
             keyExtractor={(item) => item.uuid}
             onEndReached={() => {
               if (username && token && !historyLoading) {

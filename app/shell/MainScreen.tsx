@@ -38,6 +38,9 @@ import DynamicsScreen from '../features/dynamics/DynamicsScreen';
 import { DataTransferScreen } from '../features/data-transfer/DataTransferScreen';
 import PreferencesScreen from '../features/settings/PreferencesScreen';
 import LlmSettingsScreen from '../features/settings/ModelSettingsScreen';
+import AvatarSettingsScreen from '../features/settings/AvatarSettingsScreen';
+import type { AvatarSide } from '../features/avatars/avatar_sync';
+import { useAvatars } from '../features/avatars/useAvatars';
 import { useCallFeature } from '../features/call/useCallFeature';
 import { CallScreen } from '../features/call/CallScreen';
 import { createCallMouthBridge } from '../features/call/call_audio/playback_progress';
@@ -65,6 +68,8 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
   const [showAgreement, setShowAgreement] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showLlmSettings, setShowLlmSettings] = useState(false);
+  const [editingAvatar, setEditingAvatar] = useState<AvatarSide>();
+  const avatars = useAvatars(session);
   const [showDynamics, setShowDynamics] = useState(false);
   const [showDataTransfer, setShowDataTransfer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -109,10 +114,15 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     onCallRecord: addLocalCallRecord,
   });
   callHangupRef.current = call.hangup;
-  const page = showAgreement ? 'agreement' : showDataTransfer ? 'data-transfer'
+  const page = editingAvatar ? 'avatars' : showAgreement ? 'agreement' : showDataTransfer ? 'data-transfer'
     : showPreferences ? 'preferences' : showLlmSettings ? 'models' : showDynamics ? 'dynamics'
       : call.state.phase === 'IDLE' ? 'chat' : 'call';
   const showNotice = usePageNotices(page);
+  const { error: avatarError, retry: retryAvatars } = avatars;
+  useEffect(() => {
+    if (avatarError) return showNotice({ title: '头像同步', message: avatarError, theme,
+      primary: { label: '重试', action: () => { void retryAvatars(); } } });
+  }, [avatarError, retryAvatars, showNotice, theme]);
   const { failureNotice, dismissFailure } = call;
   useEffect(() => {
     if (failureNotice && page !== 'call' && page !== 'chat') dismissFailure();
@@ -410,6 +420,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
       {showAgreement ? <AgreementScreen onClose={() => setShowAgreement(false)} theme={theme} /> : null}
       {showPreferences ? <PreferencesScreen session={session} onClose={() => setShowPreferences(false)} theme={theme} /> : null}
       {showLlmSettings ? <LlmSettingsScreen onClose={() => setShowLlmSettings(false)} theme={theme} /> : null}
+      {editingAvatar ? <AvatarSettingsScreen key={editingAvatar} side={editingAvatar} avatars={avatars} onClose={() => setEditingAvatar(undefined)} theme={theme} /> : null}
       {showDynamics ? (
         <DynamicsScreen session={session}
           onClose={handleCloseDynamics}
@@ -418,7 +429,9 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         />
       ) : null}
 
-      <ChatScreen key={chat.historyRevision} chat={chat} session={session} theme={theme} topOffset={live2dHeight} />
+      <ChatScreen key={chat.historyRevision} chat={chat} session={session} theme={theme} topOffset={live2dHeight} avatars={avatars} onEditAvatar={side => {
+        voiceInput.leavePermissionPage(); setEditingAvatar(side);
+      }} />
 
       <Animated.View
         pointerEvents={drawerOpen ? 'auto' : 'none'}

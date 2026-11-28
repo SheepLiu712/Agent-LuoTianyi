@@ -5,7 +5,7 @@ from datetime import datetime
 from shiboken6 import isValid
 
 from PySide6.QtCore import QSize, Qt, Signal, QTimer
-from PySide6.QtGui import QColor, QFontMetrics, QPixmap
+from PySide6.QtGui import QColor, QFontMetrics
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -23,9 +23,8 @@ from PySide6.QtWidgets import (
 )
 
 from .window_operation import WindowOperation
+from .avatar_label import AvatarLabel
 
-TIANYI_ICON_PATH = "res/gui/tianyi_icon.png"
-USER_ICON_PATH = "res/gui/user_icon.png"
 DYNAMIC_PAGE_SIZE = 10
 SCROLLBAR_SINGLE_STEP = 12
 
@@ -49,14 +48,6 @@ def _author_label(author_type: str) -> str:
     return "你"
 
 
-def _avatar_path(author_type: str) -> str | None:
-    if author_type == "agent":
-        return TIANYI_ICON_PATH
-    if author_type == "user":
-        return USER_ICON_PATH
-    return None
-
-
 def _format_dynamic_time(value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -69,37 +60,6 @@ def _format_dynamic_time(value: object) -> str:
         if len(parts) >= 2:
             return f"{parts[0]}\n{parts[1][:5]}"
         return raw
-
-
-class AvatarLabel(QLabel):
-    def __init__(self, author_type: str, size: int = 34, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(size, size)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        path = _avatar_path(author_type)
-        if path:
-            pixmap = QPixmap(path)
-            if not pixmap.isNull():
-                self.setPixmap(
-                    pixmap.scaled(
-                        size,
-                        size,
-                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                )
-                self.setStyleSheet("border-radius: 17px;")
-                return
-        self.setText(_author_label(author_type))
-        self.setStyleSheet("""
-            QLabel {
-                background: #EEF3F7;
-                color: #667481;
-                border-radius: 8px;
-                font-size: 11px;
-                font-weight: 700;
-            }
-            """)
 
 
 class CommentInput(QTextEdit):
@@ -144,13 +104,17 @@ class ElidedLabel(QLabel):
 
 
 class DynamicListItemWidget(QWidget):
-    def __init__(self, dynamic: dict, parent=None):
+    def __init__(self, dynamic: dict, parent=None, avatars=None):
         super().__init__(parent)
         self.setObjectName("dynamicListItem")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(10)
-        layout.addWidget(AvatarLabel(str(dynamic.get("author_type", "")), 34))
+        layout.addWidget(
+            AvatarLabel(
+                str(dynamic.get("author_type", "")), 34, avatars=avatars, default_agent="res/gui/tianyi_icon.png"
+            )
+        )
 
         text_box = QVBoxLayout()
         text_box.setContentsMargins(0, 0, 0, 0)
@@ -170,7 +134,7 @@ class DynamicListItemWidget(QWidget):
 
 
 class DynamicPostWidget(QWidget):
-    def __init__(self, dynamic: dict, parent=None):
+    def __init__(self, dynamic: dict, parent=None, avatars=None):
         super().__init__(parent)
         self.setObjectName("dynamicPostCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -179,7 +143,7 @@ class DynamicPostWidget(QWidget):
         layout.setHorizontalSpacing(10)
         layout.setVerticalSpacing(6)
         layout.addWidget(
-            AvatarLabel(str(dynamic.get("author_type", "")), 36),
+            AvatarLabel(str(dynamic.get("author_type", "")), 36, avatars=avatars, default_agent="res/gui/tianyi_icon.png"),
             0,
             0,
             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
@@ -210,7 +174,7 @@ class DynamicPostWidget(QWidget):
 
 
 class DynamicCommentWidget(QWidget):
-    def __init__(self, comment: dict, parent=None):
+    def __init__(self, comment: dict, parent=None, avatars=None):
         super().__init__(parent)
         self.setObjectName("dynamicCommentCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -219,7 +183,7 @@ class DynamicCommentWidget(QWidget):
         layout.setHorizontalSpacing(10)
         layout.setVerticalSpacing(6)
         layout.addWidget(
-            AvatarLabel(str(comment.get("author_type", "")), 30),
+            AvatarLabel(str(comment.get("author_type", "")), 30, avatars=avatars, default_agent="res/gui/tianyi_icon.png"),
             0,
             0,
             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
@@ -354,9 +318,10 @@ class DynamicEditorDialog(QDialog):
 
 
 class DynamicsDialog(QDialog):
-    def __init__(self, network_client, on_read_callback=None, parent=None):
+    def __init__(self, network_client, on_read_callback=None, parent=None, avatars=None):
         super().__init__(parent)
         self.network_client = network_client
+        self.avatars = avatars
         self.on_read_callback = on_read_callback
         self.current_dynamic: dict | None = None
         self.next_cursor: str | None = None
@@ -621,7 +586,7 @@ class DynamicsDialog(QDialog):
     def _add_post_item(self, dynamic: dict):
         item = QListWidgetItem()
         self.comments_text.addItem(item)
-        self.comments_text.setItemWidget(item, DynamicPostWidget(dynamic))
+        self.comments_text.setItemWidget(item, DynamicPostWidget(dynamic, avatars=self.avatars))
         self._update_detail_item_sizes()
 
     def _valid_result(self, request, visible_generation):
@@ -725,7 +690,7 @@ class DynamicsDialog(QDialog):
         item.setData(Qt.ItemDataRole.UserRole, dynamic)
         item.setSizeHint(QSize(0, 82))
         self.dynamic_list.addItem(item)
-        self.dynamic_list.setItemWidget(item, DynamicListItemWidget(dynamic))
+        self.dynamic_list.setItemWidget(item, DynamicListItemWidget(dynamic, avatars=self.avatars))
 
     def mark_read(self):
         if self._hidden or not self._loaded:
@@ -816,7 +781,7 @@ class DynamicsDialog(QDialog):
     def _add_comment_item(self, comment: dict):
         item = QListWidgetItem()
         self.comments_text.addItem(item)
-        self.comments_text.setItemWidget(item, DynamicCommentWidget(comment))
+        self.comments_text.setItemWidget(item, DynamicCommentWidget(comment, avatars=self.avatars))
         self._update_detail_item_sizes()
 
     def open_dynamic_editor(self):

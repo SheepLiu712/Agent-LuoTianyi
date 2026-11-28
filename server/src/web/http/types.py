@@ -23,6 +23,11 @@ class HistoryQuery(BaseModel):
     end_index: int = -1
 
 
+class AvatarUpdateRequest(BaseModel):
+    # A null image explicitly restores the bundled default on every device.
+    image: str | None = Field(max_length=2_796_236)
+
+
 class CallCapabilityQuery(BaseModel):
     character_id: str = Field(min_length=1)
 

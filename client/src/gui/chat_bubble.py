@@ -19,6 +19,8 @@ agent_stop_icon_path = "res/gui/stop_agent_msg.png"
 agent_play_icon = None
 agent_stop_icon = None
 from ..utils.logger import get_logger
+from .avatar_label import AvatarLabel
+from .avatar_settings_dialog import AvatarSettingsDialog
 
 def has_wav_file(conv_uuid: str) -> bool:
     import os
@@ -155,6 +157,7 @@ class ChatBubble(QWidget):
         is_user: bool = False,
         parent=None,
         playback_manager: BubblePlaybackManager | None = None,
+        avatars=None,
     ):
         super().__init__(parent)
         self.is_user = is_user
@@ -162,6 +165,7 @@ class ChatBubble(QWidget):
         self.content_widget: QWidget | None = None
         self.conv_uuid = conv_uuid
         self.playback_manager = playback_manager
+        self.avatars = avatars
         self.init_ui()
         if self.playback_manager and not self.is_user:
             self.playback_manager.register_bubble(self)
@@ -213,8 +217,24 @@ class ChatBubble(QWidget):
                 layout.addWidget(self.content_widget)
                 layout.addStretch()
 
+        self.avatar_label = AvatarLabel(
+            "user" if self.is_user else "agent",
+            34,
+            avatars=self.avatars,
+            editable=self.avatars is not None,
+        )
+        self.avatar_label.clicked.connect(self._on_avatar_clicked)
+        if self.is_user:
+            layout.addWidget(self.avatar_label, 0, Qt.AlignmentFlag.AlignTop)
+        else:
+            layout.insertWidget(0, self.avatar_label, 0, Qt.AlignmentFlag.AlignTop)
         self.setLayout(layout)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+    def _on_avatar_clicked(self, side: str):
+        if not self.avatars:
+            return
+        AvatarSettingsDialog(self.avatars, side=side, parent=self).exec()
 
     def _on_agent_label_clicked(self):
         if self.is_user:
@@ -305,7 +325,10 @@ class ChatImageBubble(ChatBubble):
     '''
     图片类型的消息气泡，content_widget是一个QLabel用于显示图片，目前限制最大宽高为250px以适应聊天界面。
     '''
-    def __init__(self, image_path, conv_uuid="", is_user=False, parent=None, playback_manager: BubblePlaybackManager | None = None):
+    def __init__(
+        self, image_path, conv_uuid="", is_user=False, parent=None,
+        playback_manager: BubblePlaybackManager | None = None, avatars=None,
+    ):
         self.image_label: QLabel | None = None
         self.image_path = image_path
         self.conv_uuid = conv_uuid
@@ -314,6 +337,7 @@ class ChatImageBubble(ChatBubble):
             is_user=is_user,
             parent=parent,
             playback_manager=playback_manager,
+            avatars=avatars,
         )
 
     def build_content_widget(self) -> QWidget:
@@ -376,7 +400,10 @@ class ChatTextBubble(ChatBubble):
     '''
     文本类型的消息气泡，text_edit用于显示文本内容，容器为自定义类型，方便控制行为。
     '''
-    def __init__(self, text, conv_uuid="", is_user=False, parent=None, playback_manager: BubblePlaybackManager | None = None):
+    def __init__(
+        self, text, conv_uuid="", is_user=False, parent=None,
+        playback_manager: BubblePlaybackManager | None = None, avatars=None,
+    ):
         self.text = text
         self.conv_uuid = conv_uuid
         self.text_edit: CustomTextEdit | None = None
@@ -385,6 +412,7 @@ class ChatTextBubble(ChatBubble):
             is_user=is_user,
             parent=parent,
             playback_manager=playback_manager,
+            avatars=avatars,
         )
         self.update_bubble_size()
 
@@ -441,7 +469,7 @@ class ChatTextBubble(ChatBubble):
         doc.setTextWidth(final_width - 20) # Subtract padding
         
         doc_h = doc.size().height()
-        final_height = int(doc_h + 20) 
+        final_height = max(34, int(doc_h + 20))
         
         self.text_edit.setFixedHeight(final_height)
         self.setFixedHeight(final_height + 10)
