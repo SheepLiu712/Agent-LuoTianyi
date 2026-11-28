@@ -282,6 +282,7 @@ class ServerRuntime:
             runtime._wire_dependencies()
             # No new call admission until all previous-runtime candidates converge.
             await runtime.stage_manager.initialize()
+            await runtime.user_data_transfer_service.start()
             runtime._start_background_services()
             runtime.user_interface.generate_rsa_keys()
 
@@ -407,6 +408,10 @@ class ServerRuntime:
                 uninstall_observability_log_handler()
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
+            (
+                "transfer cleanup",
+                runtime.user_data_transfer_service.close if runtime and runtime.user_data_transfer_service else None,
+            ),
             ("population sampler", runtime.population_sampler.stop if runtime and runtime.population_sampler else None),
             ("world stages", runtime.close_world_stages if runtime is not None else None),
             ("chat adapter", runtime.chat_adapter.close if runtime is not None else None),
@@ -468,6 +473,10 @@ class ServerRuntime:
                 return
             errors: list[str] = []
             shutdown_steps = (
+                (
+                    "transfer cleanup",
+                    self.user_data_transfer_service.close if self.user_data_transfer_service else None,
+                ),
                 ("population sampler", self.population_sampler.stop if self.population_sampler else None),
                 ("world runtime", self.world.stop_background_services),
                 ("world stages", self.close_world_stages),

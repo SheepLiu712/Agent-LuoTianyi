@@ -8,10 +8,11 @@ CHUNK_SIZE = 1024 * 1024
 
 
 class FileBlob:
-    def __init__(self, path, directory=None):
+    def __init__(self, path, directory=None, on_close=None):
         self.path = Path(path)
         self._directory = directory
         self._stream = None
+        self._on_close = on_close
 
     @property
     def stream(self):
@@ -39,8 +40,8 @@ class FileBlob:
         return result.seal()
 
     @classmethod
-    def open(cls, path):
-        return cls(path)
+    def open(cls, path, *, on_close=None):
+        return cls(path, on_close=on_close)
 
     def __len__(self):
         if self._stream is not None:
@@ -62,6 +63,10 @@ class FileBlob:
         if self._directory is not None:
             self._directory.cleanup()
             self._directory = None
+
+        if self._on_close is not None:
+            release, self._on_close = self._on_close, None
+            release()
 
     def __del__(self):
         self.close()

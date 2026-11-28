@@ -644,7 +644,7 @@ async def test_actual_image_and_audio_round_trip_rebinds_owner_and_preserves_byt
         )
         files = state.projection.export_media("a", payload)
         descriptor = payload["media"][0]
-        assert files[descriptor["path"]] == content and "data" not in descriptor
+        assert files[descriptor["path"]].read() == content and "data" not in descriptor
         # 应用层负责身份映射；archive path 继续作为原包键，不成为本地路径。
         payload["conversations"][0]["meta_data"]["media_id"] = target_id
         descriptor.update(id=target_id, data=files[descriptor["path"]])

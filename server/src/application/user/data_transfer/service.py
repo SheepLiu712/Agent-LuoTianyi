@@ -39,6 +39,32 @@ class UserDataTransferService:
         self._characters = tuple(characters)
         self._extract = extract
         self._busy = set()
+        self._cleanup_task = None
+        self._cleanup_stop = asyncio.Event()
+
+    async def start(self, *, cleanup_interval=60):
+        if self._cleanup_task is not None:
+            raise RuntimeError("TRANSFER_CLEANUP_ALREADY_STARTED")
+        await asyncio.to_thread(self._workspace.cleanup_expired)
+        self._cleanup_stop.clear()
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop(cleanup_interval))
+
+    async def _cleanup_loop(self, interval):
+        try:
+            while not self._cleanup_stop.is_set():
+                try:
+                    await asyncio.wait_for(self._cleanup_stop.wait(), timeout=interval)
+                except asyncio.TimeoutError:
+                    await asyncio.to_thread(self._workspace.cleanup_expired)
+        except Exception:
+            logger.exception("迁移预览文件回收失败")
+            raise
+
+    async def close(self):
+        if self._cleanup_task is not None:
+            self._cleanup_stop.set()
+            await self._cleanup_task
+            self._cleanup_task = None
 
     async def export(self, user_id, *, scope="all", format="zip", file_backed=False):
         self._validate_scope(scope)
