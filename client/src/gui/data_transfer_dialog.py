@@ -14,8 +14,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QLayout,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -89,7 +92,7 @@ class DataTransferDialog(QDialog):
         description.setWordWrap(True)
         layout.addWidget(description)
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.tabs, 1)
         self._build_export_page()
         self._build_import_page()
         self.toggle_details = QPushButton("显示详细信息")
@@ -101,11 +104,12 @@ class DataTransferDialog(QDialog):
         self.details.setReadOnly(True)
         self.details.setAccessibleName("迁移预览与结果")
         self.details.setMinimumHeight(130)
+        self.details.setMaximumHeight(160)
         self.details.setPlainText(
             "上传与下载上限 64 MiB，展开上限 256 MiB、4096 项。\n导入前会显示格式、实际范围、数量与警告；确认后才会写入。"
         )
         self.details.hide()
-        layout.addWidget(self.details, 1)
+        layout.addWidget(self.details)
         self.status_label = QLabel("就绪")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -183,6 +187,8 @@ class DataTransferDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         # 主区域：来源与选择
         form = QFormLayout()
         form.setSpacing(10)
@@ -207,6 +213,7 @@ class DataTransferDialog(QDialog):
 
         # 高级设置折叠区域
         self.advanced_group = QGroupBox("高级设置")
+        self.advanced_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.advanced_group.setCheckable(True)
         self.advanced_group.setChecked(False)
         self.advanced_content = QWidget()
@@ -256,7 +263,11 @@ class DataTransferDialog(QDialog):
         post_layout.addWidget(self.retry_extraction_button)
         layout.addWidget(self.post_preview_area)
 
-        self.tabs.addTab(page, "导入")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(page)
+        self.tabs.addTab(scroll, "导入")
         for widget in (self.source_format, self.import_scope):
             widget.currentIndexChanged.connect(self._invalidate_preview)
         self.source_path.textChanged.connect(self._invalidate_preview)

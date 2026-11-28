@@ -262,6 +262,25 @@ def test_http_native_cross_account_roundtrip_media_profile_and_repeat(transfer):
     assert image_response.status_code == 200 and image_response.headers["content-type"] == "image/png"
 
 
+def test_replace_clears_cached_context_before_subsequent_chat(transfer):
+    seed_native(transfer)
+    old = transfer.history.get_conversation_context_state("alice")
+    assert len(old["conversations"]) == 2
+    transfer.redis.setex("user_context:alice:other-character", 3600, "another role")
+    transfer.redis.setex("user_context:bob:alice", 3600, "other user")
+    view = preview(
+        transfer, b'[{"role":"user","content":"replacement history"}]', user="alice", source_format="generic"
+    )
+    result = commit(transfer, view, user="alice", mode="replace", confirm_replace=True)
+    assert result.status_code == 200 and result.json()["success"]
+    current = transfer.history.get_conversation_context_state("alice")
+    assert current["conversations"] == []  # 外部记录只进入历史，不进入角色上下文。
+    assert current["summary"] == ""
+    assert current["context_count"] == 0
+    assert transfer.redis.get("user_context:alice:other-character") is None
+    assert transfer.redis.get("user_context:bob:alice") == "other user"
+
+
 def test_http_isolation_preview_backup_and_missing_auth(transfer):
     assert transfer.client.get("/user/data/export").status_code == 401
     view = preview(transfer, b'[{"role":"user","content":"offline input"}]', source_format="generic")
@@ -378,6 +397,7 @@ def test_export_backfills_only_owner_legacy_and_readable_output(transfer):
 
 def test_explicit_extraction_freezes_candidates_and_recovers_partial_memory_write(transfer):
     from functools import partial
+
     from src.agent.skills.adapters.memory.writer import MemoryWriter
     from src.agent.skills.imported_memory import ImportedMemorySkill
     from src.infrastructure.persistence.database.services.memory_store import MemoryStore

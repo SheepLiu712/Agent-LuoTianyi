@@ -371,6 +371,21 @@ def preview(window):
     return dialog, state
 
 
+def test_import_controls_remain_readable_with_preview_and_advanced_settings(window, qapp):
+    dialog, _state = preview(window)
+    dialog.resize(560, 620)
+    for expanded in (False, True, False):
+        dialog.advanced_group.setChecked(expanded)
+        qapp.processEvents()
+        scroll = dialog.tabs.currentWidget()
+        scroll.ensureWidgetVisible(dialog.commit_button)
+        qapp.processEvents()
+        assert dialog.commit_button.height() >= dialog.commit_button.sizeHint().height()
+        assert dialog.commit_button.visibleRegion().boundingRect().height() == dialog.commit_button.height()
+        if not expanded:
+            assert dialog.advanced_group.height() <= dialog.advanced_group.sizeHint().height()
+
+
 def test_gui_preview_defaults_merge_then_commit_off_thread_and_backup_download(window, tmp_path, monkeypatch):
     dialog, state = preview(window)
     assert dialog.mode_combo.currentData() == "merge"
