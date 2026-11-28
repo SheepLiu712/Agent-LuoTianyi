@@ -94,7 +94,7 @@ function Disclosure({ title, theme, children, inline = false }: React.PropsWithC
   return <View>
     <Pressable accessibilityRole="button" accessibilityLabel={`${open && inline ? '收起' : '展开'}${title}`} accessibilityState={{ expanded: open }}
       onPress={() => setOpen(!open)}
-      style={({ pressed }) => [styles.disclosureHeader, { opacity: pressed ? 0.75 : 1 }]}>
+      style={({ pressed }) => [styles.disclosureHeader, inline && styles.inlineDisclosureHeader, { opacity: pressed ? 0.75 : 1 }]}>
       <Text style={[styles.label, { color: theme.text }]}>{title}</Text>
       <Text style={[styles.body, { color: theme.textMuted }]}>{inline ? (open ? '▾' : '▸') : '›'}</Text>
     </Pressable>
@@ -389,5 +389,6 @@ const styles = StyleSheet.create({
   preview: { borderRadius: 8, padding: 12, gap: 12 },
   progress: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 8 },
   switchRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, gap: 8 },
+  inlineDisclosureHeader: { paddingHorizontal: 0 },
   disclosureHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
 });
