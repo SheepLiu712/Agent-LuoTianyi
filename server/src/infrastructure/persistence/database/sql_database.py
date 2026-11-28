@@ -71,6 +71,14 @@ class User(Base):
     )
 
 
+class ChatAvatar(Base):
+    __tablename__ = "chat_avatars"
+
+    user_id = Column(String, ForeignKey("users.uuid", ondelete="CASCADE"), primary_key=True)
+    side = Column(String, primary_key=True)
+    image = Column(Text, nullable=True)
+
+
 class InviteCode(Base):
     __tablename__ = "invite_codes"
 
@@ -596,10 +604,15 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         _migrate_sqlite_schema(engine)
         with engine.begin() as connection:
             stamp(connection.connection.driver_connection, "main")
-    # Agreement tables are additive to schema 1; old dev installations may not have them yet.
+    # Additive tables must also be created for existing schema-1 installations.
     Base.metadata.create_all(
         bind=engine,
-        tables=[AgreementVersion.__table__, AgreementSignature.__table__, RegistrationRequest.__table__],
+        tables=[
+            AgreementVersion.__table__,
+            AgreementSignature.__table__,
+            RegistrationRequest.__table__,
+            ChatAvatar.__table__,
+        ],
     )
     with engine.begin() as connection:
         _migrate_registration_schema(connection)

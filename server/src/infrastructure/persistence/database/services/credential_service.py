@@ -231,26 +231,22 @@ class CredentialService:
         finally:
             db.close()
 
-    def check_message_token(self, username: str, token: str) -> Tuple[bool, Optional[str]]:
-        """
-        检查消息 token 是否有效。
-        """
+    def authenticate_message_user_in_session(self, db, username: str, token: str) -> Optional[User]:
+        """Return the authenticated account snapshot for a composed use case."""
         payload = self._decode_message_token_claims(token)
         if not payload:
-            return False, None
-        user_uuid = str(payload["user_uuid"])
-        db = self._new_session()
-        try:
-            user = db.query(User).filter(User.uuid == user_uuid, User.username == username).first()
-            if not user or not user.auth_token:
-                return False, None
-            expected_fp = self._session_fingerprint(user.auth_token)
-            actual_fp = str(payload["session_fp"])
-            if expected_fp and hmac.compare_digest(expected_fp, actual_fp):
-                return True, user_uuid
-            return False, None
-        finally:
-            db.close()
+            return None
+        user = db.query(User).filter(User.uuid == str(payload["user_uuid"]), User.username == username).first()
+        if not user or not user.auth_token:
+            return None
+        expected_fp = self._session_fingerprint(user.auth_token)
+        return user if expected_fp and hmac.compare_digest(expected_fp, str(payload["session_fp"])) else None
+
+    def check_message_token(self, username: str, token: str) -> Tuple[bool, Optional[str]]:
+        """检查消息 token 是否有效。"""
+        with self._new_session() as db:
+            user = self.authenticate_message_user_in_session(db, username, token)
+            return (True, user.uuid) if user is not None else (False, None)
 
     # ────────────────────────────────────────────
     # 用户注册、登录、重置账户相关方法

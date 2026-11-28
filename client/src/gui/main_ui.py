@@ -461,11 +461,12 @@ class ChatWidget(QWidget):
     我不太会写UI，这部分主要是AI写的。关键的回调逻辑是我看过的，也比较trivial，不详细解释了。
     '''
 
-    def __init__(self, config: Dict, agent_binder: AgentBinder, network_client=None, parent=None):
+    def __init__(self, config: Dict, agent_binder: AgentBinder, network_client=None, parent=None, avatars=None):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.agent = agent_binder
         self.network_client = network_client
+        self.avatars = avatars
         self.preferences_manager = None  # Will be set from main.py
         self.dynamic_dialog = None
         self.dynamic_unread_count = 0
@@ -740,7 +741,7 @@ class ChatWidget(QWidget):
         if self.network_client:
             if self.dynamic_dialog is None:
                 self.dynamic_dialog = DynamicsDialog(
-                    self.network_client, on_read_callback=self.invalidate_dynamic_badge, parent=self
+                    self.network_client, on_read_callback=self.invalidate_dynamic_badge, parent=self, avatars=self.avatars
                 )
             self.dynamic_dialog.show()
             self.dynamic_dialog.raise_()
@@ -818,6 +819,8 @@ class ChatWidget(QWidget):
 
     def closeEvent(self, event):
         self.stop_dynamic_badge()
+        if self.avatars:
+            self.avatars.close()
         super().closeEvent(event)
     
     def on_scroll_value_changed(self, value):
@@ -849,6 +852,7 @@ class ChatWidget(QWidget):
                     conv_uuid=item.uuid,
                     is_user=is_user,
                     playback_manager=self.playback_manager,
+                    avatars=self.avatars,
                 )
             else:
                 bubble = ChatTextBubble(
@@ -856,6 +860,7 @@ class ChatWidget(QWidget):
                     conv_uuid=item.uuid,
                     is_user=is_user,
                     playback_manager=self.playback_manager,
+                    avatars=self.avatars,
                 )
             self.history_layout.insertWidget(0, bubble)
             
@@ -970,6 +975,7 @@ class ChatWidget(QWidget):
                 conv_uuid=conv_uuid,
                 is_user=is_user,
                 playback_manager=self.playback_manager,
+                avatars=self.avatars,
             )
         elif type == "text":
             bubble = ChatTextBubble(
@@ -977,6 +983,7 @@ class ChatWidget(QWidget):
                 conv_uuid=conv_uuid,
                 is_user=is_user,
                 playback_manager=self.playback_manager,
+                avatars=self.avatars,
             )
         elif type == "system":
             bubble = SystemMessage(content)
@@ -1044,7 +1051,7 @@ class ChatWidget(QWidget):
 
 
 class MainWindow(QWidget):
-    def __init__(self, gui_config, live2d_config, ui_binder: AgentBinder, network_client=None):
+    def __init__(self, gui_config, live2d_config, ui_binder: AgentBinder, network_client=None, avatars=None):
         super().__init__()
         self.setWindowTitle("Chat with Luo Tianyi")
         self.resize(1100, 800)
@@ -1065,7 +1072,9 @@ class MainWindow(QWidget):
         self.v_line.setFixedWidth(2)
 
         # Right Side (Chat)
-        self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder, network_client=network_client)
+        self.chat_widget = ChatWidget(
+            config=gui_config["chat_window"], agent_binder=ui_binder, network_client=network_client, avatars=avatars
+        )
         self.layout.addWidget(self.live2d_container)
         self.layout.addWidget(self.v_line)
         self.layout.addWidget(self.chat_widget)
@@ -1074,6 +1083,8 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
         self.chat_widget.stop_dynamic_badge()
+        if self.chat_widget.avatars:
+            self.chat_widget.avatars.close()
         super().closeEvent(event)
 
     def resizeEvent(self, event: QResizeEvent):

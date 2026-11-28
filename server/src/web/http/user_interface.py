@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from src.application.user.account import PasswordDecryptionError, decrypt_password, generate_keys, get_public_key_pem
 from src.application.user.agreement_service import AgreementAcceptanceError
+from src.application.user.avatars import AvatarAuthenticationError, AvatarService
 from src.application.user.call_capability import get_call_capability
 from src.application.user.registration_service import AGREEMENT_UPGRADE_DETAIL, RegistrationError
 from src.application.user.user_conversation_helper import UserConversationHelper
@@ -361,6 +362,20 @@ class UserInterface:
     def _seconds_since_midnight() -> float:
         now = time.localtime()
         return float(now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
+
+    async def get_avatars(self, username: str, token: str) -> dict:
+        try:
+            return await asyncio.to_thread(AvatarService(self.database_manager).get, username, token)
+        except AvatarAuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    async def put_avatar(self, username: str, token: str, side: str, image: str | None) -> dict:
+        try:
+            return await asyncio.to_thread(AvatarService(self.database_manager).put, username, token, side, image)
+        except AvatarAuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     async def get_preference(
         self,
