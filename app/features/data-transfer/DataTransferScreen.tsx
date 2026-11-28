@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AppTheme } from '../../shared/ui/theme';
 import { usePageNotices } from '../../shell/notices/AppNotices';
@@ -73,7 +73,7 @@ function Choices<T extends string>({ label, labels, value, onChange, disabled, t
             opacity: disabled ? 0.55 : pressed ? 0.75 : 1,
           }]}>
           <Text style={[styles.body, { color: theme.text, fontWeight: selected ? '700' : '400' }]}>
-            {labels[option]}{selected ? ' · 已选' : ''}
+            {labels[option]}
           </Text>
         </Pressable>;
       })}
@@ -88,20 +88,27 @@ function Card({ title, theme, children }: React.PropsWithChildren<{ title: strin
   </View>;
 }
 
-function Disclosure({ title, theme, children, defaultOpen = false }: React.PropsWithChildren<{ title: string; theme: AppTheme; defaultOpen?: boolean }>) {
-  const [open, setOpen] = useState(defaultOpen);
-  const labelText = open ? `收起${title}` : `展开${title}`;
+function Disclosure({ title, theme, children }: React.PropsWithChildren<{ title: string; theme: AppTheme }>) {
+  const [open, setOpen] = useState(false);
+  const insets = useSafeAreaInsets();
   return <View>
-    <Pressable accessibilityRole="button" accessibilityLabel={labelText} accessibilityState={{ expanded: open }}
-      onPress={() => setOpen(!open)}
-      style={({ pressed }) => [styles.disclosureHeader, {
-        backgroundColor: theme.surfaceAlt,
-        opacity: pressed ? 0.75 : 1,
-      }]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`展开${title}`} accessibilityState={{ expanded: open }}
+      onPress={() => setOpen(true)}
+      style={({ pressed }) => [styles.disclosureHeader, { opacity: pressed ? 0.75 : 1 }]}>
       <Text style={[styles.label, { color: theme.text }]}>{title}</Text>
-      <Text style={[styles.body, { color: theme.textMuted }]}>{open ? '收起' : '展开'}</Text>
+      <Text style={[styles.body, { color: theme.textMuted }]}>›</Text>
     </Pressable>
-    {open && <View style={styles.group}>{children}</View>}
+    {open && <Modal visible animationType="slide" onRequestClose={() => setOpen(false)}>
+      <View style={[styles.secondary, { backgroundColor: theme.surface, paddingTop: insets.top }]}>
+        <View style={[styles.header, { borderBottomColor: theme.border }]}>
+          <Action label="返回迁移页面" disabled={false} onPress={() => setOpen(false)} theme={theme} />
+          <Text accessibilityRole="header" style={[styles.pageTitle, { color: theme.text }]}>{title}</Text>
+        </View>
+        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(24, insets.bottom + 16) }]}>
+          {children}
+        </ScrollView>
+      </View>
+    </Modal>}
   </View>;
 }
 
@@ -166,8 +173,16 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
       const message = error instanceof DataTransferError ? error.message : '操作未完成，请检查网络或文件权限后重试。';
       const uncertain = kind === 'commit' && (!(error instanceof DataTransferError) || !error.status || error.status >= 500);
       if (error instanceof DataTransferError && error.backupId) setFailureBackupId(error.backupId);
+      const summary = message.split('\n')[0];
       showNotice({ theme, title: '操作未完成', position: 'center', blocking: true,
-        message: uncertain ? `${message}\n请先刷新聊天确认结果，再决定是否重新导入。` : message });
+        message: uncertain ? `${summary}\n请先刷新聊天确认结果，再决定是否重新导入。` : summary,
+        ...(summary !== message ? {
+          cancel: { label: '关闭' },
+          primary: { label: '查看详细信息', action: () => showNotice({
+            theme, title: '错误详情', message, position: 'center', blocking: true,
+          }) },
+        } : {}),
+      });
     } finally {
       operationRef.current = undefined;
       setOperation(undefined);
@@ -271,6 +286,12 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
       {failureBackupId && <Card title="可用的恢复备份" theme={theme}>
         <Action label="下载失败操作的恢复备份" disabled={busy} theme={theme} onPress={() => saveBackup(failureBackupId)} />
       </Card>}
+      <Pressable accessibilityRole="button" accessibilityLabel="使用须知" onPress={() => showNotice({
+        theme, title: '使用须知', position: 'center', blocking: true,
+        message: '1. 上传与下载上限 64 MiB，解压后上限 256 MiB、4096 项。\n\n2. 导入和导出时请暂停聊天，过程中服务器可能断开聊天连接。\n\n3. 外部聊天默认只进入历史，开启提取长期记忆后才会调用模型提取。',
+      })} style={styles.usage}>
+        <Text style={[styles.label, { color: theme.accentText }]}>使用须知</Text>
+      </Pressable>
       <Card title="导出" theme={theme}>
         <Text style={body}>导出 {SCOPE_LABELS[exportScope]} · {EXPORT_LABELS[exportFormat]}。</Text>
         <Action label="导出并打开系统分享" onPress={exportData} disabled={busy} theme={theme} tone="primary" />
@@ -300,23 +321,30 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
               <Text style={[styles.label, styles.flexText, { color: theme.text }]}>提取长期记忆</Text>
               <Switch accessibilityLabel="提取长期记忆" disabled={busy} value={extractMemories} onValueChange={setExtractMemories} />
             </View>
-            <Text style={body}>外部聊天默认仅进入历史。开启后，服务器会调用模型提取本批记录中的用户事实；外部助手不会被视为当前角色。</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="记忆提取说明" onPress={() => showNotice({
+              theme, title: '记忆提取说明', position: 'center', blocking: true,
+              message: '外部聊天默认仅进入历史。开启后，服务器会调用模型提取本批记录中的用户事实；外部助手不会被视为当前角色。模型提取失败不会撤销已导入的聊天。',
+            })}><Text style={[styles.body, { color: theme.accentText }]}>记忆提取说明</Text></Pressable>
           </View>}
           <Action label="合并去重" onPress={() => submit('merge', false)} disabled={busy} theme={theme} tone="primary" />
           <Action label="备份后替换" onPress={confirmReplace} disabled={busy} theme={theme} tone="danger" />
         </View>}
       </Card>
       {result && <Card title={result.success ? '导入完成' : '导入未完成'} theme={theme}>
-        {!result.success && <Text style={body} accessibilityLiveRegion="polite">服务器未完成写入。{result.error ? `${result.error}` : ''}{result.rollback_error ? `\n回滚提示：${result.rollback_error}` : ''}</Text>}
-        <Text style={body}>{extractionText(extraction)}</Text>
+        {!result.success && <Text style={body} accessibilityLiveRegion="polite">导入未完成，请查看详细信息后重试。</Text>}
+        {extraction.status === 'succeeded' && <Text style={body}>{`已提取 ${extraction.memories} 条长期记忆。`}</Text>}
+        {(extraction.status === 'failed' || extraction.status === 'unavailable') &&
+          <Text style={body}>长期记忆提取失败，可重试；已导入的聊天保留。</Text>}
         {retryPreviewId && (extraction.status === 'failed' || extraction.status === 'unavailable') &&
           <Action label="重试记忆提取" disabled={busy} theme={theme} onPress={retryExtraction} />}
         {result.backup_id && <Action label="下载替换前的恢复备份" disabled={busy} theme={theme} onPress={() => {
           if (result.backup_id) saveBackup(result.backup_id);
         }} />}
-        {!needsReconnect && <Action label="刷新聊天并重连" disabled={busy} theme={theme}
-          onPress={() => { void run('refresh', () => reconnect(true)); }} />}
+        {Boolean(result.warnings?.length) && <Text style={body}>有提示，请查看详细信息。</Text>}
         <Disclosure title="详细信息" theme={theme}>
+          <Text style={body}>{extractionText(extraction)}</Text>
+          {result.error && <Text style={body}>{result.error}</Text>}
+          {result.rollback_error && <Text style={body}>恢复提示：{result.rollback_error}</Text>}
           <Text style={body}>{`导入 ${countsText(imported)}\n跳过 ${countsText(skipped)}`}</Text>
           {(result.warnings ?? []).map((warning, index) => <Text key={index} style={body}>• {warning}</Text>)}
         </Disclosure>
@@ -327,6 +355,8 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
 
 const styles = StyleSheet.create({
   screen: { ...StyleSheet.absoluteFillObject, zIndex: 110 },
+  secondary: { flex: 1 },
+  usage: { alignSelf: 'flex-end', minHeight: 48, justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },
   pageTitle: { flex: 1, fontSize: 20, fontWeight: '700' },
   scroll: { flex: 1 },

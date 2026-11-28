@@ -99,6 +99,7 @@ it('默认不提取；外部chat有效范围确认不声称替换记忆，提取
   await mount();
   await press('展开导入高级设置');
   await press('ChatGPT');
+  await press('返回迁移页面');
   jest.mocked(api.previewImport).mockResolvedValue({ ...nativePreview, source_format: 'chatgpt', scope: 'chat' });
   await press('选择文件并预览');
   expect(api.previewImport).toHaveBeenCalledWith(session, expect.any(Object), 'chatgpt', 'chat', 'luotianyi');
@@ -142,6 +143,7 @@ it('导出选项传递正确，分享前恢复聊天；重连失败提供显式�
   await mount();
   await press('展开导出高级设置');
   await press('Markdown');
+  await press('返回迁移页面');
   resume.mockResolvedValueOnce(false);
   await press('导出并打开系统分享');
   expect(api.downloadExport).toHaveBeenCalledWith(session, 'all', 'markdown');
@@ -167,15 +169,17 @@ it.each([THEMES.light, THEMES.dark])('沿用$name主题，小屏大字使用可�
   expect(selected?.props.accessibilityRole).toBe('radio');
 });
 
-it('默认收起导出和导入高级设置，结果详细统计折叠；展开后可查看且常用路径仍畅通', async () => {
+it('默认隐藏高级设置和详细统计；二级页面返回后常用路径仍畅通', async () => {
   await mount();
   expect(text()).not.toContain('保存格式');
   expect(text()).not.toContain('文件来源');
 
   await press('展开导出高级设置');
   expect(text()).toContain('保存格式');
+  await press('返回迁移页面');
   await press('展开导入高级设置');
   expect(text()).toContain('文件来源');
+  await press('返回迁移页面');
 
   await press('选择文件并预览');
   expect(text()).toContain('导入预览');
@@ -186,4 +190,31 @@ it('默认收起导出和导入高级设置，结果详细统计折叠；展开�
 
   await press('展开详细信息');
   expect(text()).toContain('聊天 3 条，长期记忆 1 条，媒体 2 个');
+});
+
+it('默认隐藏说明和内部状态，说明与结果详情仅在二级入口显示', async () => {
+  await mount();
+  expect(text()).not.toContain('64 MiB');
+  await press('使用须知');
+  expect(text()).toContain('64 MiB');
+  await act(async () => { root.root.findByType(Modal).props.onRequestClose(); });
+  await press('选择文件并预览');
+  await press('合并去重');
+  expect(text()).not.toContain('本次未请求');
+  expect(label('刷新聊天并重连')).toBeUndefined();
+  await press('展开详细信息');
+  expect(text()).toContain('本次未请求');
+  await act(async () => { root.root.findByType(Modal).props.onRequestClose(); });
+  expect(text()).not.toContain('本次未请求');
+});
+
+it('文件错误默认只展示中文提示，技术详情需主动打开', async () => {
+  await mount();
+  jest.mocked(api.previewImport).mockRejectedValueOnce(new api.DataTransferError('文件无效，请重新选择。\nExpected UTF-8 JSON', 400));
+  await press('选择文件并预览');
+  expect(text()).toContain('文件无效');
+  expect(text()).not.toContain('Expected UTF-8 JSON');
+  const details = root.root.findAllByType(Pressable).find(node => node.findAllByType(Text).some(t => t.props.children === '查看详细信息'))!;
+  await act(async () => { details.props.onPress(); });
+  expect(text()).toContain('Expected UTF-8 JSON');
 });
