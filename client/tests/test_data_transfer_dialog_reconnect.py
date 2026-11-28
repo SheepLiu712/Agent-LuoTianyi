@@ -242,9 +242,7 @@ def test_import_result_is_concise_and_usage_preserves_receipt(import_dialog, ext
     if extraction == "failed":
         assert "记忆提取未完成" in dialog.status_label.text()
     notices = []
-    monkeypatch.setattr(
-        dialog_module.QMessageBox, "information", lambda _parent, title, text: notices.append((title, text))
-    )
+    monkeypatch.setattr(dialog, "_show_information", lambda title, text: notices.append((title, text)))
     dialog.usage_button.click()
     assert notices[0][0] == "使用须知"
     assert "64 MiB" in notices[0][1]

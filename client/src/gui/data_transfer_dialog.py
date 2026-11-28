@@ -88,8 +88,11 @@ class DataTransferDialog(QDialog):
         help_row = QHBoxLayout()
         help_row.addStretch()
         self.usage_button = QPushButton("使用须知")
+        self.usage_button.setFont(title.font())
         self.usage_button.setFlat(True)
-        self.usage_button.setStyleSheet("QPushButton { color: #1296DB; border: none; padding: 2px 0; }")
+        self.usage_button.setStyleSheet(
+            "QPushButton { color: #66CCFF; font-weight: bold; border: none; padding: 2px 0; }"
+        )
         self.usage_button.clicked.connect(self._show_usage)
         help_row.addWidget(self.usage_button)
         layout.addLayout(help_row)
@@ -151,6 +154,17 @@ class DataTransferDialog(QDialog):
         self.tabs.currentChanged.connect(self._fit_window)
 
     def _apply_control_styles(self):
+        # 标签和说明入口在系统默认字号上增加 2 px。
+        font = self.font()
+        base_size = font.pixelSize() if font.pixelSize() > 0 else round(font.pointSizeF() * self.logicalDpiY() / 72)
+        label_size = base_size + 2
+        self.tabs.tabBar().setStyleSheet(f"QTabBar::tab {{ font-size: {label_size}px; }}")
+        self.usage_button.setStyleSheet(
+            self.usage_button.styleSheet() + f"QPushButton {{ font-size: {label_size}px; }}"
+        )
+        for label in self.findChildren(QLabel):
+            if label.text() in {"数据范围：", "保存格式", "：", "导入来源："}:
+                label.setStyleSheet(f"font-size: {label_size}px;")
         # 与现有相处模式设置窗口使用相同的字号、输入间距和主按钮配色。
         for control in (*self.findChildren(QComboBox), *self.findChildren(QLineEdit)):
             control.setStyleSheet("font-size: 14px; padding: 6px;")
@@ -185,14 +199,17 @@ class DataTransferDialog(QDialog):
         format_label_layout = QHBoxLayout(format_label)
         format_label_layout.setContentsMargins(0, 0, 0, 0)
         format_label_layout.setSpacing(2)
-        format_label_layout.addWidget(QLabel("保存格式："))
+        format_label_layout.addWidget(QLabel("保存格式"))
         self.format_help_button = QToolButton()
         self.format_help_button.setText("?")
         self.format_help_button.setAccessibleName("保存格式说明")
         self.format_help_button.setToolTip("保存格式说明")
-        self.format_help_button.setStyleSheet("QToolButton { color: #1296DB; border: none; background: transparent; }")
+        self.format_help_button.setStyleSheet(
+            "QToolButton { color: #1296DB; text-decoration: underline; border: none; background: transparent; }"
+        )
         self.format_help_button.clicked.connect(self._show_format_help)
         format_label_layout.addWidget(self.format_help_button)
+        format_label_layout.addWidget(QLabel("："))
         layout.addRow(format_label, self.export_format)
         self.export_button = QPushButton("导出并保存…")
         self.export_button.clicked.connect(self._export)
@@ -579,8 +596,26 @@ class DataTransferDialog(QDialog):
             height += 150
         self.resize(self.width(), min(height, self.screen().availableGeometry().height() - 60))
 
+    def _show_information(self, title, text):
+        # 普通说明使用对话框，不触发系统消息框的提示音。
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        content = QLabel(text)
+        content.setTextFormat(Qt.TextFormat.PlainText)
+        content.setWordWrap(True)
+        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(content)
+        close_button = QPushButton("确定")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignRight)
+        dialog.setMinimumWidth(420)
+        dialog.exec()
+
     def _show_format_help(self):
-        QMessageBox.information(self, "保存格式说明", "ZIP 与目录包可恢复，内部结构相同；Markdown / TXT 仅供阅读。")
+        self._show_information("保存格式说明", "ZIP 与目录包可恢复，内部结构相同；Markdown / TXT 仅供阅读。")
 
     def _show_usage(self):
         text = (
@@ -591,7 +626,7 @@ class DataTransferDialog(QDialog):
         )
         if self.details.toPlainText():
             text += "\n\n最近一次操作\n" + self.details.toPlainText()
-        QMessageBox.information(self, "使用须知", text)
+        self._show_information("使用须知", text)
 
     def reject(self):
         if self.operation.busy and self._action == "commit":
