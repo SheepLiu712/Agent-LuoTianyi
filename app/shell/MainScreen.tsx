@@ -446,27 +446,6 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         <Text style={[styles.drawerTitle, { color: theme.text }]}>菜单</Text>
         <Text style={[styles.drawerSubtitle, { color: theme.textMuted }]}>洛天依 Agent</Text>
 
-        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleToggleDebug} activeOpacity={0.78}>
-          <Text style={[styles.drawerItemText, { color: theme.text }]}>{debugOpen ? '收起调试界面' : '打开调试界面'}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
-          <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
-        </TouchableOpacity>
-
-        {Platform.OS === 'android' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="聊天与记忆迁移"
-          accessibilityState={{ disabled: call.state.phase !== 'IDLE' }} disabled={call.state.phase !== 'IDLE'}
-          style={[styles.drawerItem, styles.dataTransferItem, { backgroundColor: theme.surfaceAlt }]}
-          onPress={handleOpenDataTransfer} activeOpacity={0.78}>
-          <Text style={[styles.drawerItemText, { color: call.state.phase === 'IDLE' ? theme.text : theme.textSoft }]}>
-            聊天与记忆迁移
-          </Text>
-        </TouchableOpacity>}
-
-        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenLlmSettings} activeOpacity={0.78}>
-          <Text style={[styles.drawerItemText, { color: theme.text }]}>LLM 模型设置</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenDynamics} activeOpacity={0.78}>
           <View style={styles.drawerItemRow}>
             <Text style={[styles.drawerItemText, { color: theme.text }]}>动态</Text>
@@ -478,10 +457,6 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
               </View>
             ) : null}
           </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={() => { setShowAgreement(true); closeDrawer(); }} activeOpacity={0.78}>
-          <Text style={[styles.drawerItemText, { color: theme.text }]}>用户协议</Text>
         </TouchableOpacity>
 
         {Platform.OS === 'android' ? (
@@ -497,6 +472,27 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
             <Text style={[styles.drawerItemText, { color: call.canStart ? theme.text : theme.textMuted }]}>语音通话</Text>
           </TouchableOpacity>
         ) : null}
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenLlmSettings} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>LLM 模型设置</Text>
+        </TouchableOpacity>
+
+        {Platform.OS === 'android' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="聊天与记忆迁移"
+          accessibilityState={{ disabled: call.state.phase !== 'IDLE' }} disabled={call.state.phase !== 'IDLE'}
+          style={[styles.drawerItem, styles.dataTransferItem, { backgroundColor: theme.surfaceAlt }]}
+          onPress={handleOpenDataTransfer} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: call.state.phase === 'IDLE' ? theme.text : theme.textSoft }]}>
+            聊天与记忆迁移
+          </Text>
+        </TouchableOpacity>}
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleToggleDebug} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>{debugOpen ? '收起调试界面' : '打开调试界面'}</Text>
+        </TouchableOpacity>
 
         <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.drawerSectionLabel, { color: theme.textMuted }]}>颜色模式</Text>
@@ -519,6 +515,10 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         </View>
 
         <View style={styles.drawerSpacer} />
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={() => { setShowAgreement(true); closeDrawer(); }} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>用户协议</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.dangerSurface }]} onPress={handleLogout} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.dangerText }]}>登出</Text>
