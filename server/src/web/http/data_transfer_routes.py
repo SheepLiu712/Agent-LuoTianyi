@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import Header, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictBool
 
 from src.application.user.data_transfer import TransferCommitError
 from src.infrastructure.data_transfer import MAX_UPLOAD_BYTES, TransferFormatError
+from src.infrastructure.data_transfer._blob import FileBlob
 from src.infrastructure.persistence.user_data_transfer import TransferConflict
+from src.utils.owned_operation import complete_owned
 from src.web.http.runtime_access import require_bearer_token
 
 
@@ -60,12 +62,29 @@ async def _invoke(operation):
         raise HTTPException(status_code=503, detail={"code": "TRANSFER_STORAGE_UNAVAILABLE"}) from error
 
 
+class _FileDownload(StreamingResponse):
+    def __init__(self, data, **options):
+        self._data = data
+        self._chunks = data.chunks()
+        super().__init__(self._chunks, **options)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # 先关闭迭代器持有的读取句柄，Windows 才能删除暂存文件。
+            self._chunks.close()
+            self._data.close()
+
+
 def _download(data, filename, content_type):
-    return Response(
-        content=data,
+    response_type = _FileDownload if isinstance(data, FileBlob) else Response
+    return response_type(
+        data,
         media_type=content_type,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(data)),
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
         },
@@ -80,13 +99,17 @@ async def _read_upload(request):
         except ValueError as error:
             raise HTTPException(status_code=400, detail="无效的上传大小") from error
         if size < 0 or size > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="迁移文件不能超过 64 MiB")
-    data = bytearray()
-    async for chunk in request.stream():
-        if len(data) + len(chunk) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="迁移文件不能超过 64 MiB")
-        data.extend(chunk)
-    return bytes(data)
+            raise HTTPException(status_code=413, detail="迁移文件不能超过 1 GiB")
+    data = FileBlob.temporary()
+    try:
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="迁移文件不能超过 1 GiB")
+            await complete_owned(asyncio.to_thread(data.stream.write, chunk))
+        return data
+    except BaseException:
+        data.close()
+        raise
 
 
 def register_data_transfer_routes(router, get_runtime):
@@ -100,9 +123,13 @@ def register_data_transfer_routes(router, get_runtime):
         runtime=Depends(get_runtime),
     ):
         owner, service = await _owner(runtime, authorization)
-        data = await _invoke(service.export(owner, scope=scope, format=format))
+        data = await _invoke(service.export(owner, scope=scope, format=format, file_backed=True))
         extension = {"zip": "zip", "markdown": "md", "txt": "txt"}[format]
-        content_type = {"zip": "application/zip", "markdown": "text/markdown", "txt": "text/plain"}[format]
+        content_type = {
+            "zip": "application/zip",
+            "markdown": "text/markdown",
+            "txt": "text/plain",
+        }[format]
         return _download(data, f"agentluo-{scope}.{extension}", content_type)
 
     @router.post("/user/data/import/preview")
@@ -116,9 +143,18 @@ def register_data_transfer_routes(router, get_runtime):
     ):
         owner, service = await _owner(runtime, authorization)
         data = await _read_upload(request)
-        return await _invoke(
-            service.preview(owner, data, source_format=source_format, scope=scope, character_id=character_id)
-        )
+        try:
+            return await _invoke(
+                service.preview(
+                    owner,
+                    data,
+                    source_format=source_format,
+                    scope=scope,
+                    character_id=character_id,
+                )
+            )
+        finally:
+            data.close()
 
     @router.post("/user/data/import/commit")
     async def commit_import(

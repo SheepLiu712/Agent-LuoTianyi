@@ -556,3 +556,31 @@ def test_native_corrupt_zip_crc_is_a_public_format_error(payload):
     corrupted = output.getvalue().replace(b"source-owner", b"source-xxxxx", 1)
     with pytest.raises(transfer.TransferFormatError):
         transfer.decode_import(corrupted)
+
+
+def test_disk_archive_roundtrip_above_old_expanded_limit(payload):
+    from src.infrastructure.data_transfer._blob import FileBlob, content_digest
+
+    content = FileBlob.temporary()
+    for _ in range(60):
+        content.stream.write(b"x" * 1024 * 1024)
+    content.seal()
+    files = {}
+    for index in range(5):
+        path = f"media/item-{index}/content.bin"
+        files[path] = content
+        payload["media"].append(
+            {
+                "id": f"item-{index}",
+                "kind": "image",
+                "mime_type": "image/png",
+                "duration_ms": None,
+                "path": path,
+                "sha256": content_digest(content),
+            }
+        )
+    archive = transfer.encode_archive(payload, files, file_backed=True)
+    restored, decoded = transfer.decode_import(archive)
+    assert len(restored["media"]) == 5
+    assert sum(map(len, decoded.values())) == 300 * 1024 * 1024
+    assert all(content_digest(value) == content_digest(content) for value in decoded.values())

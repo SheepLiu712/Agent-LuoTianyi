@@ -161,9 +161,17 @@ class LegacyImageReader:
     def _owned_path(self, user_id: str, raw_path: str) -> Path:
         if any(part in {".", ".."} for part in raw_path.replace("\\", "/").split("/")):
             raise ValueError("Legacy image traversal is forbidden")
-        path = Path(raw_path)
-        owner_root = self._root / user_id
-        relative = path.relative_to(owner_root)
-        if not relative.parts or not all(_safe_component(part) for part in relative.parts):
+        # 历史 Windows/POSIX 路径仅提供文件名；实际读取始终限定本人固定目录。
+        parts = raw_path.replace("\\", "/").split("/")
+        try:
+            relative = Path(raw_path).relative_to(self._root / user_id)
+        except ValueError:
+            if parts[-4:-1] != ["data", "images", user_id]:
+                raise ValueError("Invalid legacy image owner path") from None
+        else:
+            if len(relative.parts) != 1:
+                raise ValueError("Nested legacy image path is forbidden")
+        name = parts[-1]
+        if not _safe_component(name):
             raise ValueError("Invalid legacy image path")
-        return path
+        return self._root / user_id / name

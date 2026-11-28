@@ -235,7 +235,6 @@ class ServerRuntime:
                     legacy_image_reader=LegacyImageReader(
                         database_manager.conversation_service, resolve_server_path("data/images"), media_store.max_bytes
                     ),
-                    link_legacy_image=transfer_repository.link_legacy_image,
                 ),
                 vectors=agent_runtime.vector_store,
                 interactions=runtime.stage_manager,

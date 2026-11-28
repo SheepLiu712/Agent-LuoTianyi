@@ -56,6 +56,8 @@ def test_preview_and_commit_use_bearer_raw_bytes_json_and_existing_tls(network, 
     calls = []
 
     def send(session, request, **kwargs):
+        if hasattr(request.body, "read"):
+            request.body = request.body.read()
         calls.append((request, kwargs))
         data = {"preview_id": "preview-1", "scope": "chat", "source_format": "generic", "counts": {}}
         if request.url.endswith("/commit"):
@@ -208,7 +210,7 @@ def test_upload_limits_and_cancelled_download_preserve_existing_file(network, tm
     source = tmp_path / "large.json"
     source.write_bytes(b"12345")
     monkeypatch.setattr(transfer_module, "MAX_UPLOAD_BYTES", 4)
-    with pytest.raises(ValueError, match="64 MiB"):
+    with pytest.raises(ValueError, match="1 GiB"):
         read_import_payload(str(source), threading.Event())
     monkeypatch.setattr(transfer_module, "MAX_UPLOAD_BYTES", 64 * 1024 * 1024)
     cancelled = threading.Event()
@@ -239,7 +241,7 @@ def test_archive_entry_and_expanded_limits(tmp_path, monkeypatch):
         read_import_payload(str(source), threading.Event())
     monkeypatch.setattr(transfer_module, "MAX_ARCHIVE_ENTRIES", 4096)
     monkeypatch.setattr(transfer_module, "MAX_EXPANDED_BYTES", 1)
-    with pytest.raises(ValueError, match="256 MiB"):
+    with pytest.raises(ValueError, match="2 GiB"):
         read_import_payload(str(source), threading.Event())
 
 
@@ -659,3 +661,22 @@ def test_settings_entry_refreshes_history_through_existing_async_binder(qapp, ne
         chat.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
+
+
+def test_preview_streams_file_above_previous_limit(network, tmp_path, monkeypatch):
+    source = tmp_path / "large.json"
+    size = 65 * 1024 * 1024
+    with source.open("wb") as stream:
+        stream.truncate(size)
+    received = []
+
+    def send(_session, request, **kwargs):
+        assert hasattr(request.body, "read")
+        assert int(request.headers["Content-Length"]) == size
+        received.append(sum(len(chunk) for chunk in iter(lambda: request.body.read(64 * 1024), b"")))
+        return response_for(request, {"preview_id": "large-preview", "scope": "chat"})
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    request = network.prepare_data_transfer_request("preview", source_path=str(source))
+    assert request.execute(threading.Event())[0]
+    assert received == [size]

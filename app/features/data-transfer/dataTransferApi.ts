@@ -41,7 +41,7 @@ export interface ImportResult {
   rollback_error?: string | null;
 }
 
-const MAX_IMPORT_BYTES = 64 * 1024 * 1024;
+const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
 const EXPORT_FILES: Record<ExportFormat, { extension: string; mimeType: string }> = {
   zip: { extension: 'zip', mimeType: 'application/zip' },
   markdown: { extension: 'md', mimeType: 'text/markdown' },
@@ -62,7 +62,7 @@ function httpError(status: number, detail?: unknown) {
     404: '预览或备份不存在。请重新预览文件，或确认备份仍可用。',
     409: '当前操作冲突。请等通话或数据操作结束后再试，预览失效时请重新预览。',
     410: '预览已过期，请重新选择文件。',
-    413: '文件超过服务端限制，上传上限为 64 MiB。',
+    413: '文件超过服务端限制，上传上限为 1 GiB。',
     422: '文件内容或选项无法验证，请确认文件格式和导入范围。',
   };
   const problem = typeof detail === 'object' && detail !== null ? detail as { code?: unknown; backup_id?: unknown } : undefined;

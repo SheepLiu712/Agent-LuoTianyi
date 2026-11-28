@@ -14,12 +14,19 @@ from threading import Event
 
 from ..utils.http_client import HttpClientFactory
 
-MAX_UPLOAD_BYTES = 64 * 1024 * 1024
-MAX_EXPANDED_BYTES = 256 * 1024 * 1024
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
+MAX_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 4096
 _CHUNK_SIZE = 64 * 1024
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
-_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 
 
 class TransferCancelled(Exception):
@@ -56,7 +63,9 @@ def _safe_parts(name: str) -> tuple[str, ...]:
     return tuple(parts)
 
 
-def _archive_entries(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, tuple[str, ...]]]:
+def _archive_entries(
+    archive: zipfile.ZipFile,
+) -> list[tuple[zipfile.ZipInfo, tuple[str, ...]]]:
     entries = archive.infolist()
     if len(entries) > MAX_ARCHIVE_ENTRIES:
         raise ValueError("ZIP 条目超过 4096 项上限")
@@ -70,13 +79,17 @@ def _archive_entries(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, tu
         if key in seen:
             raise ValueError("ZIP 包含重复路径")
         mode = entry.external_attr >> 16
-        if stat.S_ISLNK(mode) or stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR):
+        if stat.S_ISLNK(mode) or stat.S_IFMT(mode) not in (
+            0,
+            stat.S_IFREG,
+            stat.S_IFDIR,
+        ):
             raise ValueError("ZIP 不能包含符号链接或特殊文件")
         if entry.flag_bits & 1:
             raise ValueError("不支持加密 ZIP")
         total += entry.file_size
         if total > MAX_EXPANDED_BYTES:
-            raise ValueError("ZIP 展开大小超过 256 MiB 上限")
+            raise ValueError("ZIP 展开大小超过 2 GiB 上限")
         seen[key] = entry.is_dir()
         checked.append((entry, parts))
     for key in seen:
@@ -86,9 +99,9 @@ def _archive_entries(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, tu
     return checked
 
 
-def _directory_payload(root: Path, cancelled: Event) -> bytes:
+def _directory_payload(root: Path, cancelled: Event, output=None):
     _plain_file(root, directory=True)
-    output = io.BytesIO()
+    output = output if output is not None else io.BytesIO()
     total = count = 0
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for current, directories, files in os.walk(root, followlinks=False):
@@ -103,7 +116,7 @@ def _directory_payload(root: Path, cancelled: Event) -> bytes:
                 total += info.st_size
                 count += 1
                 if count > MAX_ARCHIVE_ENTRIES or total > MAX_EXPANDED_BYTES:
-                    raise ValueError("目录包超过 4096 项或 256 MiB 展开上限")
+                    raise ValueError("目录包超过 4096 项或 2 GiB 展开上限")
                 member = path.relative_to(root).as_posix()
                 _safe_parts(member)
                 with path.open("rb") as source, archive.open(member, "w") as target:
@@ -117,36 +130,48 @@ def _directory_payload(root: Path, cancelled: Event) -> bytes:
                 if read != info.st_size:
                     raise ValueError("目录文件在读取期间发生变化，请重新预览")
                 if output.tell() > MAX_UPLOAD_BYTES:
-                    raise ValueError("上传大小超过 64 MiB 上限")
-    payload = output.getvalue()
-    if len(payload) > MAX_UPLOAD_BYTES:
-        raise ValueError("上传大小超过 64 MiB 上限")
+                    raise ValueError("上传大小超过 1 GiB 上限")
+    size = output.tell()
+    if size > MAX_UPLOAD_BYTES:
+        raise ValueError("上传大小超过 1 GiB 上限")
     # 文件名大小写冲突等规则与下载目录包保持一致。
-    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+    with zipfile.ZipFile(output) as archive:
         _archive_entries(archive)
-    return payload
+    output.seek(0)
+    return output.getvalue() if isinstance(output, io.BytesIO) else output
 
 
-def read_import_payload(path: str, cancelled: Event) -> bytes:
+def read_import_payload(path: str, cancelled: Event, *, file_backed=False):
     source = Path(path)
-    if source.is_dir():
-        return _directory_payload(source, cancelled)
-    info = _plain_file(source)
-    if info.st_size > MAX_UPLOAD_BYTES:
-        raise ValueError("上传大小超过 64 MiB 上限")
-    content = bytearray()
-    with source.open("rb") as stream:
-        while chunk := stream.read(_CHUNK_SIZE):
-            _check_cancelled(cancelled)
-            content.extend(chunk)
-            if len(content) > MAX_UPLOAD_BYTES:
-                raise ValueError("上传大小超过 64 MiB 上限")
-    _check_cancelled(cancelled)
-    payload = bytes(content)
-    if source.suffix.lower() == ".zip" or payload.startswith(b"PK\x03\x04"):
-        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            _archive_entries(archive)
-    return payload
+    payload = tempfile.TemporaryFile(mode="w+b")
+    try:
+        if source.is_dir():
+            _directory_payload(source, cancelled, payload)
+        else:
+            info = _plain_file(source)
+            if info.st_size > MAX_UPLOAD_BYTES:
+                raise ValueError("上传大小超过 1 GiB 上限")
+            with source.open("rb") as stream:
+                while chunk := stream.read(_CHUNK_SIZE):
+                    _check_cancelled(cancelled)
+                    payload.write(chunk)
+                    if payload.tell() > MAX_UPLOAD_BYTES:
+                        raise ValueError("上传大小超过 1 GiB 上限")
+            payload.seek(0)
+            prefix = payload.read(4)
+            if source.suffix.lower() == ".zip" or prefix == b"PK\x03\x04":
+                with zipfile.ZipFile(payload) as archive:
+                    _archive_entries(archive)
+        _check_cancelled(cancelled)
+        payload.seek(0)
+        if file_backed:
+            return payload
+        result = payload.read()
+    except BaseException:
+        payload.close()
+        raise
+    payload.close()
+    return result
 
 
 def _save_download(response, destination: str, directory: bool, cancelled: Event) -> str:
@@ -168,7 +193,7 @@ def _save_download(response, destination: str, directory: bool, cancelled: Event
                     continue
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
-                    raise ValueError("下载大小超过 64 MiB 上限")
+                    raise ValueError("下载大小超过 1 GiB 上限")
                 stream.write(chunk)
         _check_cancelled(cancelled)
         if not directory:
@@ -235,17 +260,25 @@ class DataTransferRequest:
         if self.scope not in ("all", "chat", "memory"):
             raise ValueError("请选择有效的数据范围")
         headers = {"Authorization": f"Bearer {self.token}"}
-        options = {"headers": headers, "verify": True, "timeout": (10, 180), "allow_redirects": False}
+        options = {
+            "headers": headers,
+            "verify": True,
+            "timeout": (10, 180),
+            "allow_redirects": False,
+        }
         if self.action == "preview":
-            payload = read_import_payload(self.source_path, cancelled)
-            _check_cancelled(cancelled)
             headers["Content-Type"] = "application/octet-stream"
-            response = session.post(
-                f"{self.base_url}/user/data/import/preview",
-                params={"source_format": self.source_format, "scope": self.scope, "character_id": self.character_id},
-                data=payload,
-                **options,
-            )
+            with read_import_payload(self.source_path, cancelled, file_backed=True) as payload:
+                response = session.post(
+                    f"{self.base_url}/user/data/import/preview",
+                    params={
+                        "source_format": self.source_format,
+                        "scope": self.scope,
+                        "character_id": self.character_id,
+                    },
+                    data=payload,
+                    **options,
+                )
         elif self.action == "commit":
             if not self.preview_id or self.mode not in ("merge", "replace"):
                 raise ValueError("请先重新预览要导入的文件")
@@ -284,7 +317,13 @@ class DataTransferRequest:
                     if isinstance(server_detail, dict):
                         data = {
                             key: server_detail[key]
-                            for key in ("backup_id", "committed", "failed_phase", "code", "rollback_error")
+                            for key in (
+                                "backup_id",
+                                "committed",
+                                "failed_phase",
+                                "code",
+                                "rollback_error",
+                            )
                             if key in server_detail
                         }
                         server_detail = data.get("code")
@@ -300,7 +339,11 @@ class DataTransferRequest:
             if not isinstance(data, dict):
                 raise ValueError("服务器返回的数据格式无效")
             if self.action == "preview":
-                if not data.get("preview_id") or data.get("scope") not in ("all", "chat", "memory"):
+                if not data.get("preview_id") or data.get("scope") not in (
+                    "all",
+                    "chat",
+                    "memory",
+                ):
                     raise ValueError("预览响应缺少有效标识或数据范围")
                 return True, "预览完成", data
             success = data.get("success") is True

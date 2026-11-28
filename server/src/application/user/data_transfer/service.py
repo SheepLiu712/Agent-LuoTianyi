@@ -6,7 +6,11 @@ import asyncio
 import hashlib
 from collections import defaultdict
 
-from src.infrastructure.data_transfer import decode_import, encode_archive, render_readable
+from src.infrastructure.data_transfer import (
+    decode_import,
+    encode_archive,
+    render_readable,
+)
 from src.infrastructure.persistence.user_data_transfer import dump_json
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
@@ -36,20 +40,20 @@ class UserDataTransferService:
         self._extract = extract
         self._busy = set()
 
-    async def export(self, user_id, *, scope="all", format="zip"):
+    async def export(self, user_id, *, scope="all", format="zip", file_backed=False):
         self._validate_scope(scope)
         if format not in {"zip", "markdown", "txt"}:
             raise ValueError("UNSUPPORTED_EXPORT_FORMAT")
-        return await complete_owned(self._export_owned(user_id, scope, format))
+        return await complete_owned(self._export_owned(user_id, scope, format, file_backed))
 
-    async def _export_owned(self, user_id, scope, format):
+    async def _export_owned(self, user_id, scope, format, file_backed):
         self._claim(user_id)
         token = None
         try:
             token = await self._interactions.begin_user_data_transfer(user_id)
             payload, files = await self._snapshot(user_id, scope)
             data = (
-                await asyncio.to_thread(encode_archive, payload, files)
+                await asyncio.to_thread(encode_archive, payload, files, file_backed=file_backed)
                 if format == "zip"
                 else await asyncio.to_thread(render_readable, payload, format)
             )
@@ -60,6 +64,9 @@ class UserDataTransferService:
             self._busy.discard(user_id)
 
     async def preview(self, user_id, data, *, source_format="auto", scope="all", character_id="luotianyi"):
+        return await complete_owned(self._preview_owned(user_id, data, source_format, scope, character_id))
+
+    async def _preview_owned(self, user_id, data, source_format, scope, character_id):
         self._validate_scope(scope)
         if character_id not in self._characters:
             raise ValueError("CHARACTER_NOT_ENABLED")
@@ -191,8 +198,13 @@ class UserDataTransferService:
                 payload,
                 mode=mode,
                 vector_ids=plan.vector_ids,
+                legacy_images=plan.legacy_images,
                 publish=plan.publish,
-                receipt={"preview_id": preview_id, "backup_id": backup_id, "extract_memories": extract_memories},
+                receipt={
+                    "preview_id": preview_id,
+                    "backup_id": backup_id,
+                    "extract_memories": extract_memories,
+                },
             )
         except BaseException as error:
             rollback_error = None
@@ -201,7 +213,9 @@ class UserDataTransferService:
             except Exception as rollback:
                 rollback_error = type(rollback).__name__
             raise TransferCommitError(
-                "TRANSFER_COMMIT_FAILED", backup_id=backup_id, rollback_error=rollback_error
+                "TRANSFER_COMMIT_FAILED",
+                backup_id=backup_id,
+                rollback_error=rollback_error,
             ) from error
         # SQL 已提交，缓存失效/清理失败也不能误称未提交或再次执行 replace。
         warnings = payload.setdefault("warnings", [])
@@ -229,7 +243,7 @@ class UserDataTransferService:
 
     async def _backup(self, user_id, scope):
         payload, files = await self._snapshot(user_id, scope)
-        data = await asyncio.to_thread(encode_archive, payload, files)
+        data = await asyncio.to_thread(encode_archive, payload, files, file_backed=True)
         identity = await asyncio.to_thread(self._workspace.put, "backups", user_id, data)
         await asyncio.to_thread(self._workspace.get, "backups", identity, user_id)
         return identity

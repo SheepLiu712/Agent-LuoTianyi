@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import re
 from copy import deepcopy
-from hashlib import sha256
+from dataclasses import replace
 from uuid import NAMESPACE_URL, uuid5
 
 from src.domain.agent import MediaRef
-from src.infrastructure.media.media_resolver import MediaResolutionError, MediaResolutionErrorCode
+from src.infrastructure.data_transfer import MAX_EXPANDED_BYTES
+from src.infrastructure.data_transfer._blob import (
+    FileBlob,
+    content_bytes,
+    content_digest,
+)
+from src.infrastructure.media.media_resolver import (
+    MediaResolutionError,
+    MediaResolutionErrorCode,
+)
 from src.infrastructure.persistence.database.vector_store import Document
 
-_MAX_EXPANDED_BYTES = 256 * 1024 * 1024
+_MAX_EXPANDED_BYTES = MAX_EXPANDED_BYTES
 _BATCH_SIZE = 128
 _MEDIA_PATH = re.compile(r"media/[A-Za-z0-9_-]{1,128}/content\.bin\Z")
 
@@ -88,16 +98,15 @@ def _vector_document(user_id, row, index, chunk, occurrence):
 
 
 class TransferProjections:
-    def __init__(self, vector_store, media_store, media_resolver, *, legacy_image_reader=None, link_legacy_image=None):
+    def __init__(self, vector_store, media_store, media_resolver, *, legacy_image_reader=None):
         self.vector_store = vector_store
         self.media_store = media_store
         self.media_resolver = media_resolver
         self._legacy_image_reader = legacy_image_reader
-        self._link_legacy_image = link_legacy_image
 
     def export_media(self, user_id, payload):
         """按本人受控引用导出已校验媒体；缺失项明确保留 descriptor 和 warning。"""
-        self._backfill_legacy_images(user_id, payload)
+        legacy = self._export_legacy_images(user_id, payload)
         for row in payload.get("conversations", []):
             metadata = row.get("meta_data") or {}
             metadata.pop("image_server_path", None)
@@ -106,49 +115,62 @@ class TransferProjections:
         files, media, total = {}, [], 0
         for identity, descriptor in _references(payload).items():
             try:
-                prepared = self.media_store.read_for_transfer(
-                    media_ref=MediaRef(media_id=identity),
-                    owner_user_id=user_id,
-                    expected_kind=descriptor["kind"],
-                )
-                resolved = self.media_resolver.resolve(
-                    MediaRef(media_id=identity),
-                    owner_user_id=user_id,
-                    expected_kind=descriptor["kind"],
-                )
-                if resolved.data != prepared.data:
-                    raise ValueError("TRANSFER_MEDIA_CHANGED_DURING_EXPORT")
+                if identity in legacy:
+                    prepared = legacy[identity]
+                else:
+                    prepared = self._read_current_media(user_id, identity, descriptor)
             except MediaResolutionError as error:
+
                 if error.code == MediaResolutionErrorCode.UNAUTHORIZED:
                     raise
                 _warning(payload, f"媒体 {identity} 不可读取或校验失败：{error.code}。")
             except (ValueError, OSError) as error:
-                _warning(payload, f"媒体 {identity} 不可读取或校验失败：{type(error).__name__}。")
+                _warning(
+                    payload,
+                    f"媒体 {identity} 不可读取或校验失败：{type(error).__name__}。",
+                )
             else:
                 descriptor.update(
                     path=f"media/{identity}/content.bin",
-                    sha256=sha256(prepared.data).hexdigest(),
+                    sha256=content_digest(prepared.data),
                     mime_type=prepared.metadata["mime_type"],
                     duration_ms=prepared.metadata.get("duration_ms"),
                 )
                 total += len(prepared.data)
                 if total > _MAX_EXPANDED_BYTES:
                     raise ValueError("TRANSFER_MEDIA_TOTAL_TOO_LARGE")
-                files[descriptor["path"]] = prepared.data
+                files[descriptor["path"]] = (
+                    prepared.data if isinstance(prepared.data, FileBlob) else FileBlob.from_bytes(prepared.data)
+                )
             media.append(descriptor)
         payload["media"] = media
         return files
 
-    def _backfill_legacy_images(self, user_id, payload):
-        if self._legacy_image_reader is None or self._link_legacy_image is None:
-            return
+    def _read_current_media(self, user_id, identity, descriptor):
+        prepared = self.media_store.read_for_transfer(
+            media_ref=MediaRef(media_id=identity),
+            owner_user_id=user_id,
+            expected_kind=descriptor["kind"],
+        )
+        resolved = self.media_resolver.resolve(
+            MediaRef(media_id=identity),
+            owner_user_id=user_id,
+            expected_kind=descriptor["kind"],
+        )
+        if resolved.data != prepared.data:
+            raise ValueError("TRANSFER_MEDIA_CHANGED_DURING_EXPORT")
+        return prepared
+
+    def _export_legacy_images(self, user_id, payload):
+        result, total = {}, 0
+        if self._legacy_image_reader is None:
+            return result
         for row in payload.get("conversations", []):
             metadata = row.get("meta_data") or {}
             if row["type"] != "image" or row["source"] != "user" or metadata.get("media_id"):
                 continue
             if row.get("user_id") != user_id:
                 raise ValueError("LEGACY_IMAGE_OWNER_MISMATCH")
-            # reader 只接收本机记录身份，自行查本人 SQL 并限定旧图片根目录。
             resolved = self._legacy_image_reader(user_id, row["uuid"])
             if resolved is None:
                 continue
@@ -160,24 +182,28 @@ class TransferProjections:
                 kind="image",
                 mime_type=resolved.mime_type,
             )
-            created = self.media_store.publish_transfer(prepared)
-            try:
-                self._link_legacy_image(user_id, row["uuid"], media_ref.media_id, resolved.mime_type)
-            except BaseException:
-                if created:
-                    self.media_store.rollback_transfer(prepared)
-                raise
-            # 同步本机正本后再更新导出快照，返回原账号 merge 时仍是相同媒体。
+            total += len(prepared.data)
+            if total > _MAX_EXPANDED_BYTES:
+                raise ValueError("TRANSFER_MEDIA_TOTAL_TOO_LARGE")
+            result[media_ref.media_id] = replace(prepared, data=FileBlob.from_bytes(prepared.data))
+            # 只修改脱离数据库的导出快照；不发布媒体，不改缓存或历史路径。
             metadata.update(media_id=media_ref.media_id, mime_type=resolved.mime_type)
-            metadata.pop("image_server_path", None)
-            metadata.pop("image_client_path", None)
             row["meta_data"] = metadata
+        return result
 
     async def prepare(self, user_id, payload, mode):
         """先完成所有内容校验和 embedding；本方法不会发布文件、向量或 SQL。"""
-        if mode not in {"merge", "replace"} or payload["scope"] not in {"chat", "memory", "all"}:
+        if mode not in {"merge", "replace"} or payload["scope"] not in {
+            "chat",
+            "memory",
+            "all",
+        }:
             raise ValueError("INVALID_TRANSFER_MODE_OR_SCOPE")
-        media = self._prepare_media(user_id, payload) if payload["scope"] in {"chat", "all"} else []
+        media = (
+            await asyncio.to_thread(self._prepare_media, user_id, payload)
+            if payload["scope"] in {"chat", "all"}
+            else []
+        )
         previous, documents, vector_ids, embeddings = [], [], {}, []
         if payload["scope"] in {"memory", "all"}:
             previous = deepcopy(self.vector_store.list_user_documents(user_id))
@@ -189,7 +215,10 @@ class TransferProjections:
                     self._validate_embeddings(vectors, len(batch))
                     embeddings.extend(vectors)
             elif payload.get("memories"):
-                _warning(payload, "向量检索已关闭：长期记忆以规范正本恢复，本次不生成向量投影。")
+                _warning(
+                    payload,
+                    "向量检索已关闭：长期记忆以规范正本恢复，本次不生成向量投影。",
+                )
         return TransferProjectionPlan(
             self.vector_store,
             self.media_store,
@@ -201,7 +230,28 @@ class TransferProjections:
             documents,
             embeddings,
             vector_ids,
+            await asyncio.to_thread(self._legacy_replays, user_id, payload),
         )
+
+    def _legacy_replays(self, user_id, payload):
+        verified = {}
+        if self._legacy_image_reader is None:
+            return verified
+        media = {item["id"]: item for item in payload.get("media", [])}
+        for row in payload.get("conversations", []):
+            if row["type"] != "image" or row["source"] != "user":
+                continue
+            identity = self.media_store.mint_ref(user_id=user_id, client_msg_id=row["uuid"]).media_id
+            if row.get("meta_data", {}).get("media_id") != identity or identity not in media:
+                continue
+            resolved = self._legacy_image_reader(user_id, row["uuid"])
+            descriptor = media[identity]
+            if resolved is not None and descriptor.get("sha256") == content_digest(resolved.data):
+                verified[row["uuid"]] = {
+                    "media_id": identity,
+                    "mime_type": resolved.mime_type,
+                }
+        return verified
 
     def _prepare_media(self, user_id, payload):
         references, prepared, seen, total = _references(payload), [], set(), 0
@@ -233,16 +283,18 @@ class TransferProjections:
         path, data = descriptor["path"], descriptor.get("data")
         if not isinstance(path, str) or _MEDIA_PATH.fullmatch(path) is None:
             raise ValueError("INVALID_TRANSFER_MEDIA_PATH")
-        if not isinstance(data, bytes) or sha256(data).hexdigest() != descriptor["sha256"]:
+        if not isinstance(data, (bytes, FileBlob)) or content_digest(data) != descriptor["sha256"]:
             raise ValueError("TRANSFER_MEDIA_CHECKSUM_MISMATCH")
-        return self.media_store.prepare_transfer(
+        prepared = self.media_store.prepare_transfer(
             media_ref=MediaRef(media_id=descriptor["id"]),
             owner_user_id=user_id,
-            data=data,
+            data=content_bytes(data),
             kind=descriptor["kind"],
             mime_type=descriptor["mime_type"],
             duration_ms=descriptor.get("duration_ms"),
         )
+
+        return replace(prepared, data=data)
 
     @staticmethod
     def _documents(user_id, payload):
@@ -297,8 +349,10 @@ class TransferProjectionPlan:
         documents,
         embeddings,
         vector_ids,
+        legacy_images=None,
     ):
         self.vector_ids = vector_ids
+        self.legacy_images = legacy_images or {}
         self._vector_store, self._media_store = vector_store, media_store
         self._user_id, self._mode, self._scope = user_id, mode, scope
         self._media, self._previous = media, previous
@@ -313,7 +367,7 @@ class TransferProjectionPlan:
             raise RuntimeError("TRANSFER_PROJECTION_ALREADY_PUBLISHED")
         self._started = True
         for item in self._media:
-            if self._media_store.publish_transfer(item):
+            if self._media_store.publish_transfer(replace(item, data=content_bytes(item.data))):
                 self._created_media.append(item)
         if self._scope not in {"memory", "all"} or not self._vector_store.enabled:
             return
@@ -346,7 +400,7 @@ class TransferProjectionPlan:
                 self._vectors_touched = False
         for item in list(reversed(self._created_media)):
             try:
-                self._media_store.rollback_transfer(item)
+                self._media_store.rollback_transfer(replace(item, data=content_bytes(item.data)))
             except Exception as error:
                 failures.append(error)
             else:

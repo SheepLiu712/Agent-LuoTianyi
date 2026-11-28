@@ -16,7 +16,6 @@ transfer = shared.transfer
 
 def _configure(state, root):
     state.service._projections._legacy_image_reader = LegacyImageReader(state.history, root, state.media.max_bytes)
-    state.service._projections._link_legacy_image = state.repository.link_legacy_image
 
 
 def _seed(state, path, owner="alice"):
@@ -44,32 +43,43 @@ def _image(state, owner, identity):
     )
 
 
-def test_owned_legacy_image_exports_restores_and_returns_without_duplicates(transfer, tmp_path):
+@pytest.mark.parametrize("windows_relative", [False, True])
+def test_owned_legacy_image_exports_restores_and_returns_without_duplicates(transfer, tmp_path, windows_relative):
     root = tmp_path / "legacy-images"
     path = root / "alice" / "image.png"
     path.parent.mkdir(parents=True)
     Image.new("RGB", (2, 2), "blue").save(path)
-    identity = _seed(transfer, path)
+    stored_path = r"data\images\alice\image.png" if windows_relative else path
+    identity = _seed(transfer, stored_path)
     _configure(transfer, root)
-    original = _image(transfer, "alice", identity)
-    assert original.status_code == 200
+    original_content = path.read_bytes()
+    if not windows_relative:
+        assert _image(transfer, "alice", identity).content == original_content
     response = transfer.client.get("/user/data/export?scope=chat", headers=transfer.headers("alice"))
     assert response.status_code == 200, response.text
     payload, files = decode_import(response.content)
     assert len(files) == 1 and payload["warnings"] == []
     assert "image_server_path" not in payload["conversations"][0]["meta_data"]
     assert payload["conversations"][0]["meta_data"]["media_id"]
-    assert _image(transfer, "alice", identity).content == original.content
+    with transfer.sessions() as db:
+        assert json.loads(db.query(Conversation).filter_by(uuid=identity).one().meta_data) == {
+            "image_server_path": str(stored_path)
+        }
+    assert list(transfer.media._root.iterdir()) == []
     result = shared.commit(transfer, shared.preview(transfer, response.content)).json()
     assert result["success"], result
     with transfer.sessions() as db:
         restored = db.query(Conversation).filter_by(user_id="bob", type="image").one().uuid
-    assert _image(transfer, "bob", restored).content == original.content
+    assert _image(transfer, "bob", restored).content == original_content
     returned = transfer.client.get("/user/data/export?scope=chat", headers=transfer.headers("bob")).content
     merged = shared.commit(transfer, shared.preview(transfer, returned, user="alice"), user="alice").json()
     assert merged["success"] and merged["imported"]["conversations"] == 0
     assert transfer.history.get_total_conversation_count("alice") == 1
-    # 补正本后再次导出已有 modern media_id，也不能重新捎带旧路径。
+    with transfer.sessions() as db:
+        assert json.loads(db.query(Conversation).filter_by(uuid=identity).one().meta_data) == {
+            "image_server_path": str(stored_path)
+        }
+    # 往返和重复导出都不改变源记录，也不重新捎带旧路径。
     again = transfer.client.get("/user/data/export?scope=chat", headers=transfer.headers("alice"))
     repeated, _ = decode_import(again.content)
     assert "image_server_path" not in repeated["conversations"][0]["meta_data"]
@@ -112,7 +122,7 @@ def test_uploaded_path_does_not_enable_legacy_file_reading(transfer, tmp_path):
     assert "image_server_path" not in restored["conversations"][0]["meta_data"]
 
 
-def test_legacy_link_failure_removes_only_newly_created_media(transfer, tmp_path, monkeypatch):
+def test_export_never_writes_legacy_metadata_or_publishes_media(transfer, tmp_path, monkeypatch):
     root = tmp_path / "legacy-images"
     path = root / "alice" / "image.png"
     path.parent.mkdir(parents=True)
@@ -123,8 +133,69 @@ def test_legacy_link_failure_removes_only_newly_created_media(transfer, tmp_path
     def fail(*args):
         raise OSError("synthetic legacy SQL link failure")
 
-    monkeypatch.setattr(transfer.service._projections, "_link_legacy_image", fail)
+    monkeypatch.setattr(transfer.repository, "link_legacy_image", fail)
+    monkeypatch.setattr(transfer.media, "publish_transfer", fail)
     response = transfer.client.get("/user/data/export?scope=chat", headers=transfer.headers("alice"))
-    assert response.status_code == 503
+    assert response.status_code == 200
+    with transfer.sessions() as db:
+        metadata = json.loads(db.query(Conversation).filter_by(uuid=identity).one().meta_data)
+    assert metadata == {"image_server_path": str(path)}
     assert _image(transfer, "alice", identity).status_code == 200
+    assert list(transfer.media._root.iterdir()) == []
+
+
+def test_large_legacy_export_import_and_replace_backup(transfer, tmp_path, monkeypatch):
+    """真实图片组成超过旧 64 MiB 限制的 ZIP，验证导入与替换前备份均可用。"""
+    import os
+    from src.infrastructure.data_transfer._blob import FileBlob
+
+    original_read = FileBlob.read
+
+    def bounded_read(blob):
+        assert len(blob) <= transfer.media.max_bytes, "不能把整个大归档载入内存"
+        return original_read(blob)
+
+    monkeypatch.setattr(FileBlob, "read", bounded_read)
+    root = tmp_path / "legacy-images"
+    path = root / "alice" / "image.png"
+    path.parent.mkdir(parents=True)
+    Image.frombytes("RGB", (1024, 1024), os.urandom(1024 * 1024 * 3)).save(path)
+    for _ in range(23):
+        _seed(transfer, r"data\images\alice\image.png")
+    _configure(transfer, root)
+    exported = transfer.client.get("/user/data/export?scope=chat", headers=transfer.headers("alice"))
+    assert exported.status_code == 200
+    assert len(exported.content) > 64 * 1024 * 1024
+    result = shared.commit(transfer, shared.preview(transfer, exported.content)).json()
+    assert result["success"] and result["imported"]["conversations"] == 23
+    replaced = shared.commit(
+        transfer, shared.preview(transfer, exported.content), mode="replace", confirm_replace=True
+    ).json()
+    assert replaced["success"] and replaced["backup_id"]
+    backup = transfer.client.get(f"/user/data/backups/{replaced['backup_id']}", headers=transfer.headers("bob"))
+    assert backup.status_code == 200 and len(backup.content) > 64 * 1024 * 1024
+    payload, files = decode_import(backup.content)
+    assert len(payload["conversations"]) == 23 and len(files) == 23
+    assert all(value == path.read_bytes() for value in files.values())
+
+
+def test_legacy_roundtrip_rejects_changed_image_content(transfer, tmp_path):
+    root = tmp_path / "legacy-images"
+    path = root / "alice" / "image.png"
+    path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2), "blue").save(path)
+    identity = _seed(transfer, path)
+    _configure(transfer, root)
+    exported = transfer.client.get("/user/data/export?scope=chat", headers=transfer.headers("alice"))
+    payload, files = decode_import(exported.content)
+    Image.new("RGB", (2, 2), "red").save(path)
+    result = shared.commit(
+        transfer, shared.preview(transfer, encode_archive(payload, files), user="alice"), user="alice"
+    ).json()
+    assert not result["success"] and not result["committed"]
+    assert transfer.history.get_total_conversation_count("alice") == 1
+    with transfer.sessions() as db:
+        assert json.loads(db.query(Conversation).filter_by(uuid=identity).one().meta_data) == {
+            "image_server_path": str(path)
+        }
     assert list(transfer.media._root.iterdir()) == []

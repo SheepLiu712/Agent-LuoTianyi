@@ -284,7 +284,17 @@ class UserDataRepository:
         )
         db.flush()
 
-    def apply(self, user_id, payload, *, mode, vector_ids=None, publish=None, receipt=None):
+    def apply(
+        self,
+        user_id,
+        payload,
+        *,
+        mode,
+        vector_ids=None,
+        publish=None,
+        receipt=None,
+        legacy_images=None,
+    ):
         """单事务接纳已重绑定的归档；投影发布失败或 SQL commit 失败均向上传播。
 
         已有关联的相同分块会消费 vector_ids；缺失关联则在本事务补齐后发布投影。
@@ -304,7 +314,15 @@ class UserDataRepository:
                 db.flush()
             preserved = set(states) if mode == "merge" else set()
             next_indices = self._next_conversation_indices(db, user_id)
-            imported, skipped, native = self._apply_rows(db, user_id, payload, vector_ids, preserved, next_indices)
+            imported, skipped, native = self._apply_rows(
+                db,
+                user_id,
+                payload,
+                vector_ids,
+                preserved,
+                next_indices,
+                legacy_images or {},
+            )
             if scope in {"memory", "all"}:
                 self._apply_edges(db, user_id, payload.get("memory_edges", []))
                 self._apply_profile(user, payload["profile"], mode)
@@ -327,7 +345,7 @@ class UserDataRepository:
         )
         return {character: int(value or 0) for character, value in rows}
 
-    def _apply_rows(self, db, user_id, payload, vector_ids, preserved, next_indices):
+    def _apply_rows(self, db, user_id, payload, vector_ids, preserved, next_indices, legacy_images):
         imported = {"conversations": 0, "memories": 0}
         skipped = {"conversations": 0, "memories": 0}
         native = defaultdict(list)
@@ -336,7 +354,14 @@ class UserDataRepository:
                 character = row["character_id"]
                 candidate = next_indices.get(character, 0) + 1
                 history_only = character in preserved
-                added = self._add_conversation(db, user_id, row, history_only=history_only, index=candidate)
+                added = self._add_conversation(
+                    db,
+                    user_id,
+                    row,
+                    history_only=history_only,
+                    index=candidate,
+                    legacy_image=legacy_images.get(row["uuid"]),
+                )
                 (imported if added else skipped)["conversations"] += 1
                 if added:
                     next_indices[character] = candidate
@@ -349,7 +374,7 @@ class UserDataRepository:
         return imported, skipped, native
 
     @staticmethod
-    def _add_conversation(db, user_id, row, *, history_only=False, index):
+    def _add_conversation(db, user_id, row, *, history_only=False, index, legacy_image=None):
         if row.get("user_id") != user_id:
             raise TransferConflict("CONVERSATION_OWNER_MISMATCH")
         existing = db.get(Conversation, row["uuid"])
@@ -365,7 +390,10 @@ class UserDataRepository:
                 getattr(existing, key) != value for key, value in values.items() if key not in {"meta_data", "index"}
             ):
                 raise TransferConflict("CONVERSATION_IDENTITY_CONFLICT")
-            if _metadata(existing.meta_data) != _metadata(row["meta_data"]):
+            current_metadata = _metadata(existing.meta_data)
+            if legacy_image and not current_metadata.get("media_id"):
+                current_metadata.update(legacy_image)
+            if current_metadata != _metadata(row["meta_data"]):
                 raise TransferConflict("CONVERSATION_METADATA_CONFLICT")
             # 目标账号序号由本账号当前时间线决定，重放不比较源包序号。
             return False

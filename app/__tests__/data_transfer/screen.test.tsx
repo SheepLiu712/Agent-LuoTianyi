@@ -203,9 +203,9 @@ it('高级设置在原位展开收起，详细统计仍在二级页面查看', a
 
 it('默认隐藏说明和内部状态，说明与结果详情仅在二级入口显示', async () => {
   await mount();
-  expect(text()).not.toContain('64 MiB');
+  expect(text()).not.toContain('1 GiB');
   await press('使用须知');
-  expect(text()).toContain('64 MiB');
+  expect(text()).toContain('1 GiB');
   await act(async () => { root.root.findByType(Modal).props.onRequestClose(); });
   await press('选择文件并预览');
   await press('合并去重');

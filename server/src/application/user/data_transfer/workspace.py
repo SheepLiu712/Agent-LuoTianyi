@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import time
 from pathlib import Path
 from uuid import UUID, uuid4
+
+from src.infrastructure.data_transfer._blob import (
+    FileBlob,
+    content_chunks,
+    content_digest,
+)
 
 
 class TransferWorkspace:
@@ -23,10 +28,13 @@ class TransferWorkspace:
             **(metadata or {}),
             "user_id": user_id,
             "created_at": time.time(),
-            "sha256": hashlib.sha256(data).hexdigest(),
+            "sha256": content_digest(data),
         }
         self._write(directory / "data.bin", data)
-        self._write(directory / "info.json", json.dumps(information, ensure_ascii=False).encode("utf-8"))
+        self._write(
+            directory / "info.json",
+            json.dumps(information, ensure_ascii=False).encode("utf-8"),
+        )
         return identity
 
     def get(self, kind, identity, user_id):
@@ -39,8 +47,8 @@ class TransferWorkspace:
             raise FileNotFoundError("TRANSFER_FILE_NOT_FOUND")
         if kind == "previews" and time.time() - info["created_at"] > 3600:
             raise FileNotFoundError("TRANSFER_PREVIEW_EXPIRED")
-        data = (directory / "data.bin").read_bytes()
-        if hashlib.sha256(data).hexdigest() != info["sha256"]:
+        data = FileBlob.open(directory / "data.bin")
+        if content_digest(data) != info["sha256"]:
             raise ValueError("TRANSFER_FILE_CHECKSUM_MISMATCH")
         return data, info
 
@@ -67,5 +75,6 @@ class TransferWorkspace:
         temporary = path.with_suffix(".tmp")
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
+            for chunk in content_chunks(data):
+                stream.write(chunk)
         os.replace(temporary, path)

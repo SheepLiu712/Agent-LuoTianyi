@@ -1,11 +1,8 @@
-"""Pure, bounded transfer formats. Callers own authorization and persistence.
-
-Files are keyed by ``media/<opaque-id>/content.bin``; no API here touches disk,
-network, models, vectors, or the current clock. External documents are chat-only.
-"""
+"""迁移格式校验与磁盘暂存归档；调用方负责授权和业务持久化。"""
 
 from ._archive import decode_archive
 from ._archive import encode_archive as _encode_archive
+from ._blob import FileBlob, content_bytes
 from ._external import FORMATS, decode_external
 from ._render import render_readable as _render_readable
 from ._schema import (
@@ -43,29 +40,54 @@ def decode_import(data, source_format="auto", character_id="luotianyi", scope="a
 
 
 def _decode_import(data, source_format, character_id, scope):
-    require(isinstance(data, bytes) and 0 < len(data) <= MAX_UPLOAD_BYTES, "Empty or oversized transfer upload")
-    require(isinstance(source_format, str) and source_format in FORMATS, "Unknown source format")
+    require(
+        isinstance(data, (bytes, FileBlob)) and 0 < len(data) <= MAX_UPLOAD_BYTES,
+        "Empty or oversized transfer upload",
+    )
+    require(
+        isinstance(source_format, str) and source_format in FORMATS,
+        "Unknown source format",
+    )
     require(isinstance(scope, str) and scope in SCOPES, "Unknown transfer scope")
-    require(isinstance(character_id, str) and bool(character_id.strip()), "Invalid target character")
-    native = source_format == "native" or data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
+    require(
+        isinstance(character_id, str) and bool(character_id.strip()),
+        "Invalid target character",
+    )
+    if isinstance(data, FileBlob):
+        data.stream.seek(0)
+        prefix = data.stream.read(4)
+    else:
+        prefix = data[:4]
+    native = source_format == "native" or prefix.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
     if native:
-        require(source_format in {"auto", "native"}, "ZIP does not match the selected external format")
+        require(
+            source_format in {"auto", "native"},
+            "ZIP does not match the selected external format",
+        )
         payload, files = decode_archive(data)
     else:
-        payload, files = decode_external(data, source_format, character_id)
+        require(len(data) <= MAX_ENTRY_BYTES, "External document exceeds the size limit")
+        payload, files = decode_external(content_bytes(data), source_format, character_id)
         validate_payload(payload)
     payload = apply_scope(payload, scope)
     paths = {row["path"] for row in payload["media"] if row["path"] is not None}
     return payload, {path: content for path, content in files.items() if path in paths}
 
 
-def encode_archive(payload, files):
+def encode_archive(payload, files, *, file_backed=False):
     """Create a version-1 restoration ZIP with media and SHA-256 manifest."""
     try:
-        return _encode_archive(payload, files)
+        return _encode_archive(payload, files, file_backed=file_backed)
     except TransferFormatError:
         raise
-    except (KeyError, TypeError, ValueError, UnicodeError, RecursionError, OverflowError) as exc:
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeError,
+        RecursionError,
+        OverflowError,
+    ) as exc:
         raise TransferFormatError("Invalid native transfer payload") from exc
 
 

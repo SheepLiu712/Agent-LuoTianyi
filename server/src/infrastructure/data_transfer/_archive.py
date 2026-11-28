@@ -1,6 +1,5 @@
 """Bounded in-memory native ZIP encoding and decoding; never extracts paths."""
 
-import hashlib
 import io
 import stat
 import struct
@@ -9,6 +8,7 @@ import zipfile
 import zlib
 from pathlib import PurePosixPath
 
+from ._blob import FileBlob, content_bytes, content_chunks, content_digest
 from ._schema import (
     FORMAT,
     MAX_ARCHIVE_ENTRIES,
@@ -52,10 +52,13 @@ def _member(info):
     require(not info.is_dir() or info.file_size == 0, "Invalid directory member")
 
 
-def _read_members(archive):
+def _read_members(archive, file_backed=False):
     infos = archive.infolist()
     require(len(infos) <= MAX_ARCHIVE_ENTRIES, "Archive contains too many entries")
-    require(sum(info.file_size for info in infos) <= MAX_EXPANDED_BYTES, "Archive exceeds the expanded size limit")
+    require(
+        sum(info.file_size for info in infos) <= MAX_EXPANDED_BYTES,
+        "Archive exceeds the expanded size limit",
+    )
     seen = set()
     members = {}
     expanded = 0
@@ -68,51 +71,90 @@ def _read_members(archive):
             require(info.filename.startswith("media/"), "Unexpected archive directory")
             continue
         with archive.open(info) as stream:
-            data = stream.read(min(MAX_ENTRY_BYTES, MAX_EXPANDED_BYTES - expanded) + 1)
-        require(len(data) == info.file_size and len(data) <= MAX_ENTRY_BYTES, "Invalid archive member size")
+            if file_backed and info.filename not in {"manifest.json", "data.json"}:
+                data = FileBlob.temporary()
+                while chunk := stream.read(1024 * 1024):
+                    data.stream.write(chunk)
+                    require(
+                        len(data) <= min(info.file_size, MAX_ENTRY_BYTES),
+                        "Invalid archive member size",
+                    )
+            else:
+                data = stream.read(min(MAX_ENTRY_BYTES, MAX_EXPANDED_BYTES - expanded) + 1)
+        require(
+            len(data) == info.file_size and len(data) <= MAX_ENTRY_BYTES,
+            "Invalid archive member size",
+        )
         expanded += len(data)
         require(expanded <= MAX_EXPANDED_BYTES, "Archive exceeds the expanded size limit")
-        members[info.filename] = data
+        members[info.filename] = data.seal() if isinstance(data, FileBlob) else data
     return members
 
 
 def _manifest(value, members):
     require(isinstance(value, dict), "Invalid archive manifest")
     require(value.get("format") == FORMAT, "Unknown archive manifest format")
-    require(type(value.get("version")) is int and value["version"] == VERSION, "Unsupported archive version")
-    require(isinstance(value.get("scope"), str) and value["scope"] in SCOPES, "Unknown manifest scope")
+    require(
+        type(value.get("version")) is int and value["version"] == VERSION,
+        "Unsupported archive version",
+    )
+    require(
+        isinstance(value.get("scope"), str) and value["scope"] in SCOPES,
+        "Unknown manifest scope",
+    )
     checksums = value.get("files")
-    require(isinstance(checksums, dict) and "data.json" in checksums, "Invalid manifest file list")
-    require(set(checksums) == set(members) - {"manifest.json"}, "Manifest and archive files do not match")
+    require(
+        isinstance(checksums, dict) and "data.json" in checksums,
+        "Invalid manifest file list",
+    )
+    require(
+        set(checksums) == set(members) - {"manifest.json"},
+        "Manifest and archive files do not match",
+    )
     warnings = value.get("warnings")
-    require(isinstance(warnings, list) and all(isinstance(item, str) for item in warnings), "Invalid manifest warnings")
+    require(
+        isinstance(warnings, list) and all(isinstance(item, str) for item in warnings),
+        "Invalid manifest warnings",
+    )
     for name, checksum in checksums.items():
-        require(isinstance(checksum, str) and SHA256.fullmatch(checksum) is not None, "Invalid manifest checksum")
-        require(hashlib.sha256(members[name]).hexdigest() == checksum, "Archive checksum mismatch")
+        require(
+            isinstance(checksum, str) and SHA256.fullmatch(checksum) is not None,
+            "Invalid manifest checksum",
+        )
+        require(content_digest(members[name]) == checksum, "Archive checksum mismatch")
 
 
 def _media_files(payload, members):
     paths = {row["path"] for row in payload["media"] if row["path"] is not None}
-    require(set(members) == paths | {"manifest.json", "data.json"}, "Archive contains unreferenced or missing files")
+    require(
+        set(members) == paths | {"manifest.json", "data.json"},
+        "Archive contains unreferenced or missing files",
+    )
     files = {path: members[path] for path in paths}
     for row in payload["media"]:
         if row["path"] is not None:
-            checksum = hashlib.sha256(files[row["path"]]).hexdigest()
+            checksum = content_digest(files[row["path"]])
             require(checksum == row["sha256"], "Media checksum mismatch")
     return files
 
 
 def decode_archive(data):
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            members = _read_members(archive)
-        require("manifest.json" in members and "data.json" in members, "Incomplete native archive")
+        with zipfile.ZipFile(data.stream if isinstance(data, FileBlob) else io.BytesIO(data)) as archive:
+            members = _read_members(archive, file_backed=isinstance(data, FileBlob))
+        require(
+            "manifest.json" in members and "data.json" in members,
+            "Incomplete native archive",
+        )
         manifest = read_json(members["manifest.json"])
         _manifest(manifest, members)
         payload = validate_payload(read_json(members["data.json"]))
         json_bytes(payload)
         require(manifest["scope"] == payload["scope"], "Manifest scope differs from payload")
-        require(manifest["warnings"] == payload["warnings"], "Manifest warnings differ from payload")
+        require(
+            manifest["warnings"] == payload["warnings"],
+            "Manifest warnings differ from payload",
+        )
         files = _media_files(payload, members)
         payload["source_format"] = "native"
         return payload, files
@@ -136,11 +178,14 @@ def _prepare_files(payload, files):
     for row in payload["media"]:
         if row["path"] is not None:
             data = files[row["path"]]
-            require(isinstance(data, bytes) and len(data) <= MAX_ENTRY_BYTES, "Invalid media file or size")
-            require(hashlib.sha256(data).hexdigest() == row["sha256"], "Media checksum mismatch")
+            require(
+                isinstance(data, (bytes, FileBlob)) and len(data) <= MAX_ENTRY_BYTES,
+                "Invalid media file or size",
+            )
+            require(content_digest(data) == row["sha256"], "Media checksum mismatch")
 
 
-def encode_archive(payload, files):
+def encode_archive(payload, files, *, file_backed=False):
     payload = validate_payload(read_json(json_bytes(payload)))
     _prepare_files(payload, files)
     members = {"data.json": json_bytes(payload), **files}
@@ -149,19 +194,31 @@ def encode_archive(payload, files):
         "version": VERSION,
         "scope": payload["scope"],
         "warnings": payload["warnings"],
-        "files": {path: hashlib.sha256(data).hexdigest() for path, data in members.items()},
+        "files": {path: content_digest(data) for path, data in members.items()},
     }
     members["manifest.json"] = json_bytes(manifest)
     require(len(members) <= MAX_ARCHIVE_ENTRIES, "Archive contains too many entries")
-    require(all(len(data) <= MAX_ENTRY_BYTES for data in members.values()), "Archive member exceeds the size limit")
-    require(sum(map(len, members.values())) <= MAX_EXPANDED_BYTES, "Archive exceeds the expanded size limit")
-    output = io.BytesIO()
+    require(
+        all(len(data) <= MAX_ENTRY_BYTES for data in members.values()),
+        "Archive member exceeds the size limit",
+    )
+    require(
+        sum(map(len, members.values())) <= MAX_EXPANDED_BYTES,
+        "Archive exceeds the expanded size limit",
+    )
+    result = FileBlob.temporary()
+    output = result.stream
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path, data in sorted(members.items()):
             info = zipfile.ZipInfo(path, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = (stat.S_IFREG | 0o600) << 16
-            archive.writestr(info, data)
-    result = output.getvalue()
+            with archive.open(info, "w") as target:
+                for chunk in content_chunks(data):
+                    target.write(chunk)
+                    require(
+                        output.tell() <= MAX_UPLOAD_BYTES,
+                        "Archive exceeds the upload size limit",
+                    )
     require(len(result) <= MAX_UPLOAD_BYTES, "Archive exceeds the upload size limit")
-    return result
+    return result.seal() if file_backed else content_bytes(result)

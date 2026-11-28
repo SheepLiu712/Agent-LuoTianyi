@@ -245,5 +245,5 @@ def test_import_result_is_concise_and_usage_preserves_receipt(import_dialog, ext
     monkeypatch.setattr(dialog, "_show_information", lambda title, text: notices.append((title, text)))
     dialog.usage_button.click()
     assert notices[0][0] == "使用须知"
-    assert "64 MiB" in notices[0][1]
+    assert "1 GiB" in notices[0][1]
     assert "记录 2" in notices[0][1]

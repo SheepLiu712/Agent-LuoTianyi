@@ -56,10 +56,10 @@ it('以文件URI原生二进制POST预览，仅使用session Bearer并释放选�
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-it('64MiB超限在上传前拒绝，磁盘真实大小也受限制', async () => {
-  await expect(previewImport(session, { ...file, size: 64 * 1024 * 1024 + 1 }, 'auto', 'all', 'luotianyi'))
+it('1GiB超限在上传前拒绝，磁盘真实大小也受限制', async () => {
+  await expect(previewImport(session, { ...file, size: 1024 * 1024 * 1024 + 1 }, 'auto', 'all', 'luotianyi'))
     .rejects.toMatchObject({ status: 413 });
-  jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, isDirectory: false, size: 65 * 1024 * 1024 } as any);
+  jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, isDirectory: false, size: 1024 * 1024 * 1024 + 1 } as any);
   await expect(previewImport(session, file, 'native', 'all', 'luotianyi')).rejects.toMatchObject({ status: 413 });
   expect(FileSystem.uploadAsync).not.toHaveBeenCalled();
 });
@@ -109,4 +109,13 @@ it('导出与备份原生流式下载后分享本地URI，错误文件不可分�
   downloadAsync.mockResolvedValue({ status: 409 });
   await expect(downloadExport(session, 'all', 'zip')).rejects.toMatchObject({ status: 409 });
   expect(FileSystem.deleteAsync).toHaveBeenCalledWith(expect.stringMatching(/data-transfer\/.*\.zip$/), { idempotent: true });
+});
+
+
+it('超过旧64MiB的文件仍通过原生文件上传，不读取Base64到内存', async () => {
+  const size = 65 * 1024 * 1024;
+  jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, isDirectory: false, size } as any);
+  await expect(previewImport(session, { ...file, size }, 'native', 'all', 'luotianyi')).resolves.toMatchObject({ preview_id: 'preview-1' });
+  expect(FileSystem.uploadAsync).toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
 });

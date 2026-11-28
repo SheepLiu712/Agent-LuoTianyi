@@ -290,7 +290,7 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
       </Card>}
       <Pressable accessibilityRole="button" accessibilityLabel="使用须知" onPress={() => showNotice({
         theme, title: '使用须知', position: 'center', blocking: true, dimmed: true,
-        message: '1. 上传与下载上限 64 MiB，解压后上限 256 MiB、4096 项。\n\n2. 导入和导出时请暂停聊天，过程中服务器可能断开聊天连接。\n\n3. 外部聊天默认只进入历史，开启提取长期记忆后才会调用模型提取。',
+        message: '1. 上传与下载上限 1 GiB，解压后上限 2 GiB、4096 项。\n\n2. 导入和导出时请暂停聊天，过程中服务器可能断开聊天连接。\n\n3. 外部聊天默认只进入历史，开启提取长期记忆后才会调用模型提取。',
       })} style={styles.usage}>
         <Text style={[styles.label, { color: theme.accentText }]}>使用须知</Text>
       </Pressable>
@@ -321,7 +321,7 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
           <Choices label="文件来源" labels={SOURCE_LABELS} value={source} onChange={value => { setSource(value); resetPreview(); }} disabled={busy} theme={theme} />
           {externalSource ? <Text style={body}>外部文件导入纯文字聊天。</Text> :
             <Choices label="导入范围" labels={SCOPE_LABELS} value={importScope} onChange={value => { setImportScope(value); resetPreview(); }} disabled={busy} theme={theme} />}
-          <Text style={body}>请选择恢复 ZIP、ChatGPT 的 conversations.json、SillyTavern 的 JSONL 或通用 JSON。上传上限 64 MiB，ZIP 展开上限 256 MiB。</Text>
+          <Text style={body}>请选择恢复 ZIP、ChatGPT 的 conversations.json、SillyTavern 的 JSONL 或通用 JSON。上传上限 1 GiB，ZIP 展开上限 2 GiB。</Text>
         </Disclosure>
         {preview && <View style={[styles.preview, { backgroundColor: theme.surfaceAlt }]}>
           <Text accessibilityRole="header" style={[styles.label, { color: theme.text }]}>导入预览</Text>

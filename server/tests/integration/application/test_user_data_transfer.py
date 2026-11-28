@@ -519,3 +519,43 @@ def test_invalid_native_content_is_rejected_during_preview(transfer):
     assert response.status_code == 400
     with transfer.sessions() as db:
         assert db.query(Conversation).filter_by(user_id="bob").count() == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_preview_finishes_file_read_before_caller_cleanup(transfer, monkeypatch):
+    import asyncio
+    import threading
+
+    from src.application.user.data_transfer import service as service_module
+    from src.infrastructure.data_transfer._blob import FileBlob
+
+    entered, release = threading.Event(), threading.Event()
+    observed = []
+    original = service_module.decode_import
+
+    def blocked_decode(data, **options):
+        entered.set()
+        assert release.wait(5)
+        result = original(data, **options)
+        observed.append(data.path.exists())
+        return result
+
+    monkeypatch.setattr(service_module, "decode_import", blocked_decode)
+    data = FileBlob.from_bytes(b'[{"role":"user","content":"preview cancellation"}]')
+
+    async def request():
+        try:
+            return await transfer.service.preview("alice", data, scope="chat", source_format="generic")
+        finally:
+            data.close()
+
+    task = asyncio.create_task(request())
+    assert await asyncio.to_thread(entered.wait, 5)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert data.path.exists()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert observed == [True]
+    assert not data.path.exists()
