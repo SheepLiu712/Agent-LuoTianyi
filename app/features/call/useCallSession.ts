@@ -39,7 +39,7 @@ export interface CallSessionOptions {
   onPermissionSettings?: () => void;
   onCleanupError?: (error: unknown) => void;
   onFailure?: (notice: CallFailureNotice) => void;
-  ringtone?: { playLoop: () => void; stop: () => void };
+  ringtone?: { playLoop: () => void; stop: () => void; tracePhase?: (event: string, phase: string) => void };
   initializeAttempt?: (session: SessionPort) => Promise<boolean>;
 }
 
@@ -360,8 +360,12 @@ export function useCallSession(options: CallSessionOptions = {}) {
   }, [dispatchEvent, now, reportAttemptFailure, reportCleanupError, state.clientRequestId, state.phase, state.requiresChatSwitch]);
 
   useEffect(() => {
+    if (ringing) ringtone?.tracePhase?.('ringing_enter', stateRef.current.phase);
     if (ringing) ringtone?.playLoop(); else ringtone?.stop();
-    return () => ringtone?.stop();
+    return () => {
+      if (ringing) ringtone?.tracePhase?.('ringing_exit', stateRef.current.phase);
+      ringtone?.stop();
+    };
   }, [ringing, ringtone]);
 
   useEffect(() => {

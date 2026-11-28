@@ -1,5 +1,6 @@
 import AgreementScreen from '../features/account/AgreementScreen';
 import { ChatScreen } from '../features/chat/ChatScreen';
+import callAudio from '../modules/call-audio/src/CallAudioModule';
 import { VoicePermissionNotice } from '../features/chat/VoicePermissionNotice';
 import { CallFailureBanner } from '../features/call/CallFailureBanner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,6 +13,7 @@ import {
   Animated,
   Easing,
   Image,
+  Keyboard,
   PanResponder,
   Pressable,
   ScrollView,
@@ -33,6 +35,7 @@ import { useDynamicsUnread } from '../features/dynamics/useDynamicsUnread';
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, formatDebugTraceReport, subscribeDebugTrace } from '../utils/debug_trace';
 import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../shared/ui/theme';
 import DynamicsScreen from '../features/dynamics/DynamicsScreen';
+import { DataTransferScreen } from '../features/data-transfer/DataTransferScreen';
 import PreferencesScreen from '../features/settings/PreferencesScreen';
 import LlmSettingsScreen from '../features/settings/ModelSettingsScreen';
 import AvatarSettingsScreen from '../features/settings/AvatarSettingsScreen';
@@ -57,6 +60,10 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
   const drawerWidth = useMemo(() => Math.round(screenWidth * 0.38), [screenWidth]);
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
+  useEffect(() => {
+    const subscription = callAudio?.addListener('onRouteDiagnostic', ({ message }) => addDebugTrace('call-route', message));
+    return () => subscription?.remove();
+  }, []);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const [showAgreement, setShowAgreement] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
@@ -64,6 +71,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
   const [editingAvatar, setEditingAvatar] = useState<AvatarSide>();
   const avatars = useAvatars(session);
   const [showDynamics, setShowDynamics] = useState(false);
+  const [showDataTransfer, setShowDataTransfer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorMode, setColorMode] = useState<ColorMode>('light');
   const [live2dReady, setLive2dReady] = useState(false);
@@ -106,8 +114,9 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     onCallRecord: addLocalCallRecord,
   });
   callHangupRef.current = call.hangup;
-  const page = editingAvatar ? 'avatars' : showAgreement ? 'agreement' : showPreferences ? 'preferences' : showLlmSettings ? 'models' : showDynamics ? 'dynamics'
-    : call.state.phase === 'IDLE' ? 'chat' : 'call';
+  const page = editingAvatar ? 'avatars' : showAgreement ? 'agreement' : showDataTransfer ? 'data-transfer'
+    : showPreferences ? 'preferences' : showLlmSettings ? 'models' : showDynamics ? 'dynamics'
+      : call.state.phase === 'IDLE' ? 'chat' : 'call';
   const showNotice = usePageNotices(page);
   const { error: avatarError, retry: retryAvatars } = avatars;
   useEffect(() => {
@@ -288,6 +297,15 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     closeDrawer();
   };
 
+  const handleOpenDataTransfer = () => {
+    if (call.state.phase !== 'IDLE') return;
+    Keyboard.dismiss();
+    voiceInput.leavePermissionPage();
+    void voiceInput.cancelBySystem('data-transfer').catch(() => undefined);
+    setShowDataTransfer(true);
+    closeDrawer();
+  };
+
   const handleCloseDynamics = useCallback(() => {
     setShowDynamics(false);
     refreshDynamicsUnread();
@@ -312,8 +330,10 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
     });
   };
 
-  return (
-    <View style={[styles.root, { backgroundColor: theme.root }]}>
+  return <>
+    <View style={[styles.root, { backgroundColor: theme.root }]} pointerEvents={showDataTransfer ? 'none' : 'auto'}
+      accessibilityElementsHidden={showDataTransfer}
+      importantForAccessibility={showDataTransfer ? 'no-hide-descendants' : 'auto'}>
       <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
       {page === 'chat' && voiceInput.permissionNotice && <VoicePermissionNotice
@@ -409,7 +429,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         />
       ) : null}
 
-      <ChatScreen chat={chat} session={session} theme={theme} topOffset={live2dHeight} avatars={avatars} onEditAvatar={side => {
+      <ChatScreen key={chat.historyRevision} chat={chat} session={session} theme={theme} topOffset={live2dHeight} avatars={avatars} onEditAvatar={side => {
         voiceInput.leavePermissionPage(); setEditingAvatar(side);
       }} />
 
@@ -435,6 +455,7 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
           },
         ]}
       >
+        <ScrollView style={styles.drawerScroll} contentContainerStyle={styles.drawerScrollContent}>
         <Text style={[styles.drawerTitle, { color: theme.text }]}>菜单</Text>
         <Text style={[styles.drawerSubtitle, { color: theme.textMuted }]}>洛天依 Agent</Text>
 
@@ -445,6 +466,15 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
         </TouchableOpacity>
+
+        {Platform.OS === 'android' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="聊天与记忆迁移"
+          accessibilityState={{ disabled: call.state.phase !== 'IDLE' }} disabled={call.state.phase !== 'IDLE'}
+          style={[styles.drawerItem, styles.dataTransferItem, { backgroundColor: theme.surfaceAlt }]}
+          onPress={handleOpenDataTransfer} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: call.state.phase === 'IDLE' ? theme.text : theme.textSoft }]}>
+            聊天与记忆迁移
+          </Text>
+        </TouchableOpacity>}
 
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenLlmSettings} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.text }]}>LLM 模型设置</Text>
@@ -506,9 +536,13 @@ export default function MainScreen({ session, onLogout }: { session: AccountSess
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.dangerSurface }]} onPress={handleLogout} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.dangerText }]}>登出</Text>
         </TouchableOpacity>
+        </ScrollView>
       </Animated.View>
     </View>
-  );
+    {showDataTransfer && <DataTransferScreen session={session} characterId="luotianyi" theme={theme}
+      pauseChat={chat.pauseChatForDataTransfer} resumeChat={chat.resumeChatAfterDataTransfer}
+      onClose={() => setShowDataTransfer(false)} />}
+  </>;
 }
 
 const styles = StyleSheet.create({
@@ -647,6 +681,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 4, height: 0 },
   },
+  drawerScroll: { flex: 1 },
+  drawerScrollContent: { flexGrow: 1 },
   drawerTitle: {
     fontSize: 19,
     fontWeight: '700',
@@ -667,6 +703,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f8fb',
     marginBottom: 10,
   },
+  dataTransferItem: { minHeight: 48 },
   drawerItemText: {
     fontSize: 14,
     fontWeight: '600',

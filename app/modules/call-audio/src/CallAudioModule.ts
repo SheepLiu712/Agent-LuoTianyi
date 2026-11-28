@@ -12,6 +12,8 @@ import type {
 } from './CallAudio.types';
 
 export interface CallAudioNativeModule {
+  traceChatAudioMode?(stage: 'before' | 'after'): void;
+  addListener(eventName: 'onRouteDiagnostic', listener: (event: { message: string }) => void): { remove(): void };
   getCapability(): Promise<NativeCapability>;
   startSession(): Promise<NativeCapability>;
   stopSession(): Promise<void>;

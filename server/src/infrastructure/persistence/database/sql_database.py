@@ -99,12 +99,25 @@ class Conversation(Base):
     user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
     character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi", index=True)
     timestamp = Column(DateTime, default=datetime.now)
+    # 每个 (user_id, character_id) 内单调递增的消息顺序；允许缺口，不要求连续。
+    index = Column("index", Integer, nullable=True)
     source = Column(String, nullable=False)  # 'user' or 'agent'
     type = Column(String, nullable=False)  # 'text' or 'audio' or 'image'
     content = Column(Text, nullable=False)
     meta_data = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="conversations")
+
+    __table_args__ = (
+        Index(
+            "uq_conversations_user_character_index",
+            "user_id",
+            "character_id",
+            "index",
+            unique=True,
+            sqlite_where=text('"index" IS NOT NULL'),
+        ),
+    )
 
 
 class ConversationContext(Base):
@@ -583,6 +596,7 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
 
     engine = create_engine(
         DATABASE_URL,
+        hide_parameters=True,
         connect_args={"check_same_thread": False, "timeout": 30},
     )
 
@@ -605,6 +619,9 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         with engine.begin() as connection:
             stamp(connection.connection.driver_connection, "main")
     # Additive tables must also be created for existing schema-1 installations.
+    # 契约版本未变时仍要为既有库补加列；只跑本项加列迁移，避免重放其它一次性升级。
+    _migrate_conversation_index_schema(engine)
+    # Agreement tables are additive to schema 1; old dev installations may not have them yet.
     Base.metadata.create_all(
         bind=engine,
         tables=[
@@ -696,6 +713,53 @@ def _migrate_conversation_schema(connection) -> None:
     context_columns = _table_columns(connection, "conversation_contexts")
     if context_columns and "maintenance_entry_id" not in context_columns:
         connection.exec_driver_sql("ALTER TABLE conversation_contexts ADD COLUMN maintenance_entry_id VARCHAR")
+
+
+def _migrate_conversation_index_schema(db_engine: Engine) -> None:
+    """Add the per-(user, character) message sequence to existing databases.
+
+    The schema contract version intentionally stays unchanged: bumping it would
+    make ``guard_version`` reject every existing version-1 database before this
+    additive migration can run.  Legacy rows keep their old observable order by
+    being numbered ``timestamp, uuid``; gaps are allowed and never repaired.
+    """
+    with db_engine.begin() as connection:
+        columns = _table_columns(connection, "conversations")
+        if not columns:
+            return
+        if "index" not in columns:
+            connection.exec_driver_sql('ALTER TABLE conversations ADD COLUMN "index" INTEGER')
+        connection.exec_driver_sql("""
+            WITH missing AS (
+                SELECT uuid, user_id, character_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY user_id, character_id
+                           ORDER BY timestamp, uuid
+                       ) AS offset
+                FROM conversations
+                WHERE "index" IS NULL
+            ),
+            base AS (
+                SELECT user_id, character_id, MAX("index") AS current
+                FROM conversations
+                WHERE "index" IS NOT NULL
+                GROUP BY user_id, character_id
+            )
+            UPDATE conversations
+            SET "index" = (
+                SELECT COALESCE(base.current, 0) + missing.offset
+                FROM missing
+                LEFT JOIN base
+                  ON base.user_id = missing.user_id
+                 AND base.character_id = missing.character_id
+                WHERE missing.uuid = conversations.uuid
+            )
+            WHERE "index" IS NULL
+            """)
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_user_character_index "
+            'ON conversations (user_id, character_id, "index") WHERE "index" IS NOT NULL'
+        )
 
 
 def _migrate_event_schema(connection) -> None:

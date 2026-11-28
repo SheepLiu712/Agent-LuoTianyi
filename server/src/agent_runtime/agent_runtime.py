@@ -86,6 +86,10 @@ class AgentRuntime:
         """Expose the shared singing port only to the application composition root."""
         return self.skills.song_learning_tasks.world_resources
 
+    async def extract_imported_memories(self, user_id, character_id, batch_id, rows):
+        """向组合根提供显式导入提取端口，技能实现仍封装在角色运行时内。"""
+        return await self.skills.imported_memory.extract(user_id, character_id, batch_id, rows)
+
     @property
     def call_tts_character_ids(self) -> tuple[str, ...]:
         """Return characters whose Agent-owned realtime call speech is ready."""

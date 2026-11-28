@@ -6,6 +6,11 @@ export interface CallFailureNotice {
 }
 
 const FAILURE_NOTICES: Record<string, CallFailureNotice> = {
+  headset_route_unresolved: { title: '无法确定通话耳机', message: '请确认当前耳机已开启通话音频，并复制调试日志反馈。' },
+  headset_route_request_rejected: { title: '耳机连接失败', message: '系统未接受耳机通话请求，请重新连接耳机后重试。' },
+  headset_route_timeout: { title: '耳机连接超时', message: '未能及时确认耳机通话输出，请复制调试日志反馈。' },
+  headset_route_lost: { title: '耳机通话已中断', message: '通话输出设备发生变化，请确认耳机连接后重新拨号。' },
+  headset_route_probe_failed: { title: '耳机音频启动失败', message: '无法启动通话音频，请复制调试日志反馈。' },
   SERVER_CALL_UNAVAILABLE: { title: '通话暂不可用', message: '服务暂未准备好，请稍后再试。' },
   NATIVE_CALL_UNAVAILABLE: { title: '设备通话音频不可用', message: '设备音频初始化失败，请重试；若持续失败，请导出调试日志反馈。' },
   MICROPHONE_PERMISSION_DENIED: { title: '未获得麦克风权限', message: '请在系统设置中允许麦克风权限后重试。' },

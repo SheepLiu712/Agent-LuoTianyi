@@ -209,6 +209,14 @@ class ConversationEntry:
     timestamp: datetime
     source: str
     content: TextContent | ImageContent | AudioContent | SongContent | CallContent
+    index: int | None = field(default=None, compare=False)
+
+    @property
+    def sort_key(self):
+        """显式序号优先；尚未落库的新条目排在其后，再按时间与身份兜底。"""
+        if self.index is not None:
+            return 0, self.index, self.timestamp, self.entry_id
+        return 1, 0, self.timestamp, self.entry_id
 
     def __post_init__(self) -> None:
         if not self.entry_id.strip() or not self.source.strip():
@@ -217,6 +225,10 @@ class ConversationEntry:
             raise ValueError("timestamp 应为不带时区的服务器本地时间")
         if not isinstance(self.content, (TextContent, ImageContent, AudioContent, SongContent, CallContent)):
             raise TypeError("content 应为对话内容类型")
+        if self.index is not None and (
+            isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 1
+        ):
+            raise TypeError("index 应为正整数或 None")
 
 
 @dataclass(frozen=True)

@@ -101,7 +101,7 @@ class EphemeralCallConversationStore:
 
     def __init__(self, seed: ConversationSnapshot | None = None) -> None:
         source = deepcopy(seed or ConversationSnapshot())
-        entries = tuple(sorted(source.entries, key=lambda entry: (entry.timestamp, entry.entry_id)))
+        entries = tuple(sorted(source.entries, key=lambda entry: entry.sort_key))
         self._base_snapshot = ConversationSnapshot(source.summary, entries)
         self._snapshot = ConversationSnapshot()
 
@@ -120,7 +120,7 @@ class EphemeralCallConversationStore:
         if not entries:
             return
         merged = (*self._snapshot.entries, *entries)
-        ordered_entries = tuple(sorted(merged, key=lambda entry: (entry.timestamp, entry.entry_id)))
+        ordered_entries = tuple(sorted(merged, key=lambda entry: entry.sort_key))
         self._snapshot = ConversationSnapshot(self._snapshot.summary, ordered_entries)
 
     def compact(self, compaction: ConversationCompaction) -> None:

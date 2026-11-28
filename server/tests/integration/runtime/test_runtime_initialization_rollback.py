@@ -63,11 +63,15 @@ class FakeWorld:
 class FakeAgentRuntime:
     def __init__(self, *_args, **_kwargs):
         self.default_character_id = "luotianyi"
+        self.character_ids = ("luotianyi",)
         self.context_factories = {"luotianyi": object()}
         self.singing_backend = object()
         self.vector_store = object()
         self.call_tts_character_ids = ()
         self.call_summary_character_ids = ()
+
+    async def extract_imported_memories(self, *_args):
+        pytest.fail("runtime initialization must not extract imported memories")
 
     def get_agent(self, _character_id=None):
         return object()

@@ -81,8 +81,8 @@ class _Storage:
         )
         entries = tuple(
             sorted(
-                (_decode_entry(item) for item in data["conversations"]),
-                key=lambda entry: (entry.timestamp, entry.entry_id),
+                (_decode_entry(item, self.identity.user_id) for item in data["conversations"]),
+                key=lambda entry: entry.sort_key,
             )
         )
         return ConversationSnapshot(ConversationSummary(data["summary"]), entries), data["context_count"]
@@ -101,8 +101,8 @@ class _Storage:
         try:
             entries = tuple(
                 sorted(
-                    (_decode_entry(item) for item in conversations),
-                    key=lambda entry: (entry.timestamp, entry.entry_id),
+                    (_decode_entry(item, self.identity.user_id) for item in conversations),
+                    key=lambda entry: entry.sort_key,
                 )
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -130,7 +130,7 @@ class _Storage:
             raise RuntimeError("对话总结保存失败或上下文已经改变")
 
 
-def _decode_entry(item: dict) -> ConversationEntry:
+def _decode_entry(item: dict, user_id: str = "") -> ConversationEntry:
     data = item.get("meta_data") or {}
     if isinstance(data, str):
         data = json.loads(data)
@@ -170,7 +170,13 @@ def _decode_entry(item: dict) -> ConversationEntry:
         content = _decode_call_content(data, text)
     else:
         raise ValueError(f"不支持的历史对话类型：{kind}")
-    return ConversationEntry(item["uuid"], datetime.fromisoformat(item["timestamp"]), item["source"], content)
+    return ConversationEntry(
+        item["uuid"],
+        datetime.fromisoformat(item["timestamp"]),
+        item["source"],
+        content,
+        item.get("index"),
+    )
 
 
 def _decode_call_content(data: dict, text: str) -> CallContent:
