@@ -81,9 +81,9 @@ function Choices<T extends string>({ label, labels, value, onChange, disabled, t
   </View>;
 }
 
-function Card({ title, theme, children }: React.PropsWithChildren<{ title: string; theme: AppTheme }>) {
+function Card({ title, theme, children }: React.PropsWithChildren<{ title?: string; theme: AppTheme }>) {
   return <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-    <Text accessibilityRole="header" style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+    {title && <Text accessibilityRole="header" style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>}
     {children}
   </View>;
 }
@@ -129,6 +129,7 @@ function extractionText(extraction: ImportExtraction) {
 export function DataTransferScreen({ session, characterId, theme, onClose, pauseChat, resumeChat }: Props) {
   const insets = useSafeAreaInsets();
   const showNotice = usePageNotices('data-transfer');
+  const [tab, setTab] = useState<'export' | 'import'>('export');
   const [exportScope, setExportScope] = useState<TransferScope>('all');
   const [exportFormat, setExportFormat] = useState<ExportFormat>('zip');
   const [importScope, setImportScope] = useState<TransferScope>('all');
@@ -287,12 +288,23 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
         <Action label="下载失败操作的恢复备份" disabled={busy} theme={theme} onPress={() => saveBackup(failureBackupId)} />
       </Card>}
       <Pressable accessibilityRole="button" accessibilityLabel="使用须知" onPress={() => showNotice({
-        theme, title: '使用须知', position: 'center', blocking: true,
+        theme, title: '使用须知', position: 'center', blocking: true, dimmed: true,
         message: '1. 上传与下载上限 64 MiB，解压后上限 256 MiB、4096 项。\n\n2. 导入和导出时请暂停聊天，过程中服务器可能断开聊天连接。\n\n3. 外部聊天默认只进入历史，开启提取长期记忆后才会调用模型提取。',
       })} style={styles.usage}>
         <Text style={[styles.label, { color: theme.accentText }]}>使用须知</Text>
       </Pressable>
-      <Card title="导出" theme={theme}>
+      <View accessibilityRole="tablist" style={[styles.tabs, { backgroundColor: theme.surfaceAlt }]}>
+        {(['export', 'import'] as const).map(value => <Pressable key={value}
+          accessibilityRole="tab" accessibilityLabel={value === 'export' ? '导出' : '导入'}
+          accessibilityState={{ selected: tab === value, disabled: busy }} disabled={busy}
+          onPress={() => setTab(value)}
+          style={[styles.tab, { backgroundColor: tab === value ? theme.surface : 'transparent' }]}>
+          <Text style={[styles.sectionTitle, { color: tab === value ? theme.accentText : theme.textMuted }]}>
+            {value === 'export' ? '导出' : '导入'}
+          </Text>
+        </Pressable>)}
+      </View>
+      {tab === 'export' && <Card theme={theme}>
         <Text style={body}>导出 {SCOPE_LABELS[exportScope]} · {EXPORT_LABELS[exportFormat]}。</Text>
         <Action label="导出并打开系统分享" onPress={exportData} disabled={busy} theme={theme} tone="primary" />
         <Disclosure title="导出高级设置" theme={theme}>
@@ -300,8 +312,8 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
           <Choices label="保存格式" labels={EXPORT_LABELS} value={exportFormat} onChange={setExportFormat} disabled={busy} theme={theme} />
           <Text style={body}>{exportFormat === 'zip' ? 'ZIP 保留恢复所需的目录结构。' : '阅读副本仅供查看。需要还原时请选择 ZIP。'}</Text>
         </Disclosure>
-      </Card>
-      <Card title="导入" theme={theme}>
+      </Card>}
+      {tab === 'import' && <Card theme={theme}>
         <Text style={body}>{externalSource ? '外部文件导入纯文字聊天。' : `恢复 ${SCOPE_LABELS[importScope]}。`}</Text>
         <Action label="选择文件并预览" onPress={chooseFile} disabled={busy} theme={theme} tone="primary" />
         <Disclosure title="导入高级设置" theme={theme}>
@@ -329,8 +341,8 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
           <Action label="合并去重" onPress={() => submit('merge', false)} disabled={busy} theme={theme} tone="primary" />
           <Action label="备份后替换" onPress={confirmReplace} disabled={busy} theme={theme} tone="danger" />
         </View>}
-      </Card>
-      {result && <Card title={result.success ? '导入完成' : '导入未完成'} theme={theme}>
+      </Card>}
+      {tab === 'import' && result && <Card title={result.success ? '导入完成' : '导入未完成'} theme={theme}>
         {!result.success && <Text style={body} accessibilityLiveRegion="polite">导入未完成，请查看详细信息后重试。</Text>}
         {extraction.status === 'succeeded' && <Text style={body}>{`已提取 ${extraction.memories} 条长期记忆。`}</Text>}
         {(extraction.status === 'failed' || extraction.status === 'unavailable') &&
@@ -356,6 +368,8 @@ export function DataTransferScreen({ session, characterId, theme, onClose, pause
 const styles = StyleSheet.create({
   screen: { ...StyleSheet.absoluteFillObject, zIndex: 110 },
   secondary: { flex: 1 },
+  tabs: { flexDirection: 'row', padding: 4, borderRadius: 12 },
+  tab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
   usage: { alignSelf: 'flex-end', minHeight: 48, justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },
   pageTitle: { flex: 1, fontSize: 20, fontWeight: '700' },

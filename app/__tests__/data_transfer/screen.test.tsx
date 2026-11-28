@@ -36,9 +36,10 @@ const close = jest.fn();
 const label = (name: string) => root.root.findAllByType(Pressable).find(node => node.props.accessibilityLabel === name)!;
 const text = () => root.root.findAllByType(Text).map(node => node.props.children).flat(Infinity).join(' ');
 async function press(name: string) { await act(async () => { label(name).props.onPress(); }); }
-async function mount(theme = THEMES.light) {
+async function mount(theme = THEMES.light, selectImport = true) {
   await act(async () => { root = create(<AppNotices><DataTransferScreen session={session} characterId="luotianyi"
     theme={theme} onClose={close} pauseChat={pause} resumeChat={resume} /></AppNotices>); });
+  if (selectImport) await press('导入');
 }
 beforeEach(() => {
   jest.clearAllMocks();
@@ -141,6 +142,7 @@ it('HTTP200失败不显示成功，仍展示备份；409可重试且失败后仍
 
 it('导出选项传递正确，分享前恢复聊天；重连失败提供显式重试', async () => {
   await mount();
+  await press('导出');
   await press('展开导出高级设置');
   await press('Markdown');
   await press('返回迁移页面');
@@ -162,6 +164,7 @@ it.each([THEMES.light, THEMES.dark])('沿用$name主题，小屏大字使用可�
   expect(button.props.accessibilityState).toEqual({ disabled: false });
   expect(button.props.style({ pressed: false })[0]).toMatchObject({ minHeight: 48 });
   expect(button.props.style({ pressed: false })[1].backgroundColor).toBe(theme.accentSoft);
+  await press('导出');
   await press('展开导出高级设置');
   const group = root.root.findByProps({ accessibilityRole: 'radiogroup', accessibilityLabel: '导出范围' });
   expect(group.props.style.flexWrap).toBe('wrap');
@@ -174,9 +177,11 @@ it('默认隐藏高级设置和详细统计；二级页面返回后常用路径�
   expect(text()).not.toContain('保存格式');
   expect(text()).not.toContain('文件来源');
 
+  await press('导出');
   await press('展开导出高级设置');
   expect(text()).toContain('保存格式');
   await press('返回迁移页面');
+  await press('导入');
   await press('展开导入高级设置');
   expect(text()).toContain('文件来源');
   await press('返回迁移页面');
@@ -217,4 +222,18 @@ it('文件错误默认只展示中文提示，技术详情需主动打开', asyn
   const details = root.root.findAllByType(Pressable).find(node => node.findAllByType(Text).some(t => t.props.children === '查看详细信息'))!;
   await act(async () => { details.props.onPress(); });
   expect(text()).toContain('Expected UTF-8 JSON');
+});
+
+it('默认显示导出标签；切换保留导入预览且说明弹窗有蒙版', async () => {
+  await mount(THEMES.light, false);
+  expect(label('导出').props.accessibilityState.selected).toBe(true);
+  expect(label('选择文件并预览')).toBeUndefined();
+  await press('导入');
+  await press('选择文件并预览');
+  await press('导出');
+  expect(text()).not.toContain('导入预览');
+  await press('导入');
+  expect(text()).toContain('file.zip');
+  await press('使用须知');
+  expect(JSON.stringify(root.toJSON())).toContain('rgba(0,0,0,0.45)');
 });
