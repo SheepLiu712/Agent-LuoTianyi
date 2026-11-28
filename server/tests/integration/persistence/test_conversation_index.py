@@ -80,9 +80,7 @@ def test_legacy_rows_are_backfilled_in_previous_observable_order(tmp_path):
                 """)
         _migrate_conversation_index_schema(engine)
         with sqlite3.connect(database_path) as connection:
-            assert connection.execute(
-                "SELECT \"index\" FROM conversations WHERE uuid = 'c-late'"
-            ).fetchone() == (3,)
+            assert connection.execute("SELECT \"index\" FROM conversations WHERE uuid = 'c-late'").fetchone() == (3,)
     finally:
         engine.dispose()
 
@@ -144,3 +142,125 @@ def test_reopening_a_version_one_database_adds_and_backfills_the_index(tmp_path)
         assert connection.execute("SELECT \"index\" FROM conversations WHERE uuid = 'a'").fetchone() == (1,)
         assert connection.execute("SELECT \"index\" FROM conversations WHERE uuid = 'b'").fetchone() == (2,)
         assert connection.execute("PRAGMA user_version").fetchone() == (1,)
+
+
+async def test_slow_images_and_fast_text_keep_sql_and_context_in_order(tmp_path):
+    """先发图片理解较慢时，角色上下文仍与事实时间和数据库一致。"""
+    import asyncio
+    from dataclasses import replace
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from support.routing_support import request
+    from unit.agent.test_chat_preprocessing import image_request
+
+    from src.agent.context import ContextIdentity
+    from src.agent.context._storage import _Storage
+    from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
+
+    service, engine = _service(tmp_path)
+    storage = _Storage(service, ContextIdentity("luotianyi", "probe", "user"))
+    gates = [asyncio.Event(), asyncio.Event()]
+
+    class Conversation:
+        async def append(self, entries):
+            storage.append(entries)
+
+    class Terms:
+        def recognize(self, text):
+            return ()
+
+    class Vision:
+        async def understand(self, media_ref, *, owner_user_id):
+            index = int(media_ref.media_id)
+            await gates[index].wait()
+            return SimpleNamespace(mime_type="image/png"), f"image{index}"
+
+    handler = ChatPreprocessingHandler(Terms(), Vision())
+    plans = SimpleNamespace(context=SimpleNamespace(conversation=Conversation()))
+    stamp = datetime(2026, 10, 9, 10, tzinfo=timezone.utc)
+    tasks = []
+    try:
+        for index in range(2):
+            incoming = image_request(str(index))
+            incoming = replace(
+                incoming,
+                interaction=replace(
+                    incoming.interaction,
+                    user_id="user",
+                    now=stamp + timedelta(seconds=index),
+                    interaction_revision=index + 1,
+                ),
+            )
+            tasks.append(asyncio.create_task(handler.handle(incoming, plans)))
+        await asyncio.sleep(0)
+        text = request()
+        text = replace(
+            text,
+            interaction=replace(
+                text.interaction,
+                user_id="user",
+                now=stamp + timedelta(seconds=2),
+                interaction_revision=3,
+            ),
+        )
+        await handler.handle(text, plans)
+        storage.load_conversation()
+        for index, task in enumerate(tasks):
+            gates[index].set()
+            await task
+            storage.load_conversation()
+        expected = ["[图片理解]: image0", "[图片理解]: image1", "你好"]
+        assert [row.content for row in service.get_history_from_db("user", 0, 20)] == expected
+        snapshot, count = storage.load_conversation()
+        assert [entry.content.text for entry in snapshot.entries] == expected
+        assert count == 3
+    finally:
+        for gate in gates:
+            gate.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        engine.dispose()
+
+
+def test_out_of_order_batch_rebuilds_cached_context(tmp_path):
+    service, engine = _service(tmp_path)
+    try:
+        service.add_conversations("user", [_item("last", "2026-10-09 10:03:00")])
+        service.get_conversation_context_state("user")
+        service.add_conversations(
+            "user",
+            [
+                _item("middle", "2026-10-09 10:02:00"),
+                _item("first", "2026-10-09 10:01:00"),
+            ],
+        )
+        state = service.get_conversation_context_state("user")
+        assert [row["uuid"] for row in state["conversations"]] == ["first", "middle", "last"]
+        assert [row["index"] for row in state["conversations"]] == [1, 2, 3]
+    finally:
+        engine.dispose()
+
+
+def test_existing_index_gaps_do_not_move_new_messages_before_history(tmp_path):
+    """序号允许缺口；新消息仍应排在已有历史之后，而非按记录数插入。"""
+    from sqlalchemy import text
+
+    service, engine = _service(tmp_path)
+    try:
+        service.add_conversations(
+            "user",
+            [
+                _item("first", "2026-10-09 10:01:00"),
+                _item("second", "2026-10-09 10:02:00"),
+            ],
+        )
+        with engine.begin() as connection:
+            connection.execute(text('UPDATE conversations SET "index" = "index" + 10'))
+        service._redis.clear_user("user")
+        service.get_conversation_context_state("user")
+        service.add_conversations("user", [_item("third", "2026-10-09 10:03:00")])
+        state = service.get_conversation_context_state("user")
+        assert [row["uuid"] for row in state["conversations"]] == ["first", "second", "third"]
+        assert [row["index"] for row in state["conversations"]] == [11, 12, 13]
+    finally:
+        engine.dispose()
