@@ -545,6 +545,7 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
 
     engine = create_engine(
         DATABASE_URL,
+        hide_parameters=True,
         connect_args={"check_same_thread": False, "timeout": 30},
     )
 

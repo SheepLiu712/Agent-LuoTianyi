@@ -175,3 +175,48 @@ def test_commit_failure_logs_original_cause_with_operation_id(transfer, monkeypa
     assert view["preview_id"] in logged
     assert "RuntimeError: synthetic sqlite commit failure" in logged
     assert "synthetic imported history" not in logged
+
+
+def test_real_database_failure_hides_chat_parameters(transfer, tmp_path, monkeypatch):
+    """实际SQL插入失败仍能诊断，但完整异常链不暴露聊天正文。"""
+    import json
+
+    from sqlalchemy import event
+
+    from src.infrastructure.persistence.database import sql_database
+
+    marker = "PRIVATE_CHAT_CONTENT_MUST_NOT_ENTER_LOG"
+    view = shared.preview(transfer, json.dumps([{"role": "user", "content": marker}]).encode(), source_format="generic")
+    old_engine = transfer.sessions.kw["bind"]
+    monkeypatch.setattr(sql_database, "engine", sql_database.engine)
+    monkeypatch.setattr(sql_database, "SessionLocal", sql_database.SessionLocal)
+    sql_database.init_sql_db(str(tmp_path), "transfer.sqlite")
+    engine = sql_database.engine
+    transfer.sessions.configure(bind=engine)
+
+    @event.listens_for(engine, "checkout")
+    def readonly(connection, record, proxy):
+        connection.execute("PRAGMA query_only=ON")
+
+    messages = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            messages.append(self.format(record))
+
+    logger = get_logger("application.user.data_transfer")
+    capture = Capture()
+    logger.addHandler(capture)
+    try:
+        response = shared.commit(transfer, view)
+        assert response.status_code == 200
+        assert response.json()["committed"] is False
+        logged = "\n".join(messages)
+        assert "OperationalError" in logged
+        assert "readonly" in logged
+        assert view["preview_id"] in logged
+        assert marker not in logged
+    finally:
+        logger.removeHandler(capture)
+        transfer.sessions.configure(bind=old_engine)
+        engine.dispose()
