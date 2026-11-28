@@ -11,6 +11,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.MediaRouter
 import android.media.AudioFocusRequest
 import android.media.AudioRecord
 import android.media.AudioTrack
@@ -187,6 +188,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       return capability(false, "session_termination_failed")
     }
     if (sessionReady) return capability(true, null)
+    activeAudioAtMs = 0L
     val currentSessionGeneration = sessionGeneration.incrementAndGet()
     resetSessionState()
     try {
@@ -261,8 +263,10 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       originalAudioMode = manager.mode
       traceRingtone("communication_mode_requested")
       routeSnapshot("before_mode_change")
+      val requestedAt = SystemClock.elapsedRealtime()
       manager.mode = AudioManager.MODE_IN_COMMUNICATION
-      routeSnapshot("after_mode_change")
+      val duration = SystemClock.elapsedRealtime() - requestedAt
+      routeSnapshot("after_mode_change durationMs=$duration")
       try {
         selectHeadset(manager)
       } catch (error: IllegalStateException) {
@@ -295,7 +299,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       releaseCapture()
       return capability(false, "capture_start_failed")
     }
-    traceRingtone("capture_started input=${actualDevices(record)}")
+    traceRingtone("capture_started input=${actualDevices(record)} audioSession=${record.audioSessionId}")
     startPlayback()
     captureRunning.set(true)
     val eventSessionGeneration = sessionGeneration.get()
@@ -428,7 +432,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     audioTrack = track
     track.addOnRoutingChangedListener(streamRoutes, null)
     track.play()
-    traceRingtone("playback_started output=${actualDevices(track)}")
+    traceRingtone("playback_started output=${actualDevices(track)} audioSession=${track.audioSessionId}")
     playbackRunning.set(true)
     val eventSessionGeneration = sessionGeneration.get()
     playbackThread = Thread(
@@ -490,20 +494,21 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     val commandProcessor = PlaybackCommandProcessor(playbackState, accounting)
     val visualIdleGate = PlaybackVisualIdleGate()
     var firstWrite = true
-    var firstProgress = true
+    var pendingRemoteHead: StreamKey? = null
+    var firstRemoteFrame = 0L
     var lastProgressNanos = 0L
     fun observeProgress(active: StreamKey?) {
       val previousPlayedFrames = accounting.playedFrames
       accounting.observeHead(track.playbackHeadPosition.toLong() and 0xffffffffL)
+      if (pendingRemoteHead != null && pendingRemoteHead == active && accounting.playedFrames > firstRemoteFrame) {
+        traceRingtone("first_remote_progress stream=$active head=${accounting.playedFrames} output=${actualDevices(track)}", eventSessionGeneration)
+        pendingRemoteHead = null
+      }
       val nowNanos = System.nanoTime()
       if (accounting.playedFrames > previousPlayedFrames && active != null &&
         streamGenerations.containsKey(active) && !tombstonedStreams.contains(active) &&
         nowNanos - lastProgressNanos >= 16_666_667L
       ) {
-        if (firstProgress && !isReplyFailureTone(active)) {
-          firstProgress = false
-          traceRingtone("first_remote_progress stream=$active output=${actualDevices(track)}", eventSessionGeneration)
-        }
         emitPlaybackProgress(active, accounting.rmsAtPlayedFrames(playbackAnalysisFrames), eventSessionGeneration)
         lastProgressNanos = nowNanos
       }
@@ -518,6 +523,10 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
           track.playbackHeadPosition.toLong() and 0xffffffffL,
         )
         if (outcome.activeStopped) {
+          if (pendingRemoteHead in outcome.stoppedKeys) {
+            traceRingtone("first_remote_stopped_before_progress stream=$pendingRemoteHead", eventSessionGeneration)
+            pendingRemoteHead = null
+          }
           track.pause()
           track.flush()
           if (playbackRunning.get()) track.play()
@@ -547,10 +556,16 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
           val traceFirst = firstWrite && !isReplyFailureTone(chunk.key)
           if (traceFirst) {
             firstWrite = false
-            traceRingtone("first_remote_write_begin stream=${chunk.key} output=${actualDevices(track)}", eventSessionGeneration)
+            traceRingtone("first_remote_write_begin stream=${chunk.key} frames=${writeBytes / 2} output=${actualDevices(track)}", eventSessionGeneration)
           }
           val written = track.write(chunk.payload, offset, writeBytes, AudioTrack.WRITE_BLOCKING)
-          if (traceFirst) traceRingtone("first_remote_write_return bytes=$written output=${actualDevices(track)}", eventSessionGeneration)
+          if (traceFirst) {
+            traceRingtone("first_remote_write_return stream=${chunk.key} bytes=$written frames=${written.coerceAtLeast(0) / 2} output=${actualDevices(track)}", eventSessionGeneration)
+            if (written > 0) {
+              pendingRemoteHead = chunk.key
+              firstRemoteFrame = accounting.submittedFrames
+            }
+          }
           if (written <= 0) {
             if (isReplyFailureTone(chunk.key)) {
               replyFailureTonePending.set(false)
@@ -774,6 +789,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
         AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
       )
       audioFocusGranted = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+      traceRingtone("focus_result granted=$audioFocusGranted", eventSessionGeneration)
       return if (audioFocusGranted) null else "audio_focus_denied"
     }
     val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
@@ -787,6 +803,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       .build()
     audioFocusRequest = request
     audioFocusGranted = manager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    traceRingtone("focus_result granted=$audioFocusGranted", eventSessionGeneration)
     return if (audioFocusGranted) null else "audio_focus_denied"
   }
 
@@ -929,8 +946,14 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       removeCommunicationRouteTrace = { manager.removeOnCommunicationDeviceChangedListener(listener) }
     }
     routeCallback = object : AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = emitRoutes(manager, eventSessionGeneration)
-        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = emitRoutes(manager, eventSessionGeneration)
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+          traceRingtone("devices_added devices=${addedDevices.joinToString { deviceLabel(it) }}", eventSessionGeneration)
+          emitRoutes(manager, eventSessionGeneration)
+        }
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+          traceRingtone("devices_removed devices=${removedDevices.joinToString { deviceLabel(it) }}", eventSessionGeneration)
+          emitRoutes(manager, eventSessionGeneration)
+        }
       }
     manager.registerAudioDeviceCallback(routeCallback, null)
     emitRoutes(manager, eventSessionGeneration)
@@ -953,9 +976,10 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
 
   private fun traceRingtone(message: String, session: Long = sessionGeneration.get()) {
     val elapsed = SystemClock.elapsedRealtime()
-    val sinceActive = if (activeAudioAtMs > 0) (elapsed - activeAudioAtMs).toString() else "n/a"
+    val sinceActive = if (activeAudioAtMs > 0 && session == sessionGeneration.get()) (elapsed - activeAudioAtMs).toString() else "n/a"
     val line = "session=$session elapsedRealtimeMs=$elapsed sinceActiveAudioMs=$sinceActive $message"
     Log.i("CallRingtone", line)
+    Log.i("CallAudioRoute", line)
     sendEvent("onRouteDiagnostic", mapOf("message" to line))
   }
 
@@ -1043,14 +1067,31 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun routeSnapshot(event: String) {
-    val manager = requireContext().getSystemService(AudioManager::class.java)
+    val context = requireContext()
+    val manager = context.getSystemService(AudioManager::class.java)
+    val media = if (Build.VERSION.SDK_INT >= 33) {
+      val usage = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build()
+      manager.getAudioDevicesForAttributes(usage).joinToString { deviceLabel(it) }
+    } else {
+      val router = context.getSystemService(MediaRouter::class.java)
+      "legacyType=${router.getSelectedRoute(MediaRouter.ROUTE_TYPE_LIVE_AUDIO).deviceType}"
+    }
     val selected = if (Build.VERSION.SDK_INT >= 31) deviceLabel(manager.communicationDevice) else "unsupported"
     val available = if (Build.VERSION.SDK_INT >= 31) manager.availableCommunicationDevices.joinToString { deviceLabel(it) } else "unsupported"
-    traceRingtone("$event mode=${manager.mode} media=${deviceLabel(mediaHeadset)} selected=$selected available=[$available]")
+    traceRingtone("$event mode=${manager.mode} media=[$media] dialHeadset=${deviceLabel(mediaHeadset)} selected=$selected available=[$available]")
   }
 
-  private fun deviceLabel(device: AudioDeviceInfo?): String =
-    device?.let { "${deviceType(it.type)}(type=${it.type},id=${it.id})" } ?: "none"
+  private fun deviceLabel(device: AudioDeviceInfo?): String {
+    if (device == null) return "unknown"
+    val name = when (device.type) {
+      AudioDeviceInfo.TYPE_BUILTIN_MIC -> "builtin_mic"
+      AudioDeviceInfo.TYPE_USB_HEADSET -> "usb_headset"
+      AudioDeviceInfo.TYPE_BLE_HEADSET -> "ble_headset"
+      AudioDeviceInfo.TYPE_HEARING_AID -> "hearing_aid"
+      else -> deviceType(device.type)
+    }
+    return "$name(type=${device.type},id=${device.id})"
+  }
 
   private fun deviceType(type: Int): String = when (type) {
     AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "bluetooth_a2dp"
