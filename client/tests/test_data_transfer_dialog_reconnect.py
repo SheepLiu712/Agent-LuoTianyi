@@ -220,3 +220,24 @@ def test_export_cancel_enables_refresh_reconnect(export_dialog, monkeypatch, tmp
     dialog.refresh_requested.connect(lambda: refreshed.append(threading.get_ident()))
     dialog.refresh_button.click()
     assert refreshed == [ui_thread]
+
+@pytest.mark.parametrize("extraction", ["not_requested", "failed"])
+def test_successful_import_keeps_details_collapsed(import_dialog, extraction):
+    dialog, state = import_dialog
+    state["commit_result"] = {
+        "success": True, "committed": True,
+        "imported": {"conversations": 2}, "skipped": {},
+        "extraction": {"status": extraction, "memories": 0}, "warnings": [],
+    }
+    dialog.preview_button.click()
+    wait_for(lambda: not dialog.operation.busy)
+    dialog.toggle_details.click()
+    dialog.commit_button.click()
+    wait_for(lambda: not dialog.operation.busy)
+    assert not dialog.details.isVisible()
+    assert "成功" in dialog.status_label.text()
+    if extraction == "failed":
+        assert "记忆提取未完成" in dialog.status_label.text()
+    dialog.toggle_details.click()
+    assert dialog.details.isVisible()
+    assert "记录 2" in dialog.details.toPlainText()

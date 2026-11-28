@@ -71,6 +71,7 @@ class DataTransferDialog(QDialog):
         self.operation.settled.connect(self._settled)
         self.finished.connect(self.operation.close)
         self._build_ui()
+        self._apply_control_styles()
         self._update_controls()
 
     def _build_ui(self):
@@ -137,6 +138,23 @@ class DataTransferDialog(QDialog):
             label.setTextFormat(Qt.TextFormat.PlainText)
         for button in self.findChildren(QPushButton):
             button.setAutoDefault(False)
+
+    def _apply_control_styles(self):
+        # 与现有相处模式设置窗口使用相同的字号、输入间距和主按钮配色。
+        for control in (*self.findChildren(QComboBox), *self.findChildren(QLineEdit)):
+            control.setStyleSheet("font-size: 14px; padding: 6px;")
+        for button in self.findChildren(QPushButton):
+            if button is not self.toggle_details:
+                button.setStyleSheet("font-size: 14px; padding: 8px 12px;")
+        for button in (self.export_button, self.preview_button, self.commit_button):
+            button.setStyleSheet("""
+                QPushButton {
+                    background-color: #5BB8E8; color: white; border: none;
+                    padding: 12px 24px; border-radius: 8px; font-size: 14px;
+                }
+                QPushButton:hover { background-color: #4AA8D8; }
+                QPushButton:disabled { background-color: #e0e0e0; color: #666; }
+            """)
 
     def _build_export_page(self):
         page = QWidget()
@@ -449,8 +467,14 @@ class DataTransferDialog(QDialog):
             self.status_label.setText("预览完成，请核对实际范围后选择合并或替换。")
         elif request.action == "commit":
             self.details.setPlainText(self._result_text(data))
-            self._expand_details()
-            self.status_label.setText("数据导入完成，请查看记忆提取结果。可下载备份，并刷新历史 / 重连。")
+            self._collapse_details()
+            extraction = data.get("extraction") or {}
+            if extraction.get("status") in {"failed", "unavailable"}:
+                self.status_label.setText("聊天导入成功，记忆提取未完成。可重试提取或展开详情。")
+            elif data.get("warnings"):
+                self.status_label.setText("导入完成，有提示需要查看。请展开详细信息。")
+            else:
+                self.status_label.setText("导入成功。")
         else:
             self.status_label.setText(f"已保存：{data.get('path', '')}")
             if request.action == "export":
