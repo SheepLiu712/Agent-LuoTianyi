@@ -4,13 +4,13 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -18,9 +18,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -66,8 +66,8 @@ class DataTransferDialog(QDialog):
         self._cancelled = False
         self._refresh_available = False
         self.setWindowTitle("聊天与记忆迁移")
-        self.setMinimumSize(560, 620)
-        self.resize(620, 700)
+        self.setMinimumSize(560, 360)
+        self.resize(620, 420)
         self.setModal(True)
         self.operation = WindowOperation(self)
         self.operation.completed.connect(self._completed)
@@ -85,29 +85,23 @@ class DataTransferDialog(QDialog):
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #66CCFF;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        description = QLabel(
-            "仅迁移当前登录账号的数据，不包含密码、令牌或模型密钥。\n"
-            "导入或导出期间请暂停聊天；服务器可能断开聊天连接，完成后可刷新历史并重新连接。"
-        )
-        description.setWordWrap(True)
-        layout.addWidget(description)
+        help_row = QHBoxLayout()
+        help_row.addStretch()
+        self.usage_button = QPushButton("使用须知")
+        self.usage_button.setFlat(True)
+        self.usage_button.setStyleSheet("QPushButton { color: #1296DB; border: none; padding: 2px 0; }")
+        self.usage_button.clicked.connect(self._show_usage)
+        help_row.addWidget(self.usage_button)
+        layout.addLayout(help_row)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
         self._build_export_page()
         self._build_import_page()
-        self.toggle_details = QPushButton("显示详细信息")
-        self.toggle_details.setFlat(True)
-        self.toggle_details.setStyleSheet("QPushButton { color: #1296DB; text-align: left; padding-left: 0; }")
-        self.toggle_details.clicked.connect(self._toggle_details)
-        layout.addWidget(self.toggle_details)
         self.details = QTextEdit()
         self.details.setReadOnly(True)
         self.details.setAccessibleName("迁移预览与结果")
         self.details.setMinimumHeight(130)
         self.details.setMaximumHeight(160)
-        self.details.setPlainText(
-            "上传与下载上限 64 MiB，展开上限 256 MiB、4096 项。\n导入前会显示格式、实际范围、数量与警告；确认后才会写入。"
-        )
         self.details.hide()
         layout.addWidget(self.details)
         self.status_label = QLabel("就绪")
@@ -142,13 +136,26 @@ class DataTransferDialog(QDialog):
             label.setTextFormat(Qt.TextFormat.PlainText)
         for button in self.findChildren(QPushButton):
             button.setAutoDefault(False)
+        # 滚动区域默认使用系统窗口底色；统一两个页面及其空白区域的底色。
+        for page in (
+            self.tabs.widget(0),
+            self.tabs.widget(1),
+            self.tabs.widget(1).viewport(),
+            self.tabs.widget(1).widget(),
+        ):
+            palette = page.palette()
+            palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+            palette.setColor(QPalette.ColorRole.Base, QColor("white"))
+            page.setPalette(palette)
+            page.setAutoFillBackground(True)
+        self.tabs.currentChanged.connect(self._fit_window)
 
     def _apply_control_styles(self):
         # 与现有相处模式设置窗口使用相同的字号、输入间距和主按钮配色。
         for control in (*self.findChildren(QComboBox), *self.findChildren(QLineEdit)):
             control.setStyleSheet("font-size: 14px; padding: 6px;")
         for button in self.findChildren(QPushButton):
-            if button is not self.toggle_details:
+            if button is not self.usage_button:
                 button.setStyleSheet("font-size: 14px; padding: 8px 12px;")
         for button in (self.export_button, self.preview_button, self.commit_button):
             button.setStyleSheet("""
@@ -174,10 +181,19 @@ class DataTransferDialog(QDialog):
             ("TXT 阅读副本", "txt"),
         ):
             self.export_format.addItem(label, value)
-        layout.addRow("保存格式：", self.export_format)
-        hint = QLabel("ZIP 与目录包可恢复，内部结构相同；Markdown / TXT 仅供阅读。")
-        hint.setWordWrap(True)
-        layout.addRow(hint)
+        format_label = QWidget()
+        format_label_layout = QHBoxLayout(format_label)
+        format_label_layout.setContentsMargins(0, 0, 0, 0)
+        format_label_layout.setSpacing(2)
+        format_label_layout.addWidget(QLabel("保存格式："))
+        self.format_help_button = QToolButton()
+        self.format_help_button.setText("?")
+        self.format_help_button.setAccessibleName("保存格式说明")
+        self.format_help_button.setToolTip("保存格式说明")
+        self.format_help_button.setStyleSheet("QToolButton { color: #1296DB; border: none; background: transparent; }")
+        self.format_help_button.clicked.connect(self._show_format_help)
+        format_label_layout.addWidget(self.format_help_button)
+        layout.addRow(format_label, self.export_format)
         self.export_button = QPushButton("导出并保存…")
         self.export_button.clicked.connect(self._export)
         layout.addRow(self.export_button)
@@ -212,17 +228,18 @@ class DataTransferDialog(QDialog):
         layout.addWidget(self.preview_button)
 
         # 高级设置折叠区域
-        self.advanced_group = QGroupBox("高级设置")
-        self.advanced_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self.advanced_group = QToolButton()
+        self.advanced_group.setText("高级设置")
+        self.advanced_group.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.advanced_group.setArrowType(Qt.ArrowType.RightArrow)
+        self.advanced_group.setStyleSheet("QToolButton { border: none; background: transparent; padding: 4px 0; }")
         self.advanced_group.setCheckable(True)
         self.advanced_group.setChecked(False)
         self.advanced_content = QWidget()
         advanced_layout = QFormLayout(self.advanced_content)
         advanced_layout.setContentsMargins(0, 0, 0, 0)
         advanced_layout.setSpacing(10)
-        group_layout = QVBoxLayout(self.advanced_group)
-        group_layout.addWidget(self.advanced_content)
-        self.advanced_group.toggled.connect(self.advanced_content.setVisible)
+        self.advanced_group.toggled.connect(self._toggle_advanced)
         self.advanced_content.setVisible(False)
         self.source_format = QComboBox()
         for label, value in (
@@ -240,6 +257,7 @@ class DataTransferDialog(QDialog):
         self.character_id.setToolTip("外部文字记录归入的已启用角色标识")
         advanced_layout.addRow("外部记录角色：", self.character_id)
         layout.addWidget(self.advanced_group)
+        layout.addWidget(self.advanced_content)
 
         # 预览后操作区域（仅预览成功后可显示）
         self.post_preview_area = QWidget()
@@ -292,6 +310,7 @@ class DataTransferDialog(QDialog):
         self.cancel_button.setEnabled(busy and self._action != "commit" and not self._cancelled)
         self.cancel_button.setVisible(busy and self._action != "commit" and not self._cancelled)
         self.close_button.setEnabled(not busy or self._action != "commit")
+        self._fit_window()
 
     def _invalidate_preview(self, *_args):
         self._preview = None
@@ -317,14 +336,12 @@ class DataTransferDialog(QDialog):
             self.source_path.setText(path)
 
     def _collapse_details(self):
-        if self.details.isVisible():
-            self.details.hide()
-            self.toggle_details.setText("显示详细信息")
+        self.details.hide()
+        self._fit_window()
 
     def _expand_details(self):
-        if not self.details.isVisible():
-            self.details.show()
-            self.toggle_details.setText("隐藏详细信息")
+        self.details.show()
+        self._fit_window()
 
     def _start(self, action: str, message: str, **values):
         if self.operation.busy:
@@ -481,9 +498,11 @@ class DataTransferDialog(QDialog):
             self._collapse_details()
             extraction = data.get("extraction") or {}
             if extraction.get("status") in {"failed", "unavailable"}:
-                self.status_label.setText("聊天导入成功，记忆提取未完成。可重试提取或展开详情。")
+                self.status_label.setText("聊天导入成功，记忆提取未完成。可重试提取。")
+                self._expand_details()
             elif data.get("warnings"):
-                self.status_label.setText("导入完成，有提示需要查看。请展开详细信息。")
+                self.status_label.setText("导入完成，请查看以下提示。")
+                self._expand_details()
             else:
                 self.status_label.setText("导入成功。")
         else:
@@ -545,10 +564,34 @@ class DataTransferDialog(QDialog):
             self.status_label.setText("正在取消，等待当前网络请求结束…")
             self._update_controls()
 
-    def _toggle_details(self):
-        visible = not self.details.isVisible()
-        self.details.setVisible(visible)
-        self.toggle_details.setText("隐藏详细信息" if visible else "显示详细信息")
+    def _toggle_advanced(self, expanded):
+        self.advanced_content.setVisible(expanded)
+        self.advanced_group.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self._fit_window()
+
+    def _fit_window(self, *_args):
+        height = 420
+        if self.tabs.currentIndex() == 1:
+            height += 140 if self.advanced_group.isChecked() else 0
+            if self._preview is not None or self._retry_request is not None:
+                height += 120
+        if not self.details.isHidden():
+            height += 150
+        self.resize(self.width(), min(height, self.screen().availableGeometry().height() - 60))
+
+    def _show_format_help(self):
+        QMessageBox.information(self, "保存格式说明", "ZIP 与目录包可恢复，内部结构相同；Markdown / TXT 仅供阅读。")
+
+    def _show_usage(self):
+        text = (
+            "1. 上传与下载上限 64 MiB，解压后上限 256 MiB、4096 项。\n\n"
+            "2. 导入和导出时请暂停聊天，过程中服务器可能断开聊天连接。\n\n"
+            "3. 外部聊天默认只进入历史，勾选提取长期记忆后才会调用模型提取。\n\n"
+            "4. 完成后可点击“刷新历史 / 重连”。"
+        )
+        if self.details.toPlainText():
+            text += "\n\n最近一次操作\n" + self.details.toPlainText()
+        QMessageBox.information(self, "使用须知", text)
 
     def reject(self):
         if self.operation.busy and self._action == "commit":
