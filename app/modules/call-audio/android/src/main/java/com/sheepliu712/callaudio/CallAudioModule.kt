@@ -80,6 +80,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private var routeCallback: AudioDeviceCallback? = null
   private var removeCommunicationRouteTrace: (() -> Unit)? = null
   private val playbackCommandLock = java.lang.Object()
+  private var playbackAcceptsStops = false
   private val playbackCommands = ArrayDeque<PlaybackCommand>()
   private var stopOperations = StopOperationRegistry<Promise>()
   private val captureInFlight = ConcurrentHashMap.newKeySet<Long>()
@@ -174,7 +175,8 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   private fun stopRingtone(reason: String = "ringing_effect") {
     ringtone?.let { player ->
       if (Build.VERSION.SDK_INT >= 28) {
-        player.routedDevice?.takeIf(::isHeadset)?.let { mediaHeadset = it }
+        val routed = player.routedDevice
+        mediaHeadset = HeadsetRouteSelection.refreshSnapshot(mediaHeadset, routed, ::isHeadset)
       }
       runCatching { player.stop() }
       traceRingtone("play_stopped reason=$reason")
@@ -434,9 +436,23 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     track.play()
     traceRingtone("playback_started output=${actualDevices(track)} audioSession=${track.audioSessionId}")
     playbackRunning.set(true)
+    synchronized(playbackCommandLock) { playbackAcceptsStops = true }
     val eventSessionGeneration = sessionGeneration.get()
     playbackThread = Thread(
-      { playbackLoop(track, eventSessionGeneration) },
+      {
+        try {
+          playbackLoop(track, eventSessionGeneration)
+        } finally {
+          synchronized(playbackCommandLock) {
+            playbackAcceptsStops = false
+            playbackRunning.set(false)
+            playbackCommands.clear()
+            stopOperations.fail().forEach {
+              it.reject("ERR_CALL_AUDIO_PLAYBACK_UNAVAILABLE", "playback_worker_unavailable", null)
+            }
+          }
+        }
+      },
       "CallAudioPlayback-$eventSessionGeneration",
     ).apply { start() }
   }
@@ -489,7 +505,6 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun playbackLoop(track: AudioTrack, eventSessionGeneration: Long) {
-    if (!awaitHeadsetRoute(track, eventSessionGeneration)) return
     val accounting = PlaybackLoopAccounting(track.playbackHeadPosition.toLong() and 0xffffffffL)
     val commandProcessor = PlaybackCommandProcessor(playbackState, accounting)
     val visualIdleGate = PlaybackVisualIdleGate()
@@ -513,7 +528,7 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
         lastProgressNanos = nowNanos
       }
     }
-    while (playbackRunning.get() || hasPlaybackCommands()) {
+    fun processStopCommand() {
       val command = synchronized(playbackCommandLock) {
         if (playbackCommands.isEmpty()) null else playbackCommands.removeFirst()
       }
@@ -535,6 +550,13 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
         outcome.stoppedKeys.forEach { emitStoppedReceipt(it, command.generation, eventSessionGeneration) }
         stopOperations.complete(outcome.stoppedKeys).forEach { it.resolve(null) }
       }
+    }
+
+    if (!awaitHeadsetRoute(track, eventSessionGeneration, ::processStopCommand)) return
+    // 静音探测不属于任何回复，消费完成后再建立语音计账基线。
+    accounting.complete(track.playbackHeadPosition.toLong() and 0xffffffffL)
+    while (playbackRunning.get() || hasPlaybackCommands()) {
+      processStopCommand()
 
       val active = playbackState.chooseActive()
       val chunk = if (active != null && accounting.finalTarget == null) queue.pollFor(active) else null
@@ -645,24 +667,27 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     } else {
       streamGenerations.keys.toList()
     }
-    val registration = stopOperations.register(requestedKeys, promise)
-    if (registration.resolveImmediately) {
-      promise.resolve(null)
-      return
-    }
-    val keys = registration.newlyPendingKeys
-    if (keys.isEmpty()) return
-    if (playbackThread?.isAlive != true) {
-      stopOperations.cancelRegistration(promise)
-      promise.reject("ERR_CALL_AUDIO_PLAYBACK_UNAVAILABLE", "playback_worker_unavailable", null)
-      return
-    }
-    val stoppedGeneration = generation.incrementAndGet()
-    keys.forEach {
-      tombstonedStreams.add(it)
-      streamGenerations[it] = stoppedGeneration
-    }
     synchronized(playbackCommandLock) {
+      if (requestedKeys.isNotEmpty() && !playbackAcceptsStops) {
+        promise.reject("ERR_CALL_AUDIO_PLAYBACK_UNAVAILABLE", "playback_worker_unavailable", null)
+        return
+      }
+      if (requestedKeys.isEmpty()) {
+        promise.resolve(null)
+        return
+      }
+      val registration = stopOperations.register(requestedKeys, promise)
+      if (registration.resolveImmediately) {
+        promise.resolve(null)
+        return
+      }
+      val keys = registration.newlyPendingKeys
+      if (keys.isEmpty()) return
+      val stoppedGeneration = generation.incrementAndGet()
+      keys.forEach {
+        tombstonedStreams.add(it)
+        streamGenerations[it] = stoppedGeneration
+      }
       playbackCommands.addLast(PlaybackCommand(keys, stoppedGeneration))
     }
   }
@@ -1032,38 +1057,42 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
     return selected && HeadsetRouteSelection.ready(target.id, routedDevices(track).map { it.id })
   }
 
-  private fun awaitHeadsetRoute(track: AudioTrack, session: Long): Boolean {
+  private fun awaitHeadsetRoute(track: AudioTrack, session: Long, processStop: () -> Unit): Boolean {
     if (requestedHeadset == null) return true
     val deadline = SystemClock.elapsedRealtime() + 10_000
     val silence = ByteArray(960)
     val initialHead = track.playbackHeadPosition.toLong() and 0xffffffffL
     var silentFrames = 0L
     traceRingtone("headset_route_wait", session)
-    while (playbackRunning.get() && session == sessionGeneration.get()) {
-      val ready = headsetRouteReady(track)
-      val played = PlaybackAccounting.unsignedDelta(initialHead, track.playbackHeadPosition.toLong() and 0xffffffffL)
-      if (ready && played >= silentFrames) {
-        traceRingtone("headset_route_confirmed output=${actualDevices(track)}", session)
-        return true
-      }
-      if (SystemClock.elapsedRealtime() >= deadline) {
-        traceRingtone("headset_route_timeout output=${actualDevices(track)}", session)
-        playbackRunning.set(false)
-        failure("headset_route_timeout", "playback", session)
-        return false
-      }
-      // 静音启动输出路由，确认设备前不向音轨写入远端语音。
-      val written = if (ready) 0 else track.write(silence, 0, silence.size, AudioTrack.WRITE_NON_BLOCKING)
-      silentFrames += written.coerceAtLeast(0) / 2
-      if (written < 0) {
-        traceRingtone("headset_route_probe_failed code=$written", session)
-        playbackRunning.set(false)
-        failure("headset_route_probe_failed", "playback", session)
-        return false
-      }
-      Thread.sleep(10)
-    }
-    return false
+    return PlaybackRouteAwaiter.await(
+      running = { playbackRunning.get() && session == sessionGeneration.get() },
+      processStop = processStop,
+      probe = {
+        val ready = headsetRouteReady(track)
+        val played = PlaybackAccounting.unsignedDelta(initialHead, track.playbackHeadPosition.toLong() and 0xffffffffL)
+        if (ready && played >= silentFrames) {
+          traceRingtone("headset_route_confirmed output=${actualDevices(track)}", session)
+          return@await RouteProbeResult.READY
+        }
+        if (SystemClock.elapsedRealtime() >= deadline) {
+          traceRingtone("headset_route_timeout output=${actualDevices(track)}", session)
+          playbackRunning.set(false)
+          failure("headset_route_timeout", "playback", session)
+          return@await RouteProbeResult.FAILED
+        }
+        // 静音启动输出路由，确认设备前不向音轨写入远端语音。
+        val written = if (ready) 0 else track.write(silence, 0, silence.size, AudioTrack.WRITE_NON_BLOCKING)
+        silentFrames += written.coerceAtLeast(0) / 2
+        if (written < 0) {
+          traceRingtone("headset_route_probe_failed code=$written", session)
+          playbackRunning.set(false)
+          failure("headset_route_probe_failed", "playback", session)
+          return@await RouteProbeResult.FAILED
+        }
+        Thread.sleep(10)
+        RouteProbeResult.WAITING
+      },
+    )
   }
 
   private fun routeSnapshot(event: String) {
@@ -1114,10 +1143,10 @@ class CallAudioModule : Module(), Application.ActivityLifecycleCallbacks {
       manager.stopBluetoothSco()
     }
     requestedHeadset = null
-    val previous = originalAudioMode ?: return
-    (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode = previous
+    val previous = originalAudioMode
+    if (previous != null) manager.mode = previous
     originalAudioMode = null
-    routeSnapshot("mode_restored")
+    if (previous != null) routeSnapshot("mode_restored")
     activeAudioAtMs = 0L
     mediaHeadset = null
   }

@@ -3,6 +3,9 @@ package com.sheepliu712.callaudio
 internal data class RouteDevice(val id: Int, val address: String, val classicBluetooth: Boolean)
 
 internal object HeadsetRouteSelection {
+  fun <T> refreshSnapshot(previous: T?, routed: T?, isHeadset: (T) -> Boolean): T? =
+    if (routed == null) previous else routed.takeIf(isHeadset)
+
   fun select(media: RouteDevice, candidates: List<RouteDevice>): Int {
     candidates.singleOrNull { it.id == media.id }?.let { return it.id }
     if (media.address.isNotBlank() && media.address != "00:00:00:00:00:00") {

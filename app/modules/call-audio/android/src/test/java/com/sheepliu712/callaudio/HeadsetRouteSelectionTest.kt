@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HeadsetRouteSelectionTest {
+  @Test fun `speaker output replaces a previous headset snapshot`() {
+    assertNull(HeadsetRouteSelection.refreshSnapshot("headset", "speaker") { it == "headset" })
+  }
+
+  @Test fun `unknown output preserves the known headset until routing is available`() {
+    assertEquals("headset", HeadsetRouteSelection.refreshSnapshot("headset", null) { it == "headset" })
+  }
+
+  @Test fun `new headset output replaces the dialing headset`() {
+    assertEquals("new", HeadsetRouteSelection.refreshSnapshot("old", "new") { true })
+  }
+
   @Test fun `selects the media headset among multiple bluetooth devices`() {
     assertEquals(8, HeadsetRouteSelection.select(RouteDevice(1, "AA", true), listOf(
       RouteDevice(7, "BB", true), RouteDevice(8, "aa", true),
